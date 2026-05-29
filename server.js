@@ -4,6 +4,7 @@ const path = require("path");
 const crypto = require("crypto");
 require("dotenv").config();
 const multer = require("multer");
+const proxy = require("express-http-proxy");
 const repositories = require("./repositories");
 const { fetchMetricsFromUrl, openLoginBrowser } = require("./metricsFetcher");
 
@@ -117,6 +118,12 @@ const storage = multer.diskStorage({
 const upload = multer({ storage });
 
 app.use(express.json({ limit: "10mb" }));
+
+// Proxy API requests to NestJS backend (forward /api/* to http://localhost:8089/api/*)
+app.use("/api", proxy("http://localhost:8089", {
+  proxyReqPathResolver: (req) => `/api${req.url}`,
+}));
+
 app.use("/uploads", express.static(UPLOAD_DIR));
 app.use(express.static(PUBLIC_DIR));
 

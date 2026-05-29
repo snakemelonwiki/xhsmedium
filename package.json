@@ -1,18 +1,26 @@
 {
   "name": "lan-dual-role-system",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "局域网双端员工与主管管理系统 MVP",
+  "description": "运营中台 - 内容运营、客资协同、订单跟进、团队管理一体化中台",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "debug:link": "node scripts/debug-link.js"
+    "start": "concurrently \"npm run start:legacy\" \"npm run start:backend\"",
+    "start:dev": "concurrently \"npm run start:legacy\" \"npm run start:backend\"",
+    "start:legacy": "node server.js",
+    "start:backend": "cd backend && npm run start:dev",
+    "debug:link": "node scripts/debug-link.js",
+    "install:all": "npm install && cd backend && npm install"
   },
   "dependencies": {
     "dotenv": "^17.4.1",
     "express": "^4.21.2",
+    "express-http-proxy": "^2.1.2",
     "multer": "^2.1.1",
     "mysql2": "^3.21.1",
     "playwright": "^1.59.1"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
   }
 }
