@@ -1,0 +1,18 @@
+{
+  "name": "lan-dual-role-system",
+  "version": "0.1.0",
+  "private": true,
+  "description": "局域网双端员工与主管管理系统 MVP",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "debug:link": "node scripts/debug-link.js"
+  },
+  "dependencies": {
+    "dotenv": "^17.4.1",
+    "express": "^4.21.2",
+    "multer": "^2.1.1",
+    "mysql2": "^3.21.1",
+    "playwright": "^1.59.1"
+  }
+}

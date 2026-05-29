@@ -1,0 +1,9 @@
+.env_snakemelon
+node_modules/
+uploads/
+backups/
+.idea/
+*.log
+data.json
+daily-snapshots.json
+.playwright-profiles/
