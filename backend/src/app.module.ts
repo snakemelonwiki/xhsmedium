@@ -15,6 +15,7 @@ import { Order } from './entities/order.entity';
 import { OrderFollowRecord } from './entities/order-follow-record.entity';
 import { ImportTask } from './entities/import-task.entity';
 import { Notification } from './entities/notification.entity';
+import { ExportTask } from './entities/export-task.entity';
 import { AuthModule } from './modules/auth/auth.module';
 import { EmployeesModule } from './modules/employees/employees.module';
 import { UsersModule } from './modules/users/users.module';
@@ -31,6 +32,7 @@ import { RankingsModule } from './modules/rankings/rankings.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { ToolsModule } from './modules/tools/tools.module';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
+import { ExportsModule } from './modules/exports/exports.module';
 
 @Module({
   imports: [
@@ -47,7 +49,7 @@ import { AnalyticsModule } from './modules/analytics/analytics.module';
         username: config.get('MYSQL_USER', 'root'),
         password: config.get('MYSQL_PASSWORD', ''),
         database: config.get('MYSQL_DATABASE', 'lan_dual_role_system'),
-        entities: [User, Employee, Account, Post, Lead, LeadFollowRecord, LeadDraft, CollaborationTask, Order, OrderFollowRecord, ImportTask, Notification],
+        entities: [User, Employee, Account, Post, Lead, LeadFollowRecord, LeadDraft, CollaborationTask, Order, OrderFollowRecord, ImportTask, Notification, ExportTask],
         synchronize: false,
         charset: 'utf8mb4',
       }),
@@ -77,6 +79,7 @@ import { AnalyticsModule } from './modules/analytics/analytics.module';
     NotificationsModule,
     ToolsModule,
     AnalyticsModule,
+    ExportsModule,
   ],
 })
 export class AppModule {}

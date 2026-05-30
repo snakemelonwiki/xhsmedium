@@ -149,10 +149,22 @@ export class ImportsService {
     const errors: ImportRowError[] = [];
     let success = 0;
     let fail = 0;
-    const total = rows.length;
 
-    for (let i = 0; i < rows.length; i++) {
-      const rowIndex = i + 1; // 1-based
+    // 跳过模板/粘贴内容的第一行 header（中文或英文均识别），不计入 total/success/fail。
+    // 行号继续用物理行号 (i + 1) 以便用户对照原文件。
+    let startIdx = 0;
+    if (rows.length > 0) {
+      const firstRaw = rows[0] == null ? '' : String(rows[0]);
+      const firstCols = this.splitColumns(firstRaw);
+      const firstCell = (firstCols[0] || '').trim();
+      if (['平台', 'platform', 'Platform'].includes(firstCell)) {
+        startIdx = 1;
+      }
+    }
+    const total = rows.length - startIdx;
+
+    for (let i = startIdx; i < rows.length; i++) {
+      const rowIndex = i + 1; // 1-based 物理行号
       const rawLine = rows[i] == null ? '' : String(rows[i]);
       if (!rawLine.trim()) {
         fail++;

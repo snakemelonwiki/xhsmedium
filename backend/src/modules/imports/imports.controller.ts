@@ -29,7 +29,11 @@ export class ImportsController {
 
   @Get('leads/import-template.xlsx')
   async downloadTemplate(@Res() res: Response) {
-    const csv = 'platform,contact,nickname,account_name,remark\n';
+    const BOM = '﻿';
+    const csv =
+      BOM +
+      '平台,联系方式,昵称,来源账号,备注\n' +
+      '小红书,13800138000,示例客户,运营A,客户备注示例\n';
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader(
       'Content-Disposition',

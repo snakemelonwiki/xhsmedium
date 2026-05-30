@@ -15,6 +15,7 @@ export const NOTIFICATION_TYPES = {
   ORDER_NODE_DUE: 'order_node_due',
   ORDER_ABNORMAL: 'order_abnormal',
   IMPORT_DONE: 'import_done',
+  EXPORT_DONE: 'export_done',
 } as const;
 
 export type NotificationTypeCode =
