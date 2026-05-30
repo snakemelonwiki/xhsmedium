@@ -26,6 +26,15 @@ async function loadLeadStats(opts = {}) {
   }
 }
 
+async function loadTomorrowFollowups() {
+  if (state.user?.role !== 'sales') return;
+  try {
+    state.leadTomorrowFollowups = await api('/api/leads/tomorrow-followups');
+  } catch {
+    state.leadTomorrowFollowups = [];
+  }
+}
+
 // 客资看板视图触发：根据当前角色 + 所有看板筛选条件拉一次 stats。
 // T-L2/L3：把账号 / 平台 / 作品类型 / 状态 / 添加状态 / 日期范围一起传给后端，
 // 保证"筛选后数量 = 列表实际条数"（AC-3.2）。
@@ -250,9 +259,8 @@ function renderSalesFollowupBoard() {
   const strongCount = statsReady ? (byIntention.high || 0) : placeholder;
   const standbyCount = statsReady ? (byIntention.mid || 0) : placeholder;
   const weakCount = statsReady ? (byIntention.low || 0) : placeholder;
-  const tomorrowRows = state.salesTomorrowFollowupIds
-    .map((id) => state.leads.find((item) => item.id === id))
-    .filter(Boolean);
+  // T-L7: 明日待跟进读 next_follow_time 字段
+  const tomorrowRows = state.leadTomorrowFollowups || [];
   return `
     <div class="page-header page-header-rich">
       <div>
@@ -1102,6 +1110,9 @@ function renderLeadEntry() {
   if (!editing) {
     ensureLeadDraftContext();
   }
+  // T-17 图片解耦：新建客资时，用 state._leadFormBuffer 覆盖空字段，
+  // 避免图片选择→renderApp 把已填文本字段重置为空（§11 问题根治）
+  const bufferedEditing = editing || (state._leadFormBuffer ? { ...state._leadFormBuffer } : null);
   // 编辑态强制回退到表单模式，避免编辑路径与粘贴/导入交叉
   const mode = editing ? "form" : (state.leadEntryMode || "form");
   return `
@@ -1130,7 +1141,7 @@ function renderLeadEntry() {
       <div class="staff-form-head">
         <h3>${editing ? "编辑客资" : "新增客资"}</h3>
       </div>
-      ${renderLeadForm(editing, { compact: true })}
+      ${renderLeadForm(bufferedEditing || editing, { compact: true })}
     </div>
     ` : ""}
     <div class="panel">
@@ -1648,8 +1659,12 @@ function bindLeadDraftEvents() {
   const form = document.getElementById("leadForm");
   if (form && !form.dataset.leadDraftBound) {
     form.dataset.leadDraftBound = "1";
-    form.addEventListener("input", () => {
+    form.addEventListener("input", (e) => {
       if (state.editingLeadId) return;
+      // T-17: 实时同步 form 字段到 buffer，确保图片选择/renderApp 不丢已填文本（§11 图片解耦）
+      if (!state._leadFormBuffer) state._leadFormBuffer = {};
+      const el = e.target;
+      if (el && el.name) state._leadFormBuffer[el.name] = el.value;
       _saveLeadDraftDebounced();
     });
   }
@@ -1786,6 +1801,7 @@ async function submitLead(event) {
     await deleteLeadDraftById(draftId);
   }
   clearPendingLeadCapture();
+  state._leadFormBuffer = null;
   state.editingLeadId = "";
   setFlash("success", id ? "客资已更新" : "客资已录入", "这条客资已经保存到后台数据库，下方记录和主管端监控都会同步更新。");
   await loadData();

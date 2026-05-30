@@ -122,6 +122,8 @@ function renderApp() {
 
   document.querySelectorAll("[data-view]").forEach((button) => {
     button.addEventListener("click", () => {
+      // T-17: 切换视图时取消未完成请求，避免旧页面请求影响新页面
+      if (typeof abortAllPendingRequests === "function") abortAllPendingRequests();
       state.currentView = button.dataset.view;
       // 进入协同视图时强制重新拉一次（避免显示上次缓存）
       if (button.dataset.view === "sales-collabs" || button.dataset.view === "lead-collabs") {
@@ -133,6 +135,7 @@ function renderApp() {
   });
 
   document.getElementById("logoutBtn").addEventListener("click", async () => {
+    if (typeof abortAllPendingRequests === "function") abortAllPendingRequests();
     try {
       await api("/api/auth/logout", { method: "POST" });
     } catch {}
@@ -168,6 +171,10 @@ function renderApp() {
   const leadStatsViews = new Set(["leads", "sales-leads", "sales-followups", "staff-leads-board"]);
   if (leadStatsViews.has(state.currentView) && state.leadStats === null && !state.leadStatsLoading) {
     refreshLeadStatsForCurrentView();
+  }
+  // T-L7: 明日待跟进视图加载时从后端拉 next_follow_time 数据
+  if (state.currentView === 'sales-followups' && state.leadTomorrowFollowups === undefined) {
+    loadTomorrowFollowups().then(() => { if (typeof renderApp === 'function') renderApp(); });
   }
 }
 
@@ -391,10 +398,10 @@ function bindViewEvents() {
   document.getElementById("staffUserForm")?.addEventListener("submit", submitStaffUser);
   document.getElementById("accountForm")?.addEventListener("submit", submitAccount);
   document.getElementById("postForm")?.addEventListener("submit", submitPost);
-  document.getElementById("leadForm")?.addEventListener("submit", submitLead);
+  document.getElementById("leadForm")?.addEventListener("submit", withSubmitLock("submitLead", submitLead));
   document.querySelectorAll(".js-staff-posting-plan-form").forEach((form) => form.addEventListener("submit", submitStaffPostingPlan));
   document.querySelectorAll(".js-sales-feedback-form").forEach((form) => form.addEventListener("submit", submitSalesLead));
-  document.querySelectorAll(".js-lead-note-form").forEach((form) => form.addEventListener("submit", submitLeadNote));
+  document.querySelectorAll(".js-lead-note-form").forEach((form) => form.addEventListener("submit", withSubmitLock("submitNote", submitLeadNote)));
   document.querySelectorAll(".js-sales-local-profile-form").forEach((form) => form.addEventListener("submit", submitSalesLocalProfile));
   document.getElementById("leadCaptureInput")?.addEventListener("change", (event) => {
     const [file] = event.target.files || [];
@@ -829,7 +836,8 @@ function bindViewEvents() {
   document.querySelector(".js-cancel-sales-local-profile")?.addEventListener("click", () => { state.editingSalesLeadProfileId = ""; renderApp(); });
   document.querySelectorAll(".js-toggle-tomorrow-followup").forEach((el) => el.addEventListener("change", () => toggleTomorrowFollowup(el.dataset.id, el.checked)));
   document.querySelector(".js-toggle-tomorrow-followups")?.addEventListener("click", () => {
-    if (!state.salesTomorrowFollowupIds.length) return;
+    const count = (state.leadTomorrowFollowups || []).length;
+    if (!count) return;
     state.salesTomorrowFollowupPanelOpen = !state.salesTomorrowFollowupPanelOpen;
     renderApp();
   });
@@ -878,8 +886,8 @@ function bindViewEvents() {
   document.getElementById("passiveCreateBtn")?.addEventListener("click", openPassiveCreateDialog);
   document.getElementById("passiveCreateBtn2")?.addEventListener("click", openPassiveCreateDialog);
   // 协同任务：销售端发起 / 销售端关闭 / 运营端领取 / 运营端完成 / tab 切换
-  document.querySelectorAll(".js-sales-request-collab").forEach((el) => el.addEventListener("click", () => requestCollab(el.dataset.id)));
-  document.querySelectorAll(".js-sales-mark-deal").forEach((el) => el.addEventListener("click", () => markDeal(el.dataset.id)));
+  document.querySelectorAll(".js-sales-request-collab").forEach((el) => el.addEventListener("click", withSubmitLock("collab-" + el.dataset.id, () => requestCollab(el.dataset.id))));
+  document.querySelectorAll(".js-sales-mark-deal").forEach((el) => el.addEventListener("click", withSubmitLock("deal-" + el.dataset.id, () => markDeal(el.dataset.id))));
   document.querySelectorAll(".js-collab-claim").forEach((el) => el.addEventListener("click", () => claimCollab(el.dataset.id)));
   document.querySelectorAll(".js-collab-handle").forEach((el) => el.addEventListener("click", () => handleCollab(el.dataset.id)));
   document.querySelectorAll(".js-collab-close").forEach((el) => el.addEventListener("click", () => closeCollab(el.dataset.id)));
@@ -898,12 +906,12 @@ function bindViewEvents() {
   }));
   document.getElementById("leadPasteAnalyzeBtn")?.addEventListener("click", analyzeLeadPaste);
   document.getElementById("leadPasteClearBtn")?.addEventListener("click", clearLeadPaste);
-  document.getElementById("leadPasteEditForm")?.addEventListener("submit", submitLeadPaste);
+  document.getElementById("leadPasteEditForm")?.addEventListener("submit", withSubmitLock("pasteSubmit", submitLeadPaste));
   document.getElementById("leadBatchImportBtn")?.addEventListener("click", () => {
     state.leadEntryMode = "import";
     renderApp();
   });
-  document.getElementById("leadImportSubmitBtn")?.addEventListener("click", submitLeadBatchImport);
+  document.getElementById("leadImportSubmitBtn")?.addEventListener("click", withSubmitLock("importSubmit", submitLeadBatchImport));
   document.getElementById("leadImportCancelBtn")?.addEventListener("click", cancelLeadBatchImport);
   document.getElementById("importHistoryRefreshBtn")?.addEventListener("click", () => {
     state.importHistory = null;

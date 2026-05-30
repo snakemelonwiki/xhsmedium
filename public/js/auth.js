@@ -93,6 +93,7 @@ async function loadData() {
   state.staffLearningPostIds = state.user.role === "staff" ? loadStaffLearningPostIds() : [];
   state.salesLeadLocalProfiles = state.user.role === "sales" ? loadSalesLeadLocalProfiles() : {};
   state.salesTomorrowFollowupIds = state.user.role === "sales" ? loadSalesTomorrowFollowupIds() : [];
+  state.leadTomorrowFollowups = undefined; // 让 renderApp 触发 loadTomorrowFollowups 拉 next_follow_time
   if (state.user.role === "admin" || state.user.role === "owner") {
     state.reviewHighlights = loadReviewCollection("review_highlights");
     state.reviewSamples = loadReviewCollection("review_samples");

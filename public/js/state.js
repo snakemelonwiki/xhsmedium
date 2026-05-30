@@ -112,6 +112,7 @@ const state = {
   salesFollowupAccountFilter: "",
   salesLeadLocalProfiles: {},
   salesTomorrowFollowupIds: [],
+  leadTomorrowFollowups: undefined,
   salesTomorrowFollowupPanelOpen: false,
   leadStats: null,
   leadStatsLoading: false,
