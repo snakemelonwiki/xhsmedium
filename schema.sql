@@ -93,3 +93,70 @@ CREATE TABLE IF NOT EXISTS leads (
   INDEX idx_leads_account_id (account_id),
   INDEX idx_leads_created_at (created_at)
 );
+
+CREATE TABLE IF NOT EXISTS lead_follow_records (
+  id VARCHAR(64) PRIMARY KEY,
+  lead_id VARCHAR(64) NOT NULL,
+  user_id VARCHAR(64) NOT NULL,
+  follow_type VARCHAR(32) DEFAULT '微信',
+  content TEXT NULL,
+  next_follow_time DATETIME NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_follow_lead_id (lead_id),
+  INDEX idx_follow_user_id (user_id)
+);
+
+CREATE TABLE IF NOT EXISTS lead_drafts (
+  id VARCHAR(64) PRIMARY KEY,
+  user_id VARCHAR(64) NOT NULL,
+  draft_type VARCHAR(32) NOT NULL COMMENT 'leads/posts等',
+  content_json TEXT NOT NULL,
+  image_urls JSON NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_drafts_user_id (user_id)
+);
+
+CREATE TABLE IF NOT EXISTS post_metrics_history (
+  id VARCHAR(64) PRIMARY KEY,
+  post_id VARCHAR(64) NOT NULL,
+  likes BIGINT NOT NULL DEFAULT 0,
+  comments BIGINT NOT NULL DEFAULT 0,
+  favorites BIGINT NOT NULL DEFAULT 0,
+  shares BIGINT NOT NULL DEFAULT 0,
+  leads_count BIGINT NOT NULL DEFAULT 0,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_history_post_id (post_id),
+  INDEX idx_history_created_at (created_at)
+);
+
+CREATE TABLE IF NOT EXISTS favorites (
+  id VARCHAR(64) PRIMARY KEY,
+  user_id VARCHAR(64) NOT NULL,
+  target_type VARCHAR(32) NOT NULL COMMENT 'post/account',
+  target_id VARCHAR(64) NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_fav_user_id (user_id),
+  UNIQUE KEY idx_fav_user_target (user_id, target_type, target_id)
+);
+
+CREATE TABLE IF NOT EXISTS import_tasks (
+  id VARCHAR(64) PRIMARY KEY,
+  import_type VARCHAR(32) NOT NULL COMMENT 'leads/posts',
+  user_id VARCHAR(64) NOT NULL,
+  success_count INT NOT NULL DEFAULT 0,
+  fail_count INT NOT NULL DEFAULT 0,
+  error_file_url VARCHAR(500) NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_import_user_id (user_id)
+);
+
+-- ============================================================
+-- 注意：leads 表的 M1+ 字段（lead_code / intention_level / process_status(ENUM) /
+-- add_method / next_follow_time / matched_post_id / source_unknown）由
+-- migrations/ 目录下的迁移文件维护，不再在此处 ALTER。
+-- 新建数据库流程：先执行本文件，然后：
+--   node scripts/run-migrations.js
+--   node scripts/backfill-lead-code.js
+-- ============================================================

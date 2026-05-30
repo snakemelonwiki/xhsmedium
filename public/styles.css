@@ -4904,3 +4904,18 @@ tbody tr:nth-child(even):hover {
     grid-template-columns: 1fr;
   }
 }
+
+/* M1: 客资编号小标签 */
+.lead-code-tag {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #6b7280;
+  background: #f3f4f6;
+  border-radius: 4px;
+  letter-spacing: 0.3px;
+  vertical-align: middle;
+  font-family: 'SF Mono', Consolas, monospace;
+}
