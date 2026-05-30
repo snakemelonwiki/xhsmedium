@@ -131,3 +131,44 @@ function getIntentionLevelChipClass(code) {
   if (code === 'invalid' || code === '无效') return 'is-danger';
   return '';
 }
+
+// ============================================================
+// V2 枚举（M6 迁移后）：add_status / status 切英文 code
+//   旧 ADD_STATUS_MAP / LEAD_STATUS_MAP（中文 key）保留以兼容旧数据，
+//   新页面/卡片走下面的 *_V2 + getAddStatusLabel/isAddStatusAdded/getLeadStatusLabelV2/isStatusNew。
+// ============================================================
+const ADD_STATUS_MAP_V2 = {
+  not_added: '未添加',
+  applied: '已申请添加',
+  pending: '待通过',
+  rejected: '客户未通过',
+  op_reminded: '运营已提醒',
+  added: '已添加',
+};
+
+const LEAD_STATUS_MAP_V2 = {
+  new: '新客资',
+  assigned: '已分配',
+  in_followup: '销售跟进中',
+  in_collab: '协同中',
+  op_handling: '运营处理中',
+  contact_added: '已添加通过',
+  deal_closed: '已成交',
+  invalid: '无效',
+};
+
+function getAddStatusLabel(code) {
+  return ADD_STATUS_MAP_V2[code] || code || '未添加';
+}
+
+function isAddStatusAdded(code) {
+  return code === 'added' || code === '已添加' || code === '已添加通过';
+}
+
+function getLeadStatusLabelV2(code) {
+  return LEAD_STATUS_MAP_V2[code] || code || '新客资';
+}
+
+function isStatusNew(code) {
+  return code === 'new' || code === '新客资';
+}

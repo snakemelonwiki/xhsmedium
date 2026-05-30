@@ -146,7 +146,7 @@ function renderLeadsMonitor() {
 
 function renderSalesLeads() {
   const rows = getLeadsForMonitor().filter((item) => {
-    if ((item.addStatus || "未添加") === "已添加") return false;
+    if (isAddStatusAdded(item.addStatus)) return false;
     if (state.leadMonitorEmployeeFilter && item.employeeId !== state.leadMonitorEmployeeFilter) return false;
     if (state.leadMonitorAccountFilter && item.accountId !== state.leadMonitorAccountFilter) return false;
     if (state.leadMonitorPlatformFilter && item.platform !== state.leadMonitorPlatformFilter) return false;
@@ -163,7 +163,7 @@ function renderSalesLeads() {
   const notContactedCount = byProcess.not_contacted || 0;
   const notContactedDisplay = statsReady ? notContactedCount : placeholder;
   // TODO 后端 stats 暂未返回 addStatus 维度，"未添加"/"已联系待添加"先用前端 rows.filter 兜底
-  const pendingUnaddedCount = rows.filter((item) => (item.addStatus || "未添加") !== "已添加").length;
+  const pendingUnaddedCount = rows.filter((item) => !isAddStatusAdded(item.addStatus)).length;
   const contactedPendingAdd = statsReady
     ? Math.max((stats.filteredTotal ?? stats.total ?? 0) - notContactedCount, 0)
     : placeholder;
@@ -231,7 +231,7 @@ function renderSalesLeads() {
 
 function renderSalesFollowupBoard() {
   const rows = getLeadsForMonitor().filter((item) => {
-    if ((item.addStatus || "未添加") !== "已添加") return false;
+    if (!isAddStatusAdded(item.addStatus)) return false;
     if (state.salesFollowupIntentionFilter && (item.intention || "") !== state.salesFollowupIntentionFilter) return false;
     return true;
   }).sort((left, right) => {
@@ -446,8 +446,423 @@ function renderSalesFollowupCard(item) {
             `}
         </div>
       </div>
+      <div class="lead-card-actions">
+        <button class="ghost js-sales-request-collab" data-id="${item.id}" type="button">申请运营协同</button>
+        <button class="ghost js-sales-mark-deal" data-id="${item.id}" type="button">标记成交</button>
+      </div>
     </article>
   `;
+}
+
+// ===== 协同任务：类型 / 状态 中文映射 =====
+const COLLAB_TYPE_LABELS = {
+  remind_customer: "提醒客户",
+  supplement_info: "补充信息",
+  verify_identity: "核实身份",
+  second_touch: "二次触达"
+};
+
+const COLLAB_STATUS_LABELS = {
+  pending: "待领取",
+  handling: "处理中",
+  handled: "已处理",
+  closed: "已关闭"
+};
+
+function getCollabTypeLabel(type) {
+  return COLLAB_TYPE_LABELS[type] || type || "-";
+}
+
+function getCollabStatusLabel(status) {
+  return COLLAB_STATUS_LABELS[status] || status || "-";
+}
+
+// ===== 协同任务：销售端 / 运营端通用拉取 =====
+async function loadCollabTasks(scope, status) {
+  const params = new URLSearchParams();
+  if (scope) params.set("scope", scope);
+  if (status) params.set("status", status);
+  const actorUserId = state.user?.id || "";
+  if (actorUserId) params.set("actorUserId", actorUserId);
+  try {
+    const rows = await api(`/api/collaboration-tasks?${params.toString()}`);
+    state.collabTasks = Array.isArray(rows) ? rows : [];
+  } catch (err) {
+    state.collabTasks = [];
+  }
+}
+
+// ===== 销售端：申请运营协同 =====
+async function requestCollab(leadId) {
+  if (!leadId) return;
+  const type = prompt(
+    "选择协同类型：\n  remind_customer = 提醒客户\n  supplement_info = 补充信息\n  verify_identity = 核实身份\n  second_touch = 二次触达\n请输入英文 code：",
+    "remind_customer"
+  );
+  if (!type) return;
+  const allowed = ["remind_customer", "supplement_info", "verify_identity", "second_touch"];
+  if (!allowed.includes(type)) {
+    setFlash("warn", "类型无效", "请输入上述 4 个英文 code 之一。");
+    renderApp();
+    return;
+  }
+  const reason = prompt("填写协同原因（可填空）：", "") || "";
+  try {
+    await api("/api/collaboration-tasks", {
+      method: "POST",
+      body: JSON.stringify({
+        leadId,
+        type,
+        reason,
+        actorUserId: state.user?.id || ""
+      })
+    });
+  } catch (e) {
+    setFlash("warn", "提交失败", e?.message || "请稍后重试");
+    renderApp();
+    return;
+  }
+  setFlash("success", "已提交协同申请", "运营端会在协同申请处理收到通知。");
+  // 拉新数据（含 stats 等），同时如果当前正在协同申请视图，刷新一次任务
+  await loadData();
+  if (state.currentView === "sales-collabs") {
+    await loadCollabTasks("mine");
+  }
+  renderApp();
+}
+
+// ===== 销售端：标记成交 =====
+async function markDeal(leadId) {
+  if (!leadId) return;
+  const serviceType = prompt("服务类型：", "考研培训");
+  if (serviceType === null) return;
+  const amountStr = prompt("成交金额（数字，元）：", "");
+  if (amountStr === null) return;
+  const amountNum = Number(amountStr);
+  if (!Number.isFinite(amountNum) || amountNum < 0) {
+    setFlash("warn", "金额无效", "请输入正数。");
+    renderApp();
+    return;
+  }
+  const remark = prompt("备注（可填空）：", "") || "";
+  try {
+    const resp = await api(`/api/leads/${leadId}/close-deal`, {
+      method: "POST",
+      body: JSON.stringify({
+        serviceType: serviceType || "",
+        amount: amountNum,
+        remark,
+        salesUserId: state.user?.id || ""
+      })
+    });
+    const orderId = resp?.orderId || resp?.order?.id || "";
+    setFlash("success", "已标记成交", orderId ? `订单已创建：${orderId}` : "订单已创建。");
+  } catch (e) {
+    setFlash("warn", "标记失败", e?.message || "请稍后重试");
+    renderApp();
+    return;
+  }
+  await loadData();
+  renderApp();
+}
+
+// ===== 销售端：关闭协同申请 =====
+async function closeCollab(taskId) {
+  if (!taskId) return;
+  if (!confirm("确认关闭这条协同申请？关闭后运营端不再处理。")) return;
+  try {
+    await api(`/api/collaboration-tasks/${taskId}/close`, {
+      method: "PUT",
+      body: JSON.stringify({ actorUserId: state.user?.id || "" })
+    });
+  } catch (e) {
+    setFlash("warn", "关闭失败", e?.message || "请稍后重试");
+    renderApp();
+    return;
+  }
+  setFlash("success", "已关闭", "该协同申请已关闭。");
+  await loadCollabTasks("mine");
+  renderApp();
+}
+
+// ===== 运营端：领取协同申请 =====
+async function claimCollab(taskId) {
+  if (!taskId) return;
+  try {
+    await api(`/api/collaboration-tasks/${taskId}/claim`, {
+      method: "PUT",
+      body: JSON.stringify({ actorUserId: state.user?.id || "" })
+    });
+  } catch (e) {
+    setFlash("warn", "领取失败", e?.message || "请稍后重试");
+    renderApp();
+    return;
+  }
+  setFlash("success", "已领取", "已进入处理中，请尽快完成并填写处理结果。");
+  await loadCollabTasks("inbox", state.collabTabFilter || "pending");
+  renderApp();
+}
+
+// ===== 运营端：完成协同申请 =====
+async function handleCollab(taskId) {
+  if (!taskId) return;
+  const note = prompt("填写处理结果说明：", "") || "";
+  if (!note) {
+    if (!confirm("处理结果为空，确认提交？")) return;
+  }
+  try {
+    await api(`/api/collaboration-tasks/${taskId}/handle`, {
+      method: "PUT",
+      body: JSON.stringify({ handledNote: note })
+    });
+  } catch (e) {
+    setFlash("warn", "完成失败", e?.message || "请稍后重试");
+    renderApp();
+    return;
+  }
+  setFlash("success", "已完成", "发起方会收到处理完成通知。");
+  await loadCollabTasks("inbox", state.collabTabFilter || "handling");
+  renderApp();
+}
+
+// ===== 销售端：我的协同申请视图 =====
+function renderSalesCollabs() {
+  const rows = Array.isArray(state.collabTasks) ? state.collabTasks : null;
+  const leadsById = (state.leads || []).reduce((acc, item) => {
+    if (item && item.id) acc[item.id] = item;
+    return acc;
+  }, {});
+  const usersById = (state.users || []).reduce((acc, item) => {
+    if (item && item.id) acc[item.id] = item;
+    return acc;
+  }, {});
+
+  let body;
+  if (rows === null) {
+    body = `<div class="empty">加载中…</div>`;
+  } else if (rows.length === 0) {
+    body = `<div class="empty">暂无协同申请记录。可在销售跟进卡上点击"申请运营协同"。</div>`;
+  } else {
+    body = `
+      <table class="table">
+        <thead>
+          <tr>
+            <th>客资编号</th>
+            <th>协同类型</th>
+            <th>状态</th>
+            <th>处理人</th>
+            <th>申请时间</th>
+            <th>处理时间</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map((row) => {
+            const lead = leadsById[row.leadId];
+            const code = lead ? formatLeadCode(lead.leadCode) : (row.leadId || "-");
+            const handler = row.handlerId ? (usersById[row.handlerId]?.employeeName || usersById[row.handlerId]?.username || row.handlerId) : "-";
+            const canClose = row.status === "pending" || row.status === "handling";
+            return `
+              <tr>
+                <td>${code}</td>
+                <td>${getCollabTypeLabel(row.type)}</td>
+                <td>${getCollabStatusLabel(row.status)}</td>
+                <td>${handler}</td>
+                <td>${row.requestedAt ? formatDate(row.requestedAt) : "-"}</td>
+                <td>${row.handledAt ? formatDate(row.handledAt) : "-"}</td>
+                <td>${canClose ? `<button class="ghost js-collab-close" data-id="${row.id}" type="button">关闭</button>` : "-"}</td>
+              </tr>
+            `;
+          }).join("")}
+        </tbody>
+      </table>
+    `;
+  }
+
+  if (rows === null && !state.collabTasksLoading) {
+    state.collabTasksLoading = true;
+    loadCollabTasks("mine").then(() => {
+      state.collabTasksLoading = false;
+      renderApp();
+    });
+  }
+
+  return `
+    <div class="page-header page-header-rich">
+      <div>
+        <h2>协同申请</h2>
+        <p class="page-desc">查看你向运营端发起的协同任务及处理进度，未处理前可主动关闭。</p>
+      </div>
+    </div>
+    <div class="panel">
+      ${body}
+    </div>
+  `;
+}
+
+// ===== 运营端：协同 inbox 视图 =====
+function renderOperatorCollabs() {
+  const tab = state.collabTabFilter || "pending";
+  const rows = Array.isArray(state.collabTasks) ? state.collabTasks : null;
+  const leadsById = (state.leads || []).reduce((acc, item) => {
+    if (item && item.id) acc[item.id] = item;
+    return acc;
+  }, {});
+  const usersById = (state.users || []).reduce((acc, item) => {
+    if (item && item.id) acc[item.id] = item;
+    return acc;
+  }, {});
+
+  let body;
+  if (rows === null) {
+    body = `<div class="empty">加载中…</div>`;
+  } else if (rows.length === 0) {
+    body = `<div class="empty">${tab === "pending" ? "当前没有待领取的协同申请。" : "当前没有处理中的协同申请。"}</div>`;
+  } else {
+    body = `
+      <table class="table">
+        <thead>
+          <tr>
+            <th>客资编号</th>
+            <th>协同类型</th>
+            <th>申请人</th>
+            <th>原因</th>
+            <th>申请时间</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map((row) => {
+            const lead = leadsById[row.leadId];
+            const code = lead ? formatLeadCode(lead.leadCode) : (row.leadId || "-");
+            const requester = row.requesterId ? (usersById[row.requesterId]?.employeeName || usersById[row.requesterId]?.username || row.requesterId) : "-";
+            const reason = row.reason ? String(row.reason) : "-";
+            const opBtn = tab === "pending"
+              ? `<button class="primary js-collab-claim" data-id="${row.id}" type="button">领取</button>`
+              : `<button class="primary js-collab-handle" data-id="${row.id}" type="button">完成</button>`;
+            return `
+              <tr>
+                <td>${code}</td>
+                <td>${getCollabTypeLabel(row.type)}</td>
+                <td>${requester}</td>
+                <td>${reason}</td>
+                <td>${row.requestedAt ? formatDate(row.requestedAt) : "-"}</td>
+                <td>${opBtn}</td>
+              </tr>
+            `;
+          }).join("")}
+        </tbody>
+      </table>
+    `;
+  }
+
+  if (rows === null && !state.collabTasksLoading) {
+    state.collabTasksLoading = true;
+    loadCollabTasks("inbox", tab).then(() => {
+      state.collabTasksLoading = false;
+      renderApp();
+    });
+  }
+
+  return `
+    <div class="page-header page-header-rich">
+      <div>
+        <h2>协同申请处理</h2>
+        <p class="page-desc">销售端发起的协同任务在这里集中处理。"待领取"先点领取再写处理结果，"处理中"完成后会通知发起人。</p>
+      </div>
+    </div>
+    <div class="collab-tabs">
+      <button type="button" class="js-collab-tab ${tab === "pending" ? "active" : ""}" data-tab="pending">待领取</button>
+      <button type="button" class="js-collab-tab ${tab === "handling" ? "active" : ""}" data-tab="handling">处理中</button>
+    </div>
+    <div class="panel">
+      ${body}
+    </div>
+  `;
+}
+
+// ===== 运营端：待运营确认来源视图 =====
+function renderLeadSourcePending() {
+  const rows = (state.leads || []).filter((item) => {
+    return item.sourceUnknown === true || item.sourceUnknown === 1;
+  });
+  const employeesById = (state.employees || []).reduce((acc, item) => {
+    if (item && item.id) acc[item.id] = item;
+    return acc;
+  }, {});
+
+  const cards = rows.length ? rows.map((item) => {
+    const code = formatLeadCode(item.leadCode);
+    const contact = item.contactInfo || "-";
+    const nickname = item.nickname || "-";
+    const note = item.note ? String(item.note) : "-";
+    const owner = item.employeeId ? (employeesById[item.employeeId]?.name || item.employeeId) : "-";
+    return `
+      <article class="lead-monitor-card lead-monitor-card-info">
+        <div class="lead-monitor-main">
+          <div class="lead-monitor-head">
+            <div>
+              <h3>${nickname} <span class="lead-code-badge">${code}</span></h3>
+              <p class="muted">联系方式：${contact} · 当前所属：${owner}</p>
+            </div>
+            <div class="lead-monitor-head-actions">
+              <span class="lead-status-chip is-warn">来源待确认</span>
+            </div>
+          </div>
+          <div class="lead-board-grid lead-board-grid-compact">
+            <div><strong>客资编号</strong><span>${code}</span></div>
+            <div><strong>联系方式</strong><span>${contact}</span></div>
+            <div><strong>昵称</strong><span>${nickname}</span></div>
+            <div><strong>客户备注</strong><span>${note}</span></div>
+          </div>
+          <div class="lead-card-actions">
+            <button class="primary js-confirm-lead-source" data-id="${item.id}" type="button">确认来源</button>
+          </div>
+        </div>
+      </article>
+    `;
+  }).join("") : `<div class="empty">当前没有需要确认来源的被动客资。</div>`;
+
+  return `
+    <div class="page-header page-header-rich">
+      <div>
+        <h2>待确认来源</h2>
+        <p class="page-desc">销售端被动添加但来源不明的客资集中在这里，确认作品和归属运营后会自动入账。</p>
+      </div>
+    </div>
+    <div class="lead-monitor-cards">
+      ${cards}
+    </div>
+  `;
+}
+
+// ===== 运营端：确认客资来源 =====
+async function confirmLeadSource(leadId) {
+  if (!leadId) return;
+  const lead = (state.leads || []).find((item) => item.id === leadId);
+  const matchedPostId = prompt(
+    `输入来源作品的 postId（必填）${lead?.contactInfo ? `\n当前客资联系方式：${lead.contactInfo}` : ""}`,
+    ""
+  );
+  if (!matchedPostId) return;
+  const sourceOperatorId = prompt("输入来源运营 employeeId（可填空，留空表示沿用客资当前 employeeId）：", "") || "";
+  try {
+    await api(`/api/leads/${leadId}/source-confirm`, {
+      method: "POST",
+      body: JSON.stringify({
+        matchedPostId,
+        sourceOperatorId,
+        actorUserId: state.user?.id || ""
+      })
+    });
+  } catch (e) {
+    setFlash("warn", "确认失败", e?.message || "请稍后重试");
+    renderApp();
+    return;
+  }
+  setFlash("success", "来源已确认", "客资已绑定来源作品和归属运营。");
+  await loadData();
+  renderApp();
 }
 
 function renderStaffLeadsBoard() {
@@ -682,6 +1097,8 @@ function renderLeadEntry() {
   if (!editing) {
     ensureLeadDraftContext();
   }
+  // 编辑态强制回退到表单模式，避免编辑路径与粘贴/导入交叉
+  const mode = editing ? "form" : (state.leadEntryMode || "form");
   return `
     <div class="page-header page-header-rich">
       <div>
@@ -690,15 +1107,27 @@ function renderLeadEntry() {
       </div>
       <div class="toolbar toolbar-end">
         <span class="tag">${editing ? "正在编辑客资" : "今日录入"}</span>
+        ${editing ? "" : `<button id="leadBatchImportBtn" type="button">批量导入</button>`}
       </div>
     </div>
     ${editing ? "" : renderLeadDraftRestorePrompt()}
+    ${editing ? "" : `
+    <div class="lead-entry-mode-tabs">
+      <button class="${mode === "form" ? "active" : ""} js-lead-entry-mode" data-mode="form" type="button">表单录入</button>
+      <button class="${mode === "paste" ? "active" : ""} js-lead-entry-mode" data-mode="paste" type="button">粘贴解析</button>
+      <button class="${mode === "import" ? "active" : ""} js-lead-entry-mode" data-mode="import" type="button">批量导入</button>
+    </div>
+    `}
+    ${mode === "paste" ? renderLeadPastePanel() : ""}
+    ${mode === "import" ? renderLeadBatchImport() : ""}
+    ${mode === "form" ? `
     <div class="panel entry-panel">
       <div class="staff-form-head">
         <h3>${editing ? "编辑客资" : "新增客资"}</h3>
       </div>
       ${renderLeadForm(editing, { compact: true })}
     </div>
+    ` : ""}
     <div class="panel">
       <div class="section-head">
         <h3>客资记录</h3>
@@ -716,6 +1145,317 @@ function renderLeadEntry() {
       </div>
     </div>
   `;
+}
+
+// ===== 粘贴解析录入 =====
+function renderLeadPastePanel() {
+  const parsed = state.leadPasteParsed;
+  return `
+    <section class="lead-paste-panel panel">
+      <h3>粘贴群消息一键解析</h3>
+      <p class="muted">直接复制群里报客资的整段文字 + 截图，系统自动拆字段</p>
+      <textarea id="leadPasteRawText" rows="10" placeholder="粘贴客资信息，例如：&#10;昵称: 小王&#10;微信号: wx_xxx&#10;平台: 小红书&#10;来源作品: xxx&#10;备注: 想了解课程">${escapeHtml(state.leadPasteRawText || "")}</textarea>
+      <div class="lead-paste-actions">
+        <button id="leadPasteAnalyzeBtn" type="button" class="primary">解析</button>
+        <button class="ghost" id="leadPasteClearBtn" type="button">清空</button>
+      </div>
+      ${parsed ? renderLeadPastePreview() : '<p class="muted">解析后会显示预览区，可手动修改后提交。</p>'}
+    </section>
+  `;
+}
+
+function renderLeadPastePreview() {
+  const parsed = state.leadPasteParsed || {};
+  const hits = state.leadPasteHits || {};
+  const hitLabel = (key) => {
+    if (hits[key] === "matched") return '<span class="hits-matched">✓ 已识别</span>';
+    if (hits[key]) return '<span class="hits-unknown">⚠ 未识别</span>';
+    return "";
+  };
+  const fieldClass = (key) => hits[key] && hits[key] !== "matched" ? "field field-unhit" : "field";
+  const accounts = Array.isArray(state.accounts) ? state.accounts : [];
+  const platformOptions = ["小红书", "抖音", "未知"];
+  const v = (key) => escapeHtmlAttribute(parsed[key] == null ? "" : String(parsed[key]));
+  return `
+    <form id="leadPasteEditForm" class="lead-paste-edit-form">
+      <div class="${fieldClass("contact")}">
+        <label>联系方式 ${hitLabel("contact")}</label>
+        <input name="contactInfo" value="${v("contact")}" placeholder="手机号 / 微信号" />
+      </div>
+      <div class="${fieldClass("nickname")}">
+        <label>昵称 ${hitLabel("nickname")}</label>
+        <input name="nickname" value="${v("nickname")}" />
+      </div>
+      <div class="${fieldClass("platform")}">
+        <label>平台 ${hitLabel("platform")}</label>
+        <select name="platform">
+          ${platformOptions.map((p) => `<option value="${p}" ${parsed.platform === p ? "selected" : ""}>${p}</option>`).join("")}
+        </select>
+      </div>
+      <div class="${fieldClass("ip")}">
+        <label>IP 属地 ${hitLabel("ip")}</label>
+        <input name="ip" value="${v("ip")}" />
+      </div>
+      <div class="${fieldClass("sourcePostKeyword")}">
+        <label>来源作品（关键词） ${hitLabel("sourcePostKeyword")}</label>
+        <input name="sourcePostKeyword" value="${v("sourcePostKeyword")}" placeholder="作品标题或关键词" />
+      </div>
+      <div class="${fieldClass("operatorKeyword")}">
+        <label>运营 / 账号关键词 ${hitLabel("operatorKeyword")}</label>
+        <input name="operatorKeyword" value="${v("operatorKeyword")}" />
+      </div>
+      <div class="${fieldClass("status")}">
+        <label>跟进状态 ${hitLabel("status")}</label>
+        <input name="status" value="${v("status")}" />
+      </div>
+      <div class="${fieldClass("remark")}">
+        <label>备注 ${hitLabel("remark")}</label>
+        <textarea name="remark" rows="3">${escapeHtml(parsed.remark == null ? "" : String(parsed.remark))}</textarea>
+      </div>
+      <div class="field">
+        <label>归属账号</label>
+        <select name="accountId">
+          <option value="">不指定（默认第一个账号）</option>
+          ${accounts.map((a) => `<option value="${a.id}">${escapeHtml(a.accountName || "")} · ${escapeHtml(a.platform || "")}</option>`).join("")}
+        </select>
+      </div>
+      <div class="lead-paste-actions">
+        <button type="submit" class="primary">提交客资</button>
+      </div>
+    </form>
+  `;
+}
+
+// ===== 批量导入 =====
+function renderLeadBatchImport() {
+  return `
+    <section class="lead-import-panel panel">
+      <h3>客资批量导入</h3>
+      <div class="lead-import-modes">
+        <div>
+          <strong>方式一：下载模板填写后粘贴回来</strong>
+          <p class="muted">下载 CSV 模板，按表头格式填好后再回到这里粘贴。</p>
+          <a href="/api/leads/import-template.xlsx" download class="button-link">下载模板 (CSV)</a>
+        </div>
+        <div>
+          <strong>方式二：直接粘贴多行客资</strong>
+          <p class="muted">每行一条，列用 Tab、竖线 (|) 或逗号分隔：<br>平台 / 联系方式 / 昵称 / 账号 / 备注</p>
+        </div>
+      </div>
+      <textarea id="leadImportRowsInput" rows="12" placeholder="小红书\t13800000000\t客户A\t官方账号\t备注内容"></textarea>
+      <div class="lead-import-actions">
+        <button id="leadImportSubmitBtn" type="button" class="primary">开始导入</button>
+        <button class="ghost" id="leadImportCancelBtn" type="button">取消</button>
+      </div>
+      ${state.leadImportResult ? renderLeadImportResult() : ""}
+    </section>
+  `;
+}
+
+function renderLeadImportResult() {
+  const result = state.leadImportResult || {};
+  const success = result.success ?? result.successCount ?? 0;
+  const fail = result.fail ?? result.failCount ?? (Array.isArray(result.errors) ? result.errors.length : 0);
+  const total = result.total ?? result.totalCount ?? (success + fail);
+  const errors = Array.isArray(result.errors) ? result.errors : [];
+  const errorFileUrl = result.errorFileUrl || result.errorFile || "";
+  return `
+    <section class="lead-import-result">
+      <h4>导入结果</h4>
+      <div class="result-stats">
+        <span class="stat-pill stat-success">成功 ${success}</span>
+        <span class="stat-pill stat-fail">失败 ${fail}</span>
+        <span class="stat-pill">总计 ${total}</span>
+      </div>
+      ${errors.length ? `
+        <h5>失败行</h5>
+        <table class="lead-import-error-table">
+          <thead><tr><th>行号</th><th>原因</th></tr></thead>
+          <tbody>
+            ${errors.map((e) => `<tr><td>${escapeHtml(String(e.row ?? e.index ?? ""))}</td><td>${escapeHtml(String(e.reason ?? e.message ?? ""))}</td></tr>`).join("")}
+          </tbody>
+        </table>
+        ${errorFileUrl ? `<a href="${escapeHtmlAttribute(errorFileUrl)}" download>下载失败行 CSV</a>` : ""}
+      ` : ""}
+    </section>
+  `;
+}
+
+// ===== 导入历史（admin/owner） =====
+function renderImportHistory() {
+  if (state.importHistory === null && !state.importHistoryLoading) {
+    loadImportHistory();
+  }
+  const raw = state.importHistory;
+  const items = Array.isArray(raw) ? raw : (Array.isArray(raw?.items) ? raw.items : []);
+  return `
+    <div class="page-header page-header-rich">
+      <div>
+        <h2>导入历史</h2>
+        <p class="page-desc">查看主管端 / 运营端通过批量导入提交的客资批次，包含成功失败统计与失败行下载。</p>
+      </div>
+      <div class="toolbar toolbar-end">
+        <button class="ghost" id="importHistoryRefreshBtn" type="button">刷新</button>
+      </div>
+    </div>
+    <div class="panel">
+      ${state.importHistoryLoading ? '<p class="muted">加载中...</p>' : ""}
+      ${!state.importHistoryLoading && items.length === 0 ? renderEmptyState("还没有导入记录", "通过\"客资录入 → 批量导入\"提交后，这里会显示历次批次。") : ""}
+      ${items.length ? `
+        <table class="import-history-table">
+          <thead>
+            <tr>
+              <th>导入时间</th>
+              <th>总条数</th>
+              <th>成功</th>
+              <th>失败</th>
+              <th>状态</th>
+              <th>失败文件</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${items.map((row) => {
+              const total = row.total ?? row.totalCount ?? row.rows_total ?? 0;
+              const success = row.success ?? row.successCount ?? row.rows_success ?? 0;
+              const fail = row.fail ?? row.failCount ?? row.rows_fail ?? 0;
+              const status = row.status || (fail > 0 ? "partial" : "done");
+              const time = row.createdAt || row.created_at || row.finishedAt || row.finished_at || "";
+              const errorUrl = row.errorFileUrl || row.errorFile || row.error_file_url || "";
+              return `<tr>
+                <td>${time ? escapeHtml(typeof formatDate === "function" ? formatDate(time) : String(time)) : "-"}</td>
+                <td>${escapeHtml(String(total))}</td>
+                <td>${escapeHtml(String(success))}</td>
+                <td>${escapeHtml(String(fail))}</td>
+                <td>${escapeHtml(String(status))}</td>
+                <td>${errorUrl ? `<a href="${escapeHtmlAttribute(errorUrl)}" download>下载</a>` : "-"}</td>
+              </tr>`;
+            }).join("")}
+          </tbody>
+        </table>
+      ` : ""}
+    </div>
+  `;
+}
+
+async function loadImportHistory() {
+  if (state.importHistoryLoading) return;
+  state.importHistoryLoading = true;
+  try {
+    const userId = state.user?.id || "";
+    const url = `/api/import-tasks?type=leads&actorUserId=${encodeURIComponent(userId)}`;
+    const result = await api(url);
+    state.importHistory = result || [];
+  } catch (err) {
+    state.importHistory = [];
+    console.warn("[import-history] load failed", err);
+  } finally {
+    state.importHistoryLoading = false;
+    renderApp();
+  }
+}
+
+async function analyzeLeadPaste() {
+  const rawText = document.getElementById("leadPasteRawText")?.value?.trim() || "";
+  if (!rawText) {
+    setFlash("warn", "请粘贴内容", "至少输入一段文字");
+    renderApp();
+    return;
+  }
+  try {
+    const result = await api("/api/leads/parse", {
+      method: "POST",
+      body: JSON.stringify({ rawText, imageUrls: [] })
+    });
+    state.leadPasteParsed = result.parsed || {};
+    state.leadPasteHits = result.hits || {};
+    state.leadPasteRawText = rawText;
+    renderApp();
+  } catch (err) {
+    setFlash("warn", "解析失败", err?.message || "请稍后重试");
+    renderApp();
+  }
+}
+
+function clearLeadPaste() {
+  state.leadPasteParsed = null;
+  state.leadPasteHits = null;
+  state.leadPasteRawText = "";
+  const ta = document.getElementById("leadPasteRawText");
+  if (ta) ta.value = "";
+  renderApp();
+}
+
+async function submitLeadPaste(event) {
+  event.preventDefault();
+  const formData = new FormData(event.currentTarget);
+  const contactInfo = String(formData.get("contactInfo") || "").trim();
+  if (!contactInfo) {
+    setFlash("warn", "联系方式必填", "请补充联系方式后再提交");
+    renderApp();
+    return;
+  }
+  const noteParts = [];
+  const remark = String(formData.get("remark") || "").trim();
+  const statusText = String(formData.get("status") || "").trim();
+  const sourcePostKeyword = String(formData.get("sourcePostKeyword") || "").trim();
+  const operatorKeyword = String(formData.get("operatorKeyword") || "").trim();
+  if (remark) noteParts.push(remark);
+  if (statusText) noteParts.push(`[跟进状态] ${statusText}`);
+  if (sourcePostKeyword) noteParts.push(`[来源关键词] ${sourcePostKeyword}`);
+  if (operatorKeyword) noteParts.push(`[运营关键词] ${operatorKeyword}`);
+  const selectedAccountId = String(formData.get("accountId") || "").trim();
+  const accountId = selectedAccountId || (Array.isArray(state.accounts) && state.accounts[0]?.id) || "";
+  const payload = {
+    contactInfo,
+    nickname: String(formData.get("nickname") || ""),
+    platform: String(formData.get("platform") || "未知"),
+    ip: String(formData.get("ip") || ""),
+    note: noteParts.join("\n"),
+    accountId,
+    source: "parsed"
+  };
+  try {
+    await api("/api/leads", { method: "POST", body: JSON.stringify(payload) });
+    setFlash("success", "粘贴录入成功", "客资已保存");
+    clearLeadPaste();
+    state.leadEntryMode = "form";
+    await loadData();
+    renderApp();
+  } catch (err) {
+    setFlash("warn", "提交失败", err?.message || "请稍后重试");
+    renderApp();
+  }
+}
+
+async function submitLeadBatchImport() {
+  const text = document.getElementById("leadImportRowsInput")?.value?.trim() || "";
+  if (!text) {
+    setFlash("warn", "请粘贴数据", "至少粘贴一行");
+    renderApp();
+    return;
+  }
+  const rows = text.split(/\r?\n/).map((r) => r.trim()).filter(Boolean);
+  try {
+    const result = await api("/api/leads/import-paste", {
+      method: "POST",
+      body: JSON.stringify({ rows, actorUserId: state.user?.id || "" })
+    });
+    state.leadImportResult = result;
+    const success = result?.success ?? result?.successCount ?? 0;
+    const fail = result?.fail ?? result?.failCount ?? 0;
+    setFlash("success", "导入完成", `成功 ${success} / 失败 ${fail}`);
+    await loadData();
+    renderApp();
+  } catch (err) {
+    setFlash("warn", "导入失败", err?.message || "请稍后重试");
+    renderApp();
+  }
+}
+
+function cancelLeadBatchImport() {
+  state.leadEntryMode = "form";
+  state.leadImportResult = null;
+  renderApp();
 }
 
 

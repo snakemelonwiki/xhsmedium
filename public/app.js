@@ -13,6 +13,9 @@ function renderApp() {
     ["posts", "作品看板"],
     ["account-viz", "分析看板"],
     ["leads", "客资看板"],
+    ["lead-source-pending", "待确认来源"],
+    ["lead-collabs", "协同申请处理"],
+    ["import-history", "导入历史"],
     ["employees", "员工管理"],
     ["accounts", "账号管理"]
   ];
@@ -29,6 +32,7 @@ function renderApp() {
   const salesViews = [
     ["sales-leads", "客资看板"],
     ["sales-passive-leads", "待确认被动添加"],
+    ["sales-collabs", "协同申请"],
     ["sales-followups", "跟进看板"]
   ];
 
@@ -83,6 +87,11 @@ function renderApp() {
   document.querySelectorAll("[data-view]").forEach((button) => {
     button.addEventListener("click", () => {
       state.currentView = button.dataset.view;
+      // 进入协同视图时强制重新拉一次（避免显示上次缓存）
+      if (button.dataset.view === "sales-collabs" || button.dataset.view === "lead-collabs") {
+        state.collabTasks = null;
+        state.collabTasksLoading = false;
+      }
       renderApp();
     });
   });
@@ -183,6 +192,12 @@ function renderCurrentView() {
         return renderAccountVisualization();
       case "leads":
         return renderLeadsMonitor();
+      case "lead-source-pending":
+        return renderLeadSourcePending();
+      case "lead-collabs":
+        return renderOperatorCollabs();
+      case "import-history":
+        return renderImportHistory();
       case "employees":
         return renderEmployees();
       case "accounts":
@@ -198,6 +213,8 @@ function renderCurrentView() {
         return renderSalesLeads();
       case "sales-passive-leads":
         return renderSalesPassiveLeads();
+      case "sales-collabs":
+        return renderSalesCollabs();
       case "sales-followups":
         return renderSalesFollowupBoard();
       default:
@@ -801,6 +818,38 @@ function bindViewEvents() {
   );
   document.getElementById("passiveCreateBtn")?.addEventListener("click", openPassiveCreateDialog);
   document.getElementById("passiveCreateBtn2")?.addEventListener("click", openPassiveCreateDialog);
+  // 协同任务：销售端发起 / 销售端关闭 / 运营端领取 / 运营端完成 / tab 切换
+  document.querySelectorAll(".js-sales-request-collab").forEach((el) => el.addEventListener("click", () => requestCollab(el.dataset.id)));
+  document.querySelectorAll(".js-sales-mark-deal").forEach((el) => el.addEventListener("click", () => markDeal(el.dataset.id)));
+  document.querySelectorAll(".js-collab-claim").forEach((el) => el.addEventListener("click", () => claimCollab(el.dataset.id)));
+  document.querySelectorAll(".js-collab-handle").forEach((el) => el.addEventListener("click", () => handleCollab(el.dataset.id)));
+  document.querySelectorAll(".js-collab-close").forEach((el) => el.addEventListener("click", () => closeCollab(el.dataset.id)));
+  document.querySelectorAll(".js-collab-tab").forEach((el) => el.addEventListener("click", () => {
+    state.collabTabFilter = el.dataset.tab || "pending";
+    state.collabTasks = null;
+    state.collabTasksLoading = false;
+    renderApp();
+  }));
+  // 待运营确认来源：确认按钮
+  document.querySelectorAll(".js-confirm-lead-source").forEach((el) => el.addEventListener("click", () => confirmLeadSource(el.dataset.id)));
+  // 客资录入：表单 / 粘贴 / 导入 模式切换 + 粘贴解析 + 批量导入
+  document.querySelectorAll(".js-lead-entry-mode").forEach((el) => el.addEventListener("click", () => {
+    state.leadEntryMode = el.dataset.mode || "form";
+    renderApp();
+  }));
+  document.getElementById("leadPasteAnalyzeBtn")?.addEventListener("click", analyzeLeadPaste);
+  document.getElementById("leadPasteClearBtn")?.addEventListener("click", clearLeadPaste);
+  document.getElementById("leadPasteEditForm")?.addEventListener("submit", submitLeadPaste);
+  document.getElementById("leadBatchImportBtn")?.addEventListener("click", () => {
+    state.leadEntryMode = "import";
+    renderApp();
+  });
+  document.getElementById("leadImportSubmitBtn")?.addEventListener("click", submitLeadBatchImport);
+  document.getElementById("leadImportCancelBtn")?.addEventListener("click", cancelLeadBatchImport);
+  document.getElementById("importHistoryRefreshBtn")?.addEventListener("click", () => {
+    state.importHistory = null;
+    loadImportHistory();
+  });
 }
 
 function bindDelegatedEvents() {

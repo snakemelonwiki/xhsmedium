@@ -119,7 +119,18 @@ const state = {
   passiveSearchDone: false,
   notifications: [],
   unreadNotificationCount: 0,
-  notificationPanelOpen: false
+  notificationPanelOpen: false,
+  collabTasks: null,
+  collabTasksScope: "mine",  // 销售: mine; 运营: inbox
+  collabTabFilter: "pending",  // pending/handling
+  leadSourcePendingFilter: "",
+  leadEntryMode: "form",
+  leadPasteParsed: null,
+  leadPasteHits: null,
+  leadPasteRawText: "",
+  leadImportResult: null,
+  importHistory: null,
+  importHistoryLoading: false
 };
 
 const POST_TYPES = ["素人贴", "话题贴", "获客贴"];
