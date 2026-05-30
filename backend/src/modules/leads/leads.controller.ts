@@ -236,8 +236,23 @@ export class LeadsController {
     @Param('id') id: string,
     @Query('limit') limit: string,
     @Query('offset') offset: string,
+    @Query('paged') paged: string,
     @Res() res: Response,
   ) {
+    // §9 / AC-10.2 same shape switch as GET /api/leads:
+    //   - 没传 limit/offset 任一 → 返回数组（旧前端兼容，前端把 await 出来的当作 Array 用）
+    //   - 显式传了 limit/offset，或 paged=1 → 返回 { items, total, limit, offset }
+    // 现役前端 (leads-monitor.js / orders-views.js) 调 follow-records 时会带 limit=100/50，
+    // 仍走数组分支，不会把 records 错当成对象。需要 total 时前端额外加 paged=1 即可。
+    const wantsPaging = paged === '1' || paged === 'true';
+    if (wantsPaging) {
+      const result = await this.leadsService.listFollowRecordsPaged(
+        id,
+        Number(limit) || 50,
+        Number(offset) || 0,
+      );
+      return res.json(result);
+    }
     const rows = await this.leadsService.listFollowRecords(
       id,
       Number(limit) || 50,

@@ -151,6 +151,42 @@ export class ExportsService {
     return rows.map((r) => this.mapTask(r));
   }
 
+  // ---- §9 / AC-10.2 导出任务列表分页 ----
+  // 控制器有 limit/offset 时改走该方法，统一返回 { items, total, limit, offset }；
+  // 老接口（listForUser）保留，前端无分页参数时直接返回数组以保持兼容。
+  async listForUserPaged(
+    userId: string,
+    exportType: string | undefined,
+    limit: number,
+    offset: number,
+  ): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
+    const safeLimit = this.clampLimit(limit);
+    const safeOffset = Math.max(Number(offset) || 0, 0);
+    if (!userId) {
+      return { items: [], total: 0, limit: safeLimit, offset: safeOffset };
+    }
+    const where: any = { userId };
+    if (exportType) where.exportType = exportType;
+    const [rows, total] = await this.exportRepo.findAndCount({
+      where,
+      order: { createdAt: 'DESC' },
+      take: safeLimit,
+      skip: safeOffset,
+    });
+    return {
+      items: rows.map((r) => this.mapTask(r)),
+      total,
+      limit: safeLimit,
+      offset: safeOffset,
+    };
+  }
+
+  private clampLimit(limit: number): number {
+    const n = Number(limit) || 20;
+    if (n <= 0) return 20;
+    return Math.min(n, 200);
+  }
+
   async findOne(id: string): Promise<any | null> {
     if (!id) return null;
     const row = await this.exportRepo.findOne({ where: { id } });

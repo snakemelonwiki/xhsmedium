@@ -53,9 +53,21 @@ export class ExportsController {
     @Res() res: Response,
     @Query('type') type?: string,
     @Query('actorUserId') actorUserId?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
   ) {
     const session = (req as any).session;
     const userId = session?.userId || session?.id || actorUserId || '';
+    // 任一存在 → 走 paged → 返回对象；否则数组（兼容旧前端）
+    if (limit !== undefined || offset !== undefined) {
+      const paged = await this.service.listForUserPaged(
+        userId,
+        type || undefined,
+        Number(limit) || 20,
+        Number(offset) || 0,
+      );
+      return res.json(paged);
+    }
     const rows = await this.service.listForUser(userId, type || undefined);
     return res.json(rows);
   }

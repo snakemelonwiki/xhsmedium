@@ -165,6 +165,60 @@ export class OrdersService {
     return rows.map((r) => this.mapOrder(r));
   }
 
+  // §9 / AC-10.2 订单列表分页
+  // 控制器拿到 limit/offset 时改走 *Paged 版本，统一返回 { items, total, limit, offset }；
+  // 无分页参数时仍走上面老接口（直接返回数组），保持前端兼容。
+  // 业务过滤（role/scope/status）逻辑与 list() 完全一致，只在末尾包了分页 + count。
+  async listPaged(
+    options: ListOrdersOptions & { limit: number; offset: number },
+  ): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
+    const safeLimit = this.clampLimit(options.limit);
+    const safeOffset = Math.max(Number(options.offset) || 0, 0);
+
+    const qb = this.orderRepository.createQueryBuilder('o').orderBy('o.created_at', 'DESC');
+
+    if (options.status) {
+      qb.andWhere('o.order_status = :status', { status: options.status });
+    }
+
+    const isAdminLike = options.sessionRole === 'admin' || options.sessionRole === 'owner';
+
+    if (options.role === 'academic') {
+      if (options.scope === 'all' && isAdminLike) {
+        // no extra filter
+      } else {
+        if (!options.currentUserId) {
+          return { items: [], total: 0, limit: safeLimit, offset: safeOffset };
+        }
+        qb.andWhere('o.academic_user_id = :uid', { uid: options.currentUserId });
+      }
+    } else if (!isAdminLike) {
+      if (options.currentUserId) {
+        qb.andWhere(
+          '(o.sales_user_id = :uid OR o.academic_user_id = :uid)',
+          { uid: options.currentUserId },
+        );
+      } else {
+        return { items: [], total: 0, limit: safeLimit, offset: safeOffset };
+      }
+    }
+
+    qb.skip(safeOffset).take(safeLimit);
+    const [rows, total] = await qb.getManyAndCount();
+    return {
+      items: rows.map((r) => this.mapOrder(r)),
+      total,
+      limit: safeLimit,
+      offset: safeOffset,
+    };
+  }
+
+  private clampLimit(limit: number): number {
+    const n = Number(limit) || 20;
+    if (n <= 0) return 20;
+    return Math.min(n, 200);
+  }
+
   async findOne(id: string): Promise<any> {
     const order = await this.orderRepository.findOne({ where: { id } });
     if (!order) {
@@ -253,12 +307,25 @@ export class OrdersService {
     }
   }
 
-  async listFollowRecords(orderId: string): Promise<any[]> {
-    const rows = await this.orderFollowRepository.find({
+  async listFollowRecords(
+    orderId: string,
+    limit?: number,
+    offset?: number,
+  ): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
+    const safeLimit = this.clampLimit(limit as number);
+    const safeOffset = Math.max(Number(offset) || 0, 0);
+    const [rows, total] = await this.orderFollowRepository.findAndCount({
       where: { orderId },
       order: { createdAt: 'DESC' },
+      take: safeLimit,
+      skip: safeOffset,
     });
-    return rows.map((r) => this.mapFollowRecord(r));
+    return {
+      items: rows.map((r) => this.mapFollowRecord(r)),
+      total,
+      limit: safeLimit,
+      offset: safeOffset,
+    };
   }
 
   private mapOrder(row: Order): any {

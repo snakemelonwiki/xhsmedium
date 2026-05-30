@@ -129,6 +129,41 @@ export class CollaborationTasksService {
     return rows.map(this.map);
   }
 
+  // §9 / AC-10.2 协同任务列表分页
+  // 控制器拿到 limit/offset 时改走 *Paged 版本，统一返回 { items, total, limit, offset }；
+  // 无分页参数时仍走上面老接口（直接返回数组），保持前端兼容。
+  async listPaged(
+    query: ListQuery & { limit: number; offset: number },
+  ): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
+    const safeLimit = this.clampLimit(query.limit);
+    const safeOffset = Math.max(Number(query.offset) || 0, 0);
+
+    const qb = this.repo.createQueryBuilder('t');
+
+    if (query.scope === 'mine') {
+      qb.andWhere('t.requester_id = :uid', { uid: query.userId || '' });
+    } else if (query.scope === 'inbox') {
+      qb.andWhere('t.handler_id = :uid', { uid: query.userId || '' });
+    }
+
+    if (query.status) {
+      qb.andWhere('t.status = :status', { status: query.status });
+    }
+    if (query.leadId) {
+      qb.andWhere('t.lead_id = :leadId', { leadId: query.leadId });
+    }
+
+    qb.orderBy('t.requested_at', 'DESC').skip(safeOffset).take(safeLimit);
+    const [rows, total] = await qb.getManyAndCount();
+    return { items: rows.map(this.map), total, limit: safeLimit, offset: safeOffset };
+  }
+
+  private clampLimit(limit: number): number {
+    const n = Number(limit) || 20;
+    if (n <= 0) return 20;
+    return Math.min(n, 200);
+  }
+
   async claim(id: string, handlerId: string): Promise<CollaborationTask | null> {
     const task = await this.repo.findOne({ where: { id } });
     if (!task) return null;

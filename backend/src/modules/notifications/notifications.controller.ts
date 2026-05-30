@@ -28,6 +28,8 @@ export class NotificationsController {
       items: result.items,
       unreadCount: result.unreadCount,
       total: result.total,
+      limit: result.limit,
+      offset: result.offset,
     });
   }
 

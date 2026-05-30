@@ -56,9 +56,21 @@ export class ImportsController {
     @Req() req: Request,
     @Res() res: Response,
     @Query('type') type?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
   ) {
     const session = (req as any).session;
     const actorUserId = session?.userId || session?.id || 'anonymous';
+    // 任一存在 → 走 paged → 返回对象；否则数组（兼容旧前端）
+    if (limit !== undefined || offset !== undefined) {
+      const paged = await this.importsService.listTasksPaged(
+        actorUserId,
+        type,
+        Number(limit) || 20,
+        Number(offset) || 0,
+      );
+      return res.json(paged);
+    }
     const rows = await this.importsService.listTasks(actorUserId, type);
     return res.json(rows);
   }

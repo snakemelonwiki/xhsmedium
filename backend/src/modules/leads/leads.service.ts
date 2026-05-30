@@ -248,10 +248,42 @@ export class LeadsService {
     const rows = await this.followRepository.find({
       where: { leadId },
       order: { createdAt: 'DESC' },
-      take: Math.min(limit, 200),
-      skip: offset,
+      take: this.clampLimit(limit),
+      skip: Math.max(Number(offset) || 0, 0),
     });
-    return rows.map((r) => ({
+    return rows.map((r) => this.mapFollowRecord(r));
+  }
+
+  /**
+   * Paged variant: same query as listFollowRecords but also returns total count
+   * so the frontend can drive "load more" / total badges. Controllers call this
+   * when the request actually carries limit/offset; the array-returning version
+   * stays around so existing callers that `await api(...)` and treat the result
+   * as an array don't break.
+   */
+  async listFollowRecordsPaged(
+    leadId: string,
+    limit: number,
+    offset: number,
+  ): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
+    const safeLimit = this.clampLimit(limit);
+    const safeOffset = Math.max(Number(offset) || 0, 0);
+    const [rows, total] = await this.followRepository.findAndCount({
+      where: { leadId },
+      order: { createdAt: 'DESC' },
+      take: safeLimit,
+      skip: safeOffset,
+    });
+    return {
+      items: rows.map((r) => this.mapFollowRecord(r)),
+      total,
+      limit: safeLimit,
+      offset: safeOffset,
+    };
+  }
+
+  private mapFollowRecord(r: LeadFollowRecord): any {
+    return {
       id: r.id,
       leadId: r.leadId,
       userId: r.userId,
@@ -259,7 +291,7 @@ export class LeadsService {
       content: r.content,
       nextFollowTime: r.nextFollowTime,
       createdAt: r.createdAt,
-    }));
+    };
   }
 
   async remove(id: string): Promise<void> {

@@ -27,6 +27,37 @@ export class LeadDraftsService {
     return rows.map(this.mapDraft);
   }
 
+  // ---- §9 / AC-10.2 客资草稿列表分页 ----
+  // 控制器有 limit/offset 时改走该方法，统一返回 { items, total, limit, offset }；
+  // 老接口（findByUser）保留，前端无分页参数时直接返回数组以保持兼容。
+  async findByUserPaged(
+    userId: string,
+    draftType: string,
+    limit: number,
+    offset: number,
+  ): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
+    const safeLimit = this.clampLimit(limit);
+    const safeOffset = Math.max(Number(offset) || 0, 0);
+    const [rows, total] = await this.draftRepository.findAndCount({
+      where: { userId, draftType },
+      order: { updatedAt: 'DESC' },
+      take: safeLimit,
+      skip: safeOffset,
+    });
+    return {
+      items: rows.map(this.mapDraft),
+      total,
+      limit: safeLimit,
+      offset: safeOffset,
+    };
+  }
+
+  private clampLimit(limit: number): number {
+    const n = Number(limit) || 20;
+    if (n <= 0) return 20;
+    return Math.min(n, 200);
+  }
+
   async upsert(id: string, userId: string, dto: UpsertDraftDto): Promise<any> {
     const draftType = dto.draftType;
     const contentJson = dto.contentJson || '';

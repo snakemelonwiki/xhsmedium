@@ -47,15 +47,33 @@ export class OrdersController {
     @Query('scope') scope?: string,
     @Query('actorUserId') actorUserId?: string,
     @Query('actorRole') actorRole?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
   ) {
     const session = (req as any).session;
     const currentUserId = session?.userId || session?.id || actorUserId || '';
+    const sessionRole = session?.role || actorRole;
+    // §9 / AC-10.2：传了 limit 或 offset 任一即视为分页请求，返回 { items, total, limit, offset }；
+    //   不传任何分页参数 → 兼容旧前端：返回纯数组。
+    const wantsPaging = limit !== undefined || offset !== undefined;
+    if (wantsPaging) {
+      const result = await this.ordersService.listPaged({
+        role,
+        status,
+        scope,
+        currentUserId,
+        sessionRole,
+        limit: Number(limit) || 20,
+        offset: Number(offset) || 0,
+      });
+      return res.json(result);
+    }
     const rows = await this.ordersService.list({
       role,
       status,
       scope,
       currentUserId,
-      sessionRole: session?.role || actorRole,
+      sessionRole,
     });
     return res.json(rows);
   }
@@ -112,8 +130,18 @@ export class OrdersController {
   }
 
   @Get('orders/:id/follow-records')
-  async listFollowRecords(@Param('id') id: string, @Res() res: Response) {
-    const rows = await this.ordersService.listFollowRecords(id);
-    return res.json(rows);
+  async listFollowRecords(
+    @Param('id') id: string,
+    @Res() res: Response,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ) {
+    // §9 / AC-10.2 跟进记录天然分页，直接返回 { items, total, limit, offset } 对象。
+    const result = await this.ordersService.listFollowRecords(
+      id,
+      Number(limit) || 20,
+      Number(offset) || 0,
+    );
+    return res.json(result);
   }
 }

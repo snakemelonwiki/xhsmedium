@@ -31,18 +31,20 @@ export class NotificationsService {
 
   /**
    * List notifications for the given user. Unread first, then newest first.
-   * Returns the page items, the total matched count and the user's unread count
-   * (independent of pagination / type filter, used to drive the bell badge).
+   * Returns the page items, the total matched count (same where as the page)
+   * and the user's unread count (independent of pagination / type filter,
+   * used to drive the bell badge). Also echoes back the resolved limit/offset
+   * so the frontend can drive "load more" without re-deriving the math.
    */
   async listForUser(
     userId: string,
     opts?: ListOpts,
-  ): Promise<{ items: any[]; unreadCount: number; total: number }> {
+  ): Promise<{ items: any[]; unreadCount: number; total: number; limit: number; offset: number }> {
     if (!userId) {
-      return { items: [], unreadCount: 0, total: 0 };
+      return { items: [], unreadCount: 0, total: 0, limit: this.clampLimit(opts?.limit), offset: 0 };
     }
 
-    const limit = Math.min(Math.max(Number(opts?.limit) || 30, 1), 200);
+    const limit = this.clampLimit(opts?.limit);
     const offset = Math.max(Number(opts?.offset) || 0, 0);
 
     const qb = this.repo.createQueryBuilder('n')
@@ -55,12 +57,17 @@ export class NotificationsService {
       qb.andWhere('n.type_code = :type', { type: opts.type });
     }
 
+    // Count first, with the same where conditions — must run before take/skip
+    // because TypeORM's getCount on a query builder ignores take/skip but we
+    // keep the order explicit so future maintainers don't get tripped up.
+    const total = await qb.getCount();
+
     qb.orderBy('n.read_status', 'ASC')
       .addOrderBy('n.created_at', 'DESC')
       .take(limit)
       .skip(offset);
 
-    const [rows, total] = await qb.getManyAndCount();
+    const rows = await qb.getMany();
     const unreadCount = await this.repo.count({
       where: { receiverId: userId, readStatus: 0 },
     });
@@ -69,7 +76,15 @@ export class NotificationsService {
       items: rows.map((r) => this.map(r)),
       unreadCount,
       total,
+      limit,
+      offset,
     };
+  }
+
+  private clampLimit(limit: number | undefined): number {
+    const n = Number(limit) || 20;
+    if (n <= 0) return 20;
+    return Math.min(n, 200);
   }
 
   /**

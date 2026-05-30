@@ -8,12 +8,32 @@ export class LeadDraftsController {
   constructor(private readonly leadDraftsService: LeadDraftsService) {}
 
   @Get()
-  async findAll(@Req() req: Request, @Res() res: Response, @Query('type') type?: string) {
+  async findAll(
+    @Req() req: Request,
+    @Res() res: Response,
+    @Query('type') type?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ) {
     const session = (req as any).session;
     const actorUserId = session?.userId || session?.id || (req.query?.actorUserId as string) || '';
     const draftType = type || 'lead';
     if (!actorUserId) {
+      // 无登录态：保持旧行为返回空数组；分页参数下也以空 paged 对象返回
+      if (limit !== undefined || offset !== undefined) {
+        return res.json({ items: [], total: 0, limit: Number(limit) || 20, offset: Number(offset) || 0 });
+      }
       return res.json([]);
+    }
+    // 任一存在 → 走 paged → 返回对象；否则数组（兼容旧前端）
+    if (limit !== undefined || offset !== undefined) {
+      const paged = await this.leadDraftsService.findByUserPaged(
+        actorUserId,
+        draftType,
+        Number(limit) || 20,
+        Number(offset) || 0,
+      );
+      return res.json(paged);
     }
     const rows = await this.leadDraftsService.findByUser(actorUserId, draftType);
     return res.json(rows);

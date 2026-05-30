@@ -34,9 +34,25 @@ export class CollaborationTasksController {
     @Query('status') status?: string,
     @Query('leadId') leadId?: string,
     @Query('actorUserId') actorUserId?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
   ) {
     const session = (req as any).session;
     const userId = session?.userId || session?.id || actorUserId || '';
+    // §9 / AC-10.2：传了 limit 或 offset 任一即视为分页请求，返回 { items, total, limit, offset }；
+    //   不传任何分页参数 → 兼容旧前端：返回纯数组。
+    const wantsPaging = limit !== undefined || offset !== undefined;
+    if (wantsPaging) {
+      const result = await this.service.listPaged({
+        scope,
+        status,
+        leadId,
+        userId,
+        limit: Number(limit) || 20,
+        offset: Number(offset) || 0,
+      });
+      return res.json(result);
+    }
     const rows = await this.service.list({
       scope,
       status,

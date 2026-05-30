@@ -141,6 +141,39 @@ export class ImportsService {
     return rows.map((r) => this.mapTask(r));
   }
 
+  // ---- §9 / AC-10.2 导入任务列表分页 ----
+  // 控制器有 limit/offset 时改走该方法，统一返回 { items, total, limit, offset }；
+  // 老接口（listTasks）保留，前端无分页参数时直接返回数组以保持兼容。
+  async listTasksPaged(
+    userId: string,
+    importType: string | undefined,
+    limit: number,
+    offset: number,
+  ): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
+    const safeLimit = this.clampLimit(limit);
+    const safeOffset = Math.max(Number(offset) || 0, 0);
+    const where: any = { userId };
+    if (importType) where.importType = importType;
+    const [rows, total] = await this.importTaskRepository.findAndCount({
+      where,
+      order: { createdAt: 'DESC' },
+      take: safeLimit,
+      skip: safeOffset,
+    });
+    return {
+      items: rows.map((r) => this.mapTask(r)),
+      total,
+      limit: safeLimit,
+      offset: safeOffset,
+    };
+  }
+
+  private clampLimit(limit: number): number {
+    const n = Number(limit) || 20;
+    if (n <= 0) return 20;
+    return Math.min(n, 200);
+  }
+
   /**
    * Synchronous batch import of pasted lead rows.
    * Each line is parsed, validated, dup-checked, then inserted via lead repository.
