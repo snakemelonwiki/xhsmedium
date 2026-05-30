@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Req, Res } from '@nestjs/common';
+import { Controller, Get, Post, Body, Req, Res, Query } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { Request, Response } from 'express';
 import { makeId } from '../../shared/utils/id-generator';
@@ -8,7 +8,19 @@ export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
   @Get()
-  async findAll(@Res() res: Response) {
+  async findAll(
+    @Res() res: Response,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ) {
+    const wantsPaging = limit !== undefined || offset !== undefined;
+    if (wantsPaging) {
+      const result = await this.usersService.findAllPaged({
+        limit: Number(limit) || 20,
+        offset: Number(offset) || 0,
+      });
+      return res.json(result);
+    }
     const users = await this.usersService.findAll();
     return res.json(users.map((u) => ({
       id: u.id,
@@ -21,7 +33,19 @@ export class UsersController {
   }
 
   @Get('staff')
-  async findStaffUsers(@Res() res: Response) {
+  async findStaffUsers(
+    @Res() res: Response,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ) {
+    const wantsPaging = limit !== undefined || offset !== undefined;
+    if (wantsPaging) {
+      const result = await this.usersService.findStaffUsersPaged({
+        limit: Number(limit) || 20,
+        offset: Number(offset) || 0,
+      });
+      return res.json(result);
+    }
     const users = await this.usersService.findStaffUsers();
     return res.json(users.map((u) => ({
       id: u.id,

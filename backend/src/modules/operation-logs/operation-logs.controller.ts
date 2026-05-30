@@ -19,6 +19,8 @@ export class OperationLogsController {
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
   ) {
+    const limitNum = Number(limit) || 50;
+    const offsetNum = Number(offset) || 0;
     const rows = await this.service.list({
       userId,
       targetType,
@@ -26,10 +28,10 @@ export class OperationLogsController {
       action,
       from,
       to,
-      limit: Number(limit) || 50,
-      offset: Number(offset) || 0,
+      limit: limitNum,
+      offset: offsetNum,
     });
-    return res.json(rows);
+    return res.json({ ...rows, limit: limitNum, offset: offsetNum });
   }
 
   @Get(':id')

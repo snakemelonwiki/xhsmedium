@@ -58,7 +58,7 @@ function setupPagination(containerId, opts) {
         </div>
         <div class="pag-go">
           <span>跳至</span>
-          <input type="number" class="pag-go-input" min="1" max="${tp}" value="${cp}" style="width:50px;" />
+          <input type="number" class="pag-go-input" min="1" max="${tp}" value="${cp}" placeholder="${cp}" style="width:50px;" />
           <span>页</span>
           <button class="pag-btn pag-go-btn" type="button">前往</button>
           ${sizeSelect}

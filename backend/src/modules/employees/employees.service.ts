@@ -15,6 +15,15 @@ export class EmployeesService {
     return this.employeeRepository.find({ order: { createdAt: 'DESC' } });
   }
 
+  async findAllPaged(limit: number, offset: number): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
+    const [items, total] = await this.employeeRepository.findAndCount({
+      order: { createdAt: 'DESC' },
+      take: limit,
+      skip: offset,
+    });
+    return { items, total, limit, offset };
+  }
+
   async findAllCodes(): Promise<string[]> {
     const rows = await this.employeeRepository.find({ select: ['employeeCode'] as any });
     return rows.map((e) => e.employeeCode);

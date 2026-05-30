@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, Req, Res } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, Query, Req, Res } from '@nestjs/common';
 import { PostsService } from './posts.service';
 import { PostsMetricsService } from './posts-metrics.service';
 import { Request, Response } from 'express';
@@ -13,8 +13,31 @@ export class PostsController {
   ) {}
 
   @Get()
-  async findAll(@Req() req: Request, @Res() res: Response) {
+  async findAll(
+    @Req() req: Request,
+    @Res() res: Response,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ) {
     const session = (req as any).session;
+    const wantsPaging = limit !== undefined || offset !== undefined;
+
+    if (wantsPaging) {
+      if (session?.role === 'staff' && session?.employeeId) {
+        const result = await this.postsService.findByEmployeePaged(
+          session.employeeId,
+          Number(limit) || 20,
+          Number(offset) || 0,
+        );
+        return res.json(result);
+      }
+      const result = await this.postsService.findAllPaged(
+        Number(limit) || 20,
+        Number(offset) || 0,
+      );
+      return res.json(result);
+    }
+
     if (session?.role === 'staff' && session?.employeeId) {
       const rows = await this.postsService.findByEmployee(session.employeeId);
       return res.json(rows);

@@ -5342,3 +5342,128 @@ tbody tr:nth-child(even):hover {
   font-size: 14px;
   color: #111827;
 }
+
+/* ========== Pagination Component Styles ========== */
+.pag-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 0;
+  margin-top: 20px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.pag-info {
+  font-size: 14px;
+  color: #6b7280;
+  white-space: nowrap;
+}
+
+.pag-pages {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.pag-btn {
+  padding: 6px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #fff;
+  color: #374151;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.pag-btn:hover:not(:disabled) {
+  background: #f9fafb;
+  border-color: #9ca3af;
+}
+
+.pag-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.pag-btn.active {
+  background: #4f46e5;
+  color: #fff;
+  border-color: #4f46e5;
+  font-weight: 500;
+}
+
+.pag-page {
+  min-width: 36px;
+  padding: 6px 10px;
+}
+
+.pag-ellipsis {
+  padding: 6px 8px;
+  color: #9ca3af;
+  font-size: 14px;
+}
+
+.pag-go {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: #6b7280;
+  flex-wrap: wrap;
+}
+
+.pag-go-input {
+  width: 60px;
+  padding: 6px 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #fff;
+  color: #111827;
+  font-size: 14px;
+  font-weight: 500;
+  text-align: center;
+  transition: all 0.2s;
+}
+
+.pag-go-input:focus {
+  outline: none;
+  border-color: #4f46e5;
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
+}
+
+.pag-size-select {
+  padding: 6px 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #fff;
+  color: #374151;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.pag-size-select:hover {
+  border-color: #9ca3af;
+}
+
+@media (max-width: 768px) {
+  .pag-bar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+  .pag-info {
+    text-align: center;
+  }
+  .pag-pages {
+    justify-content: center;
+  }
+  .pag-go {
+    justify-content: center;
+  }
+}

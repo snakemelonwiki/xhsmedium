@@ -19,6 +19,59 @@ export class UsersService {
     return this.userRepository.find({ where: { role: 'staff' }, order: { createdAt: 'DESC' } });
   }
 
+  async findAllPaged(options: { limit: number; offset: number }): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
+    const safeLimit = this.clampLimit(options.limit);
+    const safeOffset = Math.max(Number(options.offset) || 0, 0);
+    const [rows, total] = await this.userRepository.findAndCount({
+      order: { createdAt: 'DESC' },
+      skip: safeOffset,
+      take: safeLimit,
+    });
+    return {
+      items: rows.map((u) => ({
+        id: u.id,
+        username: u.username,
+        password: u.password,
+        role: u.role,
+        employeeId: u.employeeId,
+        status: u.status,
+      })),
+      total,
+      limit: safeLimit,
+      offset: safeOffset,
+    };
+  }
+
+  async findStaffUsersPaged(options: { limit: number; offset: number }): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
+    const safeLimit = this.clampLimit(options.limit);
+    const safeOffset = Math.max(Number(options.offset) || 0, 0);
+    const [rows, total] = await this.userRepository.findAndCount({
+      where: { role: 'staff' },
+      order: { createdAt: 'DESC' },
+      skip: safeOffset,
+      take: safeLimit,
+    });
+    return {
+      items: rows.map((u) => ({
+        id: u.id,
+        username: u.username,
+        password: u.password,
+        role: u.role,
+        employeeId: u.employeeId,
+        status: u.status,
+      })),
+      total,
+      limit: safeLimit,
+      offset: safeOffset,
+    };
+  }
+
+  private clampLimit(limit: number): number {
+    const n = Number(limit) || 20;
+    if (n <= 0) return 20;
+    return Math.min(n, 200);
+  }
+
   async findByUsername(username: string): Promise<User | null> {
     return this.userRepository.findOne({ where: { username } });
   }

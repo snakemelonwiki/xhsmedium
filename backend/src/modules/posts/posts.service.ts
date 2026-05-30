@@ -25,6 +25,25 @@ export class PostsService {
     return rows.map(this.mapPost);
   }
 
+  async findAllPaged(limit: number, offset: number): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
+    const [rows, total] = await this.postRepository.findAndCount({
+      order: { publishedAt: 'DESC', createdAt: 'DESC' },
+      take: limit,
+      skip: offset,
+    });
+    return { items: rows.map(this.mapPost), total, limit, offset };
+  }
+
+  async findByEmployeePaged(employeeId: string, limit: number, offset: number): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
+    const [rows, total] = await this.postRepository.findAndCount({
+      where: { employeeId },
+      order: { publishedAt: 'DESC', createdAt: 'DESC' },
+      take: limit,
+      skip: offset,
+    });
+    return { items: rows.map(this.mapPost), total, limit, offset };
+  }
+
   async findById(id: string): Promise<any | null> {
     const row = await this.postRepository.findOne({ where: { id } });
     return row ? this.mapPost(row) : null;

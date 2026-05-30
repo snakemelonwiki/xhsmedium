@@ -148,10 +148,64 @@ function renderLeadsMonitor() {
       </div>
     </div>
     ${renderViewContext()}
-    <div class="leads-monitor-grid">
-      ${rows.length ? rows.map(renderLeadMonitorCard).join("") : `<div class="empty">暂无符合条件的客资。</div>`}
-    </div>
+    <div id="leadsMonitorGrid" class="leads-monitor-grid"><div class="empty">加载中…</div></div>
+    <div id="leadsMonitorPager" class="pag-container"></div>
   `;
+}
+
+function renderLeadsMonitorCards(items) {
+  const grid = document.getElementById("leadsMonitorGrid");
+  if (!grid) return;
+  if (!items || !items.length) {
+    grid.innerHTML = `<div class="empty">暂无符合条件的客资。</div>`;
+    return;
+  }
+  grid.innerHTML = items.map(renderLeadMonitorCard).join("");
+}
+
+function mountLeadsMonitorPagination() {
+  if (typeof setupPagination !== "function") return;
+  setupPagination("leadsMonitorPager", {
+    pageSize: 20,
+    fetchPage: async (page, pageSize, offset) => {
+      const params = new URLSearchParams();
+      params.set("scope", "all");
+      if (state.user?.id) params.set("actorUserId", state.user.id);
+      if (state.leadMonitorEmployeeFilter) params.set("employeeId", state.leadMonitorEmployeeFilter);
+      if (state.leadMonitorAccountFilter) params.set("accountId", state.leadMonitorAccountFilter);
+      if (state.leadMonitorPlatformFilter) params.set("platform", state.leadMonitorPlatformFilter);
+      if (state.leadMonitorPostTypeFilter) params.set("postType", state.leadMonitorPostTypeFilter);
+      if (state.leadMonitorStatusFilter) params.set("status", state.leadMonitorStatusFilter);
+      if (state.leadMonitorMode === "day" && state.leadMonitorDate) {
+        params.set("from", `${state.leadMonitorDate} 00:00:00`);
+        const next = new Date(state.leadMonitorDate);
+        next.setDate(next.getDate() + 1);
+        params.set("to", `${next.toISOString().slice(0, 10)} 00:00:00`);
+      } else if (state.leadMonitorMode === "week" && state.leadMonitorWeek) {
+        const match = /^(\d{4})-W(\d{2})$/.exec(state.leadMonitorWeek);
+        if (match) {
+          const year = Number(match[1]);
+          const week = Number(match[2]);
+          const jan4 = new Date(year, 0, 4);
+          const jan4Day = jan4.getDay() || 7;
+          const monday = new Date(jan4);
+          monday.setDate(jan4.getDate() - (jan4Day - 1) + (week - 1) * 7);
+          const sunday = new Date(monday);
+          sunday.setDate(monday.getDate() + 7);
+          const fmt = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} 00:00:00`;
+          params.set("from", fmt(monday));
+          params.set("to", fmt(sunday));
+        }
+      }
+      params.set("limit", String(pageSize));
+      params.set("offset", String(offset));
+      const res = await api(`/api/leads?${params.toString()}`);
+      const items = Array.isArray(res?.items) ? res.items : (Array.isArray(res) ? res : []);
+      const total = Number(res?.total ?? items.length);
+      return { items, total };
+    },
+    renderItems: (items) => renderLeadsMonitorCards(items),
+  });
 }
 
 function renderSalesLeads() {
@@ -233,10 +287,65 @@ function renderSalesLeads() {
       ${stat("已联系待添加", contactedPendingAdd)}
     </section>
     ${renderViewContext()}
-    <div class="leads-monitor-grid">
-      ${rows.length ? rows.map(renderLeadMonitorCard).join("") : `<div class="empty">暂无符合条件的客资。</div>`}
-    </div>
+    <div id="salesLeadsGrid" class="leads-monitor-grid"><div class="empty">加载中…</div></div>
+    <div id="salesLeadsPager" class="pag-container"></div>
   `;
+}
+
+function renderSalesLeadsCards(items) {
+  const grid = document.getElementById("salesLeadsGrid");
+  if (!grid) return;
+  if (!items || !items.length) {
+    grid.innerHTML = `<div class="empty">暂无符合条件的客资。</div>`;
+    return;
+  }
+  grid.innerHTML = items.map(renderLeadMonitorCard).join("");
+}
+
+function mountSalesLeadsPagination() {
+  if (typeof setupPagination !== "function") return;
+  setupPagination("salesLeadsPager", {
+    pageSize: 20,
+    fetchPage: async (page, pageSize, offset) => {
+      const params = new URLSearchParams();
+      params.set("scope", "self");
+      if (state.user?.id) params.set("actorUserId", state.user.id);
+      if (state.leadMonitorEmployeeFilter) params.set("employeeId", state.leadMonitorEmployeeFilter);
+      if (state.leadMonitorAccountFilter) params.set("accountId", state.leadMonitorAccountFilter);
+      if (state.leadMonitorPlatformFilter) params.set("platform", state.leadMonitorPlatformFilter);
+      if (state.leadMonitorPostTypeFilter) params.set("postType", state.leadMonitorPostTypeFilter);
+      if (state.leadMonitorStatusFilter) params.set("status", state.leadMonitorStatusFilter);
+      params.set("addStatus", "not_added");
+      if (state.leadMonitorMode === "day" && state.leadMonitorDate) {
+        params.set("from", `${state.leadMonitorDate} 00:00:00`);
+        const next = new Date(state.leadMonitorDate);
+        next.setDate(next.getDate() + 1);
+        params.set("to", `${next.toISOString().slice(0, 10)} 00:00:00`);
+      } else if (state.leadMonitorMode === "week" && state.leadMonitorWeek) {
+        const match = /^(\d{4})-W(\d{2})$/.exec(state.leadMonitorWeek);
+        if (match) {
+          const year = Number(match[1]);
+          const week = Number(match[2]);
+          const jan4 = new Date(year, 0, 4);
+          const jan4Day = jan4.getDay() || 7;
+          const monday = new Date(jan4);
+          monday.setDate(jan4.getDate() - (jan4Day - 1) + (week - 1) * 7);
+          const sunday = new Date(monday);
+          sunday.setDate(monday.getDate() + 7);
+          const fmt = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} 00:00:00`;
+          params.set("from", fmt(monday));
+          params.set("to", fmt(sunday));
+        }
+      }
+      params.set("limit", String(pageSize));
+      params.set("offset", String(offset));
+      const res = await api(`/api/leads?${params.toString()}`);
+      const items = Array.isArray(res?.items) ? res.items : (Array.isArray(res) ? res : []);
+      const total = Number(res?.total ?? items.length);
+      return { items, total };
+    },
+    renderItems: (items) => renderSalesLeadsCards(items),
+  });
 }
 
 function renderSalesFollowupBoard() {
@@ -305,10 +414,72 @@ function renderSalesFollowupBoard() {
       ${stat("弱意向", weakCount)}
     </section>
     ${state.salesTomorrowFollowupPanelOpen ? renderSalesTomorrowFollowupPanel(tomorrowRows) : ""}
-    <div class="leads-monitor-grid">
-      ${rows.length ? rows.map(renderSalesFollowupCard).join("") : `<div class="empty">当前筛选下暂无需要跟进的客资。</div>`}
-    </div>
+    <div id="salesFollowupsGrid" class="leads-monitor-grid"><div class="empty">加载中…</div></div>
+    <div id="salesFollowupsPager" class="pag-container"></div>
   `;
+}
+
+function renderSalesFollowupsCards(items) {
+  const grid = document.getElementById("salesFollowupsGrid");
+  if (!grid) return;
+  // 前端本地筛选：意向度（后端暂不支持 intentionLevel 筛选）
+  let filtered = items || [];
+  if (state.salesFollowupIntentionFilter) {
+    filtered = filtered.filter((item) => (item.intention || "") === state.salesFollowupIntentionFilter);
+  }
+  // 按意向度降序 → 创建时间降序排序
+  filtered.sort((left, right) => {
+    const intentionOrder = { "强意向": 3, "了解备用": 2, "弱": 1, "": 0 };
+    const diff = (intentionOrder[right.intention || ""] || 0) - (intentionOrder[left.intention || ""] || 0);
+    if (diff !== 0) return diff;
+    return new Date(right.createdAt || 0).getTime() - new Date(left.createdAt || 0).getTime();
+  });
+  if (!filtered.length) {
+    grid.innerHTML = `<div class="empty">当前筛选下暂无需要跟进的客资。</div>`;
+    return;
+  }
+  grid.innerHTML = filtered.map(renderSalesFollowupCard).join("");
+}
+
+function mountSalesFollowupsPagination() {
+  if (typeof setupPagination !== "function") return;
+  setupPagination("salesFollowupsPager", {
+    pageSize: 20,
+    fetchPage: async (page, pageSize, offset) => {
+      const params = new URLSearchParams();
+      params.set("scope", "self");
+      if (state.user?.id) params.set("actorUserId", state.user.id);
+      params.set("addStatus", "added");
+      if (state.leadMonitorMode === "day" && state.leadMonitorDate) {
+        params.set("from", `${state.leadMonitorDate} 00:00:00`);
+        const next = new Date(state.leadMonitorDate);
+        next.setDate(next.getDate() + 1);
+        params.set("to", `${next.toISOString().slice(0, 10)} 00:00:00`);
+      } else if (state.leadMonitorMode === "week" && state.leadMonitorWeek) {
+        const match = /^(\d{4})-W(\d{2})$/.exec(state.leadMonitorWeek);
+        if (match) {
+          const year = Number(match[1]);
+          const week = Number(match[2]);
+          const jan4 = new Date(year, 0, 4);
+          const jan4Day = jan4.getDay() || 7;
+          const monday = new Date(jan4);
+          monday.setDate(jan4.getDate() - (jan4Day - 1) + (week - 1) * 7);
+          const sunday = new Date(monday);
+          sunday.setDate(monday.getDate() + 7);
+          const fmt = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} 00:00:00`;
+          params.set("from", fmt(monday));
+          params.set("to", fmt(sunday));
+        }
+      }
+      params.set("limit", String(pageSize));
+      params.set("offset", String(offset));
+      const res = await api(`/api/leads?${params.toString()}`);
+      const items = Array.isArray(res?.items) ? res.items : (Array.isArray(res) ? res : []);
+      const total = Number(res?.total ?? items.length);
+      return { items, total };
+    },
+    renderItems: (items) => renderSalesFollowupsCards(items),
+  });
 }
 
 function renderSalesTomorrowFollowupPanel(rows) {
@@ -533,10 +704,10 @@ async function requestCollab(leadId) {
     return;
   }
   setFlash("success", "已提交协同申请", "运营端会在协同申请处理收到通知。");
-  // 拉新数据（含 stats 等），同时如果当前正在协同申请视图，刷新一次任务
+  // 拉新数据（含 stats 等），同时如果当前正在协同申请视图，刷新分页器
   await loadData();
-  if (state.currentView === "sales-collabs") {
-    await loadCollabTasks("mine");
+  if (state.currentView === "sales-collabs" && typeof refreshPagination === "function") {
+    refreshPagination("salesCollabsPager");
   }
   renderApp();
 }
@@ -591,7 +762,9 @@ async function closeCollab(taskId) {
     return;
   }
   setFlash("success", "已关闭", "该协同申请已关闭。");
-  await loadCollabTasks("mine");
+  if (typeof refreshPagination === "function") {
+    refreshPagination("salesCollabsPager");
+  }
   renderApp();
 }
 
@@ -609,7 +782,9 @@ async function claimCollab(taskId) {
     return;
   }
   setFlash("success", "已领取", "已进入处理中，请尽快完成并填写处理结果。");
-  await loadCollabTasks("inbox", state.collabTabFilter || "pending");
+  if (typeof refreshPagination === "function") {
+    refreshPagination("operatorCollabsPager");
+  }
   renderApp();
 }
 
@@ -631,13 +806,16 @@ async function handleCollab(taskId) {
     return;
   }
   setFlash("success", "已完成", "发起方会收到处理完成通知。");
-  await loadCollabTasks("inbox", state.collabTabFilter || "handling");
+  if (typeof refreshPagination === "function") {
+    refreshPagination("operatorCollabsPager");
+  }
   renderApp();
 }
 
 // ===== 销售端：我的协同申请视图 =====
-function renderSalesCollabs() {
-  const rows = Array.isArray(state.collabTasks) ? state.collabTasks : null;
+function renderSalesCollabsTableBody(items) {
+  const tbody = document.getElementById("salesCollabsTbody");
+  if (!tbody) return;
   const leadsById = (state.leads || []).reduce((acc, item) => {
     if (item && item.id) acc[item.id] = item;
     return acc;
@@ -646,57 +824,51 @@ function renderSalesCollabs() {
     if (item && item.id) acc[item.id] = item;
     return acc;
   }, {});
-
-  let body;
-  if (rows === null) {
-    body = `<div class="empty">加载中…</div>`;
-  } else if (rows.length === 0) {
-    body = `<div class="empty">暂无协同申请记录。可在销售跟进卡上点击"申请运营协同"。</div>`;
-  } else {
-    body = `
-      <table class="table">
-        <thead>
-          <tr>
-            <th>客资编号</th>
-            <th>协同类型</th>
-            <th>状态</th>
-            <th>处理人</th>
-            <th>申请时间</th>
-            <th>处理时间</th>
-            <th>操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${rows.map((row) => {
-            const lead = leadsById[row.leadId];
-            const code = lead ? formatLeadCode(lead.leadCode) : (row.leadId || "-");
-            const handler = row.handlerId ? (usersById[row.handlerId]?.employeeName || usersById[row.handlerId]?.username || row.handlerId) : "-";
-            const canClose = row.status === "pending" || row.status === "handling";
-            return `
-              <tr>
-                <td>${code}</td>
-                <td>${getCollabTypeLabel(row.type)}</td>
-                <td>${getCollabStatusLabel(row.status)}</td>
-                <td>${handler}</td>
-                <td>${row.requestedAt ? formatDate(row.requestedAt) : "-"}</td>
-                <td>${row.handledAt ? formatDate(row.handledAt) : "-"}</td>
-                <td>${canClose ? `<button class="ghost js-collab-close" data-id="${row.id}" type="button">关闭</button>` : "-"}</td>
-              </tr>
-            `;
-          }).join("")}
-        </tbody>
-      </table>
+  if (!items || !items.length) {
+    tbody.innerHTML = `<tr><td colspan="7"><div class="empty">暂无协同申请记录。可在销售跟进卡上点击"申请运营协同"。</div></td></tr>`;
+    return;
+  }
+  tbody.innerHTML = items.map((row) => {
+    const lead = leadsById[row.leadId];
+    const code = lead ? formatLeadCode(lead.leadCode) : (row.leadId || "-");
+    const handler = row.handlerId ? (usersById[row.handlerId]?.employeeName || usersById[row.handlerId]?.username || row.handlerId) : "-";
+    const canClose = row.status === "pending" || row.status === "handling";
+    return `
+      <tr>
+        <td>${code}</td>
+        <td>${getCollabTypeLabel(row.type)}</td>
+        <td>${getCollabStatusLabel(row.status)}</td>
+        <td>${handler}</td>
+        <td>${row.requestedAt ? formatDate(row.requestedAt) : "-"}</td>
+        <td>${row.handledAt ? formatDate(row.handledAt) : "-"}</td>
+        <td>${canClose ? `<button class="ghost js-collab-close" data-id="${row.id}" type="button">关闭</button>` : "-"}</td>
+      </tr>
     `;
-  }
+  }).join("");
+}
 
-  if (rows === null && !state.collabTasksLoading) {
-    state.collabTasksLoading = true;
-    loadCollabTasks("mine").then(() => {
-      state.collabTasksLoading = false;
-      renderApp();
-    });
-  }
+function mountSalesCollabsPagination() {
+  if (typeof setupPagination !== "function") return;
+  setupPagination("salesCollabsPager", {
+    pageSize: 20,
+    fetchPage: async (page, pageSize, offset) => {
+      const params = new URLSearchParams();
+      params.set("scope", "mine");
+      if (state.user?.id) params.set("actorUserId", state.user.id);
+      const status = state.collabTabFilter || "";
+      if (status) params.set("status", status);
+      params.set("limit", String(pageSize));
+      params.set("offset", String(offset));
+      const res = await api(`/api/collaboration-tasks?${params.toString()}`);
+      const items = Array.isArray(res?.items) ? res.items : (Array.isArray(res) ? res : []);
+      const total = Number(res?.total ?? items.length);
+      return { items, total };
+    },
+    renderItems: (items) => renderSalesCollabsTableBody(items),
+  });
+}
 
+function renderSalesCollabs() {
   return `
     <div class="page-header page-header-rich">
       <div>
@@ -705,15 +877,34 @@ function renderSalesCollabs() {
       </div>
     </div>
     <div class="panel">
-      ${body}
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>客资编号</th>
+              <th>协同类型</th>
+              <th>状态</th>
+              <th>处理人</th>
+              <th>申请时间</th>
+              <th>处理时间</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="salesCollabsTbody">
+            <tr><td colspan="7"><div class="empty">加载中…</div></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div id="salesCollabsPager" class="pag-container"></div>
     </div>
   `;
 }
 
 // ===== 运营端：协同 inbox 视图 =====
-function renderOperatorCollabs() {
+function renderOperatorCollabsTableBody(items) {
+  const tbody = document.getElementById("operatorCollabsTbody");
+  if (!tbody) return;
   const tab = state.collabTabFilter || "pending";
-  const rows = Array.isArray(state.collabTasks) ? state.collabTasks : null;
   const leadsById = (state.leads || []).reduce((acc, item) => {
     if (item && item.id) acc[item.id] = item;
     return acc;
@@ -722,58 +913,54 @@ function renderOperatorCollabs() {
     if (item && item.id) acc[item.id] = item;
     return acc;
   }, {});
-
-  let body;
-  if (rows === null) {
-    body = `<div class="empty">加载中…</div>`;
-  } else if (rows.length === 0) {
-    body = `<div class="empty">${tab === "pending" ? "当前没有待领取的协同申请。" : "当前没有处理中的协同申请。"}</div>`;
-  } else {
-    body = `
-      <table class="table">
-        <thead>
-          <tr>
-            <th>客资编号</th>
-            <th>协同类型</th>
-            <th>申请人</th>
-            <th>原因</th>
-            <th>申请时间</th>
-            <th>操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${rows.map((row) => {
-            const lead = leadsById[row.leadId];
-            const code = lead ? formatLeadCode(lead.leadCode) : (row.leadId || "-");
-            const requester = row.requesterId ? (usersById[row.requesterId]?.employeeName || usersById[row.requesterId]?.username || row.requesterId) : "-";
-            const reason = row.reason ? String(row.reason) : "-";
-            const opBtn = tab === "pending"
-              ? `<button class="primary js-collab-claim" data-id="${row.id}" type="button">领取</button>`
-              : `<button class="primary js-collab-handle" data-id="${row.id}" type="button">完成</button>`;
-            return `
-              <tr>
-                <td>${code}</td>
-                <td>${getCollabTypeLabel(row.type)}</td>
-                <td>${requester}</td>
-                <td>${reason}</td>
-                <td>${row.requestedAt ? formatDate(row.requestedAt) : "-"}</td>
-                <td>${opBtn}</td>
-              </tr>
-            `;
-          }).join("")}
-        </tbody>
-      </table>
+  if (!items || !items.length) {
+    tbody.innerHTML = `<tr><td colspan="6"><div class="empty">${tab === "pending" ? "当前没有待领取的协同申请。" : "当前没有处理中的协同申请。"}</div></td></tr>`;
+    return;
+  }
+  tbody.innerHTML = items.map((row) => {
+    const lead = leadsById[row.leadId];
+    const code = lead ? formatLeadCode(lead.leadCode) : (row.leadId || "-");
+    const requester = row.requesterId ? (usersById[row.requesterId]?.employeeName || usersById[row.requesterId]?.username || row.requesterId) : "-";
+    const reason = row.reason ? String(row.reason) : "-";
+    const opBtn = tab === "pending"
+      ? `<button class="primary js-collab-claim" data-id="${row.id}" type="button">领取</button>`
+      : `<button class="primary js-collab-handle" data-id="${row.id}" type="button">完成</button>`;
+    return `
+      <tr>
+        <td>${code}</td>
+        <td>${getCollabTypeLabel(row.type)}</td>
+        <td>${requester}</td>
+        <td>${reason}</td>
+        <td>${row.requestedAt ? formatDate(row.requestedAt) : "-"}</td>
+        <td>${opBtn}</td>
+      </tr>
     `;
-  }
+  }).join("");
+}
 
-  if (rows === null && !state.collabTasksLoading) {
-    state.collabTasksLoading = true;
-    loadCollabTasks("inbox", tab).then(() => {
-      state.collabTasksLoading = false;
-      renderApp();
-    });
-  }
+function mountOperatorCollabsPagination() {
+  if (typeof setupPagination !== "function") return;
+  setupPagination("operatorCollabsPager", {
+    pageSize: 20,
+    fetchPage: async (page, pageSize, offset) => {
+      const params = new URLSearchParams();
+      params.set("scope", "inbox");
+      if (state.user?.id) params.set("actorUserId", state.user.id);
+      const status = state.collabTabFilter || "";
+      if (status) params.set("status", status);
+      params.set("limit", String(pageSize));
+      params.set("offset", String(offset));
+      const res = await api(`/api/collaboration-tasks?${params.toString()}`);
+      const items = Array.isArray(res?.items) ? res.items : (Array.isArray(res) ? res : []);
+      const total = Number(res?.total ?? items.length);
+      return { items, total };
+    },
+    renderItems: (items) => renderOperatorCollabsTableBody(items),
+  });
+}
 
+function renderOperatorCollabs() {
+  const tab = state.collabTabFilter || "pending";
   return `
     <div class="page-header page-header-rich">
       <div>
@@ -789,7 +976,24 @@ function renderOperatorCollabs() {
       <button type="button" class="js-collab-tab ${tab === "handling" ? "active" : ""}" data-tab="handling">处理中</button>
     </div>
     <div class="panel">
-      ${body}
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>客资编号</th>
+              <th>协同类型</th>
+              <th>申请人</th>
+              <th>原因</th>
+              <th>申请时间</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="operatorCollabsTbody">
+            <tr><td colspan="6"><div class="empty">加载中…</div></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div id="operatorCollabsPager" class="pag-container"></div>
     </div>
   `;
 }
@@ -932,10 +1136,63 @@ function renderStaffLeadsBoard() {
       </div>
     </div>
     ${renderViewContext()}
-    <div class="leads-monitor-grid">
-      ${rows.length ? rows.map(renderLeadMonitorCard).join("") : `<div class="empty">当前筛选下暂无你的客资。</div>`}
-    </div>
+    <div id="staffLeadsGrid" class="leads-monitor-grid"><div class="empty">加载中…</div></div>
+    <div id="staffLeadsPager" class="pag-container"></div>
   `;
+}
+
+function renderStaffLeadsCards(items) {
+  const grid = document.getElementById("staffLeadsGrid");
+  if (!grid) return;
+  if (!items || !items.length) {
+    grid.innerHTML = `<div class="empty">当前筛选下暂无你的客资。</div>`;
+    return;
+  }
+  grid.innerHTML = items.map(renderLeadMonitorCard).join("");
+}
+
+function mountStaffLeadsPagination() {
+  if (typeof setupPagination !== "function") return;
+  setupPagination("staffLeadsPager", {
+    pageSize: 20,
+    fetchPage: async (page, pageSize, offset) => {
+      const params = new URLSearchParams();
+      params.set("scope", "self");
+      if (state.user?.id) params.set("actorUserId", state.user.id);
+      if (state.leadMonitorAccountFilter) params.set("accountId", state.leadMonitorAccountFilter);
+      if (state.leadMonitorPlatformFilter) params.set("platform", state.leadMonitorPlatformFilter);
+      if (state.leadMonitorPostTypeFilter) params.set("postType", state.leadMonitorPostTypeFilter);
+      if (state.leadMonitorStatusFilter) params.set("status", state.leadMonitorStatusFilter);
+      if (state.leadMonitorMode === "day" && state.leadMonitorDate) {
+        params.set("from", `${state.leadMonitorDate} 00:00:00`);
+        const next = new Date(state.leadMonitorDate);
+        next.setDate(next.getDate() + 1);
+        params.set("to", `${next.toISOString().slice(0, 10)} 00:00:00`);
+      } else if (state.leadMonitorMode === "week" && state.leadMonitorWeek) {
+        const match = /^(\d{4})-W(\d{2})$/.exec(state.leadMonitorWeek);
+        if (match) {
+          const year = Number(match[1]);
+          const week = Number(match[2]);
+          const jan4 = new Date(year, 0, 4);
+          const jan4Day = jan4.getDay() || 7;
+          const monday = new Date(jan4);
+          monday.setDate(jan4.getDate() - (jan4Day - 1) + (week - 1) * 7);
+          const sunday = new Date(monday);
+          sunday.setDate(monday.getDate() + 7);
+          const fmt = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} 00:00:00`;
+          params.set("from", fmt(monday));
+          params.set("to", fmt(sunday));
+        }
+      }
+      params.set("limit", String(pageSize));
+      params.set("offset", String(offset));
+      const res = await api(`/api/leads?${params.toString()}`);
+      const items = Array.isArray(res?.items) ? res.items : (Array.isArray(res) ? res : []);
+      const total = Number(res?.total ?? items.length);
+      return { items, total };
+    },
+    renderItems: (items) => renderStaffLeadsCards(items),
+  });
 }
 
 function renderLeadMonitorCard(item) {
@@ -1298,12 +1555,50 @@ function renderLeadImportResult() {
 }
 
 // ===== 导入历史（admin/owner） =====
-function renderImportHistory() {
-  if (state.importHistory === null && !state.importHistoryLoading) {
-    loadImportHistory();
+function renderImportHistoryTableBody(items) {
+  const tbody = document.getElementById("importHistoryTbody");
+  if (!tbody) return;
+  if (!items || !items.length) {
+    tbody.innerHTML = `<tr><td colspan="6"><div class="empty">还没有导入记录。通过"客资录入 → 批量导入"提交后，这里会显示历次批次。</div></td></tr>`;
+    return;
   }
-  const raw = state.importHistory;
-  const items = Array.isArray(raw) ? raw : (Array.isArray(raw?.items) ? raw.items : []);
+  tbody.innerHTML = items.map((row) => {
+    const total = row.total ?? row.totalCount ?? row.rows_total ?? 0;
+    const success = row.success ?? row.successCount ?? row.rows_success ?? 0;
+    const fail = row.fail ?? row.failCount ?? row.rows_fail ?? 0;
+    const status = row.status || (fail > 0 ? "partial" : "done");
+    const time = row.createdAt || row.created_at || row.finishedAt || row.finished_at || "";
+    const errorUrl = row.errorFileUrl || row.errorFile || row.error_file_url || "";
+    return `<tr>
+      <td>${time ? escapeHtml(typeof formatDate === "function" ? formatDate(time) : String(time)) : "-"}</td>
+      <td>${escapeHtml(String(total))}</td>
+      <td>${escapeHtml(String(success))}</td>
+      <td>${escapeHtml(String(fail))}</td>
+      <td>${escapeHtml(String(status))}</td>
+      <td>${errorUrl ? `<a href="${escapeHtmlAttribute(errorUrl)}" download>下载</a>` : "-"}</td>
+    </tr>`;
+  }).join("");
+}
+
+function mountImportHistoryPagination() {
+  if (typeof setupPagination !== "function") return;
+  setupPagination("importHistoryPager", {
+    pageSize: 20,
+    fetchPage: async (page, pageSize, offset) => {
+      const params = new URLSearchParams();
+      if (state.user?.id) params.set("actorUserId", state.user.id);
+      params.set("limit", String(pageSize));
+      params.set("offset", String(offset));
+      const res = await api(`/api/import-tasks?${params.toString()}`);
+      const items = Array.isArray(res?.items) ? res.items : (Array.isArray(res) ? res : []);
+      const total = Number(res?.total ?? items.length);
+      return { items, total };
+    },
+    renderItems: (items) => renderImportHistoryTableBody(items),
+  });
+}
+
+function renderImportHistory() {
   return `
     <div class="page-header page-header-rich">
       <div>
@@ -1315,9 +1610,7 @@ function renderImportHistory() {
       </div>
     </div>
     <div class="panel">
-      ${state.importHistoryLoading ? '<p class="muted">加载中...</p>' : ""}
-      ${!state.importHistoryLoading && items.length === 0 ? renderEmptyState("还没有导入记录", "通过\"客资录入 → 批量导入\"提交后，这里会显示历次批次。") : ""}
-      ${items.length ? `
+      <div class="table-wrap">
         <table class="import-history-table">
           <thead>
             <tr>
@@ -1329,26 +1622,12 @@ function renderImportHistory() {
               <th>失败文件</th>
             </tr>
           </thead>
-          <tbody>
-            ${items.map((row) => {
-              const total = row.total ?? row.totalCount ?? row.rows_total ?? 0;
-              const success = row.success ?? row.successCount ?? row.rows_success ?? 0;
-              const fail = row.fail ?? row.failCount ?? row.rows_fail ?? 0;
-              const status = row.status || (fail > 0 ? "partial" : "done");
-              const time = row.createdAt || row.created_at || row.finishedAt || row.finished_at || "";
-              const errorUrl = row.errorFileUrl || row.errorFile || row.error_file_url || "";
-              return `<tr>
-                <td>${time ? escapeHtml(typeof formatDate === "function" ? formatDate(time) : String(time)) : "-"}</td>
-                <td>${escapeHtml(String(total))}</td>
-                <td>${escapeHtml(String(success))}</td>
-                <td>${escapeHtml(String(fail))}</td>
-                <td>${escapeHtml(String(status))}</td>
-                <td>${errorUrl ? `<a href="${escapeHtmlAttribute(errorUrl)}" download>下载</a>` : "-"}</td>
-              </tr>`;
-            }).join("")}
+          <tbody id="importHistoryTbody">
+            <tr><td colspan="6"><div class="empty">加载中…</div></td></tr>
           </tbody>
         </table>
-      ` : ""}
+      </div>
+      <div id="importHistoryPager" class="pag-container"></div>
     </div>
   `;
 }

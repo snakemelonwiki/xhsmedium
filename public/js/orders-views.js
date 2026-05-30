@@ -323,47 +323,10 @@ async function loadSalesOrders() {
 }
 
 function renderSalesOrders() {
-  if (state.salesOrders === null && !state.salesOrdersLoading) {
-    loadSalesOrders();
-  }
-  const rows = Array.isArray(state.salesOrders) ? state.salesOrders : null;
   const tabs = [["", "全部"]].concat(ORDER_STATUS_OPTIONS.map((s) => [s, getOrderStatusLabel(s)]));
   const tabsHtml = tabs.map(([code, label]) => `
     <button class="js-sales-orders-tab ${state.salesOrdersFilter === code ? "active" : ""}" data-status="${code}" type="button">${label}</button>
   `).join("");
-  let body;
-  if (rows === null) {
-    body = `<div class="empty">加载中…</div>`;
-  } else if (!rows.length) {
-    body = `<div class="empty">暂无符合条件的订单。</div>`;
-  } else {
-    body = `
-      <div class="order-list">
-        ${rows.map((o) => {
-          const lead = findLeadByIdLite(o.leadId);
-          const leadCode = lead ? formatLeadCode(lead.leadCode) : (o.leadId || "-");
-          const academicName = findOrderUserLabel(o.academicUserId);
-          return `
-            <article class="order-card js-sales-order-open" data-id="${escapeHtmlAttribute(o.id || "")}" tabindex="0">
-              <div class="order-card-head">
-                <strong>${shortOrderId(o.id)}</strong>
-                <span class="lead-status-chip">${getOrderStatusLabel(o.orderStatus)}</span>
-                <span class="lead-status-chip">${getPaidStatusLabel(o.paidStatus)}</span>
-              </div>
-              <div class="detail-grid">
-                <div class="field"><strong>关联客资</strong><span>${leadCode}</span></div>
-                <div class="field"><strong>服务类型</strong><span>${escapeHtml(o.serviceType || "-")}</span></div>
-                <div class="field"><strong>金额</strong><span>${formatOrderAmount(o.amount)}</span></div>
-                <div class="field"><strong>教务</strong><span>${escapeHtml(academicName)}</span></div>
-                <div class="field"><strong>备注</strong><span>${escapeHtml(o.remark || "-")}</span></div>
-                <div class="field"><strong>创建时间</strong><span>${o.createdAt ? formatDate(o.createdAt) : "-"}</span></div>
-              </div>
-            </article>
-          `;
-        }).join("")}
-      </div>
-    `;
-  }
   return `
     <div class="sales-orders-page">
       <div class="page-header page-header-rich">
@@ -377,10 +340,87 @@ function renderSalesOrders() {
       </div>
       <div class="panel">
         <div class="order-status-tabs">${tabsHtml}</div>
-        ${body}
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>订单 ID</th>
+                <th>关联客资</th>
+                <th>服务类型</th>
+                <th>金额</th>
+                <th>教务</th>
+                <th>订单状态</th>
+                <th>付款状态</th>
+                <th>创建时间</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="salesOrdersTbody"><tr><td colspan="9"><div class="empty">加载中…</div></td></tr></tbody>
+          </table>
+        </div>
+        <div id="salesOrdersPager" class="pag-container"></div>
       </div>
     </div>
   `;
+}
+
+// 渲染销售订单当前页 rows 到 tbody
+function renderSalesOrdersTableBody(items) {
+  const tbody = document.getElementById("salesOrdersTbody");
+  if (!tbody) return;
+  if (!items || !items.length) {
+    tbody.innerHTML = `<tr><td colspan="9"><div class="empty">暂无符合条件的订单。</div></td></tr>`;
+    return;
+  }
+  tbody.innerHTML = items.map((o) => {
+    const lead = findLeadByIdLite(o.leadId);
+    const leadCode = lead ? formatLeadCode(lead.leadCode) : (o.leadId || "-");
+    const academicName = findOrderUserLabel(o.academicUserId);
+    return `
+      <tr class="js-sales-order-open" data-id="${escapeHtmlAttribute(o.id || "")}" style="cursor:pointer;">
+        <td>${shortOrderId(o.id)}</td>
+        <td>${leadCode}</td>
+        <td>${escapeHtml(o.serviceType || "-")}</td>
+        <td>${formatOrderAmount(o.amount)}</td>
+        <td>${escapeHtml(academicName)}</td>
+        <td>${getOrderStatusLabel(o.orderStatus)}</td>
+        <td>${getPaidStatusLabel(o.paidStatus)}</td>
+        <td>${o.createdAt ? formatDate(o.createdAt) : "-"}</td>
+        <td><button class="ghost js-sales-order-open-btn" data-id="${escapeHtmlAttribute(o.id || "")}" type="button">详情</button></td>
+      </tr>
+    `;
+  }).join("");
+  // 重新绑定点击（列表 innerHTML 重写后旧绑定丢失）
+  document.querySelectorAll("#salesOrdersTbody .js-sales-order-open").forEach((el) => el.addEventListener("click", (event) => {
+    if (event.target.closest("button")) return;
+    openSalesOrderDetail(el.dataset.id);
+  }));
+  document.querySelectorAll("#salesOrdersTbody .js-sales-order-open-btn").forEach((el) => el.addEventListener("click", (event) => {
+    event.stopPropagation();
+    openSalesOrderDetail(el.dataset.id);
+  }));
+}
+
+// 给销售订单跟进挂分页器（renderApp 后由 bindOrdersViewsEvents 调用）
+function mountSalesOrdersPagination() {
+  if (typeof setupPagination !== "function") return;
+  setupPagination("salesOrdersPager", {
+    pageSize: 20,
+    fetchPage: async (page, pageSize) => {
+      const params = new URLSearchParams();
+      params.set("scope", "mine");
+      if (state.user?.id) params.set("actorUserId", state.user.id);
+      params.set("actorRole", "sales");
+      if (state.salesOrdersFilter) params.set("status", state.salesOrdersFilter);
+      params.set("limit", String(pageSize));
+      params.set("offset", String((page - 1) * pageSize));
+      const res = await api(`/api/orders?${params.toString()}`);
+      const items = Array.isArray(res?.items) ? res.items : (Array.isArray(res) ? res : []);
+      const total = Number(res?.total ?? items.length);
+      return { items, total };
+    },
+    renderItems: (items) => renderSalesOrdersTableBody(items),
+  });
 }
 
 async function loadSalesOrderDetail(id) {
@@ -791,10 +831,6 @@ async function loadAcademicOrders() {
 }
 
 function renderAcademicOrders() {
-  if (state.academicOrders === null && !state.academicOrdersLoading) {
-    loadAcademicOrders();
-  }
-  const rows = Array.isArray(state.academicOrders) ? state.academicOrders : null;
   const tabs = [["", "全部"]].concat(
     ["to_receive", "in_progress", "awaiting_client_info", "awaiting_teacher", "to_deliver", "completed"]
       .map((s) => [s, getOrderStatusLabel(s)])
@@ -804,42 +840,6 @@ function renderAcademicOrders() {
   `).join("");
   const scope = state.academicOrdersScope || "mine";
 
-  let body;
-  if (rows === null) {
-    body = `<div class="empty">加载中…</div>`;
-  } else if (!rows.length) {
-    body = `<div class="empty">${scope === "mine" ? "暂无我领取的订单。" : "暂无符合条件的订单。"}</div>`;
-  } else {
-    body = `
-      <div class="order-list">
-        ${rows.map((o) => {
-          const canClaim = !o.academicUserId;
-          const salesName = findOrderUserLabel(o.salesUserId);
-          return `
-            <article class="order-card">
-              <div class="order-card-head">
-                <strong>${shortOrderId(o.id)}</strong>
-                <span class="lead-status-chip">${getOrderStatusLabel(o.orderStatus)}</span>
-                <span class="lead-status-chip">${getPaidStatusLabel(o.paidStatus)}</span>
-              </div>
-              <div class="detail-grid">
-                <div class="field"><strong>关联客资</strong><span>${escapeHtml(o.leadId || "-")}</span></div>
-                <div class="field"><strong>销售</strong><span>${escapeHtml(salesName)}</span></div>
-                <div class="field"><strong>服务类型</strong><span>${escapeHtml(o.serviceType || "-")}</span></div>
-                <div class="field"><strong>金额</strong><span>${formatOrderAmount(o.amount)}</span></div>
-                <div class="field"><strong>备注</strong><span>${escapeHtml(o.remark || "-")}</span></div>
-                <div class="field"><strong>创建时间</strong><span>${o.createdAt ? formatDate(o.createdAt) : "-"}</span></div>
-              </div>
-              <div class="lead-card-actions">
-                ${canClaim ? `<button class="primary js-academic-claim-order" data-id="${escapeHtmlAttribute(o.id || "")}" type="button">领取订单</button>` : ""}
-                <button class="ghost js-academic-order-open" data-id="${escapeHtmlAttribute(o.id || "")}" type="button">查看详情</button>
-              </div>
-            </article>
-          `;
-        }).join("")}
-      </div>
-    `;
-  }
   return `
     <div class="academic-orders-page">
       <div class="page-header page-header-rich">
@@ -857,10 +857,94 @@ function renderAcademicOrders() {
           <button class="js-academic-scope ${scope === "all" ? "active primary" : "ghost"}" data-scope="all" type="button">全部</button>
         </div>
         <div class="order-status-tabs">${tabsHtml}</div>
-        ${body}
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>订单 ID</th>
+                <th>关联客资</th>
+                <th>销售</th>
+                <th>服务类型</th>
+                <th>金额</th>
+                <th>订单状态</th>
+                <th>付款状态</th>
+                <th>创建时间</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="academicOrdersTbody"><tr><td colspan="9"><div class="empty">加载中…</div></td></tr></tbody>
+          </table>
+        </div>
+        <div id="academicOrdersPager" class="pag-container"></div>
       </div>
     </div>
   `;
+}
+
+// 渲染教务订单当前页 rows 到 tbody
+function renderAcademicOrdersTableBody(items) {
+  const tbody = document.getElementById("academicOrdersTbody");
+  if (!tbody) return;
+  if (!items || !items.length) {
+    tbody.innerHTML = `<tr><td colspan="9"><div class="empty">暂无符合条件的订单。</div></td></tr>`;
+    return;
+  }
+  tbody.innerHTML = items.map((o) => {
+    const canClaim = !o.academicUserId;
+    const salesName = findOrderUserLabel(o.salesUserId);
+    return `
+      <tr class="js-academic-order-open" data-id="${escapeHtmlAttribute(o.id || "")}" style="cursor:pointer;">
+        <td>${shortOrderId(o.id)}</td>
+        <td>${escapeHtml(o.leadId || "-")}</td>
+        <td>${escapeHtml(salesName)}</td>
+        <td>${escapeHtml(o.serviceType || "-")}</td>
+        <td>${formatOrderAmount(o.amount)}</td>
+        <td>${getOrderStatusLabel(o.orderStatus)}</td>
+        <td>${getPaidStatusLabel(o.paidStatus)}</td>
+        <td>${o.createdAt ? formatDate(o.createdAt) : "-"}</td>
+        <td>
+          ${canClaim ? `<button class="primary js-academic-claim-order" data-id="${escapeHtmlAttribute(o.id || "")}" type="button">领取</button> ` : ""}
+          <button class="ghost js-academic-order-open-btn" data-id="${escapeHtmlAttribute(o.id || "")}" type="button">详情</button>
+        </td>
+      </tr>
+    `;
+  }).join("");
+  // 重新绑定点击（列表 innerHTML 重写后旧绑定丢失）
+  document.querySelectorAll("#academicOrdersTbody .js-academic-order-open").forEach((el) => el.addEventListener("click", (event) => {
+    if (event.target.closest("button")) return;
+    openAcademicOrderDetail(el.dataset.id);
+  }));
+  document.querySelectorAll("#academicOrdersTbody .js-academic-order-open-btn").forEach((el) => el.addEventListener("click", (event) => {
+    event.stopPropagation();
+    openAcademicOrderDetail(el.dataset.id);
+  }));
+  document.querySelectorAll("#academicOrdersTbody .js-academic-claim-order").forEach((el) => el.addEventListener("click", (event) => {
+    event.stopPropagation();
+    academicClaimOrder(el.dataset.id);
+  }));
+}
+
+// 给教务端订单池挂分页器（renderApp 后由 bindOrdersViewsEvents 调用）
+function mountAcademicOrdersPagination() {
+  if (typeof setupPagination !== "function") return;
+  setupPagination("academicOrdersPager", {
+    pageSize: 20,
+    fetchPage: async (page, pageSize) => {
+      const params = new URLSearchParams();
+      params.set("role", "academic");
+      params.set("actorUserId", state.user?.id || "");
+      params.set("actorRole", "academic");
+      params.set("scope", state.academicOrdersScope || "mine");
+      if (state.academicOrdersFilter) params.set("status", state.academicOrdersFilter);
+      params.set("limit", String(pageSize));
+      params.set("offset", String((page - 1) * pageSize));
+      const res = await api(`/api/orders?${params.toString()}`);
+      const items = Array.isArray(res?.items) ? res.items : (Array.isArray(res) ? res : []);
+      const total = Number(res?.total ?? items.length);
+      return { items, total };
+    },
+    renderItems: (items) => renderAcademicOrdersTableBody(items),
+  });
 }
 
 async function academicClaimOrder(orderId) {
@@ -1233,6 +1317,12 @@ function bindOrdersViewsEvents() {
       mountAdminOrdersPagination();
     }
   }
+  if (state.currentView === "sales-orders" && document.getElementById("salesOrdersPager")) {
+    mountSalesOrdersPagination();
+  }
+  if (state.currentView === "academic-orders" && document.getElementById("academicOrdersPager")) {
+    mountAcademicOrdersPagination();
+  }
 
   // T-L6 销售客资详情：入口（在跟进卡片中绑定）+ 返回 + tab
   document.querySelectorAll(".js-sales-view-detail").forEach((el) => el.addEventListener("click", () => openSalesLeadDetail(el.dataset.id)));
@@ -1245,8 +1335,8 @@ function bindOrdersViewsEvents() {
   // 销售订单跟进
   document.querySelectorAll(".js-sales-orders-tab").forEach((el) => el.addEventListener("click", () => {
     state.salesOrdersFilter = el.dataset.status || "";
-    state.salesOrders = null;
-    renderApp();
+    document.querySelectorAll(".js-sales-orders-tab").forEach((b) => b.classList.toggle("active", b === el));
+    refreshPagination("salesOrdersPager");
   }));
   document.querySelectorAll(".js-sales-order-open").forEach((el) => {
     el.addEventListener("click", (event) => {
@@ -1302,13 +1392,18 @@ function bindOrdersViewsEvents() {
   // 教务端订单池
   document.querySelectorAll(".js-academic-scope").forEach((el) => el.addEventListener("click", () => {
     state.academicOrdersScope = el.dataset.scope || "mine";
-    state.academicOrders = null;
-    renderApp();
+    document.querySelectorAll(".js-academic-scope").forEach((b) => {
+      const isActive = b === el;
+      b.classList.toggle("active", isActive);
+      b.classList.toggle("primary", isActive);
+      b.classList.toggle("ghost", !isActive);
+    });
+    refreshPagination("academicOrdersPager");
   }));
   document.querySelectorAll(".js-academic-orders-tab").forEach((el) => el.addEventListener("click", () => {
     state.academicOrdersFilter = el.dataset.status || "";
-    state.academicOrders = null;
-    renderApp();
+    document.querySelectorAll(".js-academic-orders-tab").forEach((b) => b.classList.toggle("active", b === el));
+    refreshPagination("academicOrdersPager");
   }));
   document.querySelectorAll(".js-academic-claim-order").forEach((el) => el.addEventListener("click", (event) => {
     event.stopPropagation();

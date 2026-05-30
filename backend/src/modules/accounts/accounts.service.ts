@@ -16,6 +16,33 @@ export class AccountsService {
     return this.accountRepository.find({ order: { createdAt: 'DESC' } });
   }
 
+  async findAllPaged(limit: number, offset: number): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
+    const [items, total] = await this.accountRepository.findAndCount({
+      order: { createdAt: 'DESC' },
+      take: limit,
+      skip: offset,
+    });
+    return {
+      items: items.map((r) => ({
+        id: r.id,
+        employeeId: r.employeeId,
+        platform: r.platform,
+        profileUrl: r.profileUrl,
+        accountName: r.accountName,
+        accountUid: r.accountUid,
+        persona: r.persona,
+        positioning: r.positioning,
+        postingPlan: r.postingPlan || '',
+        status: r.status,
+        createdAt: r.createdAt,
+        updatedAt: r.updatedAt,
+      })),
+      total,
+      limit,
+      offset,
+    };
+  }
+
   async create(dto: Partial<Account>): Promise<any> {
     const account = this.accountRepository.create({
       ...dto,

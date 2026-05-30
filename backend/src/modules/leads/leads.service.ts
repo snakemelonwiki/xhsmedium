@@ -109,6 +109,25 @@ export class LeadsService {
     return rows.map(this.mapLead);
   }
 
+  async findTomorrowFollowupsPaged(salesUserId: string, limit: number, offset: number): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
+    if (!salesUserId) return { items: [], total: 0, limit: this.clampLimit(limit), offset: Math.max(Number(offset) || 0, 0) };
+    const safeLimit = this.clampLimit(limit);
+    const safeOffset = Math.max(Number(offset) || 0, 0);
+    const now = new Date();
+    const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+    const dayAfterTomorrow = new Date(todayEnd.getTime() + 86400000);
+    const qb = this.leadRepository
+      .createQueryBuilder('l')
+      .where('l.next_follow_time >= :from', { from: todayEnd })
+      .andWhere('l.next_follow_time < :to', { to: dayAfterTomorrow })
+      .andWhere('l.assigned_sales_user_id = :uid', { uid: salesUserId })
+      .orderBy('l.next_follow_time', 'ASC')
+      .take(safeLimit)
+      .skip(safeOffset);
+    const [rows, total] = await qb.getManyAndCount();
+    return { items: rows.map(this.mapLead), total, limit: safeLimit, offset: safeOffset };
+  }
+
   private clampLimit(limit: number): number {
     const n = Number(limit) || 20;
     if (n <= 0) return 20;
@@ -360,6 +379,80 @@ export class LeadsService {
       const scoreVal = Number(raw.raw[idx]?.score) || 0;
       return { ...mapped, score: scoreVal };
     });
+  }
+
+  async findPassiveCandidatesPaged(params: {
+    phone?: string;
+    wechat?: string;
+    nickname?: string;
+    actorEmployeeId?: string;
+    limit: number;
+    offset: number;
+  }): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
+    const phone = (params.phone || '').trim();
+    const wechat = (params.wechat || '').trim();
+    const nickname = (params.nickname || '').trim();
+    const actorEmployeeId = (params.actorEmployeeId || '').trim();
+
+    if (!phone && !wechat && !nickname) {
+      return { items: [], total: 0, limit: params.limit, offset: params.offset };
+    }
+
+    const safeLimit = this.clampLimit(params.limit);
+    const safeOffset = Math.max(Number(params.offset) || 0, 0);
+
+    const qb = this.leadRepository.createQueryBuilder('l');
+
+    const scoreExpr =
+      `(CASE WHEN :phone <> '' AND l.contact_info = :phone THEN 50 ELSE 0 END)` +
+      ` + (CASE WHEN :wechat <> '' AND l.contact_info = :wechat THEN 50 ELSE 0 END)` +
+      ` + (CASE WHEN :nicknameRaw <> '' AND l.nickname LIKE :nicknameLike THEN 20 ELSE 0 END)` +
+      ` + (CASE WHEN l.created_at >= (NOW() - INTERVAL 7 DAY) THEN 15 ELSE 0 END)` +
+      ` + (CASE WHEN :actorEmployeeId <> '' AND l.employee_id = :actorEmployeeId THEN 10 ELSE 0 END)`;
+
+    qb.addSelect(scoreExpr, 'score');
+    qb.setParameters({
+      phone,
+      wechat,
+      nicknameRaw: nickname,
+      nicknameLike: `%${nickname}%`,
+      actorEmployeeId,
+    });
+
+    const whereParts: string[] = [];
+    if (phone) whereParts.push('l.contact_info = :phone');
+    if (wechat) whereParts.push('l.contact_info = :wechat');
+    if (nickname) whereParts.push('l.nickname LIKE :nicknameLike');
+    if (whereParts.length > 0) {
+      qb.where(`(${whereParts.join(' OR ')})`);
+    }
+
+    qb.orderBy('score', 'DESC')
+      .addOrderBy('l.created_at', 'DESC')
+      .limit(safeLimit)
+      .offset(safeOffset);
+
+    const raw = await qb.getRawAndEntities();
+    const items = raw.entities.map((row, idx) => {
+      const mapped = this.mapLead(row);
+      const scoreVal = Number(raw.raw[idx]?.score) || 0;
+      return { ...mapped, score: scoreVal };
+    });
+
+    const countQb = this.leadRepository.createQueryBuilder('l');
+    countQb.setParameters({
+      phone,
+      wechat,
+      nicknameRaw: nickname,
+      nicknameLike: `%${nickname}%`,
+      actorEmployeeId,
+    });
+    if (whereParts.length > 0) {
+      countQb.where(`(${whereParts.join(' OR ')})`);
+    }
+    const total = await countQb.getCount();
+
+    return { items, total, limit: safeLimit, offset: safeOffset };
   }
 
   /**

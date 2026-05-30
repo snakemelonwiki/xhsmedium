@@ -49,6 +49,13 @@ export class RankingsService {
     return rows;
   }
 
+  async getRankingsPaged(type: string, date: string, limit: number, offset: number): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
+    const allRows = await this.getRankings(type, date);
+    const total = allRows.length;
+    const items = allRows.slice(offset, offset + limit);
+    return { items, total, limit, offset };
+  }
+
   async getLearningPosts(days: number = 7): Promise<any[]> {
     const posts = await this.postsService.findAll();
     const leads = await this.leadsService.findAll();

@@ -87,9 +87,20 @@ export class LeadsController {
   async tomorrowFollowups(
     @Req() req: Request, @Res() res: Response,
     @Query('actorUserId') actorUserId?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
   ) {
     const session = (req as any).session;
     const salesUserId = session?.userId || session?.id || actorUserId || '';
+    const wantsPaging = limit !== undefined || offset !== undefined;
+    if (wantsPaging) {
+      const result = await this.leadsService.findTomorrowFollowupsPaged(
+        salesUserId,
+        Number(limit) || 20,
+        Number(offset) || 0,
+      );
+      return res.json(result);
+    }
     const rows = await this.leadsService.findTomorrowFollowups(salesUserId);
     return res.json(rows);
   }
@@ -106,9 +117,23 @@ export class LeadsController {
     @Query('wechat') wechat?: string,
     @Query('nickname') nickname?: string,
     @Query('actorUserId') queryActorUserId?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
   ) {
     const session = (req as any).session;
     const actorEmployeeId = session?.employeeId || queryActorUserId || '';
+    const wantsPaging = limit !== undefined || offset !== undefined;
+    if (wantsPaging) {
+      const result = await this.leadsService.findPassiveCandidatesPaged({
+        phone,
+        wechat,
+        nickname,
+        actorEmployeeId,
+        limit: Number(limit) || 20,
+        offset: Number(offset) || 0,
+      });
+      return res.json(result);
+    }
     const rows = await this.leadsService.findPassiveCandidates({
       phone,
       wechat,

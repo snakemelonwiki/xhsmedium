@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, Req, Res } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, Query, Req, Res } from '@nestjs/common';
 import { AccountsService } from './accounts.service';
 import { Request, Response } from 'express';
 import { makeId } from '../../shared/utils/id-generator';
@@ -8,7 +8,19 @@ export class AccountsController {
   constructor(private readonly accountsService: AccountsService) {}
 
   @Get()
-  async findAll(@Res() res: Response) {
+  async findAll(
+    @Res() res: Response,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ) {
+    const wantsPaging = limit !== undefined || offset !== undefined;
+    if (wantsPaging) {
+      const result = await this.accountsService.findAllPaged(
+        Number(limit) || 20,
+        Number(offset) || 0,
+      );
+      return res.json(result);
+    }
     const rows = await this.accountsService.findAll();
     return res.json(rows.map((r) => ({
       id: r.id,

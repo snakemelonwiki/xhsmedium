@@ -396,6 +396,16 @@ function openAccountVisualizationWithContext({ employeeId = "", accountId = "", 
 
 
 // ===== L4782-L5379 事件绑定 + 事件委托总线 =====
+function _refreshCurrentLeadsPagination() {
+  if (typeof refreshPagination !== "function") { renderApp(); return; }
+  const v = state.currentView;
+  if (v === "leads") refreshPagination("leadsMonitorPager");
+  else if (v === "sales-leads") refreshPagination("salesLeadsPager");
+  else if (v === "staff-leads-board") refreshPagination("staffLeadsPager");
+  else if (v === "sales-followups") refreshPagination("salesFollowupsPager");
+  else renderApp();
+}
+
 function bindViewEvents() {
   document.getElementById("employeeForm")?.addEventListener("submit", submitEmployee);
   document.getElementById("staffUserForm")?.addEventListener("submit", submitStaffUser);
@@ -669,32 +679,32 @@ function bindViewEvents() {
     state.leadMonitorAccountFilter = "";
     state.leadStats = null;
     refreshLeadStatsForCurrentView();
-    renderApp();
+    _refreshCurrentLeadsPagination();
   });
   document.getElementById("leadMonitorAccountFilter")?.addEventListener("change", (event) => {
     state.leadMonitorAccountFilter = event.target.value;
     state.leadStats = null;
     refreshLeadStatsForCurrentView();
-    renderApp();
+    _refreshCurrentLeadsPagination();
   });
   document.getElementById("leadMonitorPlatformFilter")?.addEventListener("change", (event) => {
     state.leadMonitorPlatformFilter = event.target.value;
     state.leadMonitorAccountFilter = "";
     state.leadStats = null;
     refreshLeadStatsForCurrentView();
-    renderApp();
+    _refreshCurrentLeadsPagination();
   });
   document.getElementById("leadMonitorPostTypeFilter")?.addEventListener("change", (event) => {
     state.leadMonitorPostTypeFilter = event.target.value;
     state.leadStats = null;
     refreshLeadStatsForCurrentView();
-    renderApp();
+    _refreshCurrentLeadsPagination();
   });
   document.getElementById("leadMonitorStatusFilter")?.addEventListener("change", (event) => {
     state.leadMonitorStatusFilter = event.target.value;
     state.leadStats = null;
     refreshLeadStatsForCurrentView();
-    renderApp();
+    _refreshCurrentLeadsPagination();
   });
   document.getElementById("leadMonitorDateInput")?.addEventListener("change", (event) => {
     state.leadMonitorDate = event.target.value;
@@ -710,7 +720,8 @@ function bindViewEvents() {
   });
   document.getElementById("salesFollowupIntentionFilter")?.addEventListener("change", (event) => {
     state.salesFollowupIntentionFilter = event.target.value;
-    renderApp();
+    if (typeof refreshPagination === "function") refreshPagination("salesFollowupsPager");
+    else renderApp();
   });
   document.getElementById("salesFollowupPlatformFilter")?.addEventListener("change", (event) => {
     state.salesFollowupPlatformFilter = event.target.value;
@@ -896,9 +907,15 @@ function bindViewEvents() {
   document.querySelectorAll(".js-collab-close").forEach((el) => el.addEventListener("click", () => closeCollab(el.dataset.id)));
   document.querySelectorAll(".js-collab-tab").forEach((el) => el.addEventListener("click", () => {
     state.collabTabFilter = el.dataset.tab || "pending";
-    state.collabTasks = null;
-    state.collabTasksLoading = false;
-    renderApp();
+    if (state.currentView === "sales-collabs") {
+      refreshPagination("salesCollabsPager");
+    } else {
+      refreshPagination("operatorCollabsPager");
+    }
+    // Update active tab styling without full re-render
+    document.querySelectorAll(".js-collab-tab").forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.tab === state.collabTabFilter);
+    });
   }));
   // 待运营确认来源：确认按钮
   document.querySelectorAll(".js-confirm-lead-source").forEach((el) => el.addEventListener("click", () => confirmLeadSource(el.dataset.id)));
@@ -917,9 +934,31 @@ function bindViewEvents() {
   document.getElementById("leadImportSubmitBtn")?.addEventListener("click", withSubmitLock("importSubmit", submitLeadBatchImport));
   document.getElementById("leadImportCancelBtn")?.addEventListener("click", cancelLeadBatchImport);
   document.getElementById("importHistoryRefreshBtn")?.addEventListener("click", () => {
-    state.importHistory = null;
-    loadImportHistory();
+    refreshPagination("importHistoryPager");
   });
+  // 客资看板分页器
+  if (state.currentView === "leads" && document.getElementById("leadsMonitorPager")) {
+    mountLeadsMonitorPagination();
+  }
+  if (state.currentView === "sales-leads" && document.getElementById("salesLeadsPager")) {
+    mountSalesLeadsPagination();
+  }
+  if (state.currentView === "staff-leads-board" && document.getElementById("staffLeadsPager")) {
+    mountStaffLeadsPagination();
+  }
+  if (state.currentView === "sales-followups" && document.getElementById("salesFollowupsPager")) {
+    mountSalesFollowupsPagination();
+  }
+  // 协同任务 + 导入历史分页器
+  if (state.currentView === "sales-collabs" && document.getElementById("salesCollabsPager")) {
+    mountSalesCollabsPagination();
+  }
+  if (state.currentView === "lead-collabs" && document.getElementById("operatorCollabsPager")) {
+    mountOperatorCollabsPagination();
+  }
+  if (state.currentView === "import-history" && document.getElementById("importHistoryPager")) {
+    mountImportHistoryPagination();
+  }
   if (typeof bindOrdersViewsEvents === "function") {
     bindOrdersViewsEvents();
   }
