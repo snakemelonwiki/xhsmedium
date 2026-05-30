@@ -31,7 +31,6 @@ export class UsersService {
       items: rows.map((u) => ({
         id: u.id,
         username: u.username,
-        password: u.password,
         role: u.role,
         employeeId: u.employeeId,
         status: u.status,
@@ -55,7 +54,6 @@ export class UsersService {
       items: rows.map((u) => ({
         id: u.id,
         username: u.username,
-        password: u.password,
         role: u.role,
         employeeId: u.employeeId,
         status: u.status,

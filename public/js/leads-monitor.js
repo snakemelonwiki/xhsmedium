@@ -166,7 +166,7 @@ function renderLeadsMonitorCards(items) {
 function mountLeadsMonitorPagination() {
   if (typeof setupPagination !== "function") return;
   setupPagination("leadsMonitorPager", {
-    pageSize: 20,
+    pageSize: 10,
     fetchPage: async (page, pageSize, offset) => {
       const params = new URLSearchParams();
       params.set("scope", "all");
@@ -305,7 +305,7 @@ function renderSalesLeadsCards(items) {
 function mountSalesLeadsPagination() {
   if (typeof setupPagination !== "function") return;
   setupPagination("salesLeadsPager", {
-    pageSize: 20,
+    pageSize: 10,
     fetchPage: async (page, pageSize, offset) => {
       const params = new URLSearchParams();
       params.set("scope", "self");
@@ -444,7 +444,7 @@ function renderSalesFollowupsCards(items) {
 function mountSalesFollowupsPagination() {
   if (typeof setupPagination !== "function") return;
   setupPagination("salesFollowupsPager", {
-    pageSize: 20,
+    pageSize: 10,
     fetchPage: async (page, pageSize, offset) => {
       const params = new URLSearchParams();
       params.set("scope", "self");
@@ -850,7 +850,7 @@ function renderSalesCollabsTableBody(items) {
 function mountSalesCollabsPagination() {
   if (typeof setupPagination !== "function") return;
   setupPagination("salesCollabsPager", {
-    pageSize: 20,
+    pageSize: 10,
     fetchPage: async (page, pageSize, offset) => {
       const params = new URLSearchParams();
       params.set("scope", "mine");
@@ -941,7 +941,7 @@ function renderOperatorCollabsTableBody(items) {
 function mountOperatorCollabsPagination() {
   if (typeof setupPagination !== "function") return;
   setupPagination("operatorCollabsPager", {
-    pageSize: 20,
+    pageSize: 10,
     fetchPage: async (page, pageSize, offset) => {
       const params = new URLSearchParams();
       params.set("scope", "inbox");
@@ -1154,7 +1154,7 @@ function renderStaffLeadsCards(items) {
 function mountStaffLeadsPagination() {
   if (typeof setupPagination !== "function") return;
   setupPagination("staffLeadsPager", {
-    pageSize: 20,
+    pageSize: 10,
     fetchPage: async (page, pageSize, offset) => {
       const params = new URLSearchParams();
       params.set("scope", "self");
@@ -1583,7 +1583,7 @@ function renderImportHistoryTableBody(items) {
 function mountImportHistoryPagination() {
   if (typeof setupPagination !== "function") return;
   setupPagination("importHistoryPager", {
-    pageSize: 20,
+    pageSize: 10,
     fetchPage: async (page, pageSize, offset) => {
       const params = new URLSearchParams();
       if (state.user?.id) params.set("actorUserId", state.user.id);
@@ -2100,9 +2100,17 @@ async function submitSalesLead(event) {
   const formData = new FormData(event.currentTarget);
   const id = String(formData.get("id") || "");
   formData.delete("id");
+
+  // Convert FormData to plain object to avoid encoding issues
+  const data = {};
+  for (const [key, value] of formData.entries()) {
+    data[key] = value;
+  }
+
   await api(`/api/leads/${id}`, {
     method: "PUT",
-    body: formData
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data)
   });
   state.editingLeadId = "";
   setFlash("success", "销售反馈已更新", "这条客资的状态和跟进反馈已经保存，主管端刷新后会同步看到。");
@@ -2115,9 +2123,17 @@ async function submitLeadNote(event) {
   const formData = new FormData(event.currentTarget);
   const id = String(formData.get("id") || "");
   formData.delete("id");
+
+  // Convert FormData to plain object to avoid encoding issues
+  const data = {};
+  for (const [key, value] of formData.entries()) {
+    data[key] = value;
+  }
+
   await api(`/api/leads/${id}`, {
     method: "PUT",
-    body: formData
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data)
   });
   state.editingLeadNoteId = "";
   setFlash("success", "客资备注已更新", "这条客资的备注已经保存，后续跟进和主管复盘时都能看到。");

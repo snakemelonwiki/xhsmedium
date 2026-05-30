@@ -101,7 +101,21 @@ export class DashboardService {
   }
 
   async refreshEnteredData(): Promise<any> {
-    // Legacy: trigger snapshot refresh
-    return { ok: true };
+    const today = todayString();
+    const [postCount, leadCount] = await Promise.all([
+      this.postRepo.createQueryBuilder('p')
+        .select('COUNT(*)', 'count')
+        .where('p.publishedAt = :today', { today })
+        .getRawOne(),
+      this.leadRepo.createQueryBuilder('l')
+        .select('COUNT(*)', 'count')
+        .where('DATE(l.createdAt) = :today', { today })
+        .getRawOne(),
+    ]);
+    return {
+      ok: true,
+      postCount: Number(postCount?.count || 0),
+      leadCount: Number(leadCount?.count || 0),
+    };
   }
 }

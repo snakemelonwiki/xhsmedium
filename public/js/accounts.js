@@ -309,16 +309,6 @@ function renderAccountVizChart() {
 // ===== L2981-L3052 renderAccounts =====
 function renderAccounts() {
   const editing = state.accounts.find((item) => item.id === state.editingAccountId);
-  const filteredAccounts = state.accounts.filter((item) => {
-    const keyword = state.accountSearch.trim().toLowerCase();
-    if (keyword) {
-      const target = [item.accountName, item.accountUid, item.employeeName, item.persona, item.positioning].join(" ").toLowerCase();
-      if (!target.includes(keyword)) return false;
-    }
-    if (state.accountPlatformFilter && item.platform !== state.accountPlatformFilter) return false;
-    if (state.accountEmployeeFilter && item.employeeId !== state.accountEmployeeFilter) return false;
-    return true;
-  });
   const xhsCount = state.accounts.filter((item) => item.platform === "小红书").length;
   const douyinCount = state.accounts.filter((item) => item.platform === "抖音").length;
   const healthyCount = state.accounts.filter((item) => item.status === "正常").length;
@@ -330,7 +320,7 @@ function renderAccounts() {
         <p class="page-desc">主管先把账号归属、平台和状态管清楚，员工录入时就能少选错、少返工。</p>
       </div>
       <div class="toolbar toolbar-end">
-        <span class="tag">${filteredAccounts.length} / ${state.accounts.length} 个账号</span>
+        <span class="tag" id="accountsCountTag">加载中...</span>
       </div>
     </div>
     <section class="grid-4">
@@ -372,9 +362,12 @@ function renderAccounts() {
       <div class="table-wrap">
         <table>
           <thead><tr><th>账号</th><th>员工</th><th>平台</th><th>账号ID</th><th>人设</th><th>定位</th><th>状态</th><th>操作</th></tr></thead>
-          <tbody>${filteredAccounts.length ? filteredAccounts.map((item) => `<tr><td><div class="cell-stack"><strong>${item.accountName}</strong><span class="muted">${item.profileUrl ? "已配置主页链接" : "未配置主页链接"}</span></div></td><td>${item.employeeName}</td><td><span class="tag ${item.platform === "抖音" ? "tag-warm" : ""}">${item.platform}</span></td><td>${item.accountUid || "-"}</td><td>${item.persona || "-"}</td><td>${item.positioning || "-"}</td><td><span class="tag ${item.status === "正常" ? "" : "tag-soft"}">${item.status}</span></td><td><div class="actions"><button class="ghost js-edit-account" data-id="${item.id}">编辑</button><button class="ghost danger js-delete-account" data-id="${item.id}">删除</button></div></td></tr>`).join("") : `<tr><td colspan="8"><div class="empty">当前筛选条件下没有账号。</div></td></tr>`}</tbody>
+          <tbody id="accountsTableBody">
+            <tr><td colspan="8"><div class="empty">加载中...</div></td></tr>
+          </tbody>
         </table>
       </div>
+      <div id="accountsPagination"></div>
     </div>
   `;
 }
@@ -391,6 +384,39 @@ function renderAccountsMini() {
       </table>
     </div>
   `;
+}
+
+function mountAccountsPagination() {
+  setupPagination("accountsPagination", {
+    pageSize: 10,
+    fetchPage: async (page, pageSize, offset) => {
+      const result = await api(`/api/accounts?limit=${pageSize}&offset=${offset}`);
+      return result;
+    },
+    renderItems: (items) => {
+      const tbody = document.getElementById("accountsTableBody");
+      const countTag = document.getElementById("accountsCountTag");
+      if (!tbody) return;
+      if (!items.length) {
+        tbody.innerHTML = `<tr><td colspan="8"><div class="empty">当前筛选条件下没有账号。</div></td></tr>`;
+        if (countTag) countTag.textContent = "0 个账号";
+        return;
+      }
+      tbody.innerHTML = items.map((item) => `
+        <tr>
+          <td><div class="cell-stack"><strong>${item.accountName}</strong><span class="muted">${item.profileUrl ? "已配置主页链接" : "未配置主页链接"}</span></div></td>
+          <td>${item.employeeName || "-"}</td>
+          <td><span class="tag ${item.platform === "抖音" ? "tag-warm" : ""}">${item.platform}</span></td>
+          <td>${item.accountUid || "-"}</td>
+          <td>${item.persona || "-"}</td>
+          <td>${item.positioning || "-"}</td>
+          <td><span class="tag ${item.status === "正常" ? "" : "tag-soft"}">${item.status}</span></td>
+          <td><div class="actions"><button class="ghost js-edit-account" data-id="${item.id}">编辑</button><button class="ghost danger js-delete-account" data-id="${item.id}">删除</button></div></td>
+        </tr>
+      `).join("");
+      if (countTag) countTag.textContent = `${items.length} 个账号`;
+    }
+  });
 }
 
 

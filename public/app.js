@@ -179,6 +179,18 @@ function renderApp() {
   if (state.currentView === 'sales-followups' && state.leadTomorrowFollowups === undefined) {
     loadTomorrowFollowups().then(() => { if (typeof renderApp === 'function') renderApp(); });
   }
+  // 账号管理分页初始化
+  if (state.currentView === 'accounts') {
+    window.requestAnimationFrame(() => {
+      if (typeof mountAccountsPagination === 'function') mountAccountsPagination();
+      const searchInput = document.getElementById('accountSearchInput');
+      const employeeFilter = document.getElementById('accountEmployeeFilter');
+      const platformFilter = document.getElementById('accountPlatformFilter');
+      if (searchInput) searchInput.addEventListener('input', () => { state.accountSearch = searchInput.value; refreshPagination('accountsPagination'); });
+      if (employeeFilter) employeeFilter.addEventListener('change', () => { state.accountEmployeeFilter = employeeFilter.value; refreshPagination('accountsPagination'); });
+      if (platformFilter) platformFilter.addEventListener('change', () => { state.accountPlatformFilter = platformFilter.value; refreshPagination('accountsPagination'); });
+    });
+  }
 }
 
 function renderFlash() {

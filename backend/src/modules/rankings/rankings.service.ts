@@ -50,6 +50,8 @@ export class RankingsService {
   }
 
   async getRankingsPaged(type: string, date: string, limit: number, offset: number): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
+    // TODO: 当前为内存分页，getRankings 会全量加载 posts + leads。当数据量增长时，
+    // 需要将聚合逻辑下沉到 SQL，避免全表加载后再 slice。后续可改为纯 SQL 聚合或缓存。
     const allRows = await this.getRankings(type, date);
     const total = allRows.length;
     const items = allRows.slice(offset, offset + limit);

@@ -405,7 +405,7 @@ function renderSalesOrdersTableBody(items) {
 function mountSalesOrdersPagination() {
   if (typeof setupPagination !== "function") return;
   setupPagination("salesOrdersPager", {
-    pageSize: 20,
+    pageSize: 10,
     fetchPage: async (page, pageSize) => {
       const params = new URLSearchParams();
       params.set("scope", "mine");
@@ -662,7 +662,7 @@ function renderAdminOrdersTableBody(rows) {
 function mountAdminOrdersPagination() {
   if (typeof setupPagination !== "function") return;
   setupPagination("adminOrdersPager", {
-    pageSize: 20,
+    pageSize: 10,
     fetchPage: async (page, pageSize) => {
       const params = new URLSearchParams();
       params.set("actorRole", "admin");
@@ -928,7 +928,7 @@ function renderAcademicOrdersTableBody(items) {
 function mountAcademicOrdersPagination() {
   if (typeof setupPagination !== "function") return;
   setupPagination("academicOrdersPager", {
-    pageSize: 20,
+    pageSize: 10,
     fetchPage: async (page, pageSize) => {
       const params = new URLSearchParams();
       params.set("role", "academic");
