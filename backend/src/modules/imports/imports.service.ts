@@ -22,6 +22,7 @@ export interface ImportPasteResult {
   success: number;
   fail: number;
   errors: ImportRowError[];
+  errorFileUrl: string | null;
 }
 
 interface ParsedLeadRow {
@@ -257,6 +258,7 @@ export class ImportsService {
       success,
       fail,
       errors,
+      errorFileUrl,
     };
   }
 

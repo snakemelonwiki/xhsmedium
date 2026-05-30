@@ -39,7 +39,7 @@ const PLATFORM_XHS_RE = /(小红书|红薯|小红薯|xhs|RED)/i;
 const PLATFORM_DOUYIN_RE = /(抖音|dy|tiktok)/i;
 
 const PHONE_RE = /\b1[3-9]\d{9}\b/;
-const WXID_RE = /wxid_[a-zA-Z0-9]+/;
+const WXID_RE = /wxid_[a-zA-Z0-9_]+/;
 const WECHAT_LABEL_RE = /(?:微信|v信|vx|wx)[\s:：是]*([a-zA-Z0-9_-]{4,32})/i;
 const DOUYIN_LABEL_RE = /(?:抖音号|dy)[\s:：是]*([a-zA-Z0-9_.-]{3,32})/i;
 const XHS_LABEL_RE = /(?:小红书号|xhs号|红薯号)[\s:：是]*([a-zA-Z0-9_-]{3,32})/i;

@@ -1613,6 +1613,14 @@ function applyLeadDraftToForm(draft) {
     console.warn("[lead-draft] parse contentJson failed", err);
     content = {};
   }
+  // 关键修复：先写到 state._leadFormBuffer，让 renderLeadEntry 用 bufferedEditing 把 value
+  // 渲染进 input 模板。仅写 DOM 的话紧跟着的 renderApp() 全量 innerHTML 会覆盖回空。
+  state._leadFormBuffer = state._leadFormBuffer || {};
+  Object.entries(content).forEach(([name, value]) => {
+    if (name === 'captureImage' || name === 'id') return;
+    state._leadFormBuffer[name] = value == null ? '' : String(value);
+  });
+  // 同步现有 DOM（如果存在），但这只是兜底；真正生效靠 buffer + 下次渲染
   const form = document.getElementById("leadForm");
   if (form) {
     Object.entries(content).forEach(([name, value]) => {
