@@ -18,6 +18,38 @@ export class LeadsController {
     return res.json(rows);
   }
 
+  @Get('stats')
+  async stats(
+    @Req() req: Request,
+    @Res() res: Response,
+    @Query('scope') scope?: 'self' | 'employee' | 'all',
+    @Query('employeeId') employeeId?: string,
+    @Query('period') period?: 'today' | 'week' | 'month' | 'custom',
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('accountId') accountId?: string,
+    @Query('platform') platform?: string,
+    @Query('postType') postType?: string,
+    @Query('status') status?: string,
+    @Query('addStatus') addStatus?: string,
+  ) {
+    const session = (req as any).session;
+    const result = await this.leadsService.stats({
+      scope: scope || (session?.role === 'staff' ? 'self' : 'all'),
+      employeeId,
+      period,
+      from,
+      to,
+      actorEmployeeId: session?.employeeId || '',
+      accountId,
+      platform,
+      postType,
+      status,
+      addStatus,
+    });
+    return res.json(result);
+  }
+
   @Get('export')
   async exportLeads(@Req() req: Request, @Res() res: Response) {
     // Legacy TSV export — keep for backward compatibility
@@ -29,6 +61,69 @@ export class LeadsController {
     res.setHeader('Content-Type', 'text/tab-separated-values; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename=leads_export.tsv');
     return res.send(header + body);
+  }
+
+  // ---- 被动添加客资识别（passive） §4.3 ----
+  // 注意：这一组路由必须在所有 `:id` 路由之前注册，否则 NestJS 会把
+  // 字面量 'passive' 当作 :id 参数命中错误的处理函数。
+
+  @Get('passive/candidates')
+  async passiveCandidates(
+    @Req() req: Request,
+    @Res() res: Response,
+    @Query('phone') phone?: string,
+    @Query('wechat') wechat?: string,
+    @Query('nickname') nickname?: string,
+    @Query('actorUserId') queryActorUserId?: string,
+  ) {
+    const session = (req as any).session;
+    const actorEmployeeId = session?.employeeId || queryActorUserId || '';
+    const rows = await this.leadsService.findPassiveCandidates({
+      phone,
+      wechat,
+      nickname,
+      actorEmployeeId,
+    });
+    return res.json(rows);
+  }
+
+  @Post('passive/bind')
+  async passiveBind(@Body() body: any, @Req() req: Request, @Res() res: Response) {
+    const session = (req as any).session;
+    const actorUserId = session?.userId || session?.id || body.actorUserId || '';
+    const actorUserName = session?.employeeName || session?.username || '';
+    try {
+      const result = await this.leadsService.bindPassive({
+        leadId: body.leadId,
+        contact: body.contact || '',
+        salesFeedback: body.salesFeedback,
+        actorUserId,
+        actorUserName,
+      });
+      return res.json(result);
+    } catch (err: any) {
+      return res.status(422).json({ ok: false, message: err.message || 'invalid' });
+    }
+  }
+
+  @Post('passive/new')
+  async passiveNew(@Body() body: any, @Req() req: Request, @Res() res: Response) {
+    const session = (req as any).session;
+    const actorUserId = session?.userId || session?.id || body.actorUserId || '';
+    const actorUserName = session?.employeeName || session?.username || '';
+    try {
+      const result = await this.leadsService.createPassive({
+        contact: body.contact || '',
+        nickname: body.nickname,
+        platform: body.platform,
+        salesFeedback: body.salesFeedback,
+        actorUserId,
+        actorUserName,
+      });
+      return res.json(result);
+    } catch (err: any) {
+      return res.status(422).json({ ok: false, message: err.message || 'invalid' });
+    }
   }
 
   @Post()
@@ -88,15 +183,57 @@ export class LeadsController {
   }
 
   @Put(':id/board')
-  async updateBoard(@Param('id') id: string, @Body() body: any, @Res() res: Response) {
+  async updateBoard(@Param('id') id: string, @Body() body: any, @Req() req: Request, @Res() res: Response) {
+    const session = (req as any).session;
+    const actorUserId = session?.userId || session?.id || body.actorUserId || '';
     await this.leadsService.updateBoard(id, {
       assignedSalesUserId: body.assignedSalesUserId,
       assignedSalesUserName: body.assignedSalesUserName,
       processStatus: body.processStatus,
       addStatus: body.addStatus,
       intention: body.intention,
-    });
+      intentionLevel: body.intentionLevel,
+      nextFollowTime: body.nextFollowTime,
+      followNote: body.followNote,
+      followType: body.followType,
+    }, actorUserId);
     return res.json({ ok: true });
+  }
+
+  @Get(':id/follow-records')
+  async listFollowRecords(
+    @Param('id') id: string,
+    @Query('limit') limit: string,
+    @Query('offset') offset: string,
+    @Res() res: Response,
+  ) {
+    const rows = await this.leadsService.listFollowRecords(
+      id,
+      Number(limit) || 50,
+      Number(offset) || 0,
+    );
+    return res.json(rows);
+  }
+
+  @Post(':id/follow-records')
+  async addFollowRecord(
+    @Param('id') id: string,
+    @Body() body: any,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    const session = (req as any).session;
+    const actorUserId = session?.userId || session?.id || body.actorUserId || '';
+    try {
+      await this.leadsService.addFollowRecord(id, actorUserId, {
+        followType: body.followType,
+        content: body.content,
+        nextFollowTime: body.nextFollowTime,
+      });
+      return res.json({ ok: true });
+    } catch (err: any) {
+      return res.status(422).json({ ok: false, message: err.message || 'invalid' });
+    }
   }
 
   @Post(':id/remind')
@@ -106,6 +243,28 @@ export class LeadsController {
     // Placeholder: in legacy code this creates notifications in JSON
     // For now, just return OK
     return res.json({ ok: true });
+  }
+
+  @Post(':id/source-confirm')
+  async sourceConfirm(
+    @Param('id') id: string,
+    @Body() body: any,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    const session = (req as any).session;
+    const actorUserId = session?.userId || session?.id || body.actorUserId || '';
+    try {
+      const result = await this.leadsService.confirmSource({
+        id,
+        matchedPostId: body.matchedPostId,
+        sourceOperatorId: body.sourceOperatorId,
+        actorUserId,
+      });
+      return res.json(result);
+    } catch (err: any) {
+      return res.status(422).json({ ok: false, message: err.message || 'invalid' });
+    }
   }
 
   @Delete(':id')

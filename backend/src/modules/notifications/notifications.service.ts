@@ -1,48 +1,166 @@
 import { Injectable } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { Notification } from '../../entities/notification.entity';
+import { makeId } from '../../shared/utils/id-generator';
 
-interface NotificationItem {
-  id: string;
-  type: string;
-  title: string;
-  message: string;
-  createdAt: string;
-  fromUserId: string;
-  audienceRoles: string[];
-  audienceEmployeeIds: string[];
-  excludeUserIds: string[];
-  readBy: string[];
+interface ListOpts {
+  status?: 'unread' | 'all';
+  type?: string;
+  limit?: number;
+  offset?: number;
 }
 
-const notifications: NotificationItem[] = [];
+interface CreateDto {
+  receiverIds: string[];
+  senderId?: string | null;
+  portType: string;
+  typeCode: string;
+  title: string;
+  content?: string | null;
+  relatedId?: string | null;
+  relatedType?: string | null;
+}
 
 @Injectable()
 export class NotificationsService {
-  listForUser(userId: string, role: string, employeeId: string): any[] {
-    return notifications
-      .filter((item) => {
-        if (item.excludeUserIds?.includes(userId)) return false;
-        const roleMatch = !item.audienceRoles?.length || item.audienceRoles.includes(role);
-        const employeeScopedRoles = new Set(['staff']);
-        const shouldMatchEmployee = employeeScopedRoles.has(role);
-        const employeeMatch = !shouldMatchEmployee || !item.audienceEmployeeIds?.length || item.audienceEmployeeIds.includes(employeeId);
-        return roleMatch && employeeMatch;
-      })
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-      .map((item) => ({
-        ...item,
-        unread: !(item.readBy || []).includes(userId),
-      }));
+  constructor(
+    @InjectRepository(Notification)
+    private readonly repo: Repository<Notification>,
+  ) {}
+
+  /**
+   * List notifications for the given user. Unread first, then newest first.
+   * Returns the page items, the total matched count and the user's unread count
+   * (independent of pagination / type filter, used to drive the bell badge).
+   */
+  async listForUser(
+    userId: string,
+    opts?: ListOpts,
+  ): Promise<{ items: any[]; unreadCount: number; total: number }> {
+    if (!userId) {
+      return { items: [], unreadCount: 0, total: 0 };
+    }
+
+    const limit = Math.min(Math.max(Number(opts?.limit) || 30, 1), 200);
+    const offset = Math.max(Number(opts?.offset) || 0, 0);
+
+    const qb = this.repo.createQueryBuilder('n')
+      .where('n.receiver_id = :uid', { uid: userId });
+
+    if (opts?.status === 'unread') {
+      qb.andWhere('n.read_status = 0');
+    }
+    if (opts?.type) {
+      qb.andWhere('n.type_code = :type', { type: opts.type });
+    }
+
+    qb.orderBy('n.read_status', 'ASC')
+      .addOrderBy('n.created_at', 'DESC')
+      .take(limit)
+      .skip(offset);
+
+    const [rows, total] = await qb.getManyAndCount();
+    const unreadCount = await this.repo.count({
+      where: { receiverId: userId, readStatus: 0 },
+    });
+
+    return {
+      items: rows.map((r) => this.map(r)),
+      unreadCount,
+      total,
+    };
   }
 
-  markRead(notificationId: string, userId: string): boolean {
-    let changed = false;
-    for (const item of notifications) {
-      if (item.id !== notificationId) continue;
-      if ((item.readBy || []).includes(userId)) continue;
-      item.readBy = [...(item.readBy || []), userId];
-      changed = true;
-      break;
+  /**
+   * Mark a single notification as read. Only the receiver may mark it,
+   * and only when it is currently unread. Returns true on state change.
+   */
+  async markRead(id: string, userId: string): Promise<boolean> {
+    if (!id || !userId) return false;
+    const result = await this.repo
+      .createQueryBuilder()
+      .update(Notification)
+      .set({ readStatus: 1 })
+      .where('id = :id AND receiver_id = :uid AND read_status = 0', {
+        id,
+        uid: userId,
+      })
+      .execute();
+    return (result.affected || 0) > 0;
+  }
+
+  /**
+   * Mark every unread notification of the user as read. Returns affected count.
+   */
+  async markAllRead(userId: string): Promise<number> {
+    if (!userId) return 0;
+    const result = await this.repo
+      .createQueryBuilder()
+      .update(Notification)
+      .set({ readStatus: 1 })
+      .where('receiver_id = :uid AND read_status = 0', { uid: userId })
+      .execute();
+    return result.affected || 0;
+  }
+
+  /**
+   * Insert one notification per receiver. Safe to call with an empty list —
+   * call sites can pass receiverIds straight from a DB query without
+   * pre-filtering. Failures are swallowed and logged so notifications never
+   * block the underlying business transaction.
+   */
+  async create(dto: CreateDto): Promise<void> {
+    const receivers = (dto.receiverIds || [])
+      .map((id) => (id == null ? '' : String(id).trim()))
+      .filter((id) => id.length > 0);
+    if (receivers.length === 0) return;
+    if (!dto.portType || !dto.typeCode || !dto.title) return;
+
+    const now = new Date();
+    const rows = receivers.map((rid) => this.repo.create({
+      id: makeId(),
+      receiverId: rid,
+      senderId: dto.senderId ?? null,
+      portType: dto.portType,
+      typeCode: dto.typeCode,
+      title: dto.title,
+      content: dto.content ?? null,
+      relatedId: dto.relatedId ?? null,
+      relatedType: dto.relatedType ?? null,
+      readStatus: 0,
+      createdAt: now,
+      updatedAt: now,
+    } as Partial<Notification>));
+
+    try {
+      await this.repo.save(rows);
+    } catch (err: any) {
+      // Notifications are best-effort; don't propagate.
+      // eslint-disable-next-line no-console
+      console.error('[notifications] create failed', err?.message || err);
     }
-    return changed;
+  }
+
+  private map(row: Notification): any {
+    return {
+      id: row.id,
+      receiverId: row.receiverId,
+      senderId: row.senderId,
+      portType: row.portType,
+      typeCode: row.typeCode,
+      // Keep `type` alias for back-compat with the legacy in-memory shape.
+      type: row.typeCode,
+      title: row.title,
+      content: row.content,
+      // Legacy field name still consumed by the frontend bell list.
+      message: row.content,
+      relatedId: row.relatedId,
+      relatedType: row.relatedType,
+      readStatus: row.readStatus,
+      unread: !row.readStatus,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    };
   }
 }

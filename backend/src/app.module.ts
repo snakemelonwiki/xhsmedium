@@ -8,12 +8,24 @@ import { Employee } from './entities/employee.entity';
 import { Account } from './entities/account.entity';
 import { Post } from './entities/post.entity';
 import { Lead } from './entities/lead.entity';
+import { LeadFollowRecord } from './entities/lead-follow-record.entity';
+import { LeadDraft } from './entities/lead-draft.entity';
+import { CollaborationTask } from './entities/collaboration-task.entity';
+import { Order } from './entities/order.entity';
+import { OrderFollowRecord } from './entities/order-follow-record.entity';
+import { ImportTask } from './entities/import-task.entity';
+import { Notification } from './entities/notification.entity';
 import { AuthModule } from './modules/auth/auth.module';
 import { EmployeesModule } from './modules/employees/employees.module';
 import { UsersModule } from './modules/users/users.module';
 import { AccountsModule } from './modules/accounts/accounts.module';
 import { PostsModule } from './modules/posts/posts.module';
 import { LeadsModule } from './modules/leads/leads.module';
+import { LeadDraftsModule } from './modules/lead-drafts/lead-drafts.module';
+import { LeadsParserModule } from './modules/leads-parser/leads-parser.module';
+import { ImportsModule } from './modules/imports/imports.module';
+import { CollaborationTasksModule } from './modules/collaboration-tasks/collaboration-tasks.module';
+import { OrdersModule } from './modules/orders/orders.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { RankingsModule } from './modules/rankings/rankings.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
@@ -35,7 +47,7 @@ import { AnalyticsModule } from './modules/analytics/analytics.module';
         username: config.get('MYSQL_USER', 'root'),
         password: config.get('MYSQL_PASSWORD', ''),
         database: config.get('MYSQL_DATABASE', 'lan_dual_role_system'),
-        entities: [User, Employee, Account, Post, Lead],
+        entities: [User, Employee, Account, Post, Lead, LeadFollowRecord, LeadDraft, CollaborationTask, Order, OrderFollowRecord, ImportTask, Notification],
         synchronize: false,
         charset: 'utf8mb4',
       }),
@@ -55,6 +67,11 @@ import { AnalyticsModule } from './modules/analytics/analytics.module';
     AccountsModule,
     PostsModule,
     LeadsModule,
+    LeadDraftsModule,
+    LeadsParserModule,
+    ImportsModule,
+    CollaborationTasksModule,
+    OrdersModule,
     DashboardModule,
     RankingsModule,
     NotificationsModule,

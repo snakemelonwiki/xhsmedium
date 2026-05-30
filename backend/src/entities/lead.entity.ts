@@ -70,6 +70,24 @@ export class Lead {
   @Column({ length: 32, nullable: true })
   intention: string | null;
 
+  @Column({ name: 'lead_code', length: 32, nullable: true })
+  leadCode: string | null;
+
+  @Column({ name: 'intention_level', length: 16, default: 'pending' })
+  intentionLevel: string;
+
+  @Column({ name: 'add_method', length: 16, default: 'unknown' })
+  addMethod: string;
+
+  @Column({ name: 'next_follow_time', type: 'datetime', nullable: true })
+  nextFollowTime: Date | null;
+
+  @Column({ name: 'matched_post_id', length: 64, nullable: true })
+  matchedPostId: string | null;
+
+  @Column({ name: 'source_unknown', type: 'tinyint', default: 0 })
+  sourceUnknown: number;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 

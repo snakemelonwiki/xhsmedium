@@ -1,0 +1,87 @@
+import { Injectable } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { LeadDraft } from '../../entities/lead-draft.entity';
+import { makeId } from '../../shared/utils/id-generator';
+
+interface UpsertDraftDto {
+  draftType: string;
+  contentJson: string;
+  imageUrls?: any;
+}
+
+const MAX_DRAFTS_PER_TYPE = 10;
+
+@Injectable()
+export class LeadDraftsService {
+  constructor(
+    @InjectRepository(LeadDraft)
+    private readonly draftRepository: Repository<LeadDraft>,
+  ) {}
+
+  async findByUser(userId: string, draftType: string): Promise<any[]> {
+    const rows = await this.draftRepository.find({
+      where: { userId, draftType },
+      order: { updatedAt: 'DESC' },
+    });
+    return rows.map(this.mapDraft);
+  }
+
+  async upsert(id: string, userId: string, dto: UpsertDraftDto): Promise<any> {
+    const draftType = dto.draftType;
+    const contentJson = dto.contentJson || '';
+    const imageUrls = dto.imageUrls === undefined ? null : dto.imageUrls;
+
+    const existing = await this.draftRepository.findOne({ where: { id } });
+    if (existing) {
+      await this.draftRepository.update(id, {
+        userId,
+        draftType,
+        contentJson,
+        imageUrls,
+      });
+    } else {
+      const draft = this.draftRepository.create({
+        id: id || makeId(),
+        userId,
+        draftType,
+        contentJson,
+        imageUrls,
+      });
+      await this.draftRepository.save(draft);
+    }
+
+    // 保留策略：同 user_id + draft_type 最多 MAX_DRAFTS_PER_TYPE 条
+    await this.pruneOldDrafts(userId, draftType);
+
+    const saved = await this.draftRepository.findOne({ where: { id } });
+    return saved ? this.mapDraft(saved) : null;
+  }
+
+  async remove(id: string): Promise<void> {
+    await this.draftRepository.delete(id);
+  }
+
+  private async pruneOldDrafts(userId: string, draftType: string): Promise<void> {
+    const rows = await this.draftRepository.find({
+      where: { userId, draftType },
+      order: { updatedAt: 'DESC' },
+    });
+    if (rows.length <= MAX_DRAFTS_PER_TYPE) return;
+    const toDelete = rows.slice(MAX_DRAFTS_PER_TYPE).map((r) => r.id);
+    if (toDelete.length === 0) return;
+    await this.draftRepository.delete(toDelete);
+  }
+
+  private mapDraft(row: LeadDraft): any {
+    return {
+      id: row.id,
+      userId: row.userId,
+      draftType: row.draftType,
+      contentJson: row.contentJson,
+      imageUrls: row.imageUrls || null,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    };
+  }
+}

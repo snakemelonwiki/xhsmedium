@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Param, Req, Res } from '@nestjs/common';
+import { Controller, Get, Post, Param, Req, Res, Query, Body } from '@nestjs/common';
 import { NotificationsService } from './notifications.service';
 import { Request, Response } from 'express';
 
@@ -7,22 +7,53 @@ export class NotificationsController {
   constructor(private readonly notificationsService: NotificationsService) {}
 
   @Get()
-  async findAll(@Req() req: Request, @Res() res: Response) {
+  async findAll(
+    @Req() req: Request,
+    @Res() res: Response,
+    @Query('status') status?: string,
+    @Query('type') type?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+    @Query('actorUserId') actorUserId?: string,
+  ) {
     const session = (req as any).session;
-    const userId = session?.userId || '';
-    const role = session?.role || '';
-    const employeeId = session?.employeeId || '';
-    const items = this.notificationsService.listForUser(userId, role, employeeId);
+    const userId = session?.userId || session?.id || actorUserId || '';
+    const result = await this.notificationsService.listForUser(userId, {
+      status: status === 'unread' ? 'unread' : 'all',
+      type: type || undefined,
+      limit: limit ? Number(limit) : 30,
+      offset: offset ? Number(offset) : 0,
+    });
     return res.json({
-      items: items.slice(0, 30),
-      unreadCount: items.filter((item) => item.unread).length,
+      items: result.items,
+      unreadCount: result.unreadCount,
+      total: result.total,
     });
   }
 
+  // Legacy path retained — frontend posts to /api/notifications/:id/read.
   @Post(':id/read')
-  async markRead(@Param('id') id: string, @Req() req: Request, @Res() res: Response) {
+  async markRead(
+    @Param('id') id: string,
+    @Body() body: any,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
     const session = (req as any).session;
-    this.notificationsService.markRead(id, session?.userId || '');
-    return res.json({ ok: true });
+    const userId = session?.userId || session?.id || body?.actorUserId || '';
+    const ok = await this.notificationsService.markRead(id, userId);
+    return res.json({ ok, changed: ok });
+  }
+
+  @Post('read-all')
+  async markAllRead(
+    @Body() body: any,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    const session = (req as any).session;
+    const userId = session?.userId || session?.id || body?.actorUserId || '';
+    const affected = await this.notificationsService.markAllRead(userId);
+    return res.json({ ok: true, affected });
   }
 }
