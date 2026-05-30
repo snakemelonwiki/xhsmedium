@@ -7,12 +7,14 @@ function renderApp() {
   const isOwner = state.user.role === "owner";
   const isAdmin = state.user.role === "admin";
   const isSales = state.user.role === "sales";
+  const isAcademic = state.user.role === "academic";
   const adminViews = [
     ["dashboard", "总览"],
     ["personal-board", "个人看板"],
     ["posts", "作品看板"],
     ["account-viz", "分析看板"],
     ["leads", "客资看板"],
+    ["orders", "订单看板"],
     ["lead-source-pending", "待确认来源"],
     ["lead-collabs", "协同申请处理"],
     ["import-history", "导入历史"],
@@ -33,27 +35,61 @@ function renderApp() {
     ["sales-leads", "客资看板"],
     ["sales-passive-leads", "待确认被动添加"],
     ["sales-collabs", "协同申请"],
-    ["sales-followups", "跟进看板"]
+    ["sales-followups", "跟进看板"],
+    ["sales-orders", "订单跟进"]
   ];
 
-  const navItems = (isAdmin || isOwner) ? adminViews : isSales ? salesViews : staffViews;
-  if (!navItems.some(([key]) => key === state.currentView)) {
+  const academicViews = [
+    ["academic-orders", "订单池"],
+    ["academic-abnormal", "异常订单"]
+  ];
+
+  // 详情页（不在 nav 中显示，但属于合法 view）
+  const detailViews = new Set([
+    "sales-lead-detail",
+    "sales-order-detail",
+    "admin-order-detail",
+    "academic-order-detail"
+  ]);
+  const navItems = isAcademic ? academicViews : (isAdmin || isOwner) ? adminViews : isSales ? salesViews : staffViews;
+  if (!navItems.some(([key]) => key === state.currentView) && !detailViews.has(state.currentView)) {
     state.currentView = navItems[0][0];
   }
 
+  const brandMark = isOwner ? "总" : isAdmin ? "管" : isSales ? "销" : isAcademic ? "教" : "员";
+  const portName = isOwner ? "总后台" : isAdmin ? "主管端" : isSales ? "销售端" : isAcademic ? "教务端" : "员工端";
+  const sidebarRole = isOwner ? "总后台管理" : isAdmin ? "运营主管" : isSales ? "销售跟进" : isAcademic ? "教务交付" : "运营员工";
+  const sidebarCopy = isOwner ? "查看全局录入、客资来源和团队动作。"
+    : isAdmin ? "查看团队录入、作品表现和客资转化。"
+    : isSales ? "查看来源作品、引流截图和当前客资状态。"
+    : isAcademic ? "管理成交订单的交付节点、异常反馈和资料收集。"
+    : "录作品、记客资、回看当天数据。";
+  const workspaceTag = isOwner ? "总后台工作台" : isAdmin ? "主管工作台" : isSales ? "销售工作台" : isAcademic ? "教务工作台" : "员工工作台";
+  const workspaceHeadline = isOwner ? "全局客资、来源作品和引流截图都集中在这里查看。"
+    : isAdmin ? "今天的录入、快照和看板都在本机持续保存。"
+    : isSales ? "引流截图和来源作品会跟着客资一起展示，方便快速判断怎么跟进。"
+    : isAcademic ? "成交订单按状态聚合，节点跟踪和异常反馈都在这里集中处理。"
+    : "录入后会直接写入本地数据库，主管端同步后就能看到。";
+  const workspaceSub = isOwner ? "从总后台也能直接进入作品和客资现场，避免信息在不同端口之间断层。"
+    : isAdmin ? "系统现在会同时保留原始数据文件、日报快照和自动备份，临时出问题也尽量不影响当天大盘。"
+    : isSales ? "先看来源作品，再看引流截图和备注，能更快建立跟进语境。"
+    : isAcademic ? "在订单池里及时接单，对异常订单反馈处理结果，让销售和主管同步状态。"
+    : "作品、客资、当天记录都会按日期保存，回看和修改会更稳。";
+  const pulseText = isAcademic ? "订单节点跟踪开启" : (isOwner || isSales ? "来源信息可追溯" : "自动保存开启");
+  const softTag = isOwner ? "全局上下文完整" : isAdmin ? "已启用日报快照" : isSales ? "客资上下文完整" : isAcademic ? "订单流程可追溯" : "录入即写入";
   app.innerHTML = `
     <div class="shell">
       <aside class="sidebar">
         <div class="sidebar-brand">
-          <div class="brand-mark">${isOwner ? "总" : isAdmin ? "管" : isSales ? "销" : "员"}</div>
+          <div class="brand-mark">${brandMark}</div>
           <div>
-            <h1>${isOwner ? "总后台" : isAdmin ? "主管端" : isSales ? "销售端" : "员工端"}</h1>
+            <h1>${portName}</h1>
             <p class="muted">${state.user.employeeName || state.user.username}</p>
           </div>
         </div>
         <div class="sidebar-user">
-          <span class="sidebar-role">${isOwner ? "总后台管理" : isAdmin ? "运营主管" : isSales ? "销售跟进" : "运营员工"}</span>
-          <p class="sidebar-copy">${isOwner ? "查看全局录入、客资来源和团队动作。" : isAdmin ? "查看团队录入、作品表现和客资转化。" : isSales ? "查看来源作品、引流截图和当前客资状态。" : "录作品、记客资、回看当天数据。"}</p>
+          <span class="sidebar-role">${sidebarRole}</span>
+          <p class="sidebar-copy">${sidebarCopy}</p>
         </div>
         <div class="nav">
           ${navItems.map(([key, label]) => `<button data-view="${key}" class="${state.currentView === key ? "active" : ""}">${label}</button>`).join("")}
@@ -63,16 +99,16 @@ function renderApp() {
       <main class="main">
         <section class="workspace-banner">
           <div class="workspace-banner-copy">
-            <span class="mini-tag">${isOwner ? "总后台工作台" : isAdmin ? "主管工作台" : isSales ? "销售工作台" : "员工工作台"}</span>
-            <strong>${isOwner ? "全局客资、来源作品和引流截图都集中在这里查看。" : isAdmin ? "今天的录入、快照和看板都在本机持续保存。" : isSales ? "引流截图和来源作品会跟着客资一起展示，方便快速判断怎么跟进。" : "录入后会直接写入本地数据库，主管端同步后就能看到。"}</strong>
-            <p>${isOwner ? "从总后台也能直接进入作品和客资现场，避免信息在不同端口之间断层。" : isAdmin ? "系统现在会同时保留原始数据文件、日报快照和自动备份，临时出问题也尽量不影响当天大盘。" : isSales ? "先看来源作品，再看引流截图和备注，能更快建立跟进语境。" : "作品、客资、当天记录都会按日期保存，回看和修改会更稳。"} </p>
+            <span class="mini-tag">${workspaceTag}</span>
+            <strong>${workspaceHeadline}</strong>
+            <p>${workspaceSub}</p>
           </div>
           <div class="workspace-banner-meta">
             <div class="workspace-pulse">
               <span class="workspace-pulse-dot"></span>
-              <span>${isOwner || isSales ? "来源信息可追溯" : "自动保存开启"}</span>
+              <span>${pulseText}</span>
             </div>
-            <span class="tag tag-soft">${isOwner ? "全局上下文完整" : isAdmin ? "已启用日报快照" : isSales ? "客资上下文完整" : "录入即写入"}</span>
+            <span class="tag tag-soft">${softTag}</span>
             ${renderNotificationPanel()}
           </div>
         </section>
@@ -192,6 +228,10 @@ function renderCurrentView() {
         return renderAccountVisualization();
       case "leads":
         return renderLeadsMonitor();
+      case "orders":
+        return renderAdminOrders();
+      case "admin-order-detail":
+        return renderAdminOrderDetail();
       case "lead-source-pending":
         return renderLeadSourcePending();
       case "lead-collabs":
@@ -217,8 +257,27 @@ function renderCurrentView() {
         return renderSalesCollabs();
       case "sales-followups":
         return renderSalesFollowupBoard();
+      case "sales-lead-detail":
+        return renderSalesLeadDetail();
+      case "sales-orders":
+        return renderSalesOrders();
+      case "sales-order-detail":
+        return renderSalesOrderDetail();
       default:
         return renderSalesLeads();
+    }
+  }
+
+  if (state.user.role === "academic") {
+    switch (state.currentView) {
+      case "academic-orders":
+        return renderAcademicOrders();
+      case "academic-order-detail":
+        return renderAcademicOrderDetail();
+      case "academic-abnormal":
+        return renderAcademicAbnormal();
+      default:
+        return renderAcademicOrders();
     }
   }
 
@@ -850,6 +909,9 @@ function bindViewEvents() {
     state.importHistory = null;
     loadImportHistory();
   });
+  if (typeof bindOrdersViewsEvents === "function") {
+    bindOrdersViewsEvents();
+  }
 }
 
 function bindDelegatedEvents() {

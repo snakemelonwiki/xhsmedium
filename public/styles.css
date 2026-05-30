@@ -5230,3 +5230,115 @@ tbody tr:nth-child(even):hover {
 .import-history-table thead {
   background: #f9fafb;
 }
+
+/* ===== P0 新增视图：销售客资详情 / 订单详情 / 主管订单看板 / 教务订单池 ===== */
+.sales-lead-detail-page,
+.sales-order-detail-page,
+.admin-orders-page,
+.sales-orders-page,
+.academic-orders-page {
+  padding: 20px;
+}
+.detail-section {
+  margin-bottom: 24px;
+  padding: 16px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+.detail-section h3 {
+  margin: 0 0 12px 0;
+  font-size: 15px;
+  color: #111827;
+}
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+.detail-grid .field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.detail-grid .field.full-row {
+  grid-column: 1 / -1;
+}
+.detail-grid .field strong {
+  font-size: 12px;
+  color: #6b7280;
+  font-weight: 500;
+}
+.detail-grid .field span,
+.detail-grid .field select,
+.detail-grid .field input,
+.detail-grid .field textarea {
+  font-size: 14px;
+  color: #111827;
+}
+.detail-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid #e5e7eb;
+}
+.detail-tabs button {
+  padding: 8px 16px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: #6b7280;
+  font-size: 13px;
+}
+.detail-tabs button.active {
+  color: #4f46e5;
+  border-bottom: 2px solid #4f46e5;
+}
+.order-status-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+.order-status-tabs button {
+  padding: 6px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+  font-size: 13px;
+}
+.order-status-tabs button.active {
+  background: #4f46e5;
+  color: #fff;
+  border-color: #4f46e5;
+}
+.export-action {
+  display: inline-block;
+  margin-left: 8px;
+}
+.order-list {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+.order-card {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 14px 16px;
+  cursor: pointer;
+}
+.order-card:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+.order-card-head {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+.order-card-head strong {
+  font-size: 14px;
+  color: #111827;
+}

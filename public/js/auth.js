@@ -60,7 +60,20 @@ async function loadData() {
         Promise.resolve({ snapshots: {} }),
         api("/api/notifications")
       ]
-    : [...requests, api("/api/notifications")];
+    : state.user.role === "academic"
+      ? [
+          Promise.resolve(null),
+          Promise.resolve([]),
+          Promise.resolve([]),
+          api("/api/users").catch(() => []),
+          Promise.resolve([]),
+          Promise.resolve([]),
+          Promise.resolve([]),
+          Promise.resolve([]),
+          Promise.resolve({ snapshots: {} }),
+          api("/api/notifications").catch(() => ({ items: [], unreadCount: 0 }))
+        ]
+      : [...requests, api("/api/notifications")];
 
   const [summary, distribution, rankings, users, employees, accounts, posts, leads, analyticsSnapshots, notifications] = await Promise.all(normalizedRequests);
   state.summary = summary;

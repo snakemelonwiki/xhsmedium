@@ -95,6 +95,7 @@ function renderLeadsMonitor() {
       </div>
       <div class="toolbar toolbar-end">
         <span class="tag">${getLeadMonitorLabel()}</span>
+        <button id="exportLeadsBtn" type="button">导出 Excel</button>
         ${renderAdminRefreshButton()}
       </div>
     </div>
@@ -447,6 +448,7 @@ function renderSalesFollowupCard(item) {
         </div>
       </div>
       <div class="lead-card-actions">
+        <button class="ghost js-sales-view-detail" data-id="${item.id}" type="button">查看详情</button>
         <button class="ghost js-sales-request-collab" data-id="${item.id}" type="button">申请运营协同</button>
         <button class="ghost js-sales-mark-deal" data-id="${item.id}" type="button">标记成交</button>
       </div>
@@ -769,6 +771,9 @@ function renderOperatorCollabs() {
       <div>
         <h2>协同申请处理</h2>
         <p class="page-desc">销售端发起的协同任务在这里集中处理。"待领取"先点领取再写处理结果，"处理中"完成后会通知发起人。</p>
+      </div>
+      <div class="toolbar toolbar-end">
+        <button id="exportCollabsBtn" type="button">导出 Excel</button>
       </div>
     </div>
     <div class="collab-tabs">
@@ -1239,10 +1244,10 @@ function renderLeadBatchImport() {
         </div>
         <div>
           <strong>方式二：直接粘贴多行客资</strong>
-          <p class="muted">每行一条，列用 Tab、竖线 (|) 或逗号分隔：<br>平台 / 联系方式 / 昵称 / 账号 / 备注</p>
+          <p class="muted">每行一条，列用 Tab、竖线 (|) 或逗号分隔：<br>平台&lt;TAB&gt;联系方式&lt;TAB&gt;昵称&lt;TAB&gt;来源账号&lt;TAB&gt;备注</p>
         </div>
       </div>
-      <textarea id="leadImportRowsInput" rows="12" placeholder="小红书\t13800000000\t客户A\t官方账号\t备注内容"></textarea>
+      <textarea id="leadImportRowsInput" rows="12" placeholder="小红书\t13800138000\t客户A\t运营A\t备注内容"></textarea>
       <div class="lead-import-actions">
         <button id="leadImportSubmitBtn" type="button" class="primary">开始导入</button>
         <button class="ghost" id="leadImportCancelBtn" type="button">取消</button>
