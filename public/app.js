@@ -28,6 +28,7 @@ function renderApp() {
 
   const salesViews = [
     ["sales-leads", "客资看板"],
+    ["sales-passive-leads", "待确认被动添加"],
     ["sales-followups", "跟进看板"]
   ];
 
@@ -118,6 +119,11 @@ function renderApp() {
   if ((state.user.role === "admin" || state.user.role === "owner") && state.currentView === "account-viz") {
     window.requestAnimationFrame(() => renderAccountVizChart());
   }
+  // 客资看板视图统计卡片走后端 /api/leads/stats —— 进入视图时如果还没拉过，触发一次异步加载
+  const leadStatsViews = new Set(["leads", "sales-leads", "sales-followups", "staff-leads-board"]);
+  if (leadStatsViews.has(state.currentView) && state.leadStats === null && !state.leadStatsLoading) {
+    refreshLeadStatsForCurrentView();
+  }
 }
 
 function renderFlash() {
@@ -190,6 +196,8 @@ function renderCurrentView() {
     switch (state.currentView) {
       case "sales-leads":
         return renderSalesLeads();
+      case "sales-passive-leads":
+        return renderSalesPassiveLeads();
       case "sales-followups":
         return renderSalesFollowupBoard();
       default:
@@ -316,6 +324,10 @@ function bindViewEvents() {
     const [file] = event.target.files || [];
     if (!file) return;
     setPendingLeadCapture(file);
+    // 图片选择后立刻保存一次草稿（不 debounce）
+    if (typeof saveLeadDraftNow === "function" && !state.editingLeadId) {
+      saveLeadDraftNow().catch((err) => console.warn("[lead-draft] save after image select failed", err));
+    }
     renderApp();
   });
   document.querySelector('#leadForm select[name="accountId"]')?.addEventListener("change", (event) => {
@@ -569,23 +581,45 @@ function bindViewEvents() {
   document.getElementById("leadMonitorEmployeeFilter")?.addEventListener("change", (event) => {
     state.leadMonitorEmployeeFilter = event.target.value;
     state.leadMonitorAccountFilter = "";
+    state.leadStats = null;
+    refreshLeadStatsForCurrentView();
     renderApp();
   });
   document.getElementById("leadMonitorAccountFilter")?.addEventListener("change", (event) => {
     state.leadMonitorAccountFilter = event.target.value;
+    state.leadStats = null;
+    refreshLeadStatsForCurrentView();
     renderApp();
   });
   document.getElementById("leadMonitorPlatformFilter")?.addEventListener("change", (event) => {
     state.leadMonitorPlatformFilter = event.target.value;
     state.leadMonitorAccountFilter = "";
+    state.leadStats = null;
+    refreshLeadStatsForCurrentView();
     renderApp();
   });
   document.getElementById("leadMonitorPostTypeFilter")?.addEventListener("change", (event) => {
     state.leadMonitorPostTypeFilter = event.target.value;
+    state.leadStats = null;
+    refreshLeadStatsForCurrentView();
     renderApp();
   });
   document.getElementById("leadMonitorStatusFilter")?.addEventListener("change", (event) => {
     state.leadMonitorStatusFilter = event.target.value;
+    state.leadStats = null;
+    refreshLeadStatsForCurrentView();
+    renderApp();
+  });
+  document.getElementById("leadMonitorDateInput")?.addEventListener("change", (event) => {
+    state.leadMonitorDate = event.target.value;
+    state.leadStats = null;
+    refreshLeadStatsForCurrentView();
+    renderApp();
+  });
+  document.getElementById("leadMonitorWeekInput")?.addEventListener("change", (event) => {
+    state.leadMonitorWeek = event.target.value;
+    state.leadStats = null;
+    refreshLeadStatsForCurrentView();
     renderApp();
   });
   document.getElementById("salesFollowupIntentionFilter")?.addEventListener("change", (event) => {
@@ -700,6 +734,10 @@ function bindViewEvents() {
   document.querySelectorAll(".js-sales-process-select").forEach((el) => el.addEventListener("change", () => updateLeadBoardState(el.dataset.id, { processStatus: el.value || "not_contacted" })));
   document.querySelectorAll(".js-sales-process-toggle").forEach((el) => el.addEventListener("change", () => updateLeadBoardState(el.dataset.id, { processStatus: el.checked ? "applied" : "not_contacted" })));
   document.querySelectorAll(".js-sales-add-toggle").forEach((el) => el.addEventListener("change", () => updateLeadBoardState(el.dataset.id, { addStatus: el.checked ? "已添加" : "未添加" })));
+  document.querySelectorAll(".js-lead-intention-level").forEach((el) => el.addEventListener("change", () => updateLeadBoardState(el.dataset.id, { intentionLevel: el.value || "pending" })));
+  document.querySelectorAll(".js-lead-process-status").forEach((el) => el.addEventListener("change", () => updateLeadBoardState(el.dataset.id, { processStatus: el.value || "not_contacted" })));
+  document.querySelectorAll(".js-lead-next-follow").forEach((el) => el.addEventListener("change", () => updateLeadBoardState(el.dataset.id, { nextFollowTime: el.value || null })));
+  document.querySelectorAll(".js-view-follow-timeline").forEach((el) => el.addEventListener("click", () => showLeadFollowTimeline(el.dataset.id)));
   document.querySelectorAll(".js-lead-sales-assign").forEach((el) => el.addEventListener("change", () => {
     const selected = el.options[el.selectedIndex];
     updateLeadBoardState(el.dataset.id, {
@@ -754,6 +792,15 @@ function bindViewEvents() {
       renderApp();
     });
   });
+  if (typeof bindLeadDraftEvents === "function") {
+    bindLeadDraftEvents();
+  }
+  document.getElementById("passiveSearchBtn")?.addEventListener("click", searchPassiveCandidates);
+  document.querySelectorAll(".js-passive-bind").forEach((el) =>
+    el.addEventListener("click", () => bindPassiveLead(el.dataset.id))
+  );
+  document.getElementById("passiveCreateBtn")?.addEventListener("click", openPassiveCreateDialog);
+  document.getElementById("passiveCreateBtn2")?.addEventListener("click", openPassiveCreateDialog);
 }
 
 function bindDelegatedEvents() {
