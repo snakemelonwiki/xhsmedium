@@ -34,7 +34,7 @@ export class Lead {
   @Column({ length: 128, nullable: true })
   ip: string | null;
 
-  @Column({ length: 32, default: '新客资' })
+  @Column({ length: 32, default: 'new' })
   status: string;
 
   @Column({ name: 'deal_amount', type: 'decimal', precision: 12, scale: 2, nullable: true })
@@ -64,7 +64,7 @@ export class Lead {
   @Column({ name: 'process_status', length: 32, default: 'not_contacted' })
   processStatus: string;
 
-  @Column({ name: 'add_status', length: 32, default: '未添加' })
+  @Column({ name: 'add_status', length: 32, default: 'not_added' })
   addStatus: string;
 
   @Column({ length: 32, nullable: true })

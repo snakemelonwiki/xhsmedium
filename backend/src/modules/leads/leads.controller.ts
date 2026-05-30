@@ -8,9 +8,29 @@ export class LeadsController {
   constructor(private readonly leadsService: LeadsService) {}
 
   @Get()
-  async findAll(@Req() req: Request, @Res() res: Response, @Query('scope') scope?: string) {
+  async findAll(
+    @Req() req: Request,
+    @Res() res: Response,
+    @Query('scope') scope?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ) {
     const session = (req as any).session;
-    if (session?.role === 'staff' && session?.employeeId && scope !== 'all') {
+    // §9 / AC-10.2：传了 limit 或 offset 任一即视为分页请求，返回 { items, total, limit, offset }。
+    //   不传任何分页参数 → 兼容旧前端：返回纯数组。
+    const wantsPaging = limit !== undefined || offset !== undefined;
+    const restrictToOwn = session?.role === 'staff' && session?.employeeId && scope !== 'all';
+
+    if (wantsPaging) {
+      const limitNum = Number(limit) || 20;
+      const offsetNum = Number(offset) || 0;
+      const result = restrictToOwn
+        ? await this.leadsService.findByEmployeePaged(session.employeeId, limitNum, offsetNum)
+        : await this.leadsService.findAllPaged(limitNum, offsetNum);
+      return res.json(result);
+    }
+
+    if (restrictToOwn) {
       const rows = await this.leadsService.findByEmployee(session.employeeId);
       return res.json(rows);
     }
@@ -140,7 +160,7 @@ export class LeadsController {
       budget: body.budget,
       majorContent: body.majorContent,
       ip: body.ip,
-      status: body.status || '新客资',
+      status: body.status || 'new',
       dealAmount: body.dealAmount,
       note: body.note,
       captureImageUrl: body.captureImageUrl,
@@ -150,7 +170,7 @@ export class LeadsController {
       assignedSalesUserId: body.assignedSalesUserId || null,
       assignedSalesUserName: body.assignedSalesUserName || '',
       processStatus: body.processStatus || 'not_contacted',
-      addStatus: body.addStatus || '未添加',
+      addStatus: body.addStatus || 'not_added',
       intention: body.intention || null,
     });
     return res.json({ ok: true });

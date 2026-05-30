@@ -68,6 +68,38 @@ export class LeadsService {
     return rows.map(this.mapLead);
   }
 
+  // ---- §9 / AC-10.2 客资列表分页 ----
+  // 控制器拿到 limit/offset 时改走 *Paged 版本，统一返回 { items, total, limit, offset }；
+  // 无分页参数时仍走上面两个老接口（直接返回数组），保持前端 `await api('/api/leads')` 的兼容。
+  async findAllPaged(limit: number, offset: number): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
+    const safeLimit = this.clampLimit(limit);
+    const safeOffset = Math.max(Number(offset) || 0, 0);
+    const [rows, total] = await this.leadRepository.findAndCount({
+      order: { createdAt: 'DESC' },
+      take: safeLimit,
+      skip: safeOffset,
+    });
+    return { items: rows.map(this.mapLead), total, limit: safeLimit, offset: safeOffset };
+  }
+
+  async findByEmployeePaged(employeeId: string, limit: number, offset: number): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
+    const safeLimit = this.clampLimit(limit);
+    const safeOffset = Math.max(Number(offset) || 0, 0);
+    const [rows, total] = await this.leadRepository.findAndCount({
+      where: { employeeId },
+      order: { createdAt: 'DESC' },
+      take: safeLimit,
+      skip: safeOffset,
+    });
+    return { items: rows.map(this.mapLead), total, limit: safeLimit, offset: safeOffset };
+  }
+
+  private clampLimit(limit: number): number {
+    const n = Number(limit) || 20;
+    if (n <= 0) return 20;
+    return Math.min(n, 200);
+  }
+
   async create(dto: Partial<Lead>): Promise<void> {
     const leadId = (dto as any).id || makeId();
     const lead = this.leadRepository.create({
@@ -76,7 +108,7 @@ export class LeadsService {
       nickname: dto.nickname || '',
       salesUserName: dto.salesUserName || '',
       processStatus: dto.processStatus || 'not_contacted',
-      addStatus: dto.addStatus || '未添加',
+      addStatus: dto.addStatus || 'not_added',
     } as any);
     await this.leadRepository.save(lead);
 
@@ -107,7 +139,7 @@ export class LeadsService {
     if (dto.assignedSalesUserId !== undefined) next.assignedSalesUserId = dto.assignedSalesUserId || null;
     if (dto.assignedSalesUserName !== undefined) next.assignedSalesUserName = dto.assignedSalesUserName || '';
     if (dto.processStatus !== undefined) next.processStatus = dto.processStatus || 'not_contacted';
-    if (dto.addStatus !== undefined) next.addStatus = dto.addStatus || '未添加';
+    if (dto.addStatus !== undefined) next.addStatus = dto.addStatus || 'not_added';
     if (dto.intention !== undefined) next.intention = dto.intention || null;
     if (dto.intentionLevel !== undefined) next.intentionLevel = dto.intentionLevel || 'pending';
     if (dto.nextFollowTime !== undefined) {
@@ -123,7 +155,7 @@ export class LeadsService {
       // 因此用 raw query 由 employees.id 反查 users.id 兜底（找不到就跳过）。
       const sourceUserId = await this.findUserIdByEmployeeId(current.employeeId);
       if (sourceUserId) {
-        if (dto.addStatus === '已添加') {
+        if (dto.addStatus === 'added') {
           await this.notificationsService.create({
             receiverIds: [sourceUserId],
             senderId: actorUserId || null,
@@ -134,7 +166,7 @@ export class LeadsService {
             relatedId: id,
             relatedType: 'lead',
           });
-        } else if (dto.addStatus === '客户未通过') {
+        } else if (dto.addStatus === 'rejected') {
           await this.notificationsService.create({
             receiverIds: [sourceUserId],
             senderId: actorUserId || null,
@@ -303,7 +335,7 @@ export class LeadsService {
 
     const patch: Partial<Lead> = {
       addMethod: 'passive',
-      addStatus: '已添加',
+      addStatus: 'added',
       assignedSalesUserId: actorUserId || null,
       assignedSalesUserName: actorUserName || '',
     };
@@ -350,9 +382,9 @@ export class LeadsService {
       nickname: (nickname || '').trim(),
       platform: (platform || 'unknown').trim() || 'unknown',
       addMethod: 'passive',
-      addStatus: '已添加',
+      addStatus: 'added',
       sourceUnknown: 1,
-      status: '已添加通过',
+      status: 'contact_added',
       assignedSalesUserId: actorUserId || null,
       assignedSalesUserName: actorUserName || '',
       processStatus: 'chatting',
@@ -455,10 +487,15 @@ export class LeadsService {
 
     const { from, to } = this.resolvePeriod(opts.period, opts.from, opts.to);
 
-    const qb = this.leadRepository.createQueryBuilder('l');
-    if (where.employeeId) qb.andWhere('l.employee_id = :eid', { eid: where.employeeId });
-    if (from) qb.andWhere('l.created_at >= :from', { from });
-    if (to) qb.andWhere('l.created_at < :to', { to });
+    // qbBase: 只受 scope（employee_id）+ period（created_at）约束 → 用于 total（"本月/本周/今天 全量"）
+    // qb: 在 qbBase 基础上叠加账号/平台/作品类型/status/addStatus 等列表筛选维度 → 用于 filteredTotal
+    // §6 / AC-3.1 vs AC-3.2: total 与 filteredTotal 必须可拆开，分别给"汇总卡片"和"筛选条数"
+    const qbBase = this.leadRepository.createQueryBuilder('l');
+    if (where.employeeId) qbBase.andWhere('l.employee_id = :eid', { eid: where.employeeId });
+    if (from) qbBase.andWhere('l.created_at >= :from', { from });
+    if (to) qbBase.andWhere('l.created_at < :to', { to });
+
+    const qb = qbBase.clone();
     if (opts.accountId) qb.andWhere('l.account_id = :accountId', { accountId: opts.accountId });
     if (opts.platform) qb.andWhere('l.platform = :platform', { platform: opts.platform });
     if (opts.status) qb.andWhere('l.status = :status', { status: opts.status });
@@ -471,7 +508,8 @@ export class LeadsService {
       );
     }
 
-    const total = await qb.getCount();
+    const total = await qbBase.getCount();
+    const filteredTotal = await qb.getCount();
 
     const byStatus = await qb.clone()
       .select('l.status', 'k')
@@ -508,7 +546,7 @@ export class LeadsService {
 
     return {
       total,
-      filteredTotal: total,
+      filteredTotal,
       assigned,
       pending,
       byStatus: this.toCountMap(byStatus),
