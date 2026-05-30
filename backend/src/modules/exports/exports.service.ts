@@ -6,7 +6,7 @@ import { Lead } from '../../entities/lead.entity';
 import { Order } from '../../entities/order.entity';
 import { CollaborationTask } from '../../entities/collaboration-task.entity';
 import { makeId } from '../../shared/utils/id-generator';
-import { StorageService } from './storage.service';
+import { StorageService } from '../../shared/storage/storage.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NOTIFICATION_TYPES } from '../../shared/notifications';
 
@@ -186,7 +186,7 @@ export class ExportsService {
         csv = '未知导出类型\n';
     }
 
-    const fileUrl = await this.storage.saveCsv(exportId, csv);
+    const fileUrl = await this.storage.putCsv('exports', `${exportId}.csv`, csv);
     await this.exportRepo.update(exportId, {
       status: 'completed',
       fileUrl,

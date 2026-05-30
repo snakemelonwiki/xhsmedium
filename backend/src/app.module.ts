@@ -35,6 +35,7 @@ import { ToolsModule } from './modules/tools/tools.module';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { ExportsModule } from './modules/exports/exports.module';
 import { OperationLogsModule } from './modules/operation-logs/operation-logs.module';
+import { StorageModule } from './shared/storage/storage.service';
 
 @Module({
   imports: [
@@ -83,6 +84,7 @@ import { OperationLogsModule } from './modules/operation-logs/operation-logs.mod
     AnalyticsModule,
     ExportsModule,
     OperationLogsModule,
+    StorageModule,
   ],
 })
 export class AppModule {}

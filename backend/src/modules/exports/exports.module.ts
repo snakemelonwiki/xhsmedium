@@ -6,7 +6,6 @@ import { Order } from '../../entities/order.entity';
 import { CollaborationTask } from '../../entities/collaboration-task.entity';
 import { ExportsController } from './exports.controller';
 import { ExportsService } from './exports.service';
-import { StorageService } from './storage.service';
 import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
@@ -15,7 +14,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
     NotificationsModule,
   ],
   controllers: [ExportsController],
-  providers: [ExportsService, StorageService],
+  providers: [ExportsService],
   exports: [ExportsService],
 })
 export class ExportsModule {}

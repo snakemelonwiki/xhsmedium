@@ -1,13 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import * as fs from 'fs';
-import * as path from 'path';
 import { ImportTask } from '../../entities/import-task.entity';
 import { Lead } from '../../entities/lead.entity';
 import { makeId } from '../../shared/utils/id-generator';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NOTIFICATION_TYPES } from '../../shared/notifications';
+import { StorageService } from '../../shared/storage/storage.service';
 
 export interface ImportRowError {
   row: number;
@@ -41,6 +40,7 @@ export class ImportsService {
     @InjectRepository(Lead)
     private readonly leadRepository: Repository<Lead>,
     private readonly notificationsService: NotificationsService,
+    private readonly storage: StorageService,
   ) {}
 
   /**
@@ -222,11 +222,10 @@ export class ImportsService {
       }
     }
 
-    // §8 错误文件下载：fail > 0 时写一份 CSV 到 uploads/imports/，回填 errorFileUrl。
-    // 保持 /uploads 由 main.ts 的 expressStatic 静态托管，前端直接 GET 即可下载。
+    // §8 错误文件下载：fail > 0 时写一份 CSV 到对象存储 (T-22 走 StorageService)。
     let errorFileUrl: string | null = null;
     if (fail > 0 && errors.length > 0) {
-      errorFileUrl = this.writeErrorCsv(task.id, errors);
+      errorFileUrl = await this.writeErrorCsv(task.id, errors);
     }
 
     await this.finishTask(task.id, {
@@ -278,22 +277,12 @@ export class ImportsService {
   }
 
   /**
-   * §8 错误文件生成：写 CSV 到 <repo>/uploads/imports/<importTaskId>-errors.csv。
-   * 列：row, raw_line, reason。前置加 BOM 让 Excel 直接识别 UTF-8。
-   * 返回前端可访问的相对 URL（/uploads/imports/...）；写失败则返回 null（不影响主流程）。
+   * §8 错误文件生成：通过 StorageService 写到 imports bucket。
+   * 列：row, raw_line, reason。BOM + CRLF 让 Excel 不乱码。
+   * 返回前端可访问的相对 URL（/uploads/imports/...）；写失败则返回 null。
    */
-  private writeErrorCsv(taskId: string, errors: ImportRowError[]): string | null {
+  private async writeErrorCsv(taskId: string, errors: ImportRowError[]): Promise<string | null> {
     try {
-      // main.ts 走 path.join(__dirname, '..', '..', 'uploads')，从 dist/ 上溯两级。
-      // 这里在 dist/modules/imports/ 下，上溯四级到仓库根，再进 uploads/imports/。
-      const uploadsDir = path.join(__dirname, '..', '..', '..', '..', 'uploads');
-      const importsDir = path.join(uploadsDir, 'imports');
-      if (!fs.existsSync(importsDir)) {
-        fs.mkdirSync(importsDir, { recursive: true });
-      }
-      const filename = `${taskId}-errors.csv`;
-      const filePath = path.join(importsDir, filename);
-
       const escapeCsv = (v: string): string => {
         const s = v == null ? '' : String(v);
         if (s.includes('"') || s.includes(',') || s.includes('\n') || s.includes('\r')) {
@@ -301,14 +290,12 @@ export class ImportsService {
         }
         return s;
       };
-
       const lines: string[] = ['row,raw_line,reason'];
       for (const e of errors) {
         lines.push([escapeCsv(String(e.row)), escapeCsv(e.raw || ''), escapeCsv(e.reason || '')].join(','));
       }
-      // UTF-8 BOM 让 Excel/WPS 不会乱码
-      fs.writeFileSync(filePath, '﻿' + lines.join('\r\n'), 'utf8');
-      return `/uploads/imports/${filename}`;
+      const csv = lines.join('\r\n');
+      return await this.storage.putCsv('imports', `${taskId}-errors.csv`, csv);
     } catch (err) {
       // eslint-disable-next-line no-console
       console.warn('[imports] writeErrorCsv failed:', (err as any)?.message || err);
