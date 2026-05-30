@@ -94,6 +94,21 @@ export class LeadsService {
     return { items: rows.map(this.mapLead), total, limit: safeLimit, offset: safeOffset };
   }
 
+  async findTomorrowFollowups(salesUserId: string): Promise<any[]> {
+    if (!salesUserId) return [];
+    const now = new Date();
+    const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+    const dayAfterTomorrow = new Date(todayEnd.getTime() + 86400000);
+    const rows = await this.leadRepository
+      .createQueryBuilder('l')
+      .where('l.next_follow_time >= :from', { from: todayEnd })
+      .andWhere('l.next_follow_time < :to', { to: dayAfterTomorrow })
+      .andWhere('l.assigned_sales_user_id = :uid', { uid: salesUserId })
+      .orderBy('l.next_follow_time', 'ASC')
+      .getMany();
+    return rows.map(this.mapLead);
+  }
+
   private clampLimit(limit: number): number {
     const n = Number(limit) || 20;
     if (n <= 0) return 20;

@@ -21,6 +21,13 @@ const UPLOAD_DIR = path.join(__dirname, "uploads");
 
 app.use("/api", proxy(BACKEND_URL, {
   proxyReqPathResolver: (req) => `/api${req.url}`,
+  proxyReqOptDecorator: (proxyReqOpts, srcReq) => {
+    // 把原始端口透传给后端，否则 backend 看到的 socket.localPort 永远是 8089
+    // 后端 auth.service.login() 据此判断 owner 端口
+    proxyReqOpts.headers = proxyReqOpts.headers || {};
+    proxyReqOpts.headers["x-origin-port"] = String(srcReq.socket.localPort || "");
+    return proxyReqOpts;
+  },
   proxyErrorHandler: (err, res, next) => {
     if (err && err.code === "ECONNREFUSED") {
       return res.status(503).json({ message: "后端服务不可用，请稍后再试" });

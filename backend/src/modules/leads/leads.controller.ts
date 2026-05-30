@@ -83,6 +83,17 @@ export class LeadsController {
     return res.send(header + body);
   }
 
+  @Get('tomorrow-followups')
+  async tomorrowFollowups(
+    @Req() req: Request, @Res() res: Response,
+    @Query('actorUserId') actorUserId?: string,
+  ) {
+    const session = (req as any).session;
+    const salesUserId = session?.userId || session?.id || actorUserId || '';
+    const rows = await this.leadsService.findTomorrowFollowups(salesUserId);
+    return res.json(rows);
+  }
+
   // ---- 被动添加客资识别（passive） §4.3 ----
   // 注意：这一组路由必须在所有 `:id` 路由之前注册，否则 NestJS 会把
   // 字面量 'passive' 当作 :id 参数命中错误的处理函数。

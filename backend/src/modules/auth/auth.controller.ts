@@ -9,7 +9,10 @@ export class AuthController {
   @Post('login')
   async login(@Req() req: Request, @Res() res: Response) {
     const { username, password } = req.body;
-    const requestPort = Number((req.socket as any)?.localPort || 3000);
+    // legacy proxy 在 server.js 里通过 X-Origin-Port header 透传原始端口
+    // （否则后端 socket.localPort 永远是 NestJS 监听端口 8089）
+    const originPort = Number(req.headers['x-origin-port']) || 0;
+    const requestPort = originPort || Number((req.socket as any)?.localPort || 3000);
     try {
       const result = await this.authService.login(username, password, requestPort);
       return res.json(result);
