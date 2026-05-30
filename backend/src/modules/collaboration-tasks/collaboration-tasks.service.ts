@@ -9,6 +9,7 @@ import {
 import { Lead } from '../../entities/lead.entity';
 import { User } from '../../entities/user.entity';
 import { makeId } from '../../shared/utils/id-generator';
+import { sanitizeText, hasBrokenEncoding } from '../../shared/sanitize';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NOTIFICATION_TYPES } from '../../shared/notifications';
 
@@ -51,6 +52,11 @@ export class CollaborationTasksService {
     if (!dto.type || !ALLOWED_TYPES.includes(dto.type as CollaborationTaskType)) {
       throw new Error('invalid type');
     }
+    // 防御编码损坏（如客户端用错编码发送）
+    if (hasBrokenEncoding(dto.reason)) {
+      throw new Error('reason contains invalid characters; please ensure UTF-8 encoding');
+    }
+    const cleanReason = sanitizeText(dto.reason);
 
     const entity = this.repo.create({
       id: makeId(),
@@ -58,7 +64,7 @@ export class CollaborationTasksService {
       requesterId: dto.requesterId,
       handlerId: null,
       type: dto.type as CollaborationTaskType,
-      reason: dto.reason || null,
+      reason: cleanReason,
       status: 'pending',
       handledNote: null,
       requestedAt: new Date(),
@@ -143,9 +149,13 @@ export class CollaborationTasksService {
     if (task.status !== 'handling' && task.status !== 'pending') {
       throw new Error(`cannot handle task in status ${task.status}`);
     }
+    if (hasBrokenEncoding(handledNote)) {
+      throw new Error('handledNote contains invalid characters; please ensure UTF-8 encoding');
+    }
+    const cleanNote = sanitizeText(handledNote);
     await this.repo.update(id, {
       status: 'handled',
-      handledNote: handledNote || null,
+      handledNote: cleanNote,
       handledAt: new Date(),
     });
     const updated = await this.repo.findOne({ where: { id } });
@@ -158,8 +168,8 @@ export class CollaborationTasksService {
         portType: 'sales',
         typeCode: NOTIFICATION_TYPES.COLLAB_HANDLED,
         title: '协同任务已处理',
-        content: handledNote
-          ? `您发起的协同任务已处理: ${handledNote}`
+        content: cleanNote
+          ? `您发起的协同任务已处理: ${cleanNote}`
           : '您发起的协同任务已处理',
         relatedId: id,
         relatedType: 'collaboration_task',
