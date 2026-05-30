@@ -79,7 +79,7 @@ function renderSalesLeads() {
     if (state.leadMonitorStatusFilter && item.status !== state.leadMonitorStatusFilter) return false;
     return true;
   });
-  const pendingUnreceivedCount = rows.filter((item) => (item.processStatus || "未接") !== "已接").length;
+  const pendingUnreceivedCount = rows.filter((item) => !isProcessStatusActive(item.processStatus)).length;
   const pendingUnaddedCount = rows.filter((item) => (item.addStatus || "未添加") !== "已添加").length;
   return `
     <div class="page-header page-header-rich">
@@ -132,9 +132,9 @@ function renderSalesLeads() {
     </div>
     <section class="grid-4 rankings-stats-grid">
       ${stat("待处理客资", rows.length)}
-      ${stat("未接", pendingUnreceivedCount)}
+      ${stat("未联系", pendingUnreceivedCount)}
       ${stat("未添加", pendingUnaddedCount)}
-      ${stat("已接待添加", Math.max(rows.length - pendingUnreceivedCount, 0))}
+      ${stat("已联系待添加", Math.max(rows.length - pendingUnreceivedCount, 0))}
     </section>
     ${renderViewContext()}
     <div class="leads-monitor-grid">
@@ -233,7 +233,7 @@ function renderSalesTomorrowFollowupPanel(rows) {
                 <tr>
                   <td>${customerProfileLabel}</td>
                   <td>${item.contactInfo || "-"}</td>
-                  <td>${item.intention || "-"}</td>
+                  <td>${getIntentionLevelLabel(item.intention) || "-"}</td>
                   <td>${item.accountName || "-"}</td>
                   <td><button class="ghost js-complete-tomorrow-followup" data-id="${item.id}" type="button">完成</button></td>
                 </tr>
@@ -276,8 +276,8 @@ function renderSalesFollowupCard(item) {
               <input class="js-toggle-tomorrow-followup" data-id="${item.id}" type="checkbox" ${scheduledForTomorrow ? "checked" : ""} />
               <span>明天跟进</span>
             </label>
-            <span class="lead-status-chip ${getLeadIntentionChipClass(item.intention || "-")}">客资意向 · ${item.intention || "-"}</span>
-            <span class="lead-status-chip ${item.processStatus === "已接" ? "is-good" : "is-warn"}">处理状态 · ${item.processStatus || "未接"}</span>
+            <span class="lead-status-chip ${getLeadIntentionChipClass(item.intention || "-")}">客资意向 · ${getIntentionLevelLabel(item.intention) || "-"}</span>
+            <span class="lead-status-chip ${isProcessStatusActive(item.processStatus) ? "is-good" : "is-warn"}">处理状态 · ${getProcessStatusLabel(item.processStatus)}</span>
             <span class="lead-status-chip ${item.addStatus === "已添加" ? "is-good" : "is-danger"}">是否添加 · ${item.addStatus === "已添加" ? "添加" : "未添加"}</span>
           </div>
         </div>
@@ -383,10 +383,13 @@ function renderStaffLeadsBoard() {
 function renderLeadMonitorCard(item) {
   const salesUsers = (state.users || []).filter((user) => user.role === "sales" && user.status !== "disabled");
   const assignedSalesName = item.assignedSalesUserName || item.salesUserName || "-";
-  const processStatus = item.processStatus || "未接";
+  const processStatus = item.processStatus || "not_contacted";
+  const processStatusLabel = getProcessStatusLabel(processStatus);
+  const processActive = isProcessStatusActive(processStatus);
   const addStatus = item.addStatus || "未添加";
   const addStatusLabel = addStatus === "已添加" ? "添加" : "未添加";
   const intention = item.intention || "-";
+  const intentionLabel = getIntentionLevelLabel(item.intention) || "-";
   const sourceTitle = item.sourcePostTitle || "未关联作品";
   const canOpenSourcePost = Boolean(item.sourcePostUrl);
   const isSales = state.user?.role === "sales";
@@ -395,7 +398,7 @@ function renderLeadMonitorCard(item) {
   const isEditingFeedback = isSales && state.editingLeadId === item.id;
   const cardToneClass = addStatus === "已添加"
     ? "lead-monitor-card-good"
-    : processStatus === "已接"
+    : processActive
       ? "lead-monitor-card-info"
       : "lead-monitor-card-warn";
   return `
@@ -409,9 +412,9 @@ function renderLeadMonitorCard(item) {
           <div class="lead-monitor-head-actions">
             ${isSales
               ? `
-                <label class="lead-check-chip ${processStatus === "已接" ? "is-good" : ""}">
-                  <input class="js-sales-process-toggle" data-id="${item.id}" type="checkbox" ${processStatus === "已接" ? "checked" : ""} />
-                  <span>处理状态：已接</span>
+                <label class="lead-check-chip ${processActive ? "is-good" : ""}">
+                  <input class="js-sales-process-toggle" data-id="${item.id}" type="checkbox" ${processActive ? "checked" : ""} />
+                  <span>处理状态：${processStatusLabel}</span>
                 </label>
                 <label class="lead-check-chip ${addStatus === "已添加" ? "is-good" : ""}">
                   <input class="js-sales-add-toggle" data-id="${item.id}" type="checkbox" ${addStatus === "已添加" ? "checked" : ""} />
@@ -427,9 +430,9 @@ function renderLeadMonitorCard(item) {
                   </select>
                 </label>
               `
-              : `<span class="lead-status-chip ${processStatus === "已接" ? "is-good" : "is-warn"}">处理状态 · ${processStatus}</span>`}
+              : `<span class="lead-status-chip ${processActive ? "is-good" : "is-warn"}">处理状态 · ${processStatusLabel}</span>`}
             ${isSales ? "" : `<span class="lead-status-chip ${addStatus === "已添加" ? "is-good" : "is-danger"}">是否添加 · ${addStatusLabel}</span>`}
-            ${isSales ? "" : `<span class="lead-status-chip ${getLeadIntentionChipClass(intention)}">客资意向 · ${intention}</span>`}
+            ${isSales ? "" : `<span class="lead-status-chip ${getLeadIntentionChipClass(intention)}">客资意向 · ${intentionLabel}</span>`}
           </div>
         </div>
         <div class="lead-board-grid lead-board-grid-compact">
@@ -778,7 +781,7 @@ async function updateLeadBoardState(id, patch) {
   const payload = {
     assignedSalesUserId: patch.assignedSalesUserId ?? current.assignedSalesUserId ?? "",
     assignedSalesUserName: patch.assignedSalesUserName ?? current.assignedSalesUserName ?? (state.user?.role === "sales" ? (state.user.employeeName || state.user.username || "") : ""),
-    processStatus: patch.processStatus ?? current.processStatus ?? "未接",
+    processStatus: patch.processStatus ?? current.processStatus ?? "not_contacted",
     addStatus: patch.addStatus ?? current.addStatus ?? "未添加",
     intention: patch.intention ?? current.intention ?? ""
   };

@@ -61,7 +61,7 @@ export class Lead {
   @Column({ name: 'assigned_sales_user_name', length: 64, nullable: true })
   assignedSalesUserName: string | null;
 
-  @Column({ name: 'process_status', length: 32, default: '未接' })
+  @Column({ name: 'process_status', length: 32, default: 'not_contacted' })
   processStatus: string;
 
   @Column({ name: 'add_status', length: 32, default: '未添加' })

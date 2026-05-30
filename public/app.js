@@ -694,11 +694,11 @@ function bindViewEvents() {
   }));
   document.querySelectorAll(".js-delete-lead").forEach((el) => el.addEventListener("click", () => deleteLead(el.dataset.id)));
   document.querySelectorAll(".js-remind-lead").forEach((el) => el.addEventListener("click", () => remindLead(el.dataset.id, el.dataset.target)));
-  document.querySelectorAll(".js-update-lead-process").forEach((el) => el.addEventListener("click", () => updateLeadBoardState(el.dataset.id, { processStatus: el.dataset.status || "未接" })));
+  document.querySelectorAll(".js-update-lead-process").forEach((el) => el.addEventListener("click", () => updateLeadBoardState(el.dataset.id, { processStatus: el.dataset.status || "not_contacted" })));
   document.querySelectorAll(".js-update-lead-add").forEach((el) => el.addEventListener("click", () => updateLeadBoardState(el.dataset.id, { addStatus: el.dataset.status || "未添加" })));
   document.querySelectorAll(".js-lead-intention").forEach((el) => el.addEventListener("change", () => updateLeadBoardState(el.dataset.id, { intention: el.value || "" })));
-  document.querySelectorAll(".js-sales-process-select").forEach((el) => el.addEventListener("change", () => updateLeadBoardState(el.dataset.id, { processStatus: el.value || "未接" })));
-  document.querySelectorAll(".js-sales-process-toggle").forEach((el) => el.addEventListener("change", () => updateLeadBoardState(el.dataset.id, { processStatus: el.checked ? "已接" : "未接" })));
+  document.querySelectorAll(".js-sales-process-select").forEach((el) => el.addEventListener("change", () => updateLeadBoardState(el.dataset.id, { processStatus: el.value || "not_contacted" })));
+  document.querySelectorAll(".js-sales-process-toggle").forEach((el) => el.addEventListener("change", () => updateLeadBoardState(el.dataset.id, { processStatus: el.checked ? "applied" : "not_contacted" })));
   document.querySelectorAll(".js-sales-add-toggle").forEach((el) => el.addEventListener("change", () => updateLeadBoardState(el.dataset.id, { addStatus: el.checked ? "已添加" : "未添加" })));
   document.querySelectorAll(".js-lead-sales-assign").forEach((el) => el.addEventListener("change", () => {
     const selected = el.options[el.selectedIndex];

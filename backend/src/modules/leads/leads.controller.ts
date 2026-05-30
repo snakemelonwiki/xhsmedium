@@ -54,7 +54,7 @@ export class LeadsController {
       salesUserName: body.salesUserName || '',
       assignedSalesUserId: body.assignedSalesUserId || null,
       assignedSalesUserName: body.assignedSalesUserName || '',
-      processStatus: body.processStatus || '未接',
+      processStatus: body.processStatus || 'not_contacted',
       addStatus: body.addStatus || '未添加',
       intention: body.intention || null,
     });

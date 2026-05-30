@@ -30,7 +30,7 @@ export class LeadsService {
       id: makeId(),
       nickname: dto.nickname || '',
       salesUserName: dto.salesUserName || '',
-      processStatus: dto.processStatus || '未接',
+      processStatus: dto.processStatus || 'not_contacted',
       addStatus: dto.addStatus || '未添加',
     } as any);
     await this.leadRepository.save(lead);
@@ -50,7 +50,7 @@ export class LeadsService {
     await this.leadRepository.update(id, {
       assignedSalesUserId: dto.assignedSalesUserId || null,
       assignedSalesUserName: dto.assignedSalesUserName || '',
-      processStatus: dto.processStatus || '未接',
+      processStatus: dto.processStatus || 'not_contacted',
       addStatus: dto.addStatus || '未添加',
       intention: dto.intention || null,
     });
