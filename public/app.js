@@ -4,6 +4,9 @@
 
 // ===== L594-L818 renderApp / renderFlash / renderNotificationPanel / renderCurrentView / renderImageViewer =====
 function renderApp() {
+  // T-22.5 paginationjs 实例清理：renderApp 即将全量 innerHTML 覆盖，旧分页器
+  // jQuery 内部缓存需先释放，否则 destroy 会失败 + 内存泄漏
+  if (typeof destroyAllPaginators === "function") destroyAllPaginators();
   const isOwner = state.user.role === "owner";
   const isAdmin = state.user.role === "admin";
   const isSales = state.user.role === "sales";

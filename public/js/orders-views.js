@@ -504,88 +504,12 @@ function renderSalesOrderDetail() {
 // ===========================================================================
 // 任务 3：主管端订单看板
 // ===========================================================================
-async function loadAdminOrders() {
-  state.adminOrdersLoading = true;
-  const params = new URLSearchParams();
-  params.set("actorRole", "admin");
-  params.set("scope", "all");
-  if (state.user?.id) params.set("actorUserId", state.user.id);
-  const f = state.adminOrdersFilter || {};
-  if (f.orderStatus) params.set("status", f.orderStatus);
-  try {
-    const rows = await api(`/api/orders?${params.toString()}`);
-    state.adminOrders = Array.isArray(rows) ? rows : [];
-  } catch (err) {
-    state.adminOrders = [];
-  } finally {
-    state.adminOrdersLoading = false;
-    renderApp();
-  }
-}
-
-function filterAdminOrdersClientSide(rows) {
-  const f = state.adminOrdersFilter || {};
-  return rows.filter((o) => {
-    if (f.salesUserId && o.salesUserId !== f.salesUserId) return false;
-    if (f.academicUserId && o.academicUserId !== f.academicUserId) return false;
-    if (f.paidStatus && o.paidStatus !== f.paidStatus) return false;
-    if (f.from && o.createdAt && String(o.createdAt) < f.from) return false;
-    if (f.to && o.createdAt && String(o.createdAt) > f.to) return false;
-    return true;
-  });
-}
-
+// 注：列表数据走 paginationjs 分页器在 mount 后异步拉取，
+// 渲染时不预先加载全量。保留 state.adminOrdersFilter 给筛选交互用。
 function renderAdminOrders() {
-  if (state.adminOrders === null && !state.adminOrdersLoading) {
-    loadAdminOrders();
-  }
-  const all = Array.isArray(state.adminOrders) ? state.adminOrders : null;
   const f = state.adminOrdersFilter || {};
   const salesUsers = (state.users || []).filter((u) => u && u.role === "sales");
   const academicUsers = (state.users || []).filter((u) => u && u.role === "academic");
-
-  let tableBody;
-  let totalCount = 0;
-  let pagedRows = [];
-  if (all === null) {
-    tableBody = `<tr><td colspan="11"><div class="empty">加载中…</div></td></tr>`;
-  } else {
-    const filtered = filterAdminOrdersClientSide(all);
-    totalCount = filtered.length;
-    const pageSize = 20;
-    const page = Math.max(1, state.adminOrdersPage || 1);
-    const start = (page - 1) * pageSize;
-    pagedRows = filtered.slice(start, start + pageSize);
-    if (!filtered.length) {
-      tableBody = `<tr><td colspan="11"><div class="empty">暂无符合条件的订单。</div></td></tr>`;
-    } else {
-      tableBody = pagedRows.map((o) => {
-        const lead = findLeadByIdLite(o.leadId);
-        const leadCode = lead ? formatLeadCode(lead.leadCode) : (o.leadId || "-");
-        const customer = lead ? (lead.nickname || lead.contactInfo || "-") : "-";
-        const salesName = findOrderUserLabel(o.salesUserId);
-        const academicName = findOrderUserLabel(o.academicUserId);
-        return `
-          <tr class="js-admin-order-open" data-id="${escapeHtmlAttribute(o.id || "")}" style="cursor:pointer;">
-            <td>${shortOrderId(o.id)}</td>
-            <td>${leadCode}</td>
-            <td>${escapeHtml(customer)}</td>
-            <td>${escapeHtml(salesName)}</td>
-            <td>${escapeHtml(academicName)}</td>
-            <td>${escapeHtml(o.serviceType || "-")}</td>
-            <td>${formatOrderAmount(o.amount)}</td>
-            <td>${getPaidStatusLabel(o.paidStatus)}</td>
-            <td>${getOrderStatusLabel(o.orderStatus)}</td>
-            <td>${o.createdAt ? formatDate(o.createdAt) : "-"}</td>
-            <td><button class="ghost js-admin-order-open-btn" data-id="${escapeHtmlAttribute(o.id || "")}" type="button">详情</button></td>
-          </tr>
-        `;
-      }).join("");
-    }
-  }
-  const pageSize = 20;
-  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
-  const currentPage = Math.max(1, state.adminOrdersPage || 1);
 
   return `
     <div class="admin-orders-page">
@@ -595,7 +519,7 @@ function renderAdminOrders() {
           <p class="page-desc">汇总所有销售提交的成交订单，可按销售 / 教务 / 订单状态 / 付款状态 / 日期筛选。</p>
         </div>
         <div class="toolbar toolbar-end">
-          <span class="tag">共 ${totalCount} 条</span>
+          <span class="tag" id="adminOrdersTotalTag">共 - 条</span>
           <button id="exportOrdersBtn" type="button">导出 Excel</button>
         </div>
       </div>
@@ -640,19 +564,90 @@ function renderAdminOrders() {
                 <th>操作</th>
               </tr>
             </thead>
-            <tbody>${tableBody}</tbody>
+            <tbody id="adminOrdersTbody"><tr><td colspan="11"><div class="empty">加载中…</div></td></tr></tbody>
           </table>
         </div>
-        ${totalPages > 1 ? `
-          <div class="filters filters-toolbar" style="margin-top:12px;">
-            <button class="ghost js-admin-orders-prev" type="button" ${currentPage <= 1 ? "disabled" : ""}>上一页</button>
-            <span class="muted">第 ${currentPage} / ${totalPages} 页</span>
-            <button class="ghost js-admin-orders-next" type="button" ${currentPage >= totalPages ? "disabled" : ""}>下一页</button>
-          </div>
-        ` : ""}
+        <div id="adminOrdersPager" class="pag-container"></div>
       </div>
     </div>
   `;
+}
+
+// 渲染当前页 rows 到 tbody
+function renderAdminOrdersTableBody(rows) {
+  const tbody = document.getElementById("adminOrdersTbody");
+  if (!tbody) return;
+  if (!rows || !rows.length) {
+    tbody.innerHTML = `<tr><td colspan="11"><div class="empty">暂无符合条件的订单。</div></td></tr>`;
+    return;
+  }
+  tbody.innerHTML = rows.map((o) => {
+    const lead = findLeadByIdLite(o.leadId);
+    const leadCode = lead ? formatLeadCode(lead.leadCode) : (o.leadId || "-");
+    const customer = lead ? (lead.nickname || lead.contactInfo || "-") : "-";
+    const salesName = findOrderUserLabel(o.salesUserId);
+    const academicName = findOrderUserLabel(o.academicUserId);
+    return `
+      <tr class="js-admin-order-open" data-id="${escapeHtmlAttribute(o.id || "")}" style="cursor:pointer;">
+        <td>${shortOrderId(o.id)}</td>
+        <td>${leadCode}</td>
+        <td>${escapeHtml(customer)}</td>
+        <td>${escapeHtml(salesName)}</td>
+        <td>${escapeHtml(academicName)}</td>
+        <td>${escapeHtml(o.serviceType || "-")}</td>
+        <td>${formatOrderAmount(o.amount)}</td>
+        <td>${getPaidStatusLabel(o.paidStatus)}</td>
+        <td>${getOrderStatusLabel(o.orderStatus)}</td>
+        <td>${o.createdAt ? formatDate(o.createdAt) : "-"}</td>
+        <td><button class="ghost js-admin-order-open-btn" data-id="${escapeHtmlAttribute(o.id || "")}" type="button">详情</button></td>
+      </tr>
+    `;
+  }).join("");
+  // 重新绑定点击（列表 innerHTML 重写后旧绑定丢失）
+  document.querySelectorAll(".js-admin-order-open").forEach((el) => el.addEventListener("click", (e) => {
+    if (e.target.closest("button")) return;
+    const id = el.dataset.id;
+    state.adminOrderDetailId = id;
+    state.currentView = "admin-order-detail";
+    renderApp();
+  }));
+  document.querySelectorAll(".js-admin-order-open-btn").forEach((el) => el.addEventListener("click", () => {
+    state.adminOrderDetailId = el.dataset.id;
+    state.currentView = "admin-order-detail";
+    renderApp();
+  }));
+}
+
+// 给 admin 订单看板挂分页器（renderApp 后由 bindOrdersViewsEvents 调用）
+function mountAdminOrdersPagination() {
+  if (typeof setupPagination !== "function") return;
+  setupPagination("adminOrdersPager", {
+    pageSize: 20,
+    fetchPage: async (page, pageSize) => {
+      const params = new URLSearchParams();
+      params.set("actorRole", "admin");
+      params.set("scope", "all");
+      if (state.user?.id) params.set("actorUserId", state.user.id);
+      const f = state.adminOrdersFilter || {};
+      if (f.orderStatus) params.set("status", f.orderStatus);
+      if (f.salesUserId) params.set("salesUserId", f.salesUserId);
+      if (f.academicUserId) params.set("academicUserId", f.academicUserId);
+      if (f.paidStatus) params.set("paidStatus", f.paidStatus);
+      if (f.from) params.set("from", f.from);
+      if (f.to) params.set("to", f.to);
+      params.set("limit", String(pageSize));
+      params.set("offset", String((page - 1) * pageSize));
+      const res = await api(`/api/orders?${params.toString()}`);
+      // 后端 paged 返回 { items, total, limit, offset }
+      const items = Array.isArray(res?.items) ? res.items : (Array.isArray(res) ? res : []);
+      const total = Number(res?.total ?? items.length);
+      // 同步顶部"共 N 条"
+      const tag = document.getElementById("adminOrdersTotalTag");
+      if (tag) tag.textContent = `共 ${total} 条`;
+      return { items, total };
+    },
+    renderItems: (items) => renderAdminOrdersTableBody(items),
+  });
 }
 
 async function loadAdminOrderDetail(id) {
@@ -1232,6 +1227,13 @@ async function triggerExport(exportType) {
 // 事件绑定（在 bindViewEvents 末尾调用）
 // ===========================================================================
 function bindOrdersViewsEvents() {
+  // 进入 admin 订单看板时挂分页器（需要等待 DOM 准备好）
+  if (state.currentView === "orders" && document.getElementById("adminOrdersPager")) {
+    if (typeof mountAdminOrdersPagination === "function") {
+      mountAdminOrdersPagination();
+    }
+  }
+
   // T-L6 销售客资详情：入口（在跟进卡片中绑定）+ 返回 + tab
   document.querySelectorAll(".js-sales-view-detail").forEach((el) => el.addEventListener("click", () => openSalesLeadDetail(el.dataset.id)));
   document.querySelectorAll(".js-back-sales-followups").forEach((el) => el.addEventListener("click", backToSalesFollowups));
@@ -1258,49 +1260,32 @@ function bindOrdersViewsEvents() {
   // 主管端订单看板
   document.getElementById("adminOrdersSalesFilter")?.addEventListener("change", (event) => {
     state.adminOrdersFilter = { ...(state.adminOrdersFilter || {}), salesUserId: event.target.value || "" };
-    state.adminOrdersPage = 1;
-    renderApp();
+    refreshPagination("adminOrdersPager");
   });
   document.getElementById("adminOrdersAcademicFilter")?.addEventListener("change", (event) => {
     state.adminOrdersFilter = { ...(state.adminOrdersFilter || {}), academicUserId: event.target.value || "" };
-    state.adminOrdersPage = 1;
-    renderApp();
+    refreshPagination("adminOrdersPager");
   });
   document.getElementById("adminOrdersStatusFilter")?.addEventListener("change", (event) => {
     state.adminOrdersFilter = { ...(state.adminOrdersFilter || {}), orderStatus: event.target.value || "" };
-    state.adminOrdersPage = 1;
-    state.adminOrders = null;  // server-side filter, re-fetch
-    renderApp();
+    refreshPagination("adminOrdersPager");
   });
   document.getElementById("adminOrdersPaidFilter")?.addEventListener("change", (event) => {
     state.adminOrdersFilter = { ...(state.adminOrdersFilter || {}), paidStatus: event.target.value || "" };
-    state.adminOrdersPage = 1;
-    renderApp();
+    refreshPagination("adminOrdersPager");
   });
   document.getElementById("adminOrdersFromInput")?.addEventListener("change", (event) => {
     state.adminOrdersFilter = { ...(state.adminOrdersFilter || {}), from: event.target.value || "" };
-    state.adminOrdersPage = 1;
-    renderApp();
+    refreshPagination("adminOrdersPager");
   });
   document.getElementById("adminOrdersToInput")?.addEventListener("change", (event) => {
     state.adminOrdersFilter = { ...(state.adminOrdersFilter || {}), to: event.target.value || "" };
-    state.adminOrdersPage = 1;
-    renderApp();
+    refreshPagination("adminOrdersPager");
   });
   document.getElementById("adminOrdersClearBtn")?.addEventListener("click", () => {
     state.adminOrdersFilter = { salesUserId: "", academicUserId: "", orderStatus: "", paidStatus: "", from: "", to: "" };
-    state.adminOrdersPage = 1;
-    state.adminOrders = null;
-    renderApp();
+    renderApp();  // 清空筛选要重置 select 显示态，所以整页重渲
   });
-  document.querySelectorAll(".js-admin-orders-prev").forEach((el) => el.addEventListener("click", () => {
-    state.adminOrdersPage = Math.max(1, (state.adminOrdersPage || 1) - 1);
-    renderApp();
-  }));
-  document.querySelectorAll(".js-admin-orders-next").forEach((el) => el.addEventListener("click", () => {
-    state.adminOrdersPage = (state.adminOrdersPage || 1) + 1;
-    renderApp();
-  }));
   document.querySelectorAll(".js-admin-order-open").forEach((el) => {
     el.addEventListener("click", (event) => {
       if (event.target.closest("button")) return;  // 点击按钮时不触发行
