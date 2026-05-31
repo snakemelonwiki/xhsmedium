@@ -5,7 +5,7 @@ import { Badge, Button, Dropdown, Empty, List, Space, Typography } from 'antd';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 
-import { apiClient, normalizePagedResult } from '@/shared/api/apiClient';
+import { listNotifications } from '@/shared/api/notifications';
 import { StatusTag } from '@/shared/components/status';
 import type { NotificationItem } from '@/shared/types/notifications';
 
@@ -25,13 +25,9 @@ export function NotificationBell({ pollIntervalMs = 0 }: NotificationBellProps) 
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const payload = await apiClient.get<{ items?: NotificationItem[]; unreadCount?: number; total?: number; limit?: number; offset?: number }>(
-        '/notifications',
-        { query: { limit: 8, offset: 0 } },
-      );
-      const paged = normalizePagedResult<NotificationItem>(payload);
-      setItems(paged.items);
-      setUnreadCount(Number(payload.unreadCount ?? paged.items.filter((item) => item.unread).length));
+      const result = await listNotifications({ pageSize: 8 });
+      setItems(result.items);
+      setUnreadCount(Number(result.unreadCount || result.items.filter((item) => item.unread).length));
     } catch {
       setItems([]);
       setUnreadCount(0);
@@ -61,7 +57,10 @@ export function NotificationBell({ pollIntervalMs = 0 }: NotificationBellProps) 
             renderItem={(item) => (
               <List.Item
                 className="notification-item"
-                onClick={() => item.routeHint && router.push(item.routeHint)}
+                onClick={() => {
+                  const route = item.routeHint ?? fallbackRoute(item);
+                  if (route) router.push(route);
+                }}
               >
                 <Space direction="vertical" size={4}>
                   <Space>
@@ -87,4 +86,14 @@ export function NotificationBell({ pollIntervalMs = 0 }: NotificationBellProps) 
       </Button>
     </Dropdown>
   );
+}
+
+function fallbackRoute(item: NotificationItem) {
+  const type = item.targetType?.toLowerCase();
+  const targetId = item.targetId;
+  if (!type || targetId === undefined || targetId === null) return undefined;
+  if (type.includes('lead')) return `/sales/leads/${targetId}`;
+  if (type.includes('collaboration')) return '/sales/collaboration';
+  if (type.includes('order')) return `/sales/orders/${targetId}`;
+  return undefined;
 }

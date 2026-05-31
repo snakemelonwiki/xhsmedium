@@ -1,6 +1,6 @@
 import { ConflictException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { Lead } from '../../entities/lead.entity';
 import { LeadFollowRecord } from '../../entities/lead-follow-record.entity';
 import { Post } from '../../entities/post.entity';
@@ -8,8 +8,10 @@ import { User } from '../../entities/user.entity';
 import { makeId } from '../../shared/utils/id-generator';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NOTIFICATION_TYPES } from '../../shared/notifications';
+import { OperationLogsService } from '../operation-logs/operation-logs.service';
 
 interface BoardPatchDto {
+  status?: string;
   assignedSalesUserId?: string | null;
   assignedSalesUserName?: string;
   processStatus?: string;
@@ -25,6 +27,9 @@ interface FollowRecordDto {
   followType?: string;
   content: string;
   nextFollowTime?: string | Date | null;
+  processStatus?: string;
+  intention?: string | null;
+  intentionLevel?: string;
 }
 
 interface LeadFilterOptions {
@@ -38,6 +43,7 @@ interface LeadFilterOptions {
   postType?: string;
   status?: string;
   addStatus?: string;
+  search?: string;
   from?: string;
   to?: string;
 }
@@ -54,6 +60,7 @@ export class LeadsService {
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
     private readonly notificationsService: NotificationsService,
+    private readonly operationLogsService: OperationLogsService,
   ) {}
 
   /**
@@ -72,7 +79,7 @@ export class LeadsService {
 
   async findAll(): Promise<any[]> {
     const rows = await this.leadRepository.find({ order: { createdAt: 'DESC' } });
-    return rows.map(this.mapLead);
+    return this.mapLeads(rows);
   }
 
   async findByEmployee(employeeId: string): Promise<any[]> {
@@ -80,7 +87,7 @@ export class LeadsService {
       where: { employeeId },
       order: { createdAt: 'DESC' },
     });
-    return rows.map(this.mapLead);
+    return this.mapLeads(rows);
   }
 
   // ---- §9 / AC-10.2 客资列表分页 ----
@@ -94,7 +101,7 @@ export class LeadsService {
       take: safeLimit,
       skip: safeOffset,
     });
-    return { items: rows.map(this.mapLead), total, limit: safeLimit, offset: safeOffset };
+    return { items: await this.mapLeads(rows), total, limit: safeLimit, offset: safeOffset };
   }
 
   async findByEmployeePaged(employeeId: string, limit: number, offset: number): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
@@ -106,7 +113,7 @@ export class LeadsService {
       take: safeLimit,
       skip: safeOffset,
     });
-    return { items: rows.map(this.mapLead), total, limit: safeLimit, offset: safeOffset };
+    return { items: await this.mapLeads(rows), total, limit: safeLimit, offset: safeOffset };
   }
 
   async findFiltered(filters: LeadFilterOptions): Promise<any[]> {
@@ -114,7 +121,7 @@ export class LeadsService {
     const rows = await qb
       .orderBy('l.created_at', 'DESC')
       .getMany();
-    return rows.map(this.mapLead);
+    return this.mapLeads(rows);
   }
 
   async findFilteredPaged(filters: LeadFilterOptions, limit: number, offset: number): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
@@ -125,7 +132,7 @@ export class LeadsService {
       .take(safeLimit)
       .skip(safeOffset);
     const [rows, total] = await qb.getManyAndCount();
-    return { items: rows.map(this.mapLead), total, limit: safeLimit, offset: safeOffset };
+    return { items: await this.mapLeads(rows), total, limit: safeLimit, offset: safeOffset };
   }
 
   async findTomorrowFollowups(salesUserId: string): Promise<any[]> {
@@ -140,7 +147,7 @@ export class LeadsService {
       .andWhere('l.assigned_sales_user_id = :uid', { uid: salesUserId })
       .orderBy('l.next_follow_time', 'ASC')
       .getMany();
-    return rows.map(this.mapLead);
+    return this.mapLeads(rows);
   }
 
   async findTomorrowFollowupsPaged(salesUserId: string, limit: number, offset: number): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
@@ -159,7 +166,7 @@ export class LeadsService {
       .take(safeLimit)
       .skip(safeOffset);
     const [rows, total] = await qb.getManyAndCount();
-    return { items: rows.map(this.mapLead), total, limit: safeLimit, offset: safeOffset };
+    return { items: await this.mapLeads(rows), total, limit: safeLimit, offset: safeOffset };
   }
 
   private clampLimit(limit: number): number {
@@ -194,6 +201,12 @@ export class LeadsService {
     if (filters.platform) qb.andWhere('l.platform = :platform', { platform: filters.platform });
     if (filters.status) qb.andWhere('l.status = :status', { status: filters.status });
     if (filters.addStatus) qb.andWhere('l.add_status = :addStatus', { addStatus: filters.addStatus });
+    if (filters.search && filters.search.trim()) {
+      qb.andWhere(
+        '(l.contact_info LIKE :search OR l.nickname LIKE :search OR l.lead_code LIKE :search OR l.note LIKE :search)',
+        { search: `%${filters.search.trim()}%` },
+      );
+    }
     if (filters.from) qb.andWhere('l.created_at >= :from', { from: filters.from });
     if (filters.to) qb.andWhere('l.created_at < :to', { to: filters.to });
     if (filters.postType) {
@@ -263,6 +276,7 @@ export class LeadsService {
     if (!current) return;
 
     const next: Partial<Lead> = {};
+    if (dto.status !== undefined) next.status = dto.status || current.status;
     if (dto.assignedSalesUserId !== undefined) next.assignedSalesUserId = dto.assignedSalesUserId || null;
     if (dto.assignedSalesUserName !== undefined) next.assignedSalesUserName = dto.assignedSalesUserName || '';
     if (dto.processStatus !== undefined) next.processStatus = dto.processStatus || 'not_contacted';
@@ -271,6 +285,11 @@ export class LeadsService {
     if (dto.intentionLevel !== undefined) next.intentionLevel = dto.intentionLevel || 'pending';
     if (dto.nextFollowTime !== undefined) {
       next.nextFollowTime = dto.nextFollowTime ? new Date(dto.nextFollowTime) : null;
+    }
+    this.applySalesStateTransition(current, next, dto);
+    const nextLeadStatus = this.resolveLeadStatus(current, dto);
+    if (nextLeadStatus) {
+      next.status = nextLeadStatus;
     }
 
     const updateResult = await this.leadRepository.update(
@@ -299,7 +318,7 @@ export class LeadsService {
             relatedId: id,
             relatedType: 'lead',
           });
-        } else if (dto.addStatus === 'rejected') {
+        } else if (dto.addStatus === 'not_passed' || dto.addStatus === 'rejected') {
           await this.notificationsService.create({
             receiverIds: [sourceUserId],
             senderId: actorUserId || null,
@@ -347,6 +366,9 @@ export class LeadsService {
     if (!dto.content || !dto.content.trim()) {
       throw new Error('content required');
     }
+    const current = await this.leadRepository.findOne({ where: { id: leadId } });
+    if (!current) throw new Error('lead not found');
+
     await this.followRepository.save({
       id: makeId(),
       leadId,
@@ -355,21 +377,111 @@ export class LeadsService {
       content: dto.content.trim(),
       nextFollowTime: dto.nextFollowTime ? new Date(dto.nextFollowTime) : null,
     });
+    const patch: Partial<Lead> = {};
     if (dto.nextFollowTime !== undefined) {
-      await this.leadRepository.update(leadId, {
-        nextFollowTime: dto.nextFollowTime ? new Date(dto.nextFollowTime) : null,
-      });
+      patch.nextFollowTime = dto.nextFollowTime ? new Date(dto.nextFollowTime) : null;
+    }
+    if (dto.processStatus !== undefined) patch.processStatus = dto.processStatus || 'not_contacted';
+    if (dto.intention !== undefined) patch.intention = dto.intention || null;
+    if (dto.intentionLevel !== undefined) patch.intentionLevel = dto.intentionLevel || 'pending';
+    this.applySalesStateTransition(current, patch, dto);
+    if (Object.keys(patch).length > 0) {
+      await this.leadRepository.update(leadId, patch);
     }
   }
 
+  async updateSalesStatus(id: string, dto: BoardPatchDto, actorUserId: string): Promise<any | null> {
+    const current = await this.leadRepository.findOne({ where: { id } });
+    if (!current) return null;
+
+    await this.updateBoard(id, dto, actorUserId);
+    const updated = await this.leadRepository.findOne({ where: { id } });
+    if (updated) {
+      await this.operationLogsService.log({
+        userId: actorUserId || '',
+        action: 'lead_status_update',
+        targetType: 'lead',
+        targetId: id,
+        detail: JSON.stringify({
+          from: {
+            status: current.status,
+            processStatus: current.processStatus,
+            addStatus: current.addStatus,
+            intentionLevel: current.intentionLevel,
+          },
+          to: {
+            status: updated.status,
+            processStatus: updated.processStatus,
+            addStatus: updated.addStatus,
+            intentionLevel: updated.intentionLevel,
+          },
+        }),
+      });
+    }
+    return updated ? this.mapLead(updated) : null;
+  }
+
+  private applySalesStateTransition(current: Lead, next: Partial<Lead>, dto: BoardPatchDto | FollowRecordDto): void {
+    const nextAddStatus = next.addStatus ?? current.addStatus;
+    const nextProcessStatus = next.processStatus ?? current.processStatus;
+    const hasText =
+      ('followNote' in dto && Boolean(dto.followNote?.trim())) ||
+      ('content' in dto && Boolean(dto.content?.trim()));
+    const hasFollowSignal =
+      hasText ||
+      dto.nextFollowTime !== undefined ||
+      nextProcessStatus !== current.processStatus ||
+      nextAddStatus !== current.addStatus;
+
+    if (nextAddStatus === 'added') {
+      next.status = 'added_success';
+      return;
+    }
+    if (nextAddStatus === 'not_passed' || nextAddStatus === 'rejected' || nextProcessStatus === 'invalid') {
+      next.status = 'invalid';
+      if (nextAddStatus === 'rejected') next.addStatus = 'not_passed';
+      return;
+    }
+    if (!next.status && hasFollowSignal && current.status !== 'in_collaboration' && current.status !== 'operation_handled') {
+      next.status = 'in_followup';
+    }
+  }
+
+  private resolveLeadStatus(current: Lead, dto: BoardPatchDto): string | null {
+    if (dto.status !== undefined) return dto.status || current.status;
+    if (dto.processStatus === 'invalid') return 'invalid';
+    if (dto.addStatus === 'added') return 'added_success';
+    if (dto.processStatus === 'in_collaboration') return 'in_collaboration';
+    if (dto.processStatus === 'operation_handled') return 'operation_handled';
+    const hasSalesAction =
+      dto.processStatus !== undefined ||
+      dto.addStatus !== undefined ||
+      Boolean(dto.followNote && dto.followNote.trim());
+    if (hasSalesAction && current.status !== 'in_collaboration') {
+      return 'in_followup';
+    }
+    return null;
+  }
+
+  async canAccessLead(leadId: string, actor?: { actorUserId?: string; actorEmployeeId?: string; actorRole?: string }): Promise<boolean> {
+    if (!leadId) return false;
+    const row = await this.leadRepository.findOne({ where: { id: leadId } });
+    if (!row) return false;
+    const role = actor?.actorRole || '';
+    if (role === 'admin' || role === 'owner') return true;
+    if (role === 'sales') return Boolean(actor?.actorUserId && row.assignedSalesUserId === actor.actorUserId);
+    return Boolean(actor?.actorEmployeeId && row.employeeId === actor.actorEmployeeId);
+  }
+
   async listFollowRecords(leadId: string, limit = 50, offset = 0): Promise<any[]> {
+    const lead = await this.leadRepository.findOne({ where: { id: leadId } });
     const rows = await this.followRepository.find({
       where: { leadId },
       order: { createdAt: 'DESC' },
       take: this.clampLimit(limit),
       skip: Math.max(Number(offset) || 0, 0),
     });
-    return rows.map((r) => this.mapFollowRecord(r));
+    return rows.map((r) => this.mapFollowRecord(r, lead || undefined));
   }
 
   /**
@@ -392,15 +504,16 @@ export class LeadsService {
       take: safeLimit,
       skip: safeOffset,
     });
+    const lead = await this.leadRepository.findOne({ where: { id: leadId } });
     return {
-      items: rows.map((r) => this.mapFollowRecord(r)),
+      items: rows.map((r) => this.mapFollowRecord(r, lead || undefined)),
       total,
       limit: safeLimit,
       offset: safeOffset,
     };
   }
 
-  private mapFollowRecord(r: LeadFollowRecord): any {
+  private mapFollowRecord(r: LeadFollowRecord, lead?: Lead): any {
     return {
       id: r.id,
       leadId: r.leadId,
@@ -408,6 +521,10 @@ export class LeadsService {
       followType: r.followType,
       content: r.content,
       nextFollowTime: r.nextFollowTime,
+      nextFollowAt: r.nextFollowTime,
+      processStatus: lead?.processStatus,
+      intentionLevel: lead?.intentionLevel,
+      leadStatus: lead?.status,
       createdAt: r.createdAt,
     };
   }
@@ -863,10 +980,36 @@ export class LeadsService {
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
   }
 
-  private mapLead(row: Lead): any {
+  private async mapLeads(rows: Lead[]): Promise<any[]> {
+    if (rows.length === 0) return [];
+    const latest = rows.length <= 200
+      ? await this.latestFollowByLeadIds(rows.map((row) => row.id))
+      : new Map<string, LeadFollowRecord>();
+    return rows.map((row) => this.mapLead(row, latest.get(row.id)));
+  }
+
+  private async latestFollowByLeadIds(leadIds: string[]): Promise<Map<string, LeadFollowRecord>> {
+    const ids = Array.from(new Set(leadIds.filter(Boolean)));
+    if (ids.length === 0) return new Map();
+    const rows = await this.followRepository.find({
+      where: { leadId: In(ids) },
+      order: { createdAt: 'DESC' },
+    });
+    const latest = new Map<string, LeadFollowRecord>();
+    for (const row of rows) {
+      if (!latest.has(row.leadId)) {
+        latest.set(row.leadId, row);
+      }
+    }
+    return latest;
+  }
+
+  private mapLead(row: Lead, latestFollow?: LeadFollowRecord): any {
     return {
       id: row.id,
       employeeId: row.employeeId,
+      operatorId: row.employeeId,
+      operatorName: row.salesUserName || row.assignedSalesUserName || null,
       accountId: row.accountId,
       postId: row.postId,
       platform: row.platform,
@@ -891,8 +1034,11 @@ export class LeadsService {
       intentionLevel: row.intentionLevel,
       addMethod: row.addMethod,
       nextFollowTime: row.nextFollowTime,
+      nextFollowAt: row.nextFollowTime,
       matchedPostId: row.matchedPostId,
       sourceUnknown: !!row.sourceUnknown,
+      latestFollowNote: latestFollow?.content || row.salesFeedback || row.note || null,
+      latestFollowAt: latestFollow?.createdAt || row.salesUpdatedAt || row.updatedAt,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };

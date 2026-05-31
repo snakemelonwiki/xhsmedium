@@ -18,15 +18,6 @@ export class NotificationsController {
   ) {
     const session = (req as any).session;
     const user = (req as any).user;
-
-    console.log('[DEBUG] Request info:', {
-      hasSession: !!session,
-      hasUser: !!user,
-      session,
-      user,
-      authHeader: req.headers.authorization?.substring(0, 50),
-    });
-
     const userId = session?.userId || session?.id || user?.sub || user?.id || actorUserId || '';
     const userRole = session?.role || user?.role || 'staff';
 
@@ -40,13 +31,10 @@ export class NotificationsController {
       portType = 'operations';
     }
 
-    console.log('[DEBUG] Notifications query:', { userId, userRole, portType, status, type, limit, offset });
-
-    // 暂时不筛选portType，测试是否有数据
     const result = await this.notificationsService.listForUser(userId, {
       status: status === 'unread' ? 'unread' : 'all',
       type: type || undefined,
-      // portType,  // 暂时注释掉
+      portType,
       limit: limit ? Number(limit) : 30,
       offset: offset ? Number(offset) : 0,
     });

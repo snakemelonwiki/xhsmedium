@@ -30,6 +30,7 @@ export function LeadTimeline({ items }: LeadTimelineProps) {
                 <StatusTag kind={item.kind === 'collaboration' ? 'collaborationStatus' : 'processStatus'} code={item.status} />
               </span>
             ) : null}
+            {item.priority ? <Typography.Text type="secondary"> {priorityLabel(item.priority)}</Typography.Text> : null}
             <div className="timeline-meta">
               {item.actorName ? `${item.actorName} · ` : ''}
               {item.occurredAt}
@@ -40,4 +41,14 @@ export function LeadTimeline({ items }: LeadTimelineProps) {
       }))}
     />
   );
+}
+
+function priorityLabel(priority: string) {
+  const labels: Record<string, string> = {
+    normal: '普通',
+    urgent: '紧急',
+    critical: '特急',
+    high: '紧急',
+  };
+  return labels[priority] ?? priority;
 }

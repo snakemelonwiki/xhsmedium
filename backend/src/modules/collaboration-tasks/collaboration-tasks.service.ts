@@ -20,6 +20,11 @@ const ALLOWED_TYPES: CollaborationTaskType[] = [
   'second_touch',
 ];
 
+const TYPE_ALIASES: Record<string, CollaborationTaskType> = {
+  confirm_identity: 'verify_identity',
+  second_contact: 'second_touch',
+};
+
 interface CreateDto {
   leadId: string;
   type: CollaborationTaskType | string;
@@ -46,10 +51,19 @@ export class CollaborationTasksService {
     private readonly notificationsService: NotificationsService,
   ) {}
 
+  private applyScope(qb: any, query: ListQuery): void {
+    if (query.scope === 'mine' || query.scope === 'requester' || query.scope === 'sales') {
+      qb.andWhere('t.requester_id = :uid', { uid: query.userId || '' });
+    } else if (query.scope === 'inbox' || query.scope === 'handler' || query.scope === 'operations') {
+      qb.andWhere('t.handler_id = :uid', { uid: query.userId || '' });
+    }
+  }
+
   async create(dto: CreateDto): Promise<CollaborationTask> {
     if (!dto.leadId) throw new Error('leadId required');
     if (!dto.requesterId) throw new Error('requesterId required');
-    if (!dto.type || !ALLOWED_TYPES.includes(dto.type as CollaborationTaskType)) {
+    const normalizedType = this.normalizeType(dto.type);
+    if (!normalizedType) {
       throw new Error('invalid type');
     }
     // 防御编码损坏（如客户端用错编码发送）
@@ -57,13 +71,21 @@ export class CollaborationTasksService {
       throw new Error('reason contains invalid characters; please ensure UTF-8 encoding');
     }
     const cleanReason = sanitizeText(dto.reason);
+    const lead = await this.leadRepository.findOne({
+      where: { id: dto.leadId },
+      select: { id: true, employeeId: true, contactInfo: true },
+    });
+    if (!lead) throw new Error('lead not found');
+    const sourceUserId = lead.employeeId
+      ? await this.findUserIdByEmployeeId(lead.employeeId)
+      : null;
 
     const entity = this.repo.create({
       id: makeId(),
       leadId: dto.leadId,
       requesterId: dto.requesterId,
-      handlerId: null,
-      type: dto.type as CollaborationTaskType,
+      handlerId: sourceUserId,
+      type: normalizedType,
       reason: cleanReason,
       status: 'pending',
       handledNote: null,
@@ -71,29 +93,34 @@ export class CollaborationTasksService {
       handledAt: null,
     } as Partial<CollaborationTask>);
     await this.repo.save(entity);
+    await this.leadRepository.update(dto.leadId, {
+      status: 'in_collaboration',
+    });
 
     // §11.1 collab_requested: 通知客资来源运营。
-    const lead = await this.leadRepository.findOne({
-      where: { id: dto.leadId },
-      select: { id: true, employeeId: true, contactInfo: true },
-    });
-    if (lead?.employeeId) {
-      const sourceUserId = await this.findUserIdByEmployeeId(lead.employeeId);
-      if (sourceUserId) {
-        await this.notificationsService.create({
-          receiverIds: [sourceUserId],
-          senderId: dto.requesterId,
-          portType: 'operations',
-          typeCode: NOTIFICATION_TYPES.COLLAB_REQUESTED,
-          title: '协同任务待处理',
-          content: `客资 ${lead.contactInfo || ''} 有新的协同请求(${dto.type})`,
-          relatedId: (entity as CollaborationTask).id,
-          relatedType: 'collaboration_task',
-        });
-      }
+    if (sourceUserId) {
+      await this.notificationsService.create({
+        receiverIds: [sourceUserId],
+        senderId: dto.requesterId,
+        portType: 'operations',
+        typeCode: NOTIFICATION_TYPES.COLLAB_REQUESTED,
+        title: '协同任务待处理',
+        content: `客资 ${lead.contactInfo || ''} 有新的协同请求(${normalizedType})`,
+        relatedId: (entity as CollaborationTask).id,
+        relatedType: 'collaboration_task',
+      });
     }
 
     return entity as CollaborationTask;
+  }
+
+  private normalizeType(type: string | CollaborationTaskType | undefined | null): CollaborationTaskType | null {
+    const raw = String(type || '').trim();
+    if (!raw) return null;
+    const normalized = TYPE_ALIASES[raw] || raw;
+    return ALLOWED_TYPES.includes(normalized as CollaborationTaskType)
+      ? normalized as CollaborationTaskType
+      : null;
   }
 
   /**
@@ -111,11 +138,7 @@ export class CollaborationTasksService {
   async list(query: ListQuery): Promise<any[]> {
     const qb = this.repo.createQueryBuilder('t');
 
-    if (query.scope === 'mine') {
-      qb.andWhere('t.requester_id = :uid', { uid: query.userId || '' });
-    } else if (query.scope === 'inbox') {
-      qb.andWhere('t.handler_id = :uid', { uid: query.userId || '' });
-    }
+    this.applyScope(qb, query);
 
     if (query.status) {
       qb.andWhere('t.status = :status', { status: query.status });
@@ -140,11 +163,7 @@ export class CollaborationTasksService {
 
     const qb = this.repo.createQueryBuilder('t');
 
-    if (query.scope === 'mine') {
-      qb.andWhere('t.requester_id = :uid', { uid: query.userId || '' });
-    } else if (query.scope === 'inbox') {
-      qb.andWhere('t.handler_id = :uid', { uid: query.userId || '' });
-    }
+    this.applyScope(qb, query);
 
     if (query.status) {
       qb.andWhere('t.status = :status', { status: query.status });
@@ -178,7 +197,7 @@ export class CollaborationTasksService {
     return this.repo.findOne({ where: { id } });
   }
 
-  async handle(id: string, handledNote: string): Promise<CollaborationTask | null> {
+  async handle(id: string, handledNote: string, handlerId?: string): Promise<CollaborationTask | null> {
     const task = await this.repo.findOne({ where: { id } });
     if (!task) return null;
     if (task.status !== 'handling' && task.status !== 'pending') {
@@ -190,16 +209,21 @@ export class CollaborationTasksService {
     const cleanNote = sanitizeText(handledNote);
     await this.repo.update(id, {
       status: 'handled',
+      handlerId: task.handlerId || handlerId || null,
       handledNote: cleanNote,
       handledAt: new Date(),
     });
     const updated = await this.repo.findOne({ where: { id } });
+    await this.leadRepository.update(task.leadId, {
+      status: 'operation_handled',
+      addStatus: 'operation_reminded',
+    });
 
     // §11.1 collab_handled: 协同任务被处理完结，回写给原发起人。
     if (task.requesterId) {
       await this.notificationsService.create({
         receiverIds: [task.requesterId],
-        senderId: task.handlerId || null,
+        senderId: task.handlerId || handlerId || null,
         portType: 'sales',
         typeCode: NOTIFICATION_TYPES.COLLAB_HANDLED,
         title: '协同任务已处理',

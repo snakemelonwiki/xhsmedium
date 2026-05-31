@@ -7,11 +7,15 @@ import { User } from '../../entities/user.entity';
 import { LeadsController } from './leads.controller';
 import { LeadsService } from './leads.service';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { CollaborationTasksModule } from '../collaboration-tasks/collaboration-tasks.module';
+import { OperationLogsModule } from '../operation-logs/operation-logs.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Lead, LeadFollowRecord, Post, User]),
     NotificationsModule,
+    CollaborationTasksModule,
+    OperationLogsModule,
   ],
   controllers: [LeadsController],
   providers: [LeadsService],

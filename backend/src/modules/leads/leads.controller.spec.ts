@@ -1,51 +1,84 @@
 import { LeadsController } from './leads.controller';
 
-describe('LeadsController pagination', () => {
+describe('LeadsController', () => {
   const response = () => ({
+    status: jest.fn().mockReturnThis(),
     json: jest.fn().mockReturnThis(),
   }) as any;
 
-  it('默认按 20 条分页返回客资列表', async () => {
+  it('returns paged lead list when limit or offset is present', async () => {
     const leadsService = {
-      findAllPage: jest.fn().mockResolvedValue({ total: 21, items: [{ id: 'lead-1' }] }),
+      findFilteredPaged: jest.fn().mockResolvedValue({ total: 21, items: [{ id: 'lead-1' }], limit: 20, offset: 0 }),
     } as any;
-    const controller = new LeadsController(leadsService);
+    const controller = new LeadsController(leadsService, {} as any);
     const res = response();
 
-    await controller.findAll({ session: { role: 'admin' }, query: {} } as any, res);
+    await controller.findAll(
+      { session: { role: 'sales', userId: 'sales-1', employeeId: 'emp-sales' } } as any,
+      res,
+      undefined,
+      '20',
+      undefined,
+    );
 
-    expect(leadsService.findAllPage).toHaveBeenCalledWith({ limit: 20, offset: 0 });
-    expect(res.json).toHaveBeenCalledWith({ total: 21, items: [{ id: 'lead-1' }] });
+    expect(leadsService.findFilteredPaged).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scope: 'self',
+        actorUserId: 'sales-1',
+        actorEmployeeId: 'emp-sales',
+        actorRole: 'sales',
+      }),
+      20,
+      0,
+    );
+    expect(res.json).toHaveBeenCalledWith({ total: 21, items: [{ id: 'lead-1' }], limit: 20, offset: 0 });
   });
 
-  it('支持 page/pageSize 查询参数', async () => {
+  it('updates sales status through PATCH /leads/:id/status', async () => {
     const leadsService = {
-      findAllPage: jest.fn().mockResolvedValue({ total: 100, items: [{ id: 'lead-21' }] }),
+      updateSalesStatus: jest.fn().mockResolvedValue({ id: 'lead-1', addStatus: 'added', status: 'added_success' }),
     } as any;
-    const controller = new LeadsController(leadsService);
+    const controller = new LeadsController(leadsService, {} as any);
     const res = response();
 
-    await controller.findAll({ session: { role: 'admin' }, query: { page: '2', pageSize: '20' } } as any, res);
+    await controller.updateStatus(
+      'lead-1',
+      { addStatus: 'added', followNote: '通过了' },
+      { session: { userId: 'sales-1' } } as any,
+      res,
+    );
 
-    expect(leadsService.findAllPage).toHaveBeenCalledWith({ limit: 20, offset: 20 });
-    expect(res.json).toHaveBeenCalledWith({ total: 100, items: [{ id: 'lead-21' }] });
+    expect(leadsService.updateSalesStatus).toHaveBeenCalledWith(
+      'lead-1',
+      expect.objectContaining({ addStatus: 'added', followNote: '通过了' }),
+      'sales-1',
+    );
+    expect(res.json).toHaveBeenCalledWith({
+      ok: true,
+      lead: { id: 'lead-1', addStatus: 'added', status: 'added_success' },
+    });
   });
 
-  it('staff 默认只分页返回本人客资，scope=all 返回全量分页', async () => {
-    const leadsService = {
-      findByEmployeePage: jest.fn().mockResolvedValue({ total: 3, items: [{ id: 'lead-self' }] }),
-      findAllPage: jest.fn().mockResolvedValue({ total: 10, items: [{ id: 'lead-all' }] }),
+  it('creates collaboration task from lead route', async () => {
+    const collaborationTasksService = {
+      create: jest.fn().mockResolvedValue({ id: 'task-1', leadId: 'lead-1' }),
     } as any;
-    const controller = new LeadsController(leadsService);
-    const selfRes = response();
-    const allRes = response();
+    const controller = new LeadsController({} as any, collaborationTasksService);
+    const res = response();
 
-    await controller.findAll({ session: { role: 'staff', employeeId: 'emp-1' }, query: {} } as any, selfRes);
-    await controller.findAll({ session: { role: 'staff', employeeId: 'emp-1' }, query: { scope: 'all', limit: '10', offset: '10' } } as any, allRes, 'all');
+    await controller.createCollaboration(
+      'lead-1',
+      { type: 'remind_customer', reason: '提醒客户' },
+      { session: { userId: 'sales-1' } } as any,
+      res,
+    );
 
-    expect(leadsService.findByEmployeePage).toHaveBeenCalledWith('emp-1', { limit: 20, offset: 0 });
-    expect(leadsService.findAllPage).toHaveBeenCalledWith({ limit: 10, offset: 10 });
-    expect(selfRes.json).toHaveBeenCalledWith({ total: 3, items: [{ id: 'lead-self' }] });
-    expect(allRes.json).toHaveBeenCalledWith({ total: 10, items: [{ id: 'lead-all' }] });
+    expect(collaborationTasksService.create).toHaveBeenCalledWith({
+      leadId: 'lead-1',
+      type: 'remind_customer',
+      reason: '提醒客户',
+      requesterId: 'sales-1',
+    });
+    expect(res.json).toHaveBeenCalledWith({ ok: true, task: { id: 'task-1', leadId: 'lead-1' } });
   });
 });

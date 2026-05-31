@@ -41,7 +41,10 @@ export type NotificationTypeCode =
   | 'collaboration_requested'
   | 'collaboration_handled'
   | 'customer_not_passed'
-  | 'customer_added';
+  | 'customer_added'
+  | 'lead_source_confirmed'
+  | 'lead_status_changed'
+  | 'followup_reminder';
 
 export type StatusKind =
   | 'leadStatus'
@@ -98,6 +101,9 @@ export const STATUS_META: StatusRegistry = {
     collaboration_handled: { code: 'collaboration_handled', label: '协同已处理', color: 'green', role: 'sales', actionHint: '继续跟进' },
     customer_not_passed: { code: 'customer_not_passed', label: '客户未通过', color: 'orange', role: 'operation', actionHint: '提醒客户' },
     customer_added: { code: 'customer_added', label: '客户已添加', color: 'green', role: 'operation', actionHint: '查看客资' },
+    lead_source_confirmed: { code: 'lead_source_confirmed', label: '来源已更新', color: 'cyan', role: 'sales', actionHint: '查看客资' },
+    lead_status_changed: { code: 'lead_status_changed', label: '客资状态变更', color: 'cyan', role: 'sales', actionHint: '查看客资' },
+    followup_reminder: { code: 'followup_reminder', label: '跟进提醒', color: 'orange', role: 'sales', actionHint: '处理跟进' },
   },
 };
 
@@ -122,6 +128,7 @@ const STATUS_ALIASES: { [Kind in StatusKind]?: Record<string, keyof StatusRegist
   notificationType: {
     collab_requested: 'collaboration_requested',
     collab_handled: 'collaboration_handled',
+    source_confirmed: 'lead_source_confirmed',
   },
 };
 

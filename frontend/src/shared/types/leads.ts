@@ -34,6 +34,12 @@ export interface SalesLead {
   processStatus?: ProcessStatusCode | string;
   collaborationStatus?: CollaborationStatusCode | string;
   latestFollowNote?: string;
+  latestFollowAt?: string;
+  nextFollowAt?: string;
+  note?: string;
+  captureImageUrl?: string;
+  leadCode?: string;
+  addMethod?: string;
 }
 
 export type LeadTimelineKind = 'follow' | 'collaboration';
@@ -46,5 +52,7 @@ export interface LeadTimelineItem {
   actorName?: string;
   occurredAt: string;
   status?: string;
+  type?: string;
+  priority?: string;
   extra?: Record<string, unknown>;
 }

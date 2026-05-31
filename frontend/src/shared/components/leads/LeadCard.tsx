@@ -1,6 +1,6 @@
 'use client';
 
-import { CalendarOutlined, LinkOutlined, UserOutlined } from '@ant-design/icons';
+import { CalendarOutlined, ClockCircleOutlined, LinkOutlined, UserOutlined } from '@ant-design/icons';
 import { Button, Card, Descriptions, Space, Typography } from 'antd';
 import type { ReactNode } from 'react';
 
@@ -34,6 +34,7 @@ export function LeadCard({ lead, actions, onOpen, onCollaborate }: LeadCardProps
             <StatusTag kind="leadStatus" code={lead.status} />
             <StatusTag kind="addStatus" code={lead.addStatus} />
             <StatusTag kind="processStatus" code={lead.processStatus} />
+            <StatusTag kind="collaborationStatus" code={lead.collaborationStatus} />
           </Space>
         </div>
 
@@ -43,6 +44,9 @@ export function LeadCard({ lead, actions, onOpen, onCollaborate }: LeadCardProps
           </Descriptions.Item>
           <Descriptions.Item label={<><UserOutlined /> 运营</>}>{firstText(lead.operator?.name)}</Descriptions.Item>
           <Descriptions.Item label={<><CalendarOutlined /> 分配时间</>}>{firstText(lead.assignedAt)}</Descriptions.Item>
+          <Descriptions.Item label={<><ClockCircleOutlined /> 最近跟进</>}>
+            {firstText(lead.latestFollowAt, lead.latestFollowNote ? '有跟进记录' : undefined)}
+          </Descriptions.Item>
         </Descriptions>
 
         {lead.latestFollowNote ? <Typography.Paragraph type="secondary">{lead.latestFollowNote}</Typography.Paragraph> : null}

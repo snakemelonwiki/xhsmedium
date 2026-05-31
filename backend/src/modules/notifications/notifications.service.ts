@@ -62,13 +62,8 @@ export class NotificationsService {
       where.portType = opts.portType;
     }
 
-    console.log('[DEBUG] Query where:', where);
-
-    // 分开查询：先查总数
     const total = await this.repo.count({ where });
-    console.log('[DEBUG] Total count:', total);
 
-    // 再查分页数据
     const rows = await this.repo.find({
       where,
       order: {
@@ -78,9 +73,7 @@ export class NotificationsService {
       take: limit,
       skip: offset,
     });
-    console.log('[DEBUG] Rows count:', rows.length);
 
-    // 查询未读数
     const unreadWhere: any = { receiverId: userId, readStatus: 0 };
     if (opts?.portType) {
       unreadWhere.portType = opts.portType;
@@ -88,7 +81,6 @@ export class NotificationsService {
     const unreadCount = await this.repo.count({ where: unreadWhere });
 
     const items = rows.map((r) => this.map(r));
-    console.log('[DEBUG] Final result:', { itemCount: items.length, unreadCount, total });
 
     return {
       items,
@@ -177,6 +169,8 @@ export class NotificationsService {
   }
 
   private map(row: Notification): any {
+    const targetType = row.relatedType || null;
+    const targetId = row.relatedId || null;
     return {
       id: row.id,
       receiverId: row.receiverId,
@@ -191,10 +185,27 @@ export class NotificationsService {
       message: row.content,
       relatedId: row.relatedId,
       relatedType: row.relatedType,
+      targetType,
+      targetId,
+      routeHint: this.buildRouteHint(row.portType, targetType, targetId),
       readStatus: row.readStatus,
       unread: !row.readStatus,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };
+  }
+
+  private buildRouteHint(portType: string, targetType: string | null, targetId: string | null): string | null {
+    if (!targetType || !targetId) return null;
+    if (targetType === 'lead') {
+      return portType === 'operations' ? `/operation/leads/${targetId}` : `/sales/leads/${targetId}`;
+    }
+    if (targetType === 'collaboration_task') {
+      return portType === 'operations' ? '/operation/collaboration' : '/sales/collaboration';
+    }
+    if (targetType === 'order') {
+      return portType === 'academic' ? `/academic/orders/${targetId}` : `/sales/orders/${targetId}`;
+    }
+    return null;
   }
 }

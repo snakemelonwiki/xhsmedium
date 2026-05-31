@@ -18,6 +18,7 @@ function mapNotification(raw: RawNotification): NotificationItem {
   const readStatus = Number(raw.readStatus ?? raw.read_status ?? 0);
   const relatedType = text(raw.relatedType ?? raw.related_type ?? raw.targetType);
   const relatedId = text(raw.relatedId ?? raw.related_id ?? raw.targetId);
+  const leadId = text(raw.leadId ?? raw.lead_id);
   return {
     id: text(raw.id) ?? '',
     notificationType: text(raw.notificationType ?? raw.typeCode ?? raw.type_code ?? raw.type) ?? 'system',
@@ -27,15 +28,18 @@ function mapNotification(raw: RawNotification): NotificationItem {
     readAt: text(raw.readAt ?? raw.read_at) ?? null,
     createdAt: text(raw.createdAt ?? raw.created_at) ?? '',
     targetType: relatedType,
-    targetId: relatedId,
-    routeHint: text(raw.routeHint ?? raw.route_hint) ?? buildRouteHint(relatedType, relatedId),
+    targetId: relatedId ?? leadId,
+    routeHint: text(raw.routeHint ?? raw.route_hint) ?? buildRouteHint(relatedType, relatedId, leadId),
   };
 }
 
-function buildRouteHint(relatedType?: string, relatedId?: string): string | undefined {
-  if (!relatedType || !relatedId) return undefined;
-  if (relatedType.includes('lead')) return `/sales/leads/${relatedId}`;
-  if (relatedType.includes('order')) return `/sales/orders/${relatedId}`;
+function buildRouteHint(relatedType?: string, relatedId?: string, leadId?: string): string | undefined {
+  const normalizedType = relatedType?.toLowerCase();
+  const targetId = leadId ?? relatedId;
+  if (!normalizedType || !targetId) return undefined;
+  if (normalizedType.includes('lead')) return `/sales/leads/${targetId}`;
+  if (normalizedType.includes('collaboration')) return leadId ? `/sales/leads/${leadId}` : '/sales/collaboration';
+  if (normalizedType.includes('order')) return `/sales/orders/${targetId}`;
   return undefined;
 }
 
