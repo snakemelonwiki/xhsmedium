@@ -205,7 +205,7 @@ export default function SalesLeadDetailPage() {
         open={collaborationOpen}
         onCancel={() => setCollaborationOpen(false)}
         footer={null}
-        destroyOnClose
+        destroyOnClose={false}
       >
         <Form form={collaborationForm} layout="vertical" onFinish={requestCollaboration} preserve>
           <Form.Item name="type" label="协同类型" initialValue="remind_customer" rules={[{ required: true, message: '请选择协同类型' }]}>

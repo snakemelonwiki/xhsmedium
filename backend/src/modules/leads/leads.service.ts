@@ -1,4 +1,4 @@
-import { ConflictException, Injectable } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { Lead } from '../../entities/lead.entity';
@@ -47,6 +47,46 @@ interface LeadFilterOptions {
   from?: string;
   to?: string;
 }
+
+const LEAD_STATUS_CODES = new Set(['new', 'assigned', 'in_followup', 'in_collaboration', 'operation_handled', 'added_success', 'invalid']);
+const ADD_STATUS_CODES = new Set(['not_added', 'applied', 'not_passed', 'operation_reminded', 'added']);
+const PROCESS_STATUS_CODES = new Set(['not_contacted', 'waiting_pass', 'communicating', 'quoted', 'deal_pending', 'deal_done', 'invalid']);
+
+const STATUS_ALIASES: Record<string, string> = {
+  contact_added: 'added_success',
+  added: 'added_success',
+  rejected: 'invalid',
+  '新客资': 'new',
+  '已分配': 'assigned',
+  '跟进中': 'in_followup',
+  '协同中': 'in_collaboration',
+  '运营已处理': 'operation_handled',
+  '已添加通过': 'added_success',
+  '无效客资': 'invalid',
+};
+
+const ADD_STATUS_ALIASES: Record<string, string> = {
+  rejected: 'not_passed',
+  waiting_pass: 'applied',
+  '未添加': 'not_added',
+  '已申请添加': 'applied',
+  '客户未通过': 'not_passed',
+  '运营已提醒': 'operation_reminded',
+  '已添加通过': 'added',
+};
+
+const PROCESS_STATUS_ALIASES: Record<string, string> = {
+  applied: 'waiting_pass',
+  pending: 'not_contacted',
+  '未接': 'not_contacted',
+  '未联系': 'not_contacted',
+  '待通过': 'waiting_pass',
+  '沟通中': 'communicating',
+  '已报价': 'quoted',
+  '待成交': 'deal_pending',
+  '已成交': 'deal_done',
+  '无效': 'invalid',
+};
 
 @Injectable()
 export class LeadsService {
@@ -276,18 +316,19 @@ export class LeadsService {
     if (!current) return;
 
     const next: Partial<Lead> = {};
-    if (dto.status !== undefined) next.status = dto.status || current.status;
+    const normalized = this.normalizeBoardPatch(dto);
+    if (normalized.status !== undefined) next.status = normalized.status || current.status;
     if (dto.assignedSalesUserId !== undefined) next.assignedSalesUserId = dto.assignedSalesUserId || null;
     if (dto.assignedSalesUserName !== undefined) next.assignedSalesUserName = dto.assignedSalesUserName || '';
-    if (dto.processStatus !== undefined) next.processStatus = dto.processStatus || 'not_contacted';
-    if (dto.addStatus !== undefined) next.addStatus = dto.addStatus || 'not_added';
+    if (normalized.processStatus !== undefined) next.processStatus = normalized.processStatus || 'not_contacted';
+    if (normalized.addStatus !== undefined) next.addStatus = normalized.addStatus || 'not_added';
     if (dto.intention !== undefined) next.intention = dto.intention || null;
     if (dto.intentionLevel !== undefined) next.intentionLevel = dto.intentionLevel || 'pending';
     if (dto.nextFollowTime !== undefined) {
       next.nextFollowTime = dto.nextFollowTime ? new Date(dto.nextFollowTime) : null;
     }
-    this.applySalesStateTransition(current, next, dto);
-    const nextLeadStatus = this.resolveLeadStatus(current, dto);
+    this.applySalesStateTransition(current, next, normalized);
+    const nextLeadStatus = this.resolveLeadStatus(current, normalized);
     if (nextLeadStatus) {
       next.status = nextLeadStatus;
     }
@@ -301,13 +342,13 @@ export class LeadsService {
     }
 
     // §11.1 customer_added / customer_not_passed: addStatus 关键变更回写来源运营。
-    if (dto.addStatus !== undefined && dto.addStatus !== current.addStatus && current.employeeId) {
+    if (normalized.addStatus !== undefined && normalized.addStatus !== current.addStatus && current.employeeId) {
       // employeeId 在 leads 表里是 employees.id (来源运营对应的员工 ID)，但通知 receiver_id
       // 走 users 表。来源运营若关联了员工，他们 user 行的 employee_id == 员工 ID，
       // 因此用 raw query 由 employees.id 反查 users.id 兜底（找不到就跳过）。
       const sourceUserId = await this.findUserIdByEmployeeId(current.employeeId);
       if (sourceUserId) {
-        if (dto.addStatus === 'added') {
+        if (normalized.addStatus === 'added') {
           await this.notificationsService.create({
             receiverIds: [sourceUserId],
             senderId: actorUserId || null,
@@ -318,7 +359,7 @@ export class LeadsService {
             relatedId: id,
             relatedType: 'lead',
           });
-        } else if (dto.addStatus === 'not_passed' || dto.addStatus === 'rejected') {
+        } else if (normalized.addStatus === 'not_passed') {
           await this.notificationsService.create({
             receiverIds: [sourceUserId],
             senderId: actorUserId || null,
@@ -335,7 +376,7 @@ export class LeadsService {
 
     const keyFieldChanged =
       (dto.intentionLevel !== undefined && dto.intentionLevel !== current.intentionLevel) ||
-      (dto.processStatus !== undefined && dto.processStatus !== current.processStatus) ||
+      (normalized.processStatus !== undefined && normalized.processStatus !== current.processStatus) ||
       (dto.nextFollowTime !== undefined) ||
       (dto.followNote && dto.followNote.trim());
 
@@ -345,8 +386,8 @@ export class LeadsService {
     if (dto.intentionLevel !== undefined && dto.intentionLevel !== current.intentionLevel) {
       noteParts.push(`意向度: ${current.intentionLevel || '-'} → ${dto.intentionLevel}`);
     }
-    if (dto.processStatus !== undefined && dto.processStatus !== current.processStatus) {
-      noteParts.push(`处理状态: ${current.processStatus || '-'} → ${dto.processStatus}`);
+    if (normalized.processStatus !== undefined && normalized.processStatus !== current.processStatus) {
+      noteParts.push(`处理状态: ${current.processStatus || '-'} → ${normalized.processStatus}`);
     }
     if (dto.followNote && dto.followNote.trim()) {
       noteParts.push(dto.followNote.trim());
@@ -368,6 +409,7 @@ export class LeadsService {
     }
     const current = await this.leadRepository.findOne({ where: { id: leadId } });
     if (!current) throw new Error('lead not found');
+    const normalized = this.normalizeFollowRecord(dto);
 
     await this.followRepository.save({
       id: makeId(),
@@ -381,10 +423,10 @@ export class LeadsService {
     if (dto.nextFollowTime !== undefined) {
       patch.nextFollowTime = dto.nextFollowTime ? new Date(dto.nextFollowTime) : null;
     }
-    if (dto.processStatus !== undefined) patch.processStatus = dto.processStatus || 'not_contacted';
+    if (normalized.processStatus !== undefined) patch.processStatus = normalized.processStatus || 'not_contacted';
     if (dto.intention !== undefined) patch.intention = dto.intention || null;
     if (dto.intentionLevel !== undefined) patch.intentionLevel = dto.intentionLevel || 'pending';
-    this.applySalesStateTransition(current, patch, dto);
+    this.applySalesStateTransition(current, patch, normalized);
     if (Object.keys(patch).length > 0) {
       await this.leadRepository.update(leadId, patch);
     }
@@ -461,6 +503,34 @@ export class LeadsService {
       return 'in_followup';
     }
     return null;
+  }
+
+  private normalizeBoardPatch(dto: BoardPatchDto): BoardPatchDto {
+    return {
+      ...dto,
+      status: this.normalizeStatusValue('status', dto.status),
+      addStatus: this.normalizeStatusValue('addStatus', dto.addStatus),
+      processStatus: this.normalizeStatusValue('processStatus', dto.processStatus),
+    };
+  }
+
+  private normalizeFollowRecord(dto: FollowRecordDto): FollowRecordDto {
+    return {
+      ...dto,
+      processStatus: this.normalizeStatusValue('processStatus', dto.processStatus),
+    };
+  }
+
+  private normalizeStatusValue(kind: 'status' | 'addStatus' | 'processStatus', value?: string): string | undefined {
+    if (value === undefined || value === '') return value;
+    const trimmed = String(value).trim();
+    const aliases = kind === 'status' ? STATUS_ALIASES : kind === 'addStatus' ? ADD_STATUS_ALIASES : PROCESS_STATUS_ALIASES;
+    const normalized = aliases[trimmed] || trimmed;
+    const allowed = kind === 'status' ? LEAD_STATUS_CODES : kind === 'addStatus' ? ADD_STATUS_CODES : PROCESS_STATUS_CODES;
+    if (!allowed.has(normalized)) {
+      throw new BadRequestException(`invalid ${kind}: ${trimmed}`);
+    }
+    return normalized;
   }
 
   async canAccessLead(leadId: string, actor?: { actorUserId?: string; actorEmployeeId?: string; actorRole?: string }): Promise<boolean> {

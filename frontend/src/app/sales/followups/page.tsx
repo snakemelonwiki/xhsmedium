@@ -122,7 +122,7 @@ export default function SalesFollowupsPage() {
         open={Boolean(quickLead)}
         onCancel={() => setQuickLead(undefined)}
         footer={null}
-        destroyOnClose
+        destroyOnClose={false}
       >
         <Form form={form} layout="vertical" onFinish={submitQuickFollow} preserve>
           <Form.Item name="addStatus" label="添加状态" initialValue={quickLead?.addStatus ?? LeadAddStatus.APPLIED}>
