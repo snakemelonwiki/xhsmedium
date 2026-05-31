@@ -244,6 +244,20 @@ export class LeadsService {
     await this.leadRepository.update(id, dto);
   }
 
+  async findOne(id: string, actor?: { actorUserId?: string; actorEmployeeId?: string; actorRole?: string }): Promise<any | null> {
+    const row = await this.leadRepository.findOne({ where: { id } });
+    if (!row) return null;
+    const role = actor?.actorRole || '';
+    const isAdminLike = role === 'admin' || role === 'owner';
+    if (!isAdminLike && role === 'sales' && actor?.actorUserId && row.assignedSalesUserId !== actor.actorUserId) {
+      return null;
+    }
+    if (!isAdminLike && role !== 'sales' && actor?.actorEmployeeId && row.employeeId !== actor.actorEmployeeId) {
+      return null;
+    }
+    return this.mapLead(row);
+  }
+
   async updateBoard(id: string, dto: BoardPatchDto, actorUserId: string): Promise<void> {
     const current = await this.leadRepository.findOne({ where: { id } });
     if (!current) return;

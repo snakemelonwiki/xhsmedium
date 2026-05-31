@@ -241,6 +241,20 @@ export class LeadsController {
     return res.json({ ok: true });
   }
 
+  @Get(':id')
+  async findOne(@Param('id') id: string, @Req() req: Request, @Res() res: Response) {
+    const session = (req as any).session;
+    const row = await this.leadsService.findOne(id, {
+      actorUserId: session?.userId || session?.id || '',
+      actorEmployeeId: session?.employeeId || '',
+      actorRole: session?.role || '',
+    });
+    if (!row) {
+      return res.status(404).json({ ok: false, message: 'not found' });
+    }
+    return res.json(row);
+  }
+
   @Put(':id')
   @UseGuards(DebounceGuard)
   async update(@Param('id') id: string, @Body() body: any, @Res() res: Response) {

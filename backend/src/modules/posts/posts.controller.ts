@@ -131,6 +131,13 @@ export class PostsController {
     return res.json({ ok: true });
   }
 
+  @Get(':id')
+  async findOne(@Param('id') id: string, @Res() res: Response) {
+    const post = await this.postsService.findById(id);
+    if (!post) return res.status(404).json({ message: '作品不存在' });
+    return res.json(post);
+  }
+
   @Put(':id')
   @UseGuards(DebounceGuard)
   async update(@Param('id') id: string, @Body() body: any, @Res() res: Response) {

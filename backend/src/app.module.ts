@@ -39,6 +39,7 @@ import { ToolsModule } from './modules/tools/tools.module';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { ExportsModule } from './modules/exports/exports.module';
 import { OperationLogsModule } from './modules/operation-logs/operation-logs.module';
+import { UploadsModule } from './modules/uploads/uploads.module';
 import { StorageModule } from './shared/storage/storage.service';
 import { FormattedSqlLogger } from './common/sql-logger';
 import { JwtAuthMiddleware } from './common/jwt-auth.middleware';
@@ -100,6 +101,7 @@ import { TokenRefreshInterceptor } from './common/token-refresh.interceptor';
     AnalyticsModule,
     ExportsModule,
     OperationLogsModule,
+    UploadsModule,
     StorageModule,
   ],
   providers: [
