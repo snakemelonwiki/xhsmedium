@@ -51,7 +51,9 @@ export function AppLayout({ role, title, children }: AppLayoutProps) {
 
   const visibleRole = user?.role ?? role;
   const menuItems = useMemo(() => getMenuItemsByRole(visibleRole), [visibleRole]);
-  const selectedKey = menuItems.find((item) => pathname === item.path || pathname.startsWith(`${item.path}/`))?.path;
+  const selectedKey = menuItems
+    .filter((item) => pathname === item.path || pathname.startsWith(`${item.path}/`))
+    .sort((a, b) => b.path.length - a.path.length)[0]?.path;
 
   const userMenu: MenuProps['items'] = [
     {

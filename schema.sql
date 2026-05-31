@@ -107,6 +107,12 @@ CREATE TABLE IF NOT EXISTS posts (
 -- 5. leads
 -- backend/src/entities/lead.entity.ts + leads/exports/orders services.
 -- 状态字段用 VARCHAR，避免旧中文值、迁移枚举值、前端过滤值互相卡死。
+-- 当前 B 端状态机 code：
+--   status: new / assigned / in_followup / in_collaboration /
+--           operation_handled / added_success / invalid
+--   process_status: not_contacted / waiting_pass / communicating /
+--                   quoted / deal_pending / deal_done / invalid
+--   add_status: not_added / applied / not_passed / operation_reminded / added
 -- ============================================================
 CREATE TABLE IF NOT EXISTS leads (
   id                       VARCHAR(64)  PRIMARY KEY,
@@ -119,7 +125,7 @@ CREATE TABLE IF NOT EXISTS leads (
   budget                   VARCHAR(64)  NULL COMMENT '预算',
   major_content            VARCHAR(255) NULL COMMENT '专业/需求',
   ip                       VARCHAR(128) NULL COMMENT 'IP地址',
-  status                   VARCHAR(32)  NOT NULL DEFAULT 'new' COMMENT '客资状态',
+  status                   VARCHAR(32)  NOT NULL DEFAULT 'new' COMMENT '客资状态: new/assigned/in_followup/in_collaboration/operation_handled/added_success/invalid',
   deal_amount              DECIMAL(12,2) NULL COMMENT '成交金额',
   note                     TEXT         NULL COMMENT '备注',
   capture_image_url        VARCHAR(500) NULL COMMENT '引流截图URL',
@@ -128,8 +134,8 @@ CREATE TABLE IF NOT EXISTS leads (
   sales_user_name          VARCHAR(64)  NULL COMMENT '销售用户名',
   assigned_sales_user_id   VARCHAR(64)  NULL COMMENT '分配销售用户ID',
   assigned_sales_user_name VARCHAR(64)  NULL COMMENT '分配销售名称',
-  process_status           VARCHAR(32)  NOT NULL DEFAULT 'not_contacted' COMMENT '销售处理状态',
-  add_status               VARCHAR(32)  NOT NULL DEFAULT 'not_added' COMMENT '添加状态',
+  process_status           VARCHAR(32)  NOT NULL DEFAULT 'not_contacted' COMMENT '销售处理状态: not_contacted/waiting_pass/communicating/quoted/deal_pending/deal_done/invalid',
+  add_status               VARCHAR(32)  NOT NULL DEFAULT 'not_added' COMMENT '添加状态: not_added/applied/not_passed/operation_reminded/added',
   intention                VARCHAR(32)  NULL COMMENT '意向',
   lead_code                VARCHAR(32)  NULL COMMENT '客资编号',
   intention_level          VARCHAR(16)  NOT NULL DEFAULT 'pending' COMMENT '意向度',

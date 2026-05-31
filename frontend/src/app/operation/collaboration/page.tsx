@@ -1,6 +1,6 @@
 'use client';
 
-import { Button, Card, Form, Input, Space, Typography, message } from 'antd';
+import { Button, Card, Form, Input, Select, Space, Typography, message } from 'antd';
 import { useEffect, useState } from 'react';
 
 import { apiClient } from '@/shared/api/apiClient';
@@ -44,8 +44,16 @@ export default function OperationCollaborationPage() {
       <Card title="处理协同">
         <Form form={form} layout="vertical" onFinish={handleTask}>
           <div className="form-grid">
-            <Form.Item name="taskId" label="协同任务 ID" rules={[{ required: true, message: '请输入任务 ID' }]}>
-              <Input placeholder="从协同列表复制任务 ID" />
+            <Form.Item name="taskId" label="选择协同任务" rules={[{ required: true, message: '请选择协同任务' }]}>
+              <Select
+                showSearch
+                placeholder="选择待处理协同任务"
+                optionFilterProp="label"
+                options={items.filter(isActionableTask).map((item) => ({
+                  value: String(item.id),
+                  label: buildTaskLabel(item),
+                }))}
+              />
             </Form.Item>
             <Form.Item className="full-row" name="handledNote" label="处理备注" rules={[{ required: true, message: '请输入处理备注' }]}>
               <Input.TextArea rows={3} placeholder="说明已提醒客户、已补充信息或已二次触达" />
@@ -59,4 +67,15 @@ export default function OperationCollaborationPage() {
       </Card>
     </Space>
   );
+}
+
+function buildTaskLabel(item: LeadTimelineItem) {
+  const type = item.title || '协同任务';
+  const status = item.status ? ` · ${item.status}` : '';
+  const leadId = item.extra?.leadId ? ` · 客资 ${item.extra.leadId}` : '';
+  return `${type}${leadId}${status}`;
+}
+
+function isActionableTask(item: LeadTimelineItem) {
+  return item.status === 'pending' || item.status === 'handling';
 }
