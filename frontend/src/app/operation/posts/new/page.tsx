@@ -1,6 +1,7 @@
 'use client';
 
 import { Button, Card, Form, Input, Select, Space, Typography, message } from 'antd';
+import { useRouter } from 'next/navigation';
 
 import { apiClient } from '@/shared/api/apiClient';
 import { ImageUploadField } from '@/shared/components/forms';
@@ -9,12 +10,15 @@ import { useSubmitLock } from '@/shared/hooks/useSubmitLock';
 export default function OperationPostNewPage() {
   const [form] = Form.useForm();
   const { submitting, run } = useSubmitLock();
+  const router = useRouter();
 
   async function submit(values: Record<string, unknown>) {
     await run(async () => {
       await apiClient.post('/posts', values);
       message.success('作品已录入');
       form.resetFields();
+      const today = formatLocalDate(new Date());
+      router.push(`/operation/posts?from=${today}&to=${today}`);
     });
   }
 
@@ -65,4 +69,11 @@ export default function OperationPostNewPage() {
       </Card>
     </Space>
   );
+}
+
+function formatLocalDate(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }

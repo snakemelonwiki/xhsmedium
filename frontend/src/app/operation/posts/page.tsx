@@ -4,12 +4,16 @@ import { ReloadOutlined } from '@ant-design/icons';
 import { Alert, Button, Card, Empty, Pagination, Space, Table, Tag, Typography, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
 import { listPosts, refreshPostMetrics } from '@/shared/api/content';
 import type { ContentPost } from '@/shared/types/content';
 
 export default function OperationPostsPage() {
+  const searchParams = useSearchParams();
+  const from = searchParams.get('from') || undefined;
+  const to = searchParams.get('to') || undefined;
   const [items, setItems] = useState<ContentPost[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -21,7 +25,7 @@ export default function OperationPostsPage() {
     setLoading(true);
     setError(undefined);
     try {
-      const result = await listPosts({ page: nextPage, pageSize });
+      const result = await listPosts({ page: nextPage, pageSize, from, to });
       setItems(result.items);
       setTotal(result.total);
       setPage(result.page);
@@ -47,7 +51,7 @@ export default function OperationPostsPage() {
   useEffect(() => {
     load(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [from, to]);
 
   const columns: ColumnsType<ContentPost> = [
     {
@@ -109,6 +113,7 @@ export default function OperationPostsPage() {
         <Link href="/operation/posts/new"><Button type="primary">新建作品</Button></Link>
       </div>
       {error ? <Alert type="warning" showIcon message="作品数据暂不可用" description={error} /> : null}
+      {from && to ? <Alert type="info" showIcon message="今日录入记录" description={`${from} 录入的作品记录`} /> : null}
       <Card>
         <Table
           rowKey="id"

@@ -1,4 +1,4 @@
-import { Injectable, Module, Global } from '@nestjs/common';
+import { Global, Inject, Injectable, Module, Optional } from '@nestjs/common';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -23,13 +23,27 @@ export interface PutOptions {
   contentType?: string;
 }
 
+type StorageEnv = Record<string, string | undefined>;
+
+interface OssClientLike {
+  put(name: string, file: Buffer, options?: any): Promise<any>;
+  delete?(name: string): Promise<any>;
+  signatureUrl?(name: string, options?: { expires?: number; method?: string }): string;
+}
+
 @Injectable()
 export class StorageService {
   private readonly uploadsRoot: string;
   private readonly driver: string;
+  private readonly env: StorageEnv;
+  private readonly ossClient?: OssClientLike;
 
-  constructor() {
-    this.driver = process.env.OBJECT_STORAGE_DRIVER || 'local';
+  constructor(
+    @Optional() @Inject('STORAGE_ENV') env: StorageEnv = process.env,
+    @Optional() @Inject('OSS_CLIENT') ossClient?: OssClientLike,
+  ) {
+    this.env = env || process.env;
+    this.driver = this.env.OBJECT_STORAGE_DRIVER || 'local';
     // 编译后位于 dist/shared/storage/storage.service.js，上溯四级到仓库根
     this.uploadsRoot = path.join(__dirname, '..', '..', '..', '..', 'uploads');
     try {
@@ -40,10 +54,7 @@ export class StorageService {
       // eslint-disable-next-line no-console
       console.warn('[storage] init uploads root failed:', err?.message || err);
     }
-    if (this.driver !== 'local') {
-      // eslint-disable-next-line no-console
-      console.warn(`[storage] driver=${this.driver} 未实现，回退到 local`);
-    }
+    this.ossClient = ossClient || this.createOssClient();
   }
 
   /**
@@ -58,14 +69,20 @@ export class StorageService {
   async putBuffer(bucket: string, key: string, buf: Buffer, opts: PutOptions = {}): Promise<string> {
     const safeBucket = this.safeName(bucket);
     const safeKey = this.safeKey(key);
-    const dir = path.join(this.uploadsRoot, safeBucket);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    const filepath = path.join(dir, safeKey);
     let body = buf;
     if (opts.bom) {
       const bom = Buffer.from([0xef, 0xbb, 0xbf]);
       body = Buffer.concat([bom, buf]);
     }
+    if (this.isOssDriver()) {
+      const objectName = this.toObjectName(safeBucket, safeKey);
+      await this.ossClient!.put(objectName, body, this.toOssPutOptions(opts));
+      return this.toAppViewUrl(safeBucket, safeKey);
+    }
+
+    const dir = path.join(this.uploadsRoot, safeBucket);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const filepath = path.join(dir, safeKey);
     await fs.promises.writeFile(filepath, body);
     return `/uploads/${safeBucket}/${safeKey}`;
   }
@@ -83,6 +100,11 @@ export class StorageService {
   async remove(bucket: string, key: string): Promise<void> {
     const safeBucket = this.safeName(bucket);
     const safeKey = this.safeKey(key);
+    if (this.isOssDriver()) {
+      await this.ossClient?.delete?.(this.toObjectName(safeBucket, safeKey));
+      return;
+    }
+
     const filepath = path.join(this.uploadsRoot, safeBucket, safeKey);
     try {
       await fs.promises.unlink(filepath);
@@ -106,6 +128,85 @@ export class StorageService {
   /** 当前 driver（用于诊断） */
   getDriver(): string {
     return this.driver;
+  }
+
+  /**
+   * 将业务稳定路径转换为浏览器可访问地址。
+   * OSS 私有模式返回短期签名 URL；本地模式返回 /uploads 路径。
+   */
+  getReadableUrl(bucket: string, key: string): string {
+    const safeBucket = this.safeName(bucket);
+    const safeKey = this.safeKey(key);
+    if (!this.isOssDriver()) {
+      return `/uploads/${safeBucket}/${safeKey}`;
+    }
+
+    const objectName = this.toObjectName(safeBucket, safeKey);
+    if (this.isPrivateOss()) {
+      return this.ossClient!.signatureUrl!(objectName, {
+        expires: this.signUrlExpires(),
+        method: 'GET',
+      });
+    }
+
+    return `${this.publicBaseUrl().replace(/\/+$/, '')}/${objectName}`;
+  }
+
+  /**
+   * OSS 模式下返回 /api/uploads/view/<bucket>/<key>，供数据库保存稳定路径。
+   */
+  private toAppViewUrl(bucket: string, key: string): string {
+    return `/api/uploads/view/${encodeURIComponent(bucket)}/${encodeURIComponent(key)}`;
+  }
+
+  private isOssDriver(): boolean {
+    return this.driver === 'oss';
+  }
+
+  private isPrivateOss(): boolean {
+    return String(this.env.OSS_PRIVATE ?? 'true').toLowerCase() !== 'false';
+  }
+
+  private signUrlExpires(): number {
+    const seconds = Number(this.env.OSS_SIGN_URL_EXPIRES || 900);
+    return Number.isFinite(seconds) && seconds > 0 ? seconds : 900;
+  }
+
+  private publicBaseUrl(): string {
+    const configured = String(this.env.OSS_PUBLIC_BASE_URL || '').trim();
+    if (configured) return configured;
+    const bucket = this.requiredEnv('OSS_BUCKET');
+    const endpoint = this.requiredEnv('OSS_ENDPOINT').replace(/^https?:\/\//, '');
+    return `https://${bucket}.${endpoint}`;
+  }
+
+  private toObjectName(bucket: string, key: string): string {
+    const prefix = String(this.env.OSS_PREFIX || '').trim().replace(/^\/+|\/+$/g, '');
+    return [prefix, bucket, key].filter(Boolean).join('/');
+  }
+
+  private toOssPutOptions(opts: PutOptions): any {
+    if (!opts.contentType) return undefined;
+    return { headers: { 'Content-Type': opts.contentType } };
+  }
+
+  private createOssClient(): OssClientLike | undefined {
+    if (!this.isOssDriver()) return undefined;
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const OSS = require('ali-oss');
+    return new OSS({
+      region: this.requiredEnv('OSS_REGION'),
+      bucket: this.requiredEnv('OSS_BUCKET'),
+      endpoint: this.requiredEnv('OSS_ENDPOINT'),
+      accessKeyId: this.requiredEnv('OSS_ACCESS_KEY_ID'),
+      accessKeySecret: this.requiredEnv('OSS_ACCESS_KEY_SECRET'),
+    });
+  }
+
+  private requiredEnv(name: string): string {
+    const value = String(this.env[name] || '').trim();
+    if (!value) throw new Error(`missing required storage env: ${name}`);
+    return value;
   }
 
   // ---- 安全工具：拒绝 .. 跨目录、空名、绝对路径 ----

@@ -216,13 +216,18 @@ test('B-side acceptance clicks save reviewable screenshots with mocked API', asy
   await mockApi(page);
 
   await page.goto('/login', { waitUntil: 'domcontentloaded' });
+  await page.waitForLoadState('networkidle');
   await expect(page.getByRole('heading', { name: '登录工作台' })).toBeVisible();
   await page.getByPlaceholder('用户名').fill('sales');
   await page.getByPlaceholder('密码').fill('sales123');
+  const loginResponse = page.waitForResponse((response) =>
+    response.url().includes('/api/auth/login') && response.request().method() === 'POST',
+  );
   await Promise.all([
     page.waitForURL('**/sales/leads', { timeout: 30_000, waitUntil: 'commit' }),
     page.getByRole('button', { name: /登\s*录/ }).click(),
   ]);
+  await expect((await loginResponse).ok()).toBeTruthy();
   await expect(page.getByRole('heading', { name: '我的客资' })).toBeVisible({ timeout: 30_000 });
 
   await expect(page.getByText('林同学')).toBeVisible();
@@ -240,7 +245,10 @@ test('B-side acceptance clicks save reviewable screenshots with mocked API', asy
   await expect(page.getByText('林同学')).toBeVisible();
   await screenshot(page, 'B-FE-3-followups', '01-due-followups');
 
-  await page.getByRole('button', { name: '查看详情' }).first().click();
+  await Promise.all([
+    page.waitForURL(`**/sales/leads/${leadA.id}`, { timeout: 30_000 }),
+    page.getByRole('button', { name: '查看详情' }).first().click(),
+  ]);
   await expect(page.getByRole('heading', { name: '客资详情' })).toBeVisible();
   await expect(page.getByText('下一步：首次联系客户并记录跟进')).toBeVisible();
   await screenshot(page, 'B-FE-4-detail', '01-detail-status');
@@ -252,7 +260,7 @@ test('B-side acceptance clicks save reviewable screenshots with mocked API', asy
   );
   await page.getByRole('button', { name: '保存跟进' }).click();
   await expect((await followResponse).ok()).toBeTruthy();
-  await expect(page.getByText('已申请添加')).toBeVisible();
+  await expect(page.getByText('已申请添加').first()).toBeVisible();
   await expect(page.getByText('沟通中').first()).toBeVisible();
   await screenshot(page, 'B-FE-5-follow-action', '01-follow-saved');
 

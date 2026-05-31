@@ -4,6 +4,7 @@ import { In, Repository } from 'typeorm';
 import { Lead } from '../../entities/lead.entity';
 import { LeadFollowRecord } from '../../entities/lead-follow-record.entity';
 import { Post } from '../../entities/post.entity';
+import { Account } from '../../entities/account.entity';
 import { User } from '../../entities/user.entity';
 import { CollaborationTask } from '../../entities/collaboration-task.entity';
 import { makeId } from '../../shared/utils/id-generator';
@@ -99,6 +100,8 @@ export class LeadsService {
     private readonly followRepository: Repository<LeadFollowRecord>,
     @InjectRepository(Post)
     private readonly postRepository: Repository<Post>,
+    @InjectRepository(Account)
+    private readonly accountRepository: Repository<Account>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
     @InjectRepository(CollaborationTask)
@@ -1068,7 +1071,33 @@ export class LeadsService {
     const latestCollaboration = rows.length <= 200
       ? await this.latestCollaborationByLeadIds(rows.map((row) => row.id))
       : new Map<string, CollaborationTask>();
-    return rows.map((row) => this.mapLead(row, latest.get(row.id), latestCollaboration.get(row.id)));
+    const accounts = rows.length <= 200
+      ? await this.accountsByIds(rows.map((row) => row.accountId))
+      : new Map<string, Account>();
+    const posts = rows.length <= 200
+      ? await this.postsByIds(rows.map((row) => row.postId || ''))
+      : new Map<string, Post>();
+    return rows.map((row) => this.mapLead(
+      row,
+      latest.get(row.id),
+      latestCollaboration.get(row.id),
+      accounts.get(row.accountId),
+      row.postId ? posts.get(row.postId) : undefined,
+    ));
+  }
+
+  private async accountsByIds(accountIds: string[]): Promise<Map<string, Account>> {
+    const ids = Array.from(new Set(accountIds.filter(Boolean)));
+    if (ids.length === 0) return new Map();
+    const rows = await this.accountRepository.find({ where: { id: In(ids) } });
+    return new Map(rows.map((row) => [row.id, row]));
+  }
+
+  private async postsByIds(postIds: string[]): Promise<Map<string, Post>> {
+    const ids = Array.from(new Set(postIds.filter(Boolean)));
+    if (ids.length === 0) return new Map();
+    const rows = await this.postRepository.find({ where: { id: In(ids) } });
+    return new Map(rows.map((row) => [row.id, row]));
   }
 
   private async latestFollowByLeadIds(leadIds: string[]): Promise<Map<string, LeadFollowRecord>> {
@@ -1103,14 +1132,28 @@ export class LeadsService {
     return latest;
   }
 
-  private mapLead(row: Lead, latestFollow?: LeadFollowRecord, latestCollaboration?: CollaborationTask): any {
+  private mapLead(
+    row: Lead,
+    latestFollow?: LeadFollowRecord,
+    latestCollaboration?: CollaborationTask,
+    account?: Account,
+    post?: Post,
+  ): any {
     return {
       id: row.id,
       employeeId: row.employeeId,
       operatorId: row.employeeId,
       operatorName: row.salesUserName || row.assignedSalesUserName || null,
       accountId: row.accountId,
+      accountName: account?.accountName || null,
+      sourceAccountId: row.accountId,
+      sourceAccountName: account?.accountName || null,
       postId: row.postId,
+      postTitle: post?.title || null,
+      postUrl: post?.postUrl || null,
+      sourcePostId: row.postId,
+      sourcePostTitle: post?.title || null,
+      sourcePostUrl: post?.postUrl || null,
       platform: row.platform,
       contactInfo: row.contactInfo,
       nickname: row.nickname,

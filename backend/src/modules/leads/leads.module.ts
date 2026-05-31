@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { Lead } from '../../entities/lead.entity';
 import { LeadFollowRecord } from '../../entities/lead-follow-record.entity';
 import { Post } from '../../entities/post.entity';
+import { Account } from '../../entities/account.entity';
 import { User } from '../../entities/user.entity';
 import { CollaborationTask } from '../../entities/collaboration-task.entity';
 import { LeadsController } from './leads.controller';
@@ -13,7 +14,7 @@ import { OperationLogsModule } from '../operation-logs/operation-logs.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Lead, LeadFollowRecord, Post, User, CollaborationTask]),
+    TypeOrmModule.forFeature([Lead, LeadFollowRecord, Post, Account, User, CollaborationTask]),
     NotificationsModule,
     CollaborationTasksModule,
     OperationLogsModule,

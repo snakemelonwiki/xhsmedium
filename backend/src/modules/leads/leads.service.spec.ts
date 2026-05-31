@@ -11,6 +11,7 @@ describe('LeadsService status normalization', () => {
       {} as any,
       {} as any,
       {} as any,
+      {} as any,
     ) as any;
   }
 

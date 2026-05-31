@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import {
   CollaborationTask,
   CollaborationTaskType,
@@ -162,7 +162,7 @@ export class CollaborationTasksService {
 
     qb.orderBy('t.requested_at', 'DESC');
     const rows = await qb.getMany();
-    return rows.map(this.map);
+    return this.mapTasks(rows);
   }
 
   // §9 / AC-10.2 协同任务列表分页
@@ -200,7 +200,7 @@ export class CollaborationTasksService {
 
     qb.orderBy('t.requested_at', 'DESC').skip(safeOffset).take(safeLimit);
     const [rows, total] = await qb.getManyAndCount();
-    return { items: rows.map(this.map), total, limit: safeLimit, offset: safeOffset };
+    return { items: await this.mapTasks(rows), total, limit: safeLimit, offset: safeOffset };
   }
 
   private clampLimit(limit: number): number {
@@ -327,7 +327,16 @@ export class CollaborationTasksService {
     return this.repo.findOne({ where: { id } });
   }
 
-  private map(row: CollaborationTask): any {
+  private async mapTasks(rows: CollaborationTask[]): Promise<any[]> {
+    const leadIds = Array.from(new Set(rows.map((row) => row.leadId).filter(Boolean)));
+    const leads = leadIds.length
+      ? await this.leadRepository.find({ where: { id: In(leadIds) } })
+      : [];
+    const leadById = new Map(leads.map((lead) => [lead.id, lead]));
+    return rows.map((row) => this.map(row, leadById.get(row.leadId)));
+  }
+
+  private map(row: CollaborationTask, lead?: Lead): any {
     return {
       id: row.id,
       leadId: row.leadId,
@@ -341,6 +350,13 @@ export class CollaborationTasksService {
       handledAt: row.handledAt,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
+      customerName: lead?.nickname || lead?.contactInfo || null,
+      contactInfo: lead?.contactInfo || null,
+      sourceAccountId: lead?.accountId || null,
+      sourcePostId: lead?.postId || null,
+      salesRemark: lead?.salesFeedback || lead?.note || null,
+      assignedSalesUserId: lead?.assignedSalesUserId || null,
+      assignedSalesUserName: lead?.assignedSalesUserName || lead?.salesUserName || null,
     };
   }
 }

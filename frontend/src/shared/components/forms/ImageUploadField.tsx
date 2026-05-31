@@ -13,6 +13,24 @@ type ImageUploadFieldProps = {
   bucket: string;
 };
 
+const previewFrameStyle = {
+  width: 180,
+  minHeight: 180,
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  padding: 8,
+  border: '1px solid #e5e8ef',
+  borderRadius: 8,
+  background: '#ffffff',
+} as const;
+
+const previewImageStyle = {
+  maxWidth: 164,
+  maxHeight: 240,
+  objectFit: 'contain',
+} as const;
+
 export function ImageUploadField({ value, onChange, bucket }: ImageUploadFieldProps) {
   const [uploading, setUploading] = useState(false);
 
@@ -39,11 +57,15 @@ export function ImageUploadField({ value, onChange, bucket }: ImageUploadFieldPr
   return (
     <Space direction="vertical" size={8}>
       <Upload {...props}>
-        <Button icon={<UploadOutlined />} loading={uploading}>上传图片</Button>
+        <Button icon={<UploadOutlined />} loading={uploading}>
+          {value ? '重新上传' : '上传图片'}
+        </Button>
       </Upload>
       {value ? (
-        <Space direction="vertical" size={8}>
-          <Image src={value} alt="已上传图片" width={160} />
+        <Space direction="vertical" size={8} align="start">
+          <div style={previewFrameStyle}>
+            <Image src={value} alt="已上传图片" style={previewImageStyle} />
+          </div>
           <Button size="small" danger icon={<DeleteOutlined />} onClick={() => onChange?.('')}>
             删除图片
           </Button>

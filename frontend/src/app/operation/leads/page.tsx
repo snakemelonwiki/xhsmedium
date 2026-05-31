@@ -1,24 +1,43 @@
 'use client';
 
-import { Button, Card, Empty, Pagination, Space, Typography } from 'antd';
+import { ProTable, type ProColumns } from '@ant-design/pro-components';
+import { Button, Card, Empty, Input, Select, Space, Typography } from 'antd';
+import type { TablePaginationConfig } from 'antd';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 
 import { listSalesLeads } from '@/shared/api/leads';
-import { LeadCard } from '@/shared/components/leads';
+import { StatusTag } from '@/shared/components/status';
 import type { SalesLead } from '@/shared/types/leads';
+
+type LeadFilters = {
+  platform?: string;
+  status?: string;
+  search?: string;
+};
 
 export default function OperationLeadsPage() {
   const [items, setItems] = useState<SalesLead[]>([]);
-  const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(1);
-  const pageSize = 20;
+  const [loading, setLoading] = useState(false);
+  const [filters, setFilters] = useState<LeadFilters>({});
+  const [pagination, setPagination] = useState({ current: 1, pageSize: 20, total: 0 });
 
-  async function load(nextPage = page) {
-    const result = await listSalesLeads({ scope: 'self', page: nextPage, pageSize });
-    setItems(result.items);
-    setTotal(result.total);
-    setPage(result.page);
+  async function load(nextPage = pagination.current, nextPageSize = pagination.pageSize, nextFilters = filters) {
+    setLoading(true);
+    try {
+      const result = await listSalesLeads({
+        scope: 'self',
+        page: nextPage,
+        pageSize: nextPageSize,
+        platform: nextFilters.platform,
+        status: nextFilters.status,
+        search: nextFilters.search,
+      });
+      setItems(result.items);
+      setPagination({ current: result.page, pageSize: result.pageSize, total: result.total });
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -33,12 +52,113 @@ export default function OperationLeadsPage() {
           <Typography.Title level={2}>运营客资看板</Typography.Title>
           <Typography.Paragraph type="secondary">回看自己录入客资的分配、添加、跟进和协同状态。</Typography.Paragraph>
         </div>
-        <Link href="/operation/leads/new"><Button type="primary">录入客资</Button></Link>
+        <Space wrap>
+          <Select
+            allowClear
+            aria-label="筛选平台"
+            placeholder="全部平台"
+            style={{ width: 140 }}
+            value={filters.platform}
+            options={[
+              { label: '小红书', value: 'xiaohongshu' },
+              { label: '抖音', value: 'douyin' },
+            ]}
+            onChange={(platform) => {
+              const next = { ...filters, platform };
+              setFilters(next);
+              load(1, pagination.pageSize, next);
+            }}
+          />
+          <Select
+            allowClear
+            aria-label="筛选状态"
+            placeholder="全部状态"
+            style={{ width: 160 }}
+            value={filters.status}
+            options={[
+              { label: '新客资', value: 'new' },
+              { label: '已分配', value: 'assigned' },
+              { label: '协同中', value: 'in_collaboration' },
+              { label: '运营已处理', value: 'operation_handled' },
+              { label: '已添加通过', value: 'added_success' },
+              { label: '无效客资', value: 'invalid' },
+            ]}
+            onChange={(status) => {
+              const next = { ...filters, status };
+              setFilters(next);
+              load(1, pagination.pageSize, next);
+            }}
+          />
+          <Input.Search
+            allowClear
+            placeholder="搜索客户/联系方式"
+            style={{ width: 220 }}
+            onSearch={(search) => {
+              const next = { ...filters, search };
+              setFilters(next);
+              load(1, pagination.pageSize, next);
+            }}
+          />
+          <Button onClick={() => load()}>刷新</Button>
+          <Link href="/operation/leads/new"><Button type="primary">录入客资</Button></Link>
+        </Space>
       </div>
       <Card>
-        {items.length ? items.map((lead) => <LeadCard key={lead.id} lead={lead} />) : <Empty description="暂无客资" />}
-        <Pagination current={page} pageSize={pageSize} total={total} onChange={load} style={{ marginTop: 16, textAlign: 'right' }} />
+        <ProTable<SalesLead>
+          rowKey="id"
+          columns={columns}
+          dataSource={items}
+          loading={loading}
+          pagination={{ ...pagination, showSizeChanger: true }}
+          onChange={(next: TablePaginationConfig) => load(next.current ?? 1, next.pageSize ?? 20)}
+          locale={{ emptyText: <Empty description="暂无客资" /> }}
+          search={false}
+          options={false}
+        />
       </Card>
     </Space>
   );
 }
+
+const columns: ProColumns<SalesLead>[] = [
+  {
+    title: '客户',
+    dataIndex: 'customerName',
+    sorter: (a, b) => String(a.customerName || '').localeCompare(String(b.customerName || '')),
+    render: (_, record) => (
+      <Space direction="vertical" size={2}>
+        <Typography.Text strong>{record.customerName || record.nickname || `客资 ${record.id}`}</Typography.Text>
+        <Typography.Text type="secondary">{record.contact || record.phone || record.wechat || '-'}</Typography.Text>
+      </Space>
+    ),
+  },
+  {
+    title: '来源账号',
+    render: (_, record) => record.source?.accountName || record.source?.accountId || '-',
+  },
+  {
+    title: '来源作品',
+    render: (_, record) => record.source?.postTitle || record.source?.postId || '-',
+  },
+  {
+    title: '分配销售',
+    render: (_, record) => record.sales?.name || record.sales?.id || '-',
+  },
+  {
+    title: '添加状态',
+    render: (_, record) => <StatusTag kind="addStatus" code={record.addStatus} />,
+  },
+  {
+    title: '协同状态',
+    render: (_, record) => <StatusTag kind="collaborationStatus" code={record.collaborationStatus} />,
+  },
+  {
+    title: '客资状态',
+    render: (_, record) => <StatusTag kind="leadStatus" code={record.status} />,
+  },
+  {
+    title: '最后更新',
+    sorter: (a, b) => String(a.updatedAt || '').localeCompare(String(b.updatedAt || '')),
+    render: (_, record) => record.updatedAt || record.latestFollowAt || record.assignedAt || '-',
+  },
+];

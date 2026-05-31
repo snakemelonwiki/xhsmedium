@@ -2,6 +2,7 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';
 import * as path from 'path';
+import { createBodySizeGuard } from './common/body-size.middleware';
 
 // HTTP request logger
 function requestLogger(req: any, res: any, next: any) {
@@ -51,18 +52,9 @@ async function bootstrap() {
 
   const expressApp = app.getHttpAdapter().getInstance();
 
-  // Body size limits
-  expressApp.use((req: any, _res: any, next: any) => {
-    const limit = 10 * 1024 * 1024;
-    let received = 0;
-    req.on('data', (chunk: Buffer) => {
-      received += chunk.length;
-      if (received > limit) {
-        req.destroy(new Error('Request entity too large'));
-      }
-    });
-    next();
-  });
+  // Body size limits. Multipart uploads are parsed by Multer and must not be
+  // read here, otherwise the request stream reaches Multer incomplete.
+  expressApp.use(createBodySizeGuard(10 * 1024 * 1024));
 
   // Static file serving
   const expressStatic = require('express').static;

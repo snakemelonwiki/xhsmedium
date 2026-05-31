@@ -74,7 +74,12 @@ function mapLead(raw: RawRecord): SalesLead {
       id: text(raw.employeeId) ?? text(raw.operatorId),
       name: text(raw.employeeName) ?? text(raw.operatorName),
     },
+    sales: {
+      id: text(raw.assignedSalesUserId) ?? text(raw.assigned_sales_user_id) ?? text(raw.salesId),
+      name: text(raw.assignedSalesUserName) ?? text(raw.assigned_sales_user_name) ?? text(raw.salesName),
+    },
     assignedAt: text(raw.assignedAt) ?? text(raw.createdAt),
+    updatedAt: text(raw.updatedAt) ?? text(raw.updated_at) ?? text(raw.salesUpdatedAt),
     status: text(raw.status) ?? 'new',
     addStatus: text(raw.addStatus) ?? 'not_added',
     processStatus: text(raw.processStatus) ?? 'not_contacted',

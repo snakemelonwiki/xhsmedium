@@ -207,10 +207,12 @@ export class NotificationsService {
   private buildRouteHint(portType: string, targetType: string | null, targetId: string | null): string | null {
     if (!targetType || !targetId) return null;
     if (targetType === 'lead') {
-      return portType === 'operations' ? `/operation/leads/${targetId}` : `/sales/leads/${targetId}`;
+      return portType === 'operations' ? `/operation/leads?leadId=${targetId}` : `/sales/leads/${targetId}`;
     }
     if (targetType === 'collaboration_task') {
-      return portType === 'operations' ? '/operation/collaboration' : '/sales/collaboration';
+      return portType === 'operations'
+        ? `/operation/collaboration?taskId=${targetId}`
+        : `/sales/collaboration?taskId=${targetId}`;
     }
     if (targetType === 'order') {
       return portType === 'academic' ? `/academic/orders/${targetId}` : `/sales/orders/${targetId}`;

@@ -19,6 +19,11 @@ export interface LeadOperatorSummary {
   name?: string;
 }
 
+export interface LeadSalesSummary {
+  id?: string | number;
+  name?: string;
+}
+
 export interface SalesLead {
   id: string | number;
   customerName: string;
@@ -28,7 +33,9 @@ export interface SalesLead {
   wechat?: string;
   source?: LeadSourceSummary;
   operator?: LeadOperatorSummary;
+  sales?: LeadSalesSummary;
   assignedAt?: string;
+  updatedAt?: string;
   status: LeadStatusCode | string;
   addStatus?: AddStatusCode | string;
   processStatus?: ProcessStatusCode | string;

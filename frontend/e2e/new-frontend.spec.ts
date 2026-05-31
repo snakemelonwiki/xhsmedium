@@ -157,19 +157,24 @@ async function setAuthRole(page: Page, role: 'operation' | 'sales' | 'academic' 
   }, role);
 }
 
+async function gotoApp(page: Page, path: string) {
+  await page.goto(path, { waitUntil: 'domcontentloaded' });
+}
+
 test('new frontend routes and migrated interactions work with mocked backend', async ({ page }) => {
   await mockApi(page);
 
-  await page.goto('/login', { waitUntil: 'domcontentloaded' });
-  await expect(page.getByRole('heading', { name: '登录运营中台' })).toBeVisible();
+  await gotoApp(page, '/login');
+  await page.waitForLoadState('networkidle');
+  await expect(page.getByRole('heading', { name: '登录工作台' })).toBeVisible();
 
   await setAuthRole(page, 'sales');
-  await page.goto('/sales/leads');
+  await gotoApp(page, '/sales/leads');
   await expect(page.getByRole('heading', { name: '我的客资' })).toBeVisible();
   await expect(page.getByText('客户A')).toBeVisible();
 
   await setAuthRole(page, 'operation');
-  await page.goto('/operation/posts/new');
+  await gotoApp(page, '/operation/posts/new');
   await expect(page.getByRole('heading', { name: '作品录入' })).toBeVisible();
   await page.getByLabel('作品链接').fill('https://example.com/post');
   await page.getByLabel('标题').fill('新作品');
@@ -179,9 +184,12 @@ test('new frontend routes and migrated interactions work with mocked backend', a
   await page.getByRole('button', { name: '提交作品' }).click();
   await expect((await createPostResponse).ok()).toBeTruthy();
 
-  await page.goto('/operation/posts');
+  await gotoApp(page, '/operation/posts');
   await expect(page.getByRole('heading', { name: '作品列表' })).toBeVisible();
-  await page.locator('a[href="/operation/posts/post-1/edit"]').click();
+  await Promise.all([
+    page.waitForURL('**/operation/posts/post-1/edit', { timeout: 30_000 }),
+    page.locator('a[href="/operation/posts/post-1/edit"]').click(),
+  ]);
   await expect(page.getByRole('heading', { name: '编辑作品' })).toBeVisible({ timeout: 30_000 });
   await page.getByLabel('标题').fill('作品A 已编辑');
   const updatePostResponse = page.waitForResponse((response) =>
@@ -190,7 +198,7 @@ test('new frontend routes and migrated interactions work with mocked backend', a
   await page.getByRole('button', { name: '保存作品' }).click();
   await expect((await updatePostResponse).ok()).toBeTruthy();
 
-  await page.goto('/operation/gallery');
+  await gotoApp(page, '/operation/gallery');
   await expect(page.getByRole('heading', { name: '作品广场' })).toBeVisible();
   await expect(page.getByText('作品A')).toBeVisible();
   const favoriteResponse = page.waitForResponse((response) =>
@@ -200,11 +208,11 @@ test('new frontend routes and migrated interactions work with mocked backend', a
   await expect((await favoriteResponse).ok()).toBeTruthy();
 
   await setAuthRole(page, 'sales');
-  await page.goto('/sales/passive-leads');
+  await gotoApp(page, '/sales/passive-leads');
   await expect(page.getByRole('heading', { name: '待确认被动添加' })).toBeVisible();
   await expect(page.getByText('客户A')).toBeVisible();
 
-  await page.goto('/sales/messages');
+  await gotoApp(page, '/sales/messages');
   await expect(page.getByRole('heading', { name: '销售消息' })).toBeVisible();
   await expect(page.getByText('新客资提醒')).toBeVisible();
   const readAllResponse = page.waitForResponse((response) =>
@@ -214,10 +222,10 @@ test('new frontend routes and migrated interactions work with mocked backend', a
   await expect((await readAllResponse).ok()).toBeTruthy();
 
   await setAuthRole(page, 'academic');
-  await page.goto('/academic/orders');
+  await gotoApp(page, '/academic/orders');
   await expect(page.getByRole('heading', { name: '订单池' })).toBeVisible();
 
   await setAuthRole(page, 'admin');
-  await page.goto('/admin/leads');
+  await gotoApp(page, '/admin/leads');
   await expect(page.getByRole('heading', { name: '主管客资' })).toBeVisible();
 });
