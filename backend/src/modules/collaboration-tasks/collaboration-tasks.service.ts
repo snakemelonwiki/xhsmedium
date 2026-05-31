@@ -230,8 +230,8 @@ export class CollaborationTasksService {
         content: cleanNote
           ? `您发起的协同任务已处理: ${cleanNote}`
           : '您发起的协同任务已处理',
-        relatedId: id,
-        relatedType: 'collaboration_task',
+        relatedId: task.leadId,
+        relatedType: 'lead',
       });
     }
 

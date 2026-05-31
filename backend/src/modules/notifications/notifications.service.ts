@@ -91,6 +91,15 @@ export class NotificationsService {
     };
   }
 
+  async countUnread(userId: string, portType?: string): Promise<number> {
+    if (!userId) return 0;
+    const where: any = { receiverId: userId, readStatus: 0 };
+    if (portType) {
+      where.portType = portType;
+    }
+    return this.repo.count({ where });
+  }
+
   private clampLimit(limit: number | undefined): number {
     const n = Number(limit) || 20;
     if (n <= 0) return 20;

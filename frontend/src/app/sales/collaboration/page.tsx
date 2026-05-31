@@ -32,6 +32,12 @@ export default function SalesCollaborationPage() {
   }
 
   async function loadLeads() {
+    const allLeads = await listSalesLeads({ pageSize: 100 }).catch(() => undefined);
+    if (allLeads) {
+      setLeads(dedupeLeads(allLeads.items));
+      return;
+    }
+
     const [assigned, inFollowup] = await Promise.all([
       listSalesLeads({ pageSize: 100, status: LeadStatus.ASSIGNED }).catch(() => ({ items: [] as SalesLead[] })),
       listSalesLeads({ pageSize: 100, status: LeadStatus.IN_FOLLOWUP }).catch(() => ({ items: [] as SalesLead[] })),
@@ -87,7 +93,7 @@ export default function SalesCollaborationPage() {
       <Card title="发起协同">
         <Form form={form} layout="vertical" onFinish={submit}>
           <div className="form-grid">
-            <Form.Item name="leadId" label="客资 ID" rules={[{ required: true, message: '请输入客资 ID' }]}>
+            <Form.Item name="leadId" label="选择客资" rules={[{ required: true, message: '请选择客资' }]}>
               <Select
                 showSearch
                 placeholder="选择要协同的客资"

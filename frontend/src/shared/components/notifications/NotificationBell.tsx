@@ -5,7 +5,7 @@ import { Badge, Button, Dropdown, Empty, List, Space, Typography } from 'antd';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 
-import { listNotifications } from '@/shared/api/notifications';
+import { listNotifications, markNotificationRead } from '@/shared/api/notifications';
 import { StatusTag } from '@/shared/components/status';
 import type { NotificationItem } from '@/shared/types/notifications';
 
@@ -43,6 +43,19 @@ export function NotificationBell({ pollIntervalMs = 0 }: NotificationBellProps) 
     return () => window.clearInterval(timer);
   }, [pollIntervalMs, refresh]);
 
+  const openNotification = useCallback(async (item: NotificationItem) => {
+    const route = item.routeHint ?? fallbackRoute(item);
+    if (item.unread) {
+      setItems((current) => current.map((entry) => (entry.id === item.id ? { ...entry, unread: false } : entry)));
+      setUnreadCount((current) => Math.max(0, current - 1));
+      markNotificationRead(item.id).catch(() => {
+        setItems((current) => current.map((entry) => (entry.id === item.id ? { ...entry, unread: true } : entry)));
+        setUnreadCount((current) => current + 1);
+      });
+    }
+    if (route) router.push(route);
+  }, [router]);
+
   const overlay = (
     <div className="notification-panel">
       <Space direction="vertical" size={12} className="page-stack">
@@ -57,10 +70,7 @@ export function NotificationBell({ pollIntervalMs = 0 }: NotificationBellProps) 
             renderItem={(item) => (
               <List.Item
                 className="notification-item"
-                onClick={() => {
-                  const route = item.routeHint ?? fallbackRoute(item);
-                  if (route) router.push(route);
-                }}
+                onClick={() => openNotification(item)}
               >
                 <Space direction="vertical" size={4}>
                   <Space>

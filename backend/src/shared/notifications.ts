@@ -6,8 +6,8 @@
  */
 export const NOTIFICATION_TYPES = {
   LEAD_ASSIGNED: 'lead_assigned',
-  COLLAB_REQUESTED: 'collab_requested',
-  COLLAB_HANDLED: 'collab_handled',
+  COLLAB_REQUESTED: 'collaboration_requested',
+  COLLAB_HANDLED: 'collaboration_handled',
   CUSTOMER_NOT_PASSED: 'customer_not_passed',
   CUSTOMER_ADDED: 'customer_added',
   LEAD_SOURCE_CONFIRMED: 'lead_source_confirmed',

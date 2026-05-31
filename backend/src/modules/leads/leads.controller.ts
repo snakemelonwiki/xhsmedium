@@ -25,6 +25,7 @@ export class LeadsController {
     @Query('postType') postType?: string,
     @Query('status') status?: string,
     @Query('addStatus') addStatus?: string,
+    @Query('processStatus') processStatus?: string,
     @Query('q') q?: string,
     @Query('search') search?: string,
     @Query('keyword') keyword?: string,
@@ -47,6 +48,7 @@ export class LeadsController {
       postType,
       status,
       addStatus,
+      processStatus,
       search: q || search || keyword,
       from,
       to,
@@ -79,6 +81,7 @@ export class LeadsController {
     @Query('postType') postType?: string,
     @Query('status') status?: string,
     @Query('addStatus') addStatus?: string,
+    @Query('processStatus') processStatus?: string,
   ) {
     const session = (req as any).session;
     const result = await this.leadsService.stats({
@@ -95,6 +98,7 @@ export class LeadsController {
       postType,
       status,
       addStatus,
+      processStatus,
     });
     return res.json(result);
   }
@@ -233,7 +237,7 @@ export class LeadsController {
       budget: body.budget,
       majorContent: body.majorContent,
       ip: body.ip,
-      status: body.status || 'new',
+      status: body.status || (body.assignedSalesUserId ? 'assigned' : 'new'),
       dealAmount: body.dealAmount,
       note: body.note,
       captureImageUrl: body.captureImageUrl,
@@ -295,6 +299,14 @@ export class LeadsController {
   async updateBoard(@Param('id') id: string, @Body() body: any, @Req() req: Request, @Res() res: Response) {
     const session = (req as any).session;
     const actorUserId = session?.userId || session?.id || body.actorUserId || '';
+    const canAccess = await this.leadsService.canAccessLead(id, {
+      actorUserId,
+      actorEmployeeId: session?.employeeId || '',
+      actorRole: session?.role || '',
+    });
+    if (!canAccess) {
+      return res.status(404).json({ ok: false, message: 'not found' });
+    }
     await this.leadsService.updateBoard(id, {
       status: body.status,
       assignedSalesUserId: body.assignedSalesUserId,
@@ -315,6 +327,14 @@ export class LeadsController {
   async updateStatus(@Param('id') id: string, @Body() body: any, @Req() req: Request, @Res() res: Response) {
     const session = (req as any).session;
     const actorUserId = session?.userId || session?.id || body.actorUserId || '';
+    const canAccess = await this.leadsService.canAccessLead(id, {
+      actorUserId,
+      actorEmployeeId: session?.employeeId || '',
+      actorRole: session?.role || '',
+    });
+    if (!canAccess) {
+      return res.status(404).json({ ok: false, message: 'not found' });
+    }
     try {
       const lead = await this.leadsService.updateSalesStatus(id, {
         status: body.status,
@@ -382,6 +402,14 @@ export class LeadsController {
   ) {
     const session = (req as any).session;
     const actorUserId = session?.userId || session?.id || body.actorUserId || '';
+    const canAccess = await this.leadsService.canAccessLead(id, {
+      actorUserId,
+      actorEmployeeId: session?.employeeId || '',
+      actorRole: session?.role || '',
+    });
+    if (!canAccess) {
+      return res.status(404).json({ ok: false, message: 'not found' });
+    }
     try {
       await this.leadsService.addFollowRecord(id, actorUserId, {
         followType: body.followType,
@@ -408,6 +436,14 @@ export class LeadsController {
     const requesterId = session?.userId || session?.id || body.actorUserId || '';
     if (!requesterId) {
       return res.status(401).json({ ok: false, message: 'no requester' });
+    }
+    const canAccess = await this.leadsService.canAccessLead(id, {
+      actorUserId: requesterId,
+      actorEmployeeId: session?.employeeId || '',
+      actorRole: session?.role || '',
+    });
+    if (!canAccess) {
+      return res.status(404).json({ ok: false, message: 'not found' });
     }
     try {
       const task = await this.collaborationTasksService.create({

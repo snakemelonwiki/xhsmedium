@@ -5,6 +5,7 @@ import { Lead } from '../../entities/lead.entity';
 import { LeadFollowRecord } from '../../entities/lead-follow-record.entity';
 import { Post } from '../../entities/post.entity';
 import { User } from '../../entities/user.entity';
+import { CollaborationTask } from '../../entities/collaboration-task.entity';
 import { makeId } from '../../shared/utils/id-generator';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NOTIFICATION_TYPES } from '../../shared/notifications';
@@ -43,6 +44,7 @@ interface LeadFilterOptions {
   postType?: string;
   status?: string;
   addStatus?: string;
+  processStatus?: string;
   search?: string;
   from?: string;
   to?: string;
@@ -99,6 +101,8 @@ export class LeadsService {
     private readonly postRepository: Repository<Post>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
+    @InjectRepository(CollaborationTask)
+    private readonly collaborationRepository: Repository<CollaborationTask>,
     private readonly notificationsService: NotificationsService,
     private readonly operationLogsService: OperationLogsService,
   ) {}
@@ -241,6 +245,7 @@ export class LeadsService {
     if (filters.platform) qb.andWhere('l.platform = :platform', { platform: filters.platform });
     if (filters.status) qb.andWhere('l.status = :status', { status: filters.status });
     if (filters.addStatus) qb.andWhere('l.add_status = :addStatus', { addStatus: filters.addStatus });
+    if (filters.processStatus) qb.andWhere('l.process_status = :processStatus', { processStatus: filters.processStatus });
     if (filters.search && filters.search.trim()) {
       qb.andWhere(
         '(l.contact_info LIKE :search OR l.nickname LIKE :search OR l.lead_code LIKE :search OR l.note LIKE :search)',
@@ -308,7 +313,8 @@ export class LeadsService {
     if (!isAdminLike && role !== 'sales' && actor?.actorEmployeeId && row.employeeId !== actor.actorEmployeeId) {
       return null;
     }
-    return this.mapLead(row);
+    const latestCollaboration = await this.latestCollaborationByLeadIds([row.id]);
+    return this.mapLead(row, undefined, latestCollaboration.get(row.id));
   }
 
   async updateBoard(id: string, dto: BoardPatchDto, actorUserId: string): Promise<void> {
@@ -460,7 +466,9 @@ export class LeadsService {
         }),
       });
     }
-    return updated ? this.mapLead(updated) : null;
+    if (!updated) return null;
+    const latestCollaboration = await this.latestCollaborationByLeadIds([updated.id]);
+    return this.mapLead(updated, undefined, latestCollaboration.get(updated.id));
   }
 
   private applySalesStateTransition(current: Lead, next: Partial<Lead>, dto: BoardPatchDto | FollowRecordDto): void {
@@ -898,9 +906,9 @@ export class LeadsService {
     postType?: string;
     status?: string;
     addStatus?: string;
+    processStatus?: string;
   }): Promise<any> {
     const scope = opts.scope || 'all';
-    const where: any = {};
     const scopeFilters: LeadFilterOptions = {
       scope,
       employeeId: opts.employeeId,
@@ -939,6 +947,7 @@ export class LeadsService {
       postType: opts.postType,
       status: opts.status,
       addStatus: opts.addStatus,
+      processStatus: opts.processStatus,
     });
 
     const total = await qbBase.getCount();
@@ -998,6 +1007,7 @@ export class LeadsService {
         postType: opts.postType || null,
         status: opts.status || null,
         addStatus: opts.addStatus || null,
+        processStatus: opts.processStatus || null,
       },
     };
   }
@@ -1055,7 +1065,10 @@ export class LeadsService {
     const latest = rows.length <= 200
       ? await this.latestFollowByLeadIds(rows.map((row) => row.id))
       : new Map<string, LeadFollowRecord>();
-    return rows.map((row) => this.mapLead(row, latest.get(row.id)));
+    const latestCollaboration = rows.length <= 200
+      ? await this.latestCollaborationByLeadIds(rows.map((row) => row.id))
+      : new Map<string, CollaborationTask>();
+    return rows.map((row) => this.mapLead(row, latest.get(row.id), latestCollaboration.get(row.id)));
   }
 
   private async latestFollowByLeadIds(leadIds: string[]): Promise<Map<string, LeadFollowRecord>> {
@@ -1074,7 +1087,23 @@ export class LeadsService {
     return latest;
   }
 
-  private mapLead(row: Lead, latestFollow?: LeadFollowRecord): any {
+  private async latestCollaborationByLeadIds(leadIds: string[]): Promise<Map<string, CollaborationTask>> {
+    const ids = Array.from(new Set(leadIds.filter(Boolean)));
+    if (ids.length === 0) return new Map();
+    const rows = await this.collaborationRepository.find({
+      where: { leadId: In(ids) },
+      order: { requestedAt: 'DESC' },
+    });
+    const latest = new Map<string, CollaborationTask>();
+    for (const row of rows) {
+      if (!latest.has(row.leadId)) {
+        latest.set(row.leadId, row);
+      }
+    }
+    return latest;
+  }
+
+  private mapLead(row: Lead, latestFollow?: LeadFollowRecord, latestCollaboration?: CollaborationTask): any {
     return {
       id: row.id,
       employeeId: row.employeeId,
@@ -1098,6 +1127,7 @@ export class LeadsService {
       assignedSalesUserId: row.assignedSalesUserId,
       assignedSalesUserName: row.assignedSalesUserName,
       processStatus: row.processStatus,
+      collaborationStatus: latestCollaboration?.status || 'none',
       addStatus: row.addStatus,
       intention: row.intention,
       leadCode: row.leadCode,
