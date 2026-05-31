@@ -158,7 +158,7 @@ const LEAD_STATUS_MAP_V2 = {
 };
 
 function getAddStatusLabel(code) {
-  return ADD_STATUS_MAP_V2[code] || code || '未添加';
+  return ADD_STATUS_MAP_V2[code] || ADD_STATUS_MAP[code] || code || '未添加';
 }
 
 function isAddStatusAdded(code) {

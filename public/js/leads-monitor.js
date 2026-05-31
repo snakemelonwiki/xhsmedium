@@ -166,7 +166,7 @@ function renderLeadsMonitorCards(items) {
 function mountLeadsMonitorPagination() {
   if (typeof setupPagination !== "function") return;
   setupPagination("leadsMonitorPager", {
-    pageSize: 10,
+    pageSize: 20,
     fetchPage: async (page, pageSize, offset) => {
       const params = new URLSearchParams();
       params.set("scope", "all");
@@ -226,10 +226,12 @@ function renderSalesLeads() {
   const totalDisplay = statsReady ? (stats.filteredTotal ?? stats.total ?? 0) : placeholder;
   const notContactedCount = byProcess.not_contacted || 0;
   const notContactedDisplay = statsReady ? notContactedCount : placeholder;
-  // TODO 后端 stats 暂未返回 addStatus 维度，"未添加"/"已联系待添加"先用前端 rows.filter 兜底
-  const pendingUnaddedCount = rows.filter((item) => !isAddStatusAdded(item.addStatus)).length;
+  const byAddStatus = statsReady ? (stats.byAddStatus || {}) : {};
+  const pendingUnaddedCount = statsReady
+    ? Number(byAddStatus.not_added || byAddStatus["未添加"] || 0)
+    : placeholder;
   const contactedPendingAdd = statsReady
-    ? Math.max((stats.filteredTotal ?? stats.total ?? 0) - notContactedCount, 0)
+    ? Number(byAddStatus.applied || 0) + Number(byAddStatus.pending || 0) + Number(byAddStatus.op_reminded || 0)
     : placeholder;
   return `
     <div class="page-header page-header-rich">
@@ -305,7 +307,7 @@ function renderSalesLeadsCards(items) {
 function mountSalesLeadsPagination() {
   if (typeof setupPagination !== "function") return;
   setupPagination("salesLeadsPager", {
-    pageSize: 10,
+    pageSize: 20,
     fetchPage: async (page, pageSize, offset) => {
       const params = new URLSearchParams();
       params.set("scope", "self");
@@ -444,7 +446,7 @@ function renderSalesFollowupsCards(items) {
 function mountSalesFollowupsPagination() {
   if (typeof setupPagination !== "function") return;
   setupPagination("salesFollowupsPager", {
-    pageSize: 10,
+    pageSize: 20,
     fetchPage: async (page, pageSize, offset) => {
       const params = new URLSearchParams();
       params.set("scope", "self");
@@ -587,7 +589,7 @@ function renderSalesFollowupCard(item) {
             </label>
             <span class="lead-status-chip ${getLeadIntentionChipClass(item.intention || "-")}">客资意向 · ${getIntentionLevelLabel(item.intention) || "-"}</span>
             <span class="lead-status-chip ${isProcessStatusActive(item.processStatus) ? "is-good" : "is-warn"}">处理状态 · ${getProcessStatusLabel(item.processStatus)}</span>
-            <span class="lead-status-chip ${item.addStatus === "已添加" ? "is-good" : "is-danger"}">是否添加 · ${item.addStatus === "已添加" ? "添加" : "未添加"}</span>
+            <span class="lead-status-chip ${isAddStatusAdded(item.addStatus) ? "is-good" : "is-danger"}">是否添加 · ${getAddStatusLabel(item.addStatus)}</span>
           </div>
         </div>
         ${renderFollowupControlRow(item)}
@@ -850,7 +852,7 @@ function renderSalesCollabsTableBody(items) {
 function mountSalesCollabsPagination() {
   if (typeof setupPagination !== "function") return;
   setupPagination("salesCollabsPager", {
-    pageSize: 10,
+    pageSize: 20,
     fetchPage: async (page, pageSize, offset) => {
       const params = new URLSearchParams();
       params.set("scope", "mine");
@@ -941,7 +943,7 @@ function renderOperatorCollabsTableBody(items) {
 function mountOperatorCollabsPagination() {
   if (typeof setupPagination !== "function") return;
   setupPagination("operatorCollabsPager", {
-    pageSize: 10,
+    pageSize: 20,
     fetchPage: async (page, pageSize, offset) => {
       const params = new URLSearchParams();
       params.set("scope", "inbox");
@@ -1154,7 +1156,7 @@ function renderStaffLeadsCards(items) {
 function mountStaffLeadsPagination() {
   if (typeof setupPagination !== "function") return;
   setupPagination("staffLeadsPager", {
-    pageSize: 10,
+    pageSize: 20,
     fetchPage: async (page, pageSize, offset) => {
       const params = new URLSearchParams();
       params.set("scope", "self");
@@ -1202,7 +1204,8 @@ function renderLeadMonitorCard(item) {
   const processStatusLabel = getProcessStatusLabel(processStatus);
   const processActive = isProcessStatusActive(processStatus);
   const addStatus = item.addStatus || "未添加";
-  const addStatusLabel = addStatus === "已添加" ? "添加" : "未添加";
+  const addStatusAdded = isAddStatusAdded(addStatus);
+  const addStatusLabel = getAddStatusLabel(addStatus);
   const intention = item.intention || "-";
   const intentionLabel = getIntentionLevelLabel(item.intention) || "-";
   const sourceTitle = item.sourcePostTitle || "未关联作品";
@@ -1211,7 +1214,7 @@ function renderLeadMonitorCard(item) {
   const isAdminLike = state.user?.role === "admin" || state.user?.role === "owner";
   const salesFeedbackSummary = item.salesFeedback ? String(item.salesFeedback).trim() : "";
   const isEditingFeedback = isSales && state.editingLeadId === item.id;
-  const cardToneClass = addStatus === "已添加"
+  const cardToneClass = addStatusAdded
     ? "lead-monitor-card-good"
     : processActive
       ? "lead-monitor-card-info"
@@ -1231,9 +1234,9 @@ function renderLeadMonitorCard(item) {
                   <input class="js-sales-process-toggle" data-id="${item.id}" type="checkbox" ${processActive ? "checked" : ""} />
                   <span>处理状态：${processStatusLabel}</span>
                 </label>
-                <label class="lead-check-chip ${addStatus === "已添加" ? "is-good" : ""}">
-                  <input class="js-sales-add-toggle" data-id="${item.id}" type="checkbox" ${addStatus === "已添加" ? "checked" : ""} />
-                  <span>是否添加：已添加</span>
+                <label class="lead-check-chip ${addStatusAdded ? "is-good" : ""}">
+                  <input class="js-sales-add-toggle" data-id="${item.id}" type="checkbox" ${addStatusAdded ? "checked" : ""} />
+                  <span>是否添加：${addStatusLabel}</span>
                 </label>
                 <label class="lead-chip-select-wrap lead-chip-select-inline ${getLeadIntentionChipClass(intention)}">
                   <span>客资意向</span>
@@ -1247,7 +1250,7 @@ function renderLeadMonitorCard(item) {
                 <span class="lead-status-chip">添加方式 · ${getAddMethodLabel(item.addMethod)}</span>
               `
               : `<span class="lead-status-chip ${processActive ? "is-good" : "is-warn"}">处理状态 · ${processStatusLabel}</span>`}
-            ${isSales ? "" : `<span class="lead-status-chip ${addStatus === "已添加" ? "is-good" : "is-danger"}">是否添加 · ${addStatusLabel}</span>`}
+            ${isSales ? "" : `<span class="lead-status-chip ${addStatusAdded ? "is-good" : "is-danger"}">是否添加 · ${addStatusLabel}</span>`}
             ${isSales ? "" : `<span class="lead-status-chip ${getLeadIntentionChipClass(intention)}">客资意向 · ${intentionLabel}</span>`}
           </div>
         </div>
@@ -1583,7 +1586,7 @@ function renderImportHistoryTableBody(items) {
 function mountImportHistoryPagination() {
   if (typeof setupPagination !== "function") return;
   setupPagination("importHistoryPager", {
-    pageSize: 10,
+    pageSize: 20,
     fetchPage: async (page, pageSize, offset) => {
       const params = new URLSearchParams();
       if (state.user?.id) params.set("actorUserId", state.user.id);
@@ -1946,14 +1949,16 @@ function bindLeadDraftEvents() {
   const form = document.getElementById("leadForm");
   if (form && !form.dataset.leadDraftBound) {
     form.dataset.leadDraftBound = "1";
-    form.addEventListener("input", (e) => {
+    const syncLeadDraftBuffer = (e) => {
       if (state.editingLeadId) return;
       // T-17: 实时同步 form 字段到 buffer，确保图片选择/renderApp 不丢已填文本（§11 图片解耦）
       if (!state._leadFormBuffer) state._leadFormBuffer = {};
       const el = e.target;
-      if (el && el.name) state._leadFormBuffer[el.name] = el.value;
+      if (el && el.name && el.type !== "file") state._leadFormBuffer[el.name] = el.value;
       _saveLeadDraftDebounced();
-    });
+    };
+    form.addEventListener("input", syncLeadDraftBuffer);
+    form.addEventListener("change", syncLeadDraftBuffer);
   }
   document.querySelector(".js-restore-lead-draft")?.addEventListener("click", () => { restoreLeadDraft(); });
   document.querySelector(".js-discard-lead-draft")?.addEventListener("click", () => { discardLeadDraft(); });
@@ -2066,6 +2071,13 @@ async function deleteLead(id) {
 async function submitLead(event) {
   event.preventDefault();
   const formData = new FormData(event.currentTarget);
+
+  // 提交前立即保存草稿（防止提交失败丢失数据）
+  const id = String(formData.get("id") || "");
+  if (!id && typeof saveDraftNow === "function") {
+    saveDraftNow("lead", event.currentTarget);
+  }
+
   if (state.leadCaptureFile) {
     formData.set("captureImage", state.leadCaptureFile, state.leadCaptureFile.name || "lead-capture.png");
   }
@@ -2073,26 +2085,40 @@ async function submitLead(event) {
     alert("请选择这条客资对应的作品。");
     return;
   }
-  const id = String(formData.get("id") || "");
+
   formData.delete("id");
-  await api(id ? `/api/leads/${id}` : "/api/leads", {
-    method: id ? "PUT" : "POST",
-    body: formData
-  });
-  // 提交成功后清理草稿（仅新建场景）
-  if (!id && state.leadDraftId) {
-    const draftId = state.leadDraftId;
-    state.leadDraftId = null;
-    state.pendingLeadCapture = null;
-    resetLeadDraftContext();
-    await deleteLeadDraftById(draftId);
+
+  try {
+    await api(id ? `/api/leads/${id}` : "/api/leads", {
+      method: id ? "PUT" : "POST",
+      body: formData
+    });
+
+    // 提交成功后清理草稿（仅新建场景）
+    if (!id) {
+      if (state.leadDraftId) {
+        const draftId = state.leadDraftId;
+        state.leadDraftId = null;
+        state.pendingLeadCapture = null;
+        resetLeadDraftContext();
+        await deleteLeadDraftById(draftId);
+      }
+      if (typeof clearDraftFromLocal === "function") {
+        clearDraftFromLocal("lead");
+      }
+    }
+
+    clearPendingLeadCapture();
+    state._leadFormBuffer = null;
+    state.editingLeadId = "";
+    setFlash("success", id ? "客资已更新" : "客资已录入", "这条客资已经保存到后台数据库，下方记录和主管端监控都会同步更新。");
+    await loadData();
+    renderApp();
+  } catch (err) {
+    // 提交失败时保留表单内容，不清空
+    setFlash("error", "提交失败", err.message || "请检查网络连接后重试，已填写内容已自动保存。");
+    throw err;
   }
-  clearPendingLeadCapture();
-  state._leadFormBuffer = null;
-  state.editingLeadId = "";
-  setFlash("success", id ? "客资已更新" : "客资已录入", "这条客资已经保存到后台数据库，下方记录和主管端监控都会同步更新。");
-  await loadData();
-  renderApp();
 }
 
 async function submitSalesLead(event) {

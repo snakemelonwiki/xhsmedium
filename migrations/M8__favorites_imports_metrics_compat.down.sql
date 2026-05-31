@@ -1,0 +1,2 @@
+-- M8 down is intentionally non-destructive.
+-- These columns/tables hold user-facing import, favorite, and metrics history data.

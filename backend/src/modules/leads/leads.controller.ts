@@ -1,7 +1,8 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, Req, Res, Query } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, Req, Res, Query, UseGuards } from '@nestjs/common';
 import { LeadsService } from './leads.service';
 import { Request, Response } from 'express';
 import { makeId } from '../../shared/utils/id-generator';
+import { DebounceGuard } from '../../common/debounce.guard';
 
 @Controller('leads')
 export class LeadsController {
@@ -11,30 +12,48 @@ export class LeadsController {
   async findAll(
     @Req() req: Request,
     @Res() res: Response,
-    @Query('scope') scope?: string,
+    @Query('scope') scope?: 'self' | 'employee' | 'all',
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
+    @Query('employeeId') employeeId?: string,
+    @Query('accountId') accountId?: string,
+    @Query('platform') platform?: string,
+    @Query('postType') postType?: string,
+    @Query('status') status?: string,
+    @Query('addStatus') addStatus?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
   ) {
     const session = (req as any).session;
     // §9 / AC-10.2：传了 limit 或 offset 任一即视为分页请求，返回 { items, total, limit, offset }。
     //   不传任何分页参数 → 兼容旧前端：返回纯数组。
     const wantsPaging = limit !== undefined || offset !== undefined;
-    const restrictToOwn = session?.role === 'staff' && session?.employeeId && scope !== 'all';
+    const effectiveScope = this.resolveScope(session?.role, scope);
+    const filters = {
+      scope: effectiveScope,
+      employeeId,
+      actorEmployeeId: session?.employeeId || '',
+      actorUserId: session?.userId || session?.id || '',
+      actorRole: session?.role || '',
+      accountId,
+      platform,
+      postType,
+      status,
+      addStatus,
+      from,
+      to,
+    };
 
     if (wantsPaging) {
-      const limitNum = Number(limit) || 20;
-      const offsetNum = Number(offset) || 0;
-      const result = restrictToOwn
-        ? await this.leadsService.findByEmployeePaged(session.employeeId, limitNum, offsetNum)
-        : await this.leadsService.findAllPaged(limitNum, offsetNum);
+      const result = await this.leadsService.findFilteredPaged(
+        filters,
+        Number(limit) || 20,
+        Number(offset) || 0,
+      );
       return res.json(result);
     }
 
-    if (restrictToOwn) {
-      const rows = await this.leadsService.findByEmployee(session.employeeId);
-      return res.json(rows);
-    }
-    const rows = await this.leadsService.findAll();
+    const rows = await this.leadsService.findFiltered(filters);
     return res.json(rows);
   }
 
@@ -55,12 +74,14 @@ export class LeadsController {
   ) {
     const session = (req as any).session;
     const result = await this.leadsService.stats({
-      scope: scope || (session?.role === 'staff' ? 'self' : 'all'),
+      scope: this.resolveScope(session?.role, scope),
       employeeId,
       period,
       from,
       to,
       actorEmployeeId: session?.employeeId || '',
+      actorUserId: session?.userId || session?.id || '',
+      actorRole: session?.role || '',
       accountId,
       platform,
       postType,
@@ -68,6 +89,13 @@ export class LeadsController {
       addStatus,
     });
     return res.json(result);
+  }
+
+  private resolveScope(role?: string, scope?: 'self' | 'employee' | 'all'): 'self' | 'employee' | 'all' {
+    if (role === 'admin' || role === 'owner') {
+      return scope || 'all';
+    }
+    return 'self';
   }
 
   @Get('export')
@@ -183,6 +211,7 @@ export class LeadsController {
   }
 
   @Post()
+  @UseGuards(DebounceGuard)
   async create(@Body() body: any, @Req() req: Request, @Res() res: Response) {
     const session = (req as any).session;
     await this.leadsService.create({
@@ -213,6 +242,7 @@ export class LeadsController {
   }
 
   @Put(':id')
+  @UseGuards(DebounceGuard)
   async update(@Param('id') id: string, @Body() body: any, @Res() res: Response) {
     await this.leadsService.update(id, {
       accountId: body.accountId,
@@ -239,6 +269,7 @@ export class LeadsController {
   }
 
   @Put(':id/board')
+  @UseGuards(DebounceGuard)
   async updateBoard(@Param('id') id: string, @Body() body: any, @Req() req: Request, @Res() res: Response) {
     const session = (req as any).session;
     const actorUserId = session?.userId || session?.id || body.actorUserId || '';

@@ -3,10 +3,12 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Notification } from '../../entities/notification.entity';
 import { makeId } from '../../shared/utils/id-generator';
+import { NotificationsGateway } from './notifications.gateway';
 
 interface ListOpts {
   status?: 'unread' | 'all';
   type?: string;
+  portType?: string;
   limit?: number;
   offset?: number;
 }
@@ -27,6 +29,7 @@ export class NotificationsService {
   constructor(
     @InjectRepository(Notification)
     private readonly repo: Repository<Notification>,
+    private readonly gateway: NotificationsGateway,
   ) {}
 
   /**
@@ -47,33 +50,48 @@ export class NotificationsService {
     const limit = this.clampLimit(opts?.limit);
     const offset = Math.max(Number(opts?.offset) || 0, 0);
 
-    const qb = this.repo.createQueryBuilder('n')
-      .where('n.receiver_id = :uid', { uid: userId });
-
+    // 构建查询条件
+    const where: any = { receiverId: userId };
     if (opts?.status === 'unread') {
-      qb.andWhere('n.read_status = 0');
+      where.readStatus = 0;
     }
     if (opts?.type) {
-      qb.andWhere('n.type_code = :type', { type: opts.type });
+      where.typeCode = opts.type;
+    }
+    if (opts?.portType) {
+      where.portType = opts.portType;
     }
 
-    // Count first, with the same where conditions — must run before take/skip
-    // because TypeORM's getCount on a query builder ignores take/skip but we
-    // keep the order explicit so future maintainers don't get tripped up.
-    const total = await qb.getCount();
+    console.log('[DEBUG] Query where:', where);
 
-    qb.orderBy('n.read_status', 'ASC')
-      .addOrderBy('n.created_at', 'DESC')
-      .take(limit)
-      .skip(offset);
+    // 分开查询：先查总数
+    const total = await this.repo.count({ where });
+    console.log('[DEBUG] Total count:', total);
 
-    const rows = await qb.getMany();
-    const unreadCount = await this.repo.count({
-      where: { receiverId: userId, readStatus: 0 },
+    // 再查分页数据
+    const rows = await this.repo.find({
+      where,
+      order: {
+        readStatus: 'ASC',
+        createdAt: 'DESC',
+      },
+      take: limit,
+      skip: offset,
     });
+    console.log('[DEBUG] Rows count:', rows.length);
+
+    // 查询未读数
+    const unreadWhere: any = { receiverId: userId, readStatus: 0 };
+    if (opts?.portType) {
+      unreadWhere.portType = opts.portType;
+    }
+    const unreadCount = await this.repo.count({ where: unreadWhere });
+
+    const items = rows.map((r) => this.map(r));
+    console.log('[DEBUG] Final result:', { itemCount: items.length, unreadCount, total });
 
     return {
-      items: rows.map((r) => this.map(r)),
+      items,
       unreadCount,
       total,
       limit,
@@ -150,6 +168,7 @@ export class NotificationsService {
 
     try {
       await this.repo.save(rows);
+      rows.forEach((row) => this.gateway.emitCreated(row.receiverId, this.map(row)));
     } catch (err: any) {
       // Notifications are best-effort; don't propagate.
       // eslint-disable-next-line no-console

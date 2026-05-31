@@ -4,14 +4,27 @@ import { AppModule } from './app.module';
 import * as path from 'path';
 
 // HTTP request logger
-function requestLogger(req: any, _res: any, next: any) {
+function requestLogger(req: any, res: any, next: any) {
   const start = Date.now();
-  const originalEnd = _res.end;
-  _res.end = function(...args: any[]) {
+
+  // 打印请求信息
+  console.log(`\n\x1b[36m[${new Date().toISOString()}] ${req.method} ${req.originalUrl}\x1b[0m`);
+  if (Object.keys(req.query).length) {
+    console.log('\x1b[33m[QUERY]\x1b[0m', JSON.stringify(req.query));
+  }
+  if (req.body && Object.keys(req.body).length) {
+    console.log('\x1b[33m[BODY]\x1b[0m', JSON.stringify(req.body));
+  }
+
+  // 拦截响应
+  const originalJson = res.json;
+  res.json = function(data: any) {
     const elapsed = Date.now() - start;
-    console.log(`${req.method} ${req.originalUrl} -> ${_res.statusCode} (${elapsed}ms)`);
-    originalEnd.apply(_res, args);
+    console.log(`\x1b[32m[RESPONSE]\x1b[0m ${res.statusCode} (${elapsed}ms)`);
+    console.log('\x1b[32m[DATA]\x1b[0m', JSON.stringify(data).substring(0, 500));
+    return originalJson.call(this, data);
   };
+
   next();
 }
 
@@ -23,10 +36,11 @@ async function bootstrap() {
   // HTTP request logger
   app.use(requestLogger);
 
-  app.enableCors({
-    origin: true,
-    credentials: true,
-  });
+	  app.enableCors({
+	    origin: true,
+	    credentials: true,
+	    exposedHeaders: ['X-New-Token'],
+	  });
 
   app.useGlobalPipes(
     new ValidationPipe({

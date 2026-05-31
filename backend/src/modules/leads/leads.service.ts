@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { ConflictException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Lead } from '../../entities/lead.entity';
@@ -25,6 +25,21 @@ interface FollowRecordDto {
   followType?: string;
   content: string;
   nextFollowTime?: string | Date | null;
+}
+
+interface LeadFilterOptions {
+  scope?: 'self' | 'employee' | 'all';
+  employeeId?: string;
+  actorEmployeeId?: string;
+  actorUserId?: string;
+  actorRole?: string;
+  accountId?: string;
+  platform?: string;
+  postType?: string;
+  status?: string;
+  addStatus?: string;
+  from?: string;
+  to?: string;
 }
 
 @Injectable()
@@ -94,6 +109,25 @@ export class LeadsService {
     return { items: rows.map(this.mapLead), total, limit: safeLimit, offset: safeOffset };
   }
 
+  async findFiltered(filters: LeadFilterOptions): Promise<any[]> {
+    const qb = this.buildLeadFilterQuery(filters);
+    const rows = await qb
+      .orderBy('l.created_at', 'DESC')
+      .getMany();
+    return rows.map(this.mapLead);
+  }
+
+  async findFilteredPaged(filters: LeadFilterOptions, limit: number, offset: number): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
+    const safeLimit = this.clampLimit(limit);
+    const safeOffset = Math.max(Number(offset) || 0, 0);
+    const qb = this.buildLeadFilterQuery(filters)
+      .orderBy('l.created_at', 'DESC')
+      .take(safeLimit)
+      .skip(safeOffset);
+    const [rows, total] = await qb.getManyAndCount();
+    return { items: rows.map(this.mapLead), total, limit: safeLimit, offset: safeOffset };
+  }
+
   async findTomorrowFollowups(salesUserId: string): Promise<any[]> {
     if (!salesUserId) return [];
     const now = new Date();
@@ -134,11 +168,56 @@ export class LeadsService {
     return Math.min(n, 200);
   }
 
+  private buildLeadFilterQuery(filters: LeadFilterOptions) {
+    const qb = this.leadRepository.createQueryBuilder('l');
+    this.applyLeadScope(qb, filters);
+    this.applyLeadFilters(qb, filters);
+    return qb;
+  }
+
+  private applyLeadScope(qb: any, filters: LeadFilterOptions): void {
+    const scope = filters.scope || 'all';
+    const role = filters.actorRole || '';
+    if (scope === 'self') {
+      if (role === 'sales') {
+        qb.andWhere('l.assigned_sales_user_id = :actorUserId', { actorUserId: filters.actorUserId || '' });
+      } else {
+        qb.andWhere('l.employee_id = :actorEmployeeId', { actorEmployeeId: filters.actorEmployeeId || '' });
+      }
+    } else if (scope === 'employee') {
+      qb.andWhere('l.employee_id = :employeeId', { employeeId: filters.employeeId || '' });
+    }
+  }
+
+  private applyLeadFilters(qb: any, filters: LeadFilterOptions): void {
+    if (filters.accountId) qb.andWhere('l.account_id = :accountId', { accountId: filters.accountId });
+    if (filters.platform) qb.andWhere('l.platform = :platform', { platform: filters.platform });
+    if (filters.status) qb.andWhere('l.status = :status', { status: filters.status });
+    if (filters.addStatus) qb.andWhere('l.add_status = :addStatus', { addStatus: filters.addStatus });
+    if (filters.from) qb.andWhere('l.created_at >= :from', { from: filters.from });
+    if (filters.to) qb.andWhere('l.created_at < :to', { to: filters.to });
+    if (filters.postType) {
+      qb.andWhere(
+        'l.post_id IN (SELECT p.id FROM posts p WHERE p.post_type = :postType)',
+        { postType: filters.postType },
+      );
+    }
+  }
+
+  private generateLeadCode(): string {
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const ymd = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`;
+    const random = Math.random().toString(36).slice(2, 8).toUpperCase();
+    return `L${ymd}-${random}`;
+  }
+
   async create(dto: Partial<Lead>): Promise<void> {
     const leadId = (dto as any).id || makeId();
     const lead = this.leadRepository.create({
       ...dto,
       id: leadId,
+      leadCode: dto.leadCode || this.generateLeadCode(),
       nickname: dto.nickname || '',
       salesUserName: dto.salesUserName || '',
       processStatus: dto.processStatus || 'not_contacted',
@@ -180,7 +259,13 @@ export class LeadsService {
       next.nextFollowTime = dto.nextFollowTime ? new Date(dto.nextFollowTime) : null;
     }
 
-    await this.leadRepository.update(id, next);
+    const updateResult = await this.leadRepository.update(
+      { id, updatedAt: current.updatedAt } as any,
+      next,
+    );
+    if (!updateResult.affected) {
+      throw new ConflictException('客资状态已被其他人更新，请刷新后重试');
+    }
 
     // §11.1 customer_added / customer_not_passed: addStatus 关键变更回写来源运营。
     if (dto.addStatus !== undefined && dto.addStatus !== current.addStatus && current.employeeId) {
@@ -516,6 +601,7 @@ export class LeadsService {
     const leadId = makeId();
     const lead = this.leadRepository.create({
       id: leadId,
+      leadCode: this.generateLeadCode(),
       employeeId: '',
       accountId: '',
       contactInfo: trimmedContact,
@@ -603,6 +689,8 @@ export class LeadsService {
     from?: string;
     to?: string;
     actorEmployeeId?: string;
+    actorUserId?: string;
+    actorRole?: string;
     // T-L2/L3 看板五个筛选维度 —— 与列表筛选保持口径一致（AC-3.2）
     accountId?: string;
     platform?: string;
@@ -612,17 +700,25 @@ export class LeadsService {
   }): Promise<any> {
     const scope = opts.scope || 'all';
     const where: any = {};
+    const scopeFilters: LeadFilterOptions = {
+      scope,
+      employeeId: opts.employeeId,
+      actorEmployeeId: opts.actorEmployeeId,
+      actorUserId: opts.actorUserId,
+      actorRole: opts.actorRole,
+    };
 
     if (scope === 'self') {
-      if (!opts.actorEmployeeId) {
+      if (opts.actorRole === 'sales' && !opts.actorUserId) {
         return this.emptyStats();
       }
-      where.employeeId = opts.actorEmployeeId;
+      if (opts.actorRole !== 'sales' && !opts.actorEmployeeId) {
+        return this.emptyStats();
+      }
     } else if (scope === 'employee') {
       if (!opts.employeeId) {
         return this.emptyStats();
       }
-      where.employeeId = opts.employeeId;
     }
 
     const { from, to } = this.resolvePeriod(opts.period, opts.from, opts.to);
@@ -631,22 +727,18 @@ export class LeadsService {
     // qb: 在 qbBase 基础上叠加账号/平台/作品类型/status/addStatus 等列表筛选维度 → 用于 filteredTotal
     // §6 / AC-3.1 vs AC-3.2: total 与 filteredTotal 必须可拆开，分别给"汇总卡片"和"筛选条数"
     const qbBase = this.leadRepository.createQueryBuilder('l');
-    if (where.employeeId) qbBase.andWhere('l.employee_id = :eid', { eid: where.employeeId });
+    this.applyLeadScope(qbBase, scopeFilters);
     if (from) qbBase.andWhere('l.created_at >= :from', { from });
     if (to) qbBase.andWhere('l.created_at < :to', { to });
 
     const qb = qbBase.clone();
-    if (opts.accountId) qb.andWhere('l.account_id = :accountId', { accountId: opts.accountId });
-    if (opts.platform) qb.andWhere('l.platform = :platform', { platform: opts.platform });
-    if (opts.status) qb.andWhere('l.status = :status', { status: opts.status });
-    if (opts.addStatus) qb.andWhere('l.add_status = :addStatus', { addStatus: opts.addStatus });
-    // postType 在 leads 表里不存，要 join posts；当前没建索引，简化为 IN 子查询
-    if (opts.postType) {
-      qb.andWhere(
-        'l.post_id IN (SELECT p.id FROM posts p WHERE p.post_type = :postType)',
-        { postType: opts.postType },
-      );
-    }
+    this.applyLeadFilters(qb, {
+      accountId: opts.accountId,
+      platform: opts.platform,
+      postType: opts.postType,
+      status: opts.status,
+      addStatus: opts.addStatus,
+    });
 
     const total = await qbBase.getCount();
     const filteredTotal = await qb.getCount();

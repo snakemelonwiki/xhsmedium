@@ -15,6 +15,7 @@ async function init() {
     const me = await api("/api/auth/me");
     state.user = me.user;
     await loadData();
+    if (typeof initNotificationSocket === "function") initNotificationSocket();
     renderApp();
   } catch {
     localStorage.removeItem("lan_system_token");
@@ -24,6 +25,7 @@ async function init() {
 }
 
 async function loadData() {
+  const firstPage = "limit=20&offset=0";
   const requests = state.user.role === "admin" || state.user.role === "owner"
     ? [
         api("/api/dashboard/summary"),
@@ -32,8 +34,8 @@ async function loadData() {
         api("/api/users"),
         api("/api/employees"),
         api("/api/accounts"),
-        api("/api/posts"),
-        api("/api/leads"),
+        api(`/api/posts?${firstPage}`),
+        api(`/api/leads?${firstPage}`),
         api("/api/analytics/snapshots")
       ]
     : [
@@ -43,8 +45,8 @@ async function loadData() {
         Promise.resolve([]),
         Promise.resolve([]),
         api("/api/accounts"),
-        api("/api/posts"),
-        api("/api/leads"),
+        api(`/api/posts?${firstPage}`),
+        api(`/api/leads?${firstPage}`),
         Promise.resolve({ snapshots: {} })
       ];
   const normalizedRequests = state.user.role === "sales"
@@ -55,8 +57,8 @@ async function loadData() {
         Promise.resolve([]),
         Promise.resolve([]),
         api("/api/accounts"),
-        api("/api/posts"),
-        api("/api/leads"),
+        api(`/api/posts?${firstPage}`),
+        api(`/api/leads?${firstPage}`),
         Promise.resolve({ snapshots: {} }),
         api("/api/notifications")
       ]
@@ -76,21 +78,25 @@ async function loadData() {
       : [...requests, api("/api/notifications")];
 
   const [summary, distribution, rankings, users, employees, accounts, posts, leads, analyticsSnapshots, notifications] = await Promise.all(normalizedRequests);
+  const postsPage = Array.isArray(posts) ? { items: posts, total: posts.length } : posts;
+  const leadsPage = Array.isArray(leads) ? { items: leads, total: leads.length } : leads;
   state.summary = summary;
   state.distribution = distribution;
   state.rankings = rankings;
   state.users = users || [];
   state.employees = employees;
   state.accounts = accounts;
-  state.posts = posts;
-  state.leads = leads;
+  state.posts = postsPage?.items || [];
+  state.postTotal = Number(postsPage?.total || state.posts.length);
+  state.leads = leadsPage?.items || [];
+  state.leadTotal = Number(leadsPage?.total || state.leads.length);
   state.analyticsSnapshots = analyticsSnapshots.snapshots || {};
   state.notifications = notifications?.items || [];
   state.unreadNotificationCount = Number(notifications?.unreadCount || 0);
   alignStateDatesToAvailableData();
-  state.teamPosts = state.user.role === "staff" ? await api("/api/posts?scope=all") : posts;
-  state.teamLeads = state.user.role === "staff" ? await api("/api/leads?scope=all") : leads;
-  state.staffLearningPostIds = state.user.role === "staff" ? loadStaffLearningPostIds() : [];
+  state.teamPosts = state.posts;
+  state.teamLeads = state.leads;
+  state.staffLearningPostIds = state.user.role === "staff" ? await loadFavoritePostIds() : [];
   state.salesLeadLocalProfiles = state.user.role === "sales" ? loadSalesLeadLocalProfiles() : {};
   state.salesTomorrowFollowupIds = state.user.role === "sales" ? loadSalesTomorrowFollowupIds() : [];
   state.leadTomorrowFollowups = undefined; // 让 renderApp 触发 loadTomorrowFollowups 拉 next_follow_time
@@ -160,6 +166,7 @@ function renderLogin() {
       state.user = data.user;
       localStorage.setItem("lan_system_token", state.token);
       await loadData();
+      if (typeof initNotificationSocket === "function") initNotificationSocket();
       renderApp();
     } catch (error) {
       alert(error.message);

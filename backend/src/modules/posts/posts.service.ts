@@ -2,14 +2,30 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Post } from '../../entities/post.entity';
+import { Lead } from '../../entities/lead.entity';
+import { PostMetricsHistory } from '../../entities/post-metrics-history.entity';
 import { makeId } from '../../shared/utils/id-generator';
 import { normalizePostType, normalizeTrafficByType, normalizeExternalUrl } from '../../shared/utils/normalize';
+
+interface PostListFilters {
+  employeeId?: string;
+  accountId?: string;
+  platform?: string;
+  postType?: string;
+  from?: string;
+  to?: string;
+  sort?: string;
+}
 
 @Injectable()
 export class PostsService {
   constructor(
     @InjectRepository(Post)
     private readonly postRepository: Repository<Post>,
+    @InjectRepository(Lead)
+    private readonly leadRepository: Repository<Lead>,
+    @InjectRepository(PostMetricsHistory)
+    private readonly metricsHistoryRepository: Repository<PostMetricsHistory>,
   ) {}
 
   async findAll(): Promise<any[]> {
@@ -26,27 +42,74 @@ export class PostsService {
   }
 
   async findAllPaged(limit: number, offset: number): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
+    return this.findPaged({}, limit, offset);
+  }
+
+  async findPaged(filters: PostListFilters, limit: number, offset: number): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
+    const safeLimit = this.clampLimit(limit);
+    const safeOffset = Math.max(Number(offset) || 0, 0);
+    const qb = this.postRepository.createQueryBuilder('p');
+
+    if (filters.employeeId) qb.andWhere('p.employee_id = :employeeId', { employeeId: filters.employeeId });
+    if (filters.accountId) qb.andWhere('p.account_id = :accountId', { accountId: filters.accountId });
+    if (filters.platform) qb.andWhere('p.platform = :platform', { platform: filters.platform });
+    if (filters.postType) qb.andWhere('p.post_type = :postType', { postType: filters.postType });
+    if (filters.from) qb.andWhere('p.published_at >= :from', { from: filters.from });
+    if (filters.to) qb.andWhere('p.published_at <= :to', { to: filters.to });
+
+    if (filters.sort === 'leads') {
+      qb.addSelect((subQb) => {
+        return subQb
+          .select('COUNT(1)')
+          .from('leads', 'l')
+          .where('l.post_id = p.id');
+      }, 'lead_count')
+        .orderBy('lead_count', 'DESC')
+        .addOrderBy('p.published_at', 'DESC')
+        .addOrderBy('p.created_at', 'DESC');
+    } else {
+      qb.orderBy('p.published_at', 'DESC').addOrderBy('p.created_at', 'DESC');
+    }
+
+    const [rows, total] = await qb.take(safeLimit).skip(safeOffset).getManyAndCount();
+    return { items: rows.map(this.mapPost), total, limit: safeLimit, offset: safeOffset };
+  }
+
+  async findAllPagedLegacy(limit: number, offset: number): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
+    const safeLimit = this.clampLimit(limit);
+    const safeOffset = Math.max(Number(offset) || 0, 0);
     const [rows, total] = await this.postRepository.findAndCount({
       order: { publishedAt: 'DESC', createdAt: 'DESC' },
-      take: limit,
-      skip: offset,
+      take: safeLimit,
+      skip: safeOffset,
     });
-    return { items: rows.map(this.mapPost), total, limit, offset };
+    return { items: rows.map(this.mapPost), total, limit: safeLimit, offset: safeOffset };
   }
 
   async findByEmployeePaged(employeeId: string, limit: number, offset: number): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
-    const [rows, total] = await this.postRepository.findAndCount({
-      where: { employeeId },
-      order: { publishedAt: 'DESC', createdAt: 'DESC' },
-      take: limit,
-      skip: offset,
-    });
-    return { items: rows.map(this.mapPost), total, limit, offset };
+    return this.findPaged({ employeeId }, limit, offset);
+  }
+
+  private clampLimit(limit: number): number {
+    const n = Number(limit) || 20;
+    if (n <= 0) return 20;
+    return Math.min(n, 200);
   }
 
   async findById(id: string): Promise<any | null> {
     const row = await this.postRepository.findOne({ where: { id } });
     return row ? this.mapPost(row) : null;
+  }
+
+  async findByIds(ids: string[]): Promise<any[]> {
+    const cleanIds = Array.from(new Set((ids || []).filter(Boolean)));
+    if (!cleanIds.length) return [];
+    const rows = await this.postRepository.createQueryBuilder('p')
+      .where('p.id IN (:...ids)', { ids: cleanIds })
+      .orderBy('p.published_at', 'DESC')
+      .addOrderBy('p.created_at', 'DESC')
+      .getMany();
+    return rows.map(this.mapPost);
   }
 
   async create(dto: Partial<Post>): Promise<void> {
@@ -101,6 +164,19 @@ export class PostsService {
       favorites: metrics.favorites,
       metricsUpdatedAt: metrics.metricsUpdatedAt,
     });
+  }
+
+  async recordMetricsHistory(id: string, metrics: { likes: number; comments: number; favorites: number; shares?: number }): Promise<void> {
+    const leadsCount = await this.leadRepository.count({ where: { postId: id } });
+    await this.metricsHistoryRepository.save(this.metricsHistoryRepository.create({
+      id: makeId(),
+      postId: id,
+      likes: Number(metrics.likes || 0),
+      comments: Number(metrics.comments || 0),
+      favorites: Number(metrics.favorites || 0),
+      shares: Number(metrics.shares || 0),
+      leadsCount,
+    }));
   }
 
   async remove(id: string): Promise<void> {

@@ -231,10 +231,21 @@ export class ExportsService {
 
     // §11.1 export_done: 通知发起人下载
     if (task.userId) {
+      const filter = this.parseFilter(task.filterJson);
+      const userRole = filter._userRole || 'staff';
+
+      // 根据用户角色设置正确的端口类型
+      let portType: 'operations' | 'sales' | 'academic' = 'operations';
+      if (userRole === 'sales') {
+        portType = 'sales';
+      } else if (userRole === 'academic') {
+        portType = 'academic';
+      }
+
       await this.notifications.create({
         receiverIds: [task.userId],
         senderId: null,
-        portType: 'operations',
+        portType,
         typeCode: NOTIFICATION_TYPES.EXPORT_DONE,
         title: `${this.typeNameZh(task.exportType)}导出完成`,
         content: `点击下载：${fileUrl}`,

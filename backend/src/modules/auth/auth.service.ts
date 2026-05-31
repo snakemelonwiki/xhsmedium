@@ -83,4 +83,20 @@ export class AuthService {
   logout(token: string): void {
     sessions.delete(token);
   }
+
+  async refreshToken(userId: string): Promise<string> {
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    if (!user || user.status !== 'active') {
+      throw new UnauthorizedException({ message: '用户状态异常' });
+    }
+
+    const newToken = this.jwtService.sign({
+      sub: user.id,
+      username: user.username,
+      role: user.role,
+      employeeId: user.employeeId,
+    });
+
+    return newToken;
+  }
 }

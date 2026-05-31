@@ -38,6 +38,21 @@ app.use("/api", proxy(BACKEND_URL, {
   limit: "10mb",
 }));
 
+app.use("/socket.io", proxy(BACKEND_URL, {
+  proxyReqPathResolver: (req) => `/socket.io${req.url}`,
+  proxyReqOptDecorator: (proxyReqOpts, srcReq) => {
+    proxyReqOpts.headers = proxyReqOpts.headers || {};
+    proxyReqOpts.headers["x-origin-port"] = String(srcReq.socket.localPort || "");
+    return proxyReqOpts;
+  },
+  proxyErrorHandler: (err, res, next) => {
+    if (err && err.code === "ECONNREFUSED") {
+      return res.status(503).end("backend unavailable");
+    }
+    return next(err);
+  },
+}));
+
 app.use("/uploads", express.static(UPLOAD_DIR));
 app.use(express.static(PUBLIC_DIR));
 

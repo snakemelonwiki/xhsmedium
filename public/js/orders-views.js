@@ -137,6 +137,8 @@ function renderSalesLeadDetail() {
   const processStatus = lead.processStatus || "not_contacted";
   const nextFollow = lead.nextFollowTime ? String(lead.nextFollowTime).slice(0, 16).replace(" ", "T") : "";
   const addStatus = lead.addStatus || "未添加";
+  const addStatusAdded = isAddStatusAdded(addStatus);
+  const addStatusLabel = getAddStatusLabel(addStatus);
 
   const renderInfoSection = () => `
     <section class="detail-section">
@@ -194,9 +196,9 @@ function renderSalesLeadDetail() {
         </div>
         <div class="field">
           <strong>添加状态</strong>
-          <label class="lead-check-chip ${addStatus === "已添加" ? "is-good" : ""}">
-            <input class="js-sales-add-toggle" data-id="${lead.id}" type="checkbox" ${addStatus === "已添加" ? "checked" : ""} />
-            <span>${addStatus === "已添加" ? "已添加" : "未添加"}</span>
+          <label class="lead-check-chip ${addStatusAdded ? "is-good" : ""}">
+            <input class="js-sales-add-toggle" data-id="${lead.id}" type="checkbox" ${addStatusAdded ? "checked" : ""} />
+            <span>${addStatusLabel}</span>
           </label>
         </div>
         <div class="field">
@@ -405,7 +407,7 @@ function renderSalesOrdersTableBody(items) {
 function mountSalesOrdersPagination() {
   if (typeof setupPagination !== "function") return;
   setupPagination("salesOrdersPager", {
-    pageSize: 10,
+    pageSize: 20,
     fetchPage: async (page, pageSize) => {
       const params = new URLSearchParams();
       params.set("scope", "mine");
@@ -646,15 +648,10 @@ function renderAdminOrdersTableBody(rows) {
   // 重新绑定点击（列表 innerHTML 重写后旧绑定丢失）
   document.querySelectorAll(".js-admin-order-open").forEach((el) => el.addEventListener("click", (e) => {
     if (e.target.closest("button")) return;
-    const id = el.dataset.id;
-    state.adminOrderDetailId = id;
-    state.currentView = "admin-order-detail";
-    renderApp();
+    openAdminOrderDetail(el.dataset.id);
   }));
   document.querySelectorAll(".js-admin-order-open-btn").forEach((el) => el.addEventListener("click", () => {
-    state.adminOrderDetailId = el.dataset.id;
-    state.currentView = "admin-order-detail";
-    renderApp();
+    openAdminOrderDetail(el.dataset.id);
   }));
 }
 
@@ -662,7 +659,7 @@ function renderAdminOrdersTableBody(rows) {
 function mountAdminOrdersPagination() {
   if (typeof setupPagination !== "function") return;
   setupPagination("adminOrdersPager", {
-    pageSize: 10,
+    pageSize: 20,
     fetchPage: async (page, pageSize) => {
       const params = new URLSearchParams();
       params.set("actorRole", "admin");
@@ -928,7 +925,7 @@ function renderAcademicOrdersTableBody(items) {
 function mountAcademicOrdersPagination() {
   if (typeof setupPagination !== "function") return;
   setupPagination("academicOrdersPager", {
-    pageSize: 10,
+    pageSize: 20,
     fetchPage: async (page, pageSize) => {
       const params = new URLSearchParams();
       params.set("role", "academic");

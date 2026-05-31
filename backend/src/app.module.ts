@@ -1,8 +1,9 @@
-import { Module } from '@nestjs/common';
+import { Module, NestModule, MiddlewareConsumer } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
+import { APP_INTERCEPTOR } from '@nestjs/core';
 import { User } from './entities/user.entity';
 import { Employee } from './entities/employee.entity';
 import { Account } from './entities/account.entity';
@@ -15,6 +16,8 @@ import { Order } from './entities/order.entity';
 import { OrderFollowRecord } from './entities/order-follow-record.entity';
 import { ImportTask } from './entities/import-task.entity';
 import { Notification } from './entities/notification.entity';
+import { Favorite } from './entities/favorite.entity';
+import { PostMetricsHistory } from './entities/post-metrics-history.entity';
 import { ExportTask } from './entities/export-task.entity';
 import { OperationLog } from './entities/operation-log.entity';
 import { AuthModule } from './modules/auth/auth.module';
@@ -31,11 +34,15 @@ import { OrdersModule } from './modules/orders/orders.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { RankingsModule } from './modules/rankings/rankings.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
+import { FavoritesModule } from './modules/favorites/favorites.module';
 import { ToolsModule } from './modules/tools/tools.module';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { ExportsModule } from './modules/exports/exports.module';
 import { OperationLogsModule } from './modules/operation-logs/operation-logs.module';
 import { StorageModule } from './shared/storage/storage.service';
+import { FormattedSqlLogger } from './common/sql-logger';
+import { JwtAuthMiddleware } from './common/jwt-auth.middleware';
+import { TokenRefreshInterceptor } from './common/token-refresh.interceptor';
 
 @Module({
   imports: [
@@ -52,9 +59,17 @@ import { StorageModule } from './shared/storage/storage.service';
         username: config.get('MYSQL_USER', 'root'),
         password: config.get('MYSQL_PASSWORD', ''),
         database: config.get('MYSQL_DATABASE', 'lan_dual_role_system'),
-        entities: [User, Employee, Account, Post, Lead, LeadFollowRecord, LeadDraft, CollaborationTask, Order, OrderFollowRecord, ImportTask, Notification, ExportTask, OperationLog],
+        entities: [User, Employee, Account, Post, Lead, LeadFollowRecord, LeadDraft, CollaborationTask, Order, OrderFollowRecord, ImportTask, Notification, Favorite, PostMetricsHistory, ExportTask, OperationLog],
         synchronize: false,
         charset: 'utf8mb4',
+        logging: true,
+        logger: new FormattedSqlLogger(),
+        extra: {
+          connectionLimit: 50,
+          waitForConnections: true,
+          queueLimit: 0,
+          connectTimeout: 10000,
+        },
       }),
     }),
     JwtModule.registerAsync({
@@ -62,7 +77,7 @@ import { StorageModule } from './shared/storage/storage.service';
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
         secret: config.get('JWT_SECRET', 'fallback-secret'),
-        signOptions: { expiresIn: config.get('JWT_EXPIRES_IN', '2h') },
+        signOptions: { expiresIn: config.get('JWT_EXPIRES_IN', '8h') },
       }),
     }),
     PassportModule.register({ defaultStrategy: 'jwt' }),
@@ -80,11 +95,24 @@ import { StorageModule } from './shared/storage/storage.service';
     DashboardModule,
     RankingsModule,
     NotificationsModule,
+    FavoritesModule,
     ToolsModule,
     AnalyticsModule,
     ExportsModule,
     OperationLogsModule,
     StorageModule,
   ],
+  providers: [
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: TokenRefreshInterceptor,
+    },
+  ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer
+      .apply(JwtAuthMiddleware)
+      .forRoutes('*');
+  }
+}

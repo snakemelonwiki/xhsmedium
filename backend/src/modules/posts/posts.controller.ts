@@ -1,9 +1,10 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, Query, Req, Res } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, Query, Req, Res, UseGuards } from '@nestjs/common';
 import { PostsService } from './posts.service';
 import { PostsMetricsService } from './posts-metrics.service';
 import { Request, Response } from 'express';
 import { makeId } from '../../shared/utils/id-generator';
 import { todayString } from '../../shared/utils/date-utils';
+import { DebounceGuard } from '../../common/debounce.guard';
 
 @Controller('posts')
 export class PostsController {
@@ -18,20 +19,44 @@ export class PostsController {
     @Res() res: Response,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
+    @Query('employeeId') employeeId?: string,
+    @Query('accountId') accountId?: string,
+    @Query('platform') platform?: string,
+    @Query('postType') postType?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('sort') sort?: string,
   ) {
     const session = (req as any).session;
     const wantsPaging = limit !== undefined || offset !== undefined;
 
     if (wantsPaging) {
       if (session?.role === 'staff' && session?.employeeId) {
-        const result = await this.postsService.findByEmployeePaged(
-          session.employeeId,
+        const result = await this.postsService.findPaged(
+          {
+            employeeId: session.employeeId,
+            accountId,
+            platform,
+            postType,
+            from,
+            to,
+            sort,
+          },
           Number(limit) || 20,
           Number(offset) || 0,
         );
         return res.json(result);
       }
-      const result = await this.postsService.findAllPaged(
+      const result = await this.postsService.findPaged(
+        {
+          employeeId,
+          accountId,
+          platform,
+          postType,
+          from,
+          to,
+          sort,
+        },
         Number(limit) || 20,
         Number(offset) || 0,
       );
@@ -47,6 +72,7 @@ export class PostsController {
   }
 
   @Post()
+  @UseGuards(DebounceGuard)
   async create(@Body() body: any, @Req() req: Request, @Res() res: Response) {
     const session = (req as any).session;
     const postId = makeId();
@@ -72,6 +98,7 @@ export class PostsController {
   }
 
   @Put(':id')
+  @UseGuards(DebounceGuard)
   async update(@Param('id') id: string, @Body() body: any, @Res() res: Response) {
     await this.postsService.update(id, {
       accountId: body.accountId,
@@ -106,6 +133,7 @@ export class PostsController {
     try {
       const metrics = await this.postsMetricsService.fetchMetricsFromUrl(body.postUrl);
       await this.postsService.updateMetrics(id, metrics);
+      await this.postsService.recordMetricsHistory(id, metrics);
       return res.json({ ok: true, metrics });
     } catch (error: any) {
       return res.status(400).json({ message: error.message || '抓取失败' });
@@ -114,8 +142,12 @@ export class PostsController {
 
   @Post('refresh-metrics')
   async refreshMetrics(@Body() body: any, @Res() res: Response) {
-    // Legacy: synchronous batch refresh
-    const posts = await this.postsService.findAll();
+    const postIds = Array.isArray(body?.postIds)
+      ? body.postIds.map((id: any) => String(id || '').trim()).filter(Boolean)
+      : [];
+    const posts = postIds.length
+      ? await this.postsService.findByIds(postIds)
+      : await this.postsService.findAll();
     const eligible = posts.filter((p) => p.postUrl);
     if (eligible.length === 0) {
       return res.status(400).json({ message: '当前范围内没有可刷新的作品' });
@@ -125,12 +157,20 @@ export class PostsController {
       try {
         const metrics = await this.postsMetricsService.fetchMetricsFromUrl(post.postUrl);
         await this.postsService.updateMetrics(post.id, metrics);
+        await this.postsService.recordMetricsHistory(post.id, metrics);
         results.push({ id: post.id, success: true });
-      } catch {
-        results.push({ id: post.id, success: false });
+      } catch (error: any) {
+        results.push({ id: post.id, success: false, reason: error?.message || '刷新失败' });
       }
     }
-    return res.json({ ok: true, results });
+    return res.json({
+      ok: true,
+      scoped: postIds.length > 0,
+      requested: postIds.length || posts.length,
+      refreshed: results.filter((item) => item.success).length,
+      failed: results.filter((item) => !item.success).length,
+      results,
+    });
   }
 
   @Post('rollback-metrics')

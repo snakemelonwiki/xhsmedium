@@ -2,13 +2,14 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ImportTask } from '../../entities/import-task.entity';
 import { Lead } from '../../entities/lead.entity';
+import { Post } from '../../entities/post.entity';
 import { ImportsController } from './imports.controller';
 import { ImportsService } from './imports.service';
 import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([ImportTask, Lead]),
+    TypeOrmModule.forFeature([ImportTask, Lead, Post]),
     NotificationsModule,
   ],
   controllers: [ImportsController],

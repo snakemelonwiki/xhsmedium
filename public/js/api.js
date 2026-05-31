@@ -11,14 +11,25 @@ const _activeAbortControllers = new Set();
 const _MAX_CONCURRENT_REQUESTS = 8;
 let _inFlightCount = 0;
 const _pendingQueue = [];
+let _requestGeneration = 0;
 
 // 用于 token 失效场景：先保草稿、再弹登录
 let _isRedirecting401 = false;
 
 async function _scheduleRequest(runner) {
+  const generation = _requestGeneration;
+  const abortIfStale = () => {
+    if (generation !== _requestGeneration) {
+      const err = new DOMException("Request cancelled", "AbortError");
+      throw err;
+    }
+  };
   if (_inFlightCount < _MAX_CONCURRENT_REQUESTS) {
     _inFlightCount++;
-    try { return await runner(); }
+    try {
+      abortIfStale();
+      return await runner();
+    }
     finally {
       _inFlightCount--;
       const next = _pendingQueue.shift();
@@ -29,7 +40,10 @@ async function _scheduleRequest(runner) {
   return new Promise((resolve, reject) => {
     _pendingQueue.push(async () => {
       _inFlightCount++;
-      try { resolve(await runner()); }
+      try {
+        abortIfStale();
+        resolve(await runner());
+      }
       catch (err) { reject(err); }
       finally {
         _inFlightCount--;
@@ -79,15 +93,21 @@ async function api(path, options = {}) {
     const signal = options.signal || controller?.signal;
 
     try {
-      const response = await fetch(path, {
-        ...options,
-        signal,
-        headers: {
-          ...(state.token ? { Authorization: `Bearer ${state.token}` } : {}),
+	      const response = await fetch(path, {
+	        ...options,
+	        signal,
+	        headers: {
+	          ...(state.token ? { Authorization: `Bearer ${state.token}` } : {}),
           ...(!isFormData ? { "Content-Type": "application/json" } : {}),
           ...(options.headers || {})
-        }
-      });
+	        }
+	      });
+
+	      const refreshedToken = response.headers.get("X-New-Token");
+	      if (refreshedToken) {
+	        state.token = refreshedToken;
+	        localStorage.setItem("lan_system_token", refreshedToken);
+	      }
 
       // T-17 401 拦截：token 失效 → 保草稿 → 弹登录
       // 但要排除：
@@ -116,6 +136,13 @@ async function api(path, options = {}) {
 
 // 离开视图 / 切角色 / logout 时统一取消所有未完成请求
 function abortAllPendingRequests() {
+  _requestGeneration++;
+  while (_pendingQueue.length) {
+    const next = _pendingQueue.shift();
+    if (next) {
+      try { next(); } catch {}
+    }
+  }
   for (const ctrl of _activeAbortControllers) {
     try { ctrl.abort(); } catch {}
   }
@@ -130,7 +157,6 @@ function withSubmitLock(key, asyncFn, lockMs = 1000) {
     if (_submittingKeys.has(key)) {
       if (typeof setFlash === "function") {
         setFlash("warn", "请稍候", "操作正在处理中，请勿重复点击。");
-        if (typeof renderApp === "function") renderApp();
       }
       return;
     }

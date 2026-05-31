@@ -388,7 +388,7 @@ function renderAccountsMini() {
 
 function mountAccountsPagination() {
   setupPagination("accountsPagination", {
-    pageSize: 10,
+    pageSize: 20,
     fetchPage: async (page, pageSize, offset) => {
       const result = await api(`/api/accounts?limit=${pageSize}&offset=${offset}`);
       return result;

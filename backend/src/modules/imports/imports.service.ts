@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ImportTask } from '../../entities/import-task.entity';
 import { Lead } from '../../entities/lead.entity';
+import { Post } from '../../entities/post.entity';
 import { makeId } from '../../shared/utils/id-generator';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NOTIFICATION_TYPES } from '../../shared/notifications';
@@ -39,6 +40,8 @@ export class ImportsService {
     private readonly importTaskRepository: Repository<ImportTask>,
     @InjectRepository(Lead)
     private readonly leadRepository: Repository<Lead>,
+    @InjectRepository(Post)
+    private readonly postRepository: Repository<Post>,
     private readonly notificationsService: NotificationsService,
     private readonly storage: StorageService,
   ) {}
@@ -178,7 +181,7 @@ export class ImportsService {
    * Synchronous batch import of pasted lead rows.
    * Each line is parsed, validated, dup-checked, then inserted via lead repository.
    */
-  async importLeadsPaste(rows: string[], actorUserId: string): Promise<ImportPasteResult> {
+  async importLeadsPaste(rows: string[], actorUserId: string, actorEmployeeId = ''): Promise<ImportPasteResult> {
     const task = await this.createTask('leads', actorUserId);
     const errors: ImportRowError[] = [];
     let success = 0;
@@ -229,7 +232,8 @@ export class ImportsService {
 
         const lead = this.leadRepository.create({
           id: makeId(),
-          employeeId: '',
+          leadCode: this.generateLeadCode(),
+          employeeId: actorEmployeeId || '',
           accountId: '',
           postId: null,
           platform: parsed.platform,
@@ -294,6 +298,88 @@ export class ImportsService {
     };
   }
 
+  async importPostsPaste(rows: string[], actorUserId: string, actorEmployeeId = ''): Promise<ImportPasteResult> {
+    const task = await this.createTask('posts', actorUserId);
+    const errors: ImportRowError[] = [];
+    let success = 0;
+    let fail = 0;
+    let startIdx = 0;
+    if (rows.length > 0) {
+      const first = (this.splitColumns(String(rows[0] || ''))[0] || '').trim();
+      if (['平台', 'platform', 'Platform'].includes(first)) startIdx = 1;
+    }
+    const total = rows.length - startIdx;
+
+    for (let i = startIdx; i < rows.length; i++) {
+      const rowIndex = i + 1;
+      const rawLine = rows[i] == null ? '' : String(rows[i]);
+      if (!rawLine.trim()) {
+        fail++;
+        errors.push({ row: rowIndex, reason: '空行', raw: rawLine });
+        continue;
+      }
+      const cols = this.splitColumns(rawLine);
+      const platform = cols[0] || '';
+      const title = cols[1] || '';
+      const postType = cols[2] || '获客贴';
+      const postUrl = cols[3] || '';
+      const accountId = cols[4] || '';
+      const publishedAt = cols[5] || new Date().toISOString().slice(0, 10);
+      if (!platform || !title) {
+        fail++;
+        errors.push({ row: rowIndex, reason: '平台或标题缺失', raw: rawLine });
+        continue;
+      }
+      try {
+        await this.postRepository.save(this.postRepository.create({
+          id: makeId(),
+          employeeId: actorEmployeeId || '',
+          accountId,
+          platform,
+          title,
+          copywriting: cols[6] || '',
+          coverImageUrl: cols[7] || null,
+          postUrl: postUrl || null,
+          postType,
+          traffic: Number(cols[8] || 0),
+          likes: Number(cols[9] || 0),
+          comments: Number(cols[10] || 0),
+          favorites: Number(cols[11] || 0),
+          publishedAt,
+          note: cols[12] || null,
+        } as any));
+        success++;
+      } catch (err: any) {
+        fail++;
+        errors.push({ row: rowIndex, reason: `写入失败: ${err?.message || String(err)}`, raw: rawLine });
+      }
+    }
+
+    const errorFileUrl = fail > 0 && errors.length > 0 ? await this.writeErrorCsv(task.id, errors) : null;
+    await this.finishTask(task.id, {
+      totalCount: total,
+      successCount: success,
+      failCount: fail,
+      status: 'done',
+      errorFileUrl,
+    });
+
+    if (actorUserId && actorUserId !== 'anonymous') {
+      await this.notificationsService.create({
+        receiverIds: [actorUserId],
+        senderId: null,
+        portType: 'operations',
+        typeCode: NOTIFICATION_TYPES.IMPORT_DONE,
+        title: '作品批量导入完成',
+        content: `共 ${total} 行，成功 ${success}，失败 ${fail}`,
+        relatedId: task.id,
+        relatedType: 'import_task',
+      });
+    }
+
+    return { ok: true, importTaskId: task.id, total, success, fail, errors, errorFileUrl };
+  }
+
   private mapTask(row: ImportTask): any {
     return {
       id: row.id,
@@ -334,5 +420,13 @@ export class ImportsService {
       console.warn('[imports] writeErrorCsv failed:', (err as any)?.message || err);
       return null;
     }
+  }
+
+  private generateLeadCode(): string {
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const ymd = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`;
+    const random = Math.random().toString(36).slice(2, 8).toUpperCase();
+    return `L${ymd}-${random}`;
   }
 }

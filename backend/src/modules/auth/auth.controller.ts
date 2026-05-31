@@ -42,4 +42,18 @@ export class AuthController {
     }
     return res.json({ ok: true });
   }
+
+  @Post('refresh')
+  async refresh(@Req() req: Request, @Res() res: Response) {
+    const userId = (req as any).user?.sub;
+    if (!userId) {
+      return res.status(401).json({ message: '未登录' });
+    }
+    try {
+      const newToken = await this.authService.refreshToken(userId);
+      return res.json({ token: newToken });
+    } catch (error: any) {
+      return res.status(401).json({ message: error.message || 'Token刷新失败' });
+    }
+  }
 }

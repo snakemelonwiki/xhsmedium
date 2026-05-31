@@ -75,10 +75,32 @@ function renderPostsMonitor() {
       </div>
     </div>
     ${renderViewContext()}
-    <div class="posts-monitor-grid">
-      ${rows.length ? rows.map(renderPostMonitorCard).join("") : `<div class="empty">这一天没有符合条件的帖子。</div>`}
+    <div class="posts-monitor-grid" id="postsMonitorGrid">
+      <div class="empty">加载中...</div>
     </div>
+    <div id="postsMonitorPager"></div>
   `;
+}
+
+function getPostMonitorDateRangeParams() {
+  const params = new URLSearchParams();
+  if (state.postMonitorMode === "week") {
+    const dates = getDatesInWeek(state.postMonitorWeek);
+    if (dates.length) {
+      params.set("from", dates[0]);
+      params.set("to", dates[dates.length - 1]);
+    }
+  } else if (state.postMonitorMode === "month") {
+    const dates = getMonthDates(state.postMonitorMonth);
+    if (dates.length) {
+      params.set("from", dates[0]);
+      params.set("to", dates[dates.length - 1]);
+    }
+  } else if (state.postMonitorDate) {
+    params.set("from", state.postMonitorDate);
+    params.set("to", state.postMonitorDate);
+  }
+  return params;
 }
 
 function renderPostMonitorCard(item) {
@@ -87,7 +109,11 @@ function renderPostMonitorCard(item) {
   return `
     <article class="post-monitor-card post-board-card">
       <div class="post-monitor-cover">
-        ${item.coverImageUrl ? `<button class="image-trigger js-open-image" data-src="${item.coverImageUrl}" type="button"><img src="${item.coverImageUrl}" alt="${item.title}" class="post-monitor-image" /></button>` : `<div class="post-monitor-placeholder">暂无封面</div>`}
+        ${item.coverImageUrl && typeof createLazyImageButtonHtml === "function"
+          ? createLazyImageButtonHtml(item.coverImageUrl, item.title || "作品封面", "post-monitor-image")
+          : item.coverImageUrl
+            ? `<button class="image-trigger js-open-image" data-src="${item.coverImageUrl}" type="button"><img src="${item.coverImageUrl}" alt="${item.title}" class="post-monitor-image" loading="lazy" /></button>`
+            : `<div class="post-monitor-placeholder">暂无封面</div>`}
       </div>
       <div class="post-monitor-body post-board-copy">
         <span class="mini-tag">作品文案</span>
@@ -159,6 +185,17 @@ function renderPostsTable(rows) {
 function renderPostEntry() {
   const editing = state.posts.find((item) => item.id === state.editingPostId);
   const todayRows = getTodayStaffPosts();
+
+  // 检查是否有未提交的草稿并初始化恢复提示
+  if (!editing && typeof hasDraft === "function" && hasDraft("post")) {
+    if (typeof showDraftRestorePrompt === "function") {
+      showDraftRestorePrompt("post",
+        () => restoreDraft("post"),
+        () => discardDraft("post")
+      );
+    }
+  }
+
   return `
     <div class="page-header page-header-rich entry-page-header">
       <div>
@@ -169,6 +206,7 @@ function renderPostEntry() {
         <span class="tag">${editing ? "正在编辑作品" : "今日录入"}</span>
       </div>
     </div>
+    ${!editing && state.draftRestorePrompt ? renderDraftRestorePrompt() : ""}
     <div class="panel entry-panel entry-panel-compact">
       <div class="staff-form-head">
         <h3>${editing ? "编辑作品" : "新增作品"}</h3>
@@ -226,34 +264,35 @@ function renderMyPosts() {
 // ===== L3691-L3736 renderPostForm / getAccountSourcePosts =====
 function renderPostForm(editing, options = {}) {
   const compact = Boolean(options.compact);
-  const selectedType = editing?.postType || "素人贴";
+  const formValues = editing || (state._postFormBuffer ? { ...state._postFormBuffer } : null);
+  const selectedType = formValues?.postType || "素人贴";
   return `
     <form id="postForm" class="form-grid form-grid-tight">
-      <input type="hidden" name="id" value="${editing?.id || ""}" />
-      <input type="hidden" name="coverImageUrl" value="${editing?.coverImageUrl || ""}" />
-      <select name="accountId" required>${state.accounts.map((item) => `<option value="${item.id}" data-platform="${item.platform}" ${editing?.accountId === item.id ? "selected" : ""}>${item.accountName} · ${item.platform}</option>`).join("")}</select>
-      <select name="postType">${POST_TYPES.map((item) => `<option value="${item}" ${editing?.postType === item ? "selected" : ""}>${item}</option>`).join("")}</select>
+      <input type="hidden" name="id" value="${formValues?.id || ""}" />
+      <input type="hidden" name="coverImageUrl" value="${formValues?.coverImageUrl || ""}" />
+      <select name="accountId" required>${state.accounts.map((item) => `<option value="${item.id}" data-platform="${item.platform}" ${formValues?.accountId === item.id ? "selected" : ""}>${item.accountName} · ${item.platform}</option>`).join("")}</select>
+      <select name="postType">${POST_TYPES.map((item) => `<option value="${item}" ${selectedType === item ? "selected" : ""}>${item}</option>`).join("")}</select>
       <div class="full field-block">
         <label class="field-label">封面上传</label>
         <input name="coverImage" id="postCoverInput" type="file" accept="image/*" />
         <div class="paste-cover-hint" id="postCoverPasteHint" tabindex="0">可直接按 Command/Ctrl + V 粘贴封面截图，也可点击上方选择图片。</div>
         ${state.postCoverPreviewUrl ? `<div class="cover-preview-wrap"><span class="muted">当前待上传封面</span><button class="image-trigger image-trigger-inline js-open-image" data-src="${state.postCoverPreviewUrl}" type="button"><img class="cover-thumb" src="${state.postCoverPreviewUrl}" alt="待上传封面" /></button></div>` : editing?.coverImageUrl ? `<div class="cover-preview-wrap"><span class="muted">当前封面</span><button class="image-trigger image-trigger-inline js-open-image" data-src="${editing.coverImageUrl}" type="button"><img class="cover-thumb" src="${editing.coverImageUrl}" alt="当前封面" /></button></div>` : ""}
       </div>
-      <input class="full" name="title" placeholder="作品名 / 标题" value="${editing?.title || ""}" />
-      <textarea class="full" name="copywriting" rows="4" placeholder="作品文案">${editing?.copywriting || ""}</textarea>
-      <input class="full" name="postUrl" placeholder="作品链接" value="${editing?.postUrl || ""}" />
+      <input class="full" name="title" placeholder="作品名 / 标题" value="${formValues?.title || ""}" />
+      <textarea class="full" name="copywriting" rows="4" placeholder="作品文案">${formValues?.copywriting || ""}</textarea>
+      <input class="full" name="postUrl" placeholder="作品链接" value="${formValues?.postUrl || ""}" />
       <div class="full" id="postTrafficField" style="${selectedType === "获客贴" ? "" : "display:none;"}">
-        <input name="traffic" type="number" min="0" placeholder="获客贴播放量（仅获客贴填写，其他类型自动记为0）" value="${selectedType === "获客贴" ? (editing?.traffic ?? "") : ""}" />
+        <input name="traffic" type="number" min="0" placeholder="获客贴播放量（仅获客贴填写，其他类型自动记为0）" value="${selectedType === "获客贴" ? (formValues?.traffic ?? "") : ""}" />
       </div>
       ${
         compact
           ? ""
           : `
-            <input name="likes" type="number" min="0" placeholder="点赞数" value="${editing?.likes ?? ""}" />
-            <input name="comments" type="number" min="0" placeholder="评论数" value="${editing?.comments ?? ""}" />
-            <input name="favorites" type="number" min="0" placeholder="收藏数" value="${editing?.favorites ?? ""}" />
-            <input name="publishedAt" type="date" value="${editing?.publishedAt || ""}" />
-            <textarea class="full" name="note" rows="3" placeholder="备注">${editing?.note || ""}</textarea>
+            <input name="likes" type="number" min="0" placeholder="点赞数" value="${formValues?.likes ?? ""}" />
+            <input name="comments" type="number" min="0" placeholder="评论数" value="${formValues?.comments ?? ""}" />
+            <input name="favorites" type="number" min="0" placeholder="收藏数" value="${formValues?.favorites ?? ""}" />
+            <input name="publishedAt" type="date" value="${formValues?.publishedAt || ""}" />
+            <textarea class="full" name="note" rows="3" placeholder="备注">${formValues?.note || ""}</textarea>
           `
       }
       <div class="actions full">
@@ -366,20 +405,42 @@ async function submitPost(event) {
   event.preventDefault();
   const formData = new FormData(event.currentTarget);
   const id = String(formData.get("id") || "");
+  collectPostFormBuffer();
+
+  // 提交前立即保存草稿（防止提交失败丢失数据）
+  if (!id && typeof saveDraftNow === "function") {
+    saveDraftNow("post", event.currentTarget);
+  }
+
   if (state.postCoverFile) {
     formData.set("coverImage", state.postCoverFile, state.postCoverFile.name || "pasted-cover.png");
   }
-  const result = await api(id ? `/api/posts/${id}` : "/api/posts", {
-    method: id ? "PUT" : "POST",
-    body: formData
-  });
-  clearPendingPostCover();
-  state.editingPostId = "";
-  setFlash("success", id ? "作品已更新" : "作品已提交", "这条作品已经写入后台，主管端同步看板后会立刻看到。");
-  await loadData();
-  renderApp();
-  if (result.metricsSyncError) {
-    alert(`作品已保存，但互动数据暂未自动抓到：${result.metricsSyncError}`);
+
+  try {
+    const result = await api(id ? `/api/posts/${id}` : "/api/posts", {
+      method: id ? "PUT" : "POST",
+      body: formData
+    });
+
+    // 提交成功后清除草稿
+    if (!id && typeof clearDraftFromLocal === "function") {
+      clearDraftFromLocal("post");
+    }
+
+    clearPendingPostCover();
+    state._postFormBuffer = null;
+    state.editingPostId = "";
+    setFlash("success", id ? "作品已更新" : "作品已提交", "这条作品已经写入后台，主管端同步看板后会立刻看到。");
+    await loadData();
+    renderApp();
+
+    if (result.metricsSyncError) {
+      alert(`作品已保存，但互动数据暂未自动抓到：${result.metricsSyncError}`);
+    }
+  } catch (err) {
+    // 提交失败时保留表单内容，不清空
+    setFlash("error", "提交失败", err.message || "请检查网络连接后重试，已填写内容已自动保存。");
+    throw err;
   }
 }
 
@@ -398,9 +459,17 @@ async function savePostSuggestion(id) {
 }
 
 async function refreshScopedMetrics() {
+  const postIds = getScopedRefreshPostIds();
+  if (!postIds.length) {
+    alert("当前范围内没有可刷新的作品。");
+    return;
+  }
   try {
-    const result = await api("/api/dashboard/refresh-entered-data", { method: "POST" });
-    setFlash("success", "看板数据已同步", `已按员工当前录入的数据同步作品 ${result.postCount} 条、客资 ${result.leadCount} 条。`);
+    const result = await api("/api/posts/refresh-metrics", {
+      method: "POST",
+      body: JSON.stringify({ postIds })
+    });
+    setFlash("success", "作品指标已刷新", `当前范围 ${result.requested || postIds.length} 条，成功 ${result.refreshed || 0} 条，失败 ${result.failed || 0} 条。`);
     await loadData();
     renderApp();
   } catch (error) {
@@ -450,4 +519,40 @@ async function rollbackScopedMetrics() {
     alert(error.message);
   }
 }
+
+function mountPostsMonitorPagination() {
+  if (typeof setupPagination !== "function") return;
+  setupPagination("postsMonitorPager", {
+    pageSize: 20,
+    fetchPage: async (page, pageSize, offset) => {
+      const params = getPostMonitorDateRangeParams();
+      params.set("limit", String(pageSize));
+      params.set("offset", String(offset));
+      if (state.postMonitorEmployeeFilter) params.set("employeeId", state.postMonitorEmployeeFilter);
+      if (state.postMonitorTypeFilter) params.set("postType", state.postMonitorTypeFilter);
+      if (state.postMonitorPlatformFilter) params.set("platform", state.postMonitorPlatformFilter);
+      if (state.postMonitorAccountFilter) params.set("accountId", state.postMonitorAccountFilter);
+      if (state.postMonitorSort) params.set("sort", state.postMonitorSort);
+      const result = await api(`/api/posts?${params.toString()}`);
+      const items = Array.isArray(result?.items) ? result.items : [];
+      items.forEach((item) => {
+        const idx = state.posts.findIndex((post) => post.id === item.id);
+        if (idx >= 0) state.posts[idx] = item;
+        else state.posts.push(item);
+      });
+      state.postTotal = Number(result?.total || items.length);
+      return { items, total: state.postTotal };
+    },
+    renderItems: (items) => {
+      const grid = document.getElementById("postsMonitorGrid");
+      if (!grid) return;
+      if (!items.length) {
+        grid.innerHTML = `<div class="empty">这一天没有符合条件的帖子。</div>`;
+        return;
+      }
+      grid.innerHTML = items.map(renderPostMonitorCard).join("");
+    }
+  });
+}
+
 
