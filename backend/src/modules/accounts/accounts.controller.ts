@@ -12,16 +12,21 @@ export class AccountsController {
     @Res() res: Response,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
+    @Query('keyword') keyword?: string,
+    @Query('search') search?: string,
+    @Query('q') q?: string,
   ) {
     const wantsPaging = limit !== undefined || offset !== undefined;
+    const nextKeyword = keyword || search || q || '';
     if (wantsPaging) {
       const result = await this.accountsService.findAllPaged(
         Number(limit) || 20,
         Number(offset) || 0,
+        nextKeyword,
       );
       return res.json(result);
     }
-    const rows = await this.accountsService.findAll();
+    const rows = await this.accountsService.findAll(nextKeyword);
     return res.json(rows.map((r) => ({
       id: r.id,
       employeeId: r.employeeId,

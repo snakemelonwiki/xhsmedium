@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Like, Repository } from 'typeorm';
 import { Account } from '../../entities/account.entity';
 import { makeId } from '../../shared/utils/id-generator';
 import { normalizeExternalUrl } from '../../shared/utils/normalize';
@@ -12,13 +12,17 @@ export class AccountsService {
     private readonly accountRepository: Repository<Account>,
   ) {}
 
-  async findAll(): Promise<any[]> {
-    return this.accountRepository.find({ order: { createdAt: 'DESC' } });
+  async findAll(keyword = ''): Promise<any[]> {
+    return this.accountRepository.find({
+      order: { createdAt: 'DESC' },
+      where: this.keywordWhere(keyword),
+    });
   }
 
-  async findAllPaged(limit: number, offset: number): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
+  async findAllPaged(limit: number, offset: number, keyword = ''): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
     const [items, total] = await this.accountRepository.findAndCount({
       order: { createdAt: 'DESC' },
+      where: this.keywordWhere(keyword),
       take: limit,
       skip: offset,
     });
@@ -73,5 +77,20 @@ export class AccountsService {
 
   async remove(id: string): Promise<void> {
     await this.accountRepository.delete(id);
+  }
+
+  private keywordWhere(keyword: string) {
+    const value = String(keyword || '').trim();
+    if (!value) return undefined;
+    const like = Like(`%${value}%`);
+    return [
+      { accountName: like },
+      { accountUid: like },
+      { employeeId: like },
+      { platform: like },
+      { persona: like },
+      { positioning: like },
+      { status: like },
+    ];
   }
 }

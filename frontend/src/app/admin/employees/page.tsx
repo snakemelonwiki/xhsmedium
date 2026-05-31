@@ -12,13 +12,14 @@ export default function AdminEmployeesPage() {
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<AdminEmployee>();
+  const [keyword, setKeyword] = useState('');
   const [pagination, setPagination] = useState({ current: 1, pageSize: 20, total: 0 });
   const [form] = Form.useForm();
 
-  async function load(page = pagination.current, pageSize = pagination.pageSize) {
+  async function load(page = pagination.current, pageSize = pagination.pageSize, nextKeyword = keyword) {
     setLoading(true);
     try {
-      const result = await listAdminEmployees({ page, pageSize });
+      const result = await listAdminEmployees({ page, pageSize, keyword: nextKeyword.trim() || undefined });
       setItems(result.items);
       setPagination({ current: result.page, pageSize: result.pageSize, total: result.total });
     } catch {
@@ -48,6 +49,12 @@ export default function AdminEmployeesPage() {
     await load();
   }
 
+  function handleSearch(value: string) {
+    const nextKeyword = value.trim();
+    setKeyword(nextKeyword);
+    void load(1, pagination.pageSize, nextKeyword);
+  }
+
   const columns: TableColumnsType<AdminEmployee> = [
     { title: '姓名', dataIndex: 'name' },
     { title: '员工编号', dataIndex: 'employeeCode', render: (value?: string) => value || '-' },
@@ -66,6 +73,18 @@ export default function AdminEmployeesPage() {
         <Button type="primary" onClick={() => startEdit()}>新增员工</Button>
       </div>
       <Card>
+        <Input.Search
+          allowClear
+          value={keyword}
+          placeholder="搜索姓名、员工编号、电话、状态"
+          onChange={(event) => {
+            const value = event.target.value;
+            setKeyword(value);
+            if (!value) void load(1, pagination.pageSize, '');
+          }}
+          onSearch={handleSearch}
+          style={{ width: 320, maxWidth: '100%', marginBottom: 16 }}
+        />
         <Table
           rowKey="id"
           columns={columns}

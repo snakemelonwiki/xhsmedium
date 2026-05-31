@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Like, Repository } from 'typeorm';
 import { Employee } from '../../entities/employee.entity';
 import { makeId } from '../../shared/utils/id-generator';
 
@@ -11,13 +11,17 @@ export class EmployeesService {
     private readonly employeeRepository: Repository<Employee>,
   ) {}
 
-  async findAll(): Promise<any[]> {
-    return this.employeeRepository.find({ order: { createdAt: 'DESC' } });
+  async findAll(keyword = ''): Promise<any[]> {
+    return this.employeeRepository.find({
+      order: { createdAt: 'DESC' },
+      where: this.keywordWhere(keyword),
+    });
   }
 
-  async findAllPaged(limit: number, offset: number): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
+  async findAllPaged(limit: number, offset: number, keyword = ''): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
     const [items, total] = await this.employeeRepository.findAndCount({
       order: { createdAt: 'DESC' },
+      where: this.keywordWhere(keyword),
       take: limit,
       skip: offset,
     });
@@ -43,5 +47,17 @@ export class EmployeesService {
 
   async remove(id: string): Promise<void> {
     await this.employeeRepository.delete(id);
+  }
+
+  private keywordWhere(keyword: string) {
+    const value = String(keyword || '').trim();
+    if (!value) return undefined;
+    const like = Like(`%${value}%`);
+    return [
+      { name: like },
+      { employeeCode: like },
+      { phone: like },
+      { status: like },
+    ];
   }
 }
