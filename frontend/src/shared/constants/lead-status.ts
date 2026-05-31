@@ -201,18 +201,18 @@ export const COLLABORATION_STATUS_CONFIG: Record<CollaborationStatus, StatusConf
     allowedRoles: ['operation', 'sales', 'admin', 'owner'],
     nextActions: ['发起协同']
   },
-  requested: {
-    code: 'requested',
-    label: '已申请',
-    color: 'processing',
+  pending: {
+    code: 'pending',
+    label: '待处理',
+    color: 'warning',
     description: '销售已申请协同，等待运营处理',
     allowedRoles: ['operation', 'sales', 'admin', 'owner'],
     nextActions: ['运营处理']
   },
-  in_progress: {
-    code: 'in_progress',
+  handling: {
+    code: 'handling',
     label: '处理中',
-    color: 'warning',
+    color: 'processing',
     description: '运营正在处理协同任务',
     allowedRoles: ['operation', 'admin', 'owner'],
     nextActions: ['完成处理']
@@ -224,6 +224,14 @@ export const COLLABORATION_STATUS_CONFIG: Record<CollaborationStatus, StatusConf
     description: '运营已处理完成',
     allowedRoles: ['sales', 'admin', 'owner'],
     nextActions: ['继续跟进', '再次协同']
+  },
+  closed: {
+    code: 'closed',
+    label: '已关闭',
+    color: 'default',
+    description: '协同任务已关闭',
+    allowedRoles: ['operation', 'sales', 'admin', 'owner'],
+    nextActions: []
   }
 };
 

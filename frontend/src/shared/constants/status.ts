@@ -125,6 +125,15 @@ const STATUS_ALIASES: { [Kind in StatusKind]?: Record<string, keyof StatusRegist
     chatting: 'communicating',
     closed: 'deal_done',
   },
+  collaborationStatus: {
+    requested: 'pending',
+    in_progress: 'handling',
+    processing: 'handling',
+    pending_operation: 'pending',
+    done: 'handled',
+    cancelled: 'closed',
+    canceled: 'closed',
+  },
   notificationType: {
     collab_requested: 'collaboration_requested',
     collab_handled: 'collaboration_handled',

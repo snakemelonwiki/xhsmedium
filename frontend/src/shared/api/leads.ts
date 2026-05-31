@@ -123,6 +123,7 @@ function collaborationTitle(raw: RawRecord): string {
 function normalizeCollaborationStatus(status?: string): string | undefined {
   if (!status) return undefined;
   const aliases: Record<string, string> = {
+    requested: 'pending',
     in_progress: 'handling',
     processing: 'handling',
     pending_operation: 'pending',

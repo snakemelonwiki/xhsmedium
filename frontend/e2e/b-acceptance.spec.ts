@@ -219,8 +219,10 @@ test('B-side acceptance clicks save reviewable screenshots with mocked API', asy
   await expect(page.getByRole('heading', { name: '登录工作台' })).toBeVisible();
   await page.getByPlaceholder('用户名').fill('sales');
   await page.getByPlaceholder('密码').fill('sales123');
-  await page.locator('.login-submit').click();
-  await page.waitForURL('**/sales/leads', { timeout: 30_000 });
+  await Promise.all([
+    page.waitForURL('**/sales/leads', { timeout: 30_000, waitUntil: 'commit' }),
+    page.getByRole('button', { name: /登\s*录/ }).click(),
+  ]);
   await expect(page.getByRole('heading', { name: '我的客资' })).toBeVisible({ timeout: 30_000 });
 
   await expect(page.getByText('林同学')).toBeVisible();

@@ -22,8 +22,8 @@ export const COLLABORATION_TASK_STATUS_CONFIG: Record<
     color: 'warning',
     description: '销售已申请，等待运营处理'
   },
-  in_progress: {
-    code: 'in_progress',
+  handling: {
+    code: 'handling',
     label: '处理中',
     color: 'processing',
     description: '运营正在处理'
@@ -34,11 +34,11 @@ export const COLLABORATION_TASK_STATUS_CONFIG: Record<
     color: 'success',
     description: '运营已处理完成'
   },
-  cancelled: {
-    code: 'cancelled',
-    label: '已取消',
+  closed: {
+    code: 'closed',
+    label: '已关闭',
     color: 'default',
-    description: '协同任务已取消'
+    description: '协同任务已关闭'
   }
 };
 

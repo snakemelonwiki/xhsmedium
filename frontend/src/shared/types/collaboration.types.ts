@@ -10,9 +10,9 @@
  */
 export type CollaborationTaskStatus =
   | 'pending'                // 待处理
-  | 'in_progress'            // 处理中
+  | 'handling'               // 处理中
   | 'handled'                // 已处理
-  | 'cancelled';             // 已取消
+  | 'closed';                // 已关闭
 
 /**
  * 协同任务类型
@@ -151,9 +151,9 @@ export interface CollaborationTaskListResponse {
 export interface CollaborationTaskStats {
   total: number;
   pending: number;
-  in_progress: number;
+  handling: number;
   handled: number;
-  cancelled: number;
+  closed: number;
 
   // 按类型统计
   byType: Record<CollaborationTaskType, number>;

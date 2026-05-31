@@ -22,4 +22,10 @@ describe('status lookup', () => {
     expect(normalizeStatusCode('processStatus', 'chatting')).toBe('communicating');
     expect(normalizeStatusCode('processStatus', 'closed')).toBe('deal_done');
   });
+
+  it('normalizes collaboration status aliases to backend task statuses', () => {
+    expect(normalizeStatusCode('collaborationStatus', 'requested')).toBe('pending');
+    expect(normalizeStatusCode('collaborationStatus', 'in_progress')).toBe('handling');
+    expect(normalizeStatusCode('collaborationStatus', 'cancelled')).toBe('closed');
+  });
 });

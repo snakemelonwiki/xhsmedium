@@ -44,9 +44,10 @@ export type LeadProcessStatus =
  */
 export type CollaborationStatus =
   | 'none'                   // 无协同
-  | 'requested'              // 已申请协同
-  | 'in_progress'            // 协同处理中
-  | 'handled';               // 已处理
+  | 'pending'                // 待运营处理
+  | 'handling'               // 协同处理中
+  | 'handled'                // 已处理
+  | 'closed';                // 已关闭
 
 /**
  * 客资核心字段接口

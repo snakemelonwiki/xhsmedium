@@ -46,8 +46,10 @@ export const LeadProcessStatus = {
  */
 export const CollaborationStatus = {
   NONE: 'none' as const,
-  REQUESTED: 'requested' as const,
+  REQUESTED: 'pending' as const,
   PENDING: 'pending' as const,
-  IN_PROGRESS: 'in_progress' as const,
+  IN_PROGRESS: 'handling' as const,
+  HANDLING: 'handling' as const,
   HANDLED: 'handled' as const,
+  CLOSED: 'closed' as const,
 } as const;
