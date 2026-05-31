@@ -5,7 +5,7 @@ import { Post } from '../../entities/post.entity';
 import { Lead } from '../../entities/lead.entity';
 import { PostMetricsHistory } from '../../entities/post-metrics-history.entity';
 import { makeId } from '../../shared/utils/id-generator';
-import { normalizePostType, normalizeTrafficByType, normalizeExternalUrl } from '../../shared/utils/normalize';
+import { normalizePostType, normalizeTrafficByType, normalizeExternalUrl, normalizeMediaUrl } from '../../shared/utils/normalize';
 
 interface PostListFilters {
   employeeId?: string;
@@ -130,7 +130,7 @@ export class PostsService {
     const sql = `
       SELECT
         p.id, p.employee_id, p.account_id, p.platform, p.title, p.copywriting,
-        p.cover_image_url, p.post_url, p.post_type, p.traffic,
+        p.cover_image_url, p.cover_thumb_url, p.post_url, p.post_type, p.traffic,
         p.likes, p.comments, p.favorites, p.shares,
         p.metrics_updated_at, p.published_at, p.note, p.supervisor_suggestion,
         p.created_at, p.updated_at,
@@ -188,7 +188,8 @@ export class PostsService {
       id: makeId(),
       postType: normalizePostType(dto.postType),
       traffic: normalizeTrafficByType(dto.postType, dto.traffic),
-      coverImageUrl: dto.coverImageUrl ? normalizeExternalUrl(dto.coverImageUrl) : null,
+      coverImageUrl: dto.coverImageUrl ? normalizeMediaUrl(dto.coverImageUrl) : null,
+      coverThumbUrl: (dto as any).coverThumbUrl ? normalizeMediaUrl((dto as any).coverThumbUrl) : null,
       postUrl: dto.postUrl ? normalizeExternalUrl(dto.postUrl) : null,
       copywriting: dto.copywriting || '',
       supervisorSuggestion: dto.supervisorSuggestion || '',
@@ -201,7 +202,8 @@ export class PostsService {
     if (dto.accountId !== undefined) updates.accountId = dto.accountId;
     if (dto.title !== undefined) updates.title = dto.title;
     if (dto.copywriting !== undefined) updates.copywriting = dto.copywriting || '';
-    if (dto.coverImageUrl !== undefined) updates.coverImageUrl = dto.coverImageUrl ? normalizeExternalUrl(dto.coverImageUrl) : null;
+    if (dto.coverImageUrl !== undefined) updates.coverImageUrl = dto.coverImageUrl ? normalizeMediaUrl(dto.coverImageUrl) : null;
+    if ((dto as any).coverThumbUrl !== undefined) updates.coverThumbUrl = (dto as any).coverThumbUrl ? normalizeMediaUrl((dto as any).coverThumbUrl) : null;
     if (dto.postUrl !== undefined) updates.postUrl = dto.postUrl ? normalizeExternalUrl(dto.postUrl) : null;
     if (dto.postType !== undefined) {
       updates.postType = normalizePostType(dto.postType);
@@ -264,6 +266,7 @@ export class PostsService {
       title: row.title,
       copywriting: row.copywriting || '',
       coverImageUrl: row.cover_image_url,
+      coverThumbUrl: row.cover_thumb_url,
       postUrl: row.post_url,
       postType: normalizePostType(row.post_type),
       traffic: normalizeTrafficByType(row.post_type, Number(row.traffic || 0)),
@@ -292,6 +295,7 @@ export class PostsService {
       title: row.title,
       copywriting: row.copywriting || '',
       coverImageUrl: row.coverImageUrl,
+      coverThumbUrl: row.coverThumbUrl,
       postUrl: row.postUrl,
       postType: normalizePostType(row.postType),
       traffic: normalizeTrafficByType(row.postType, row.traffic),

@@ -80,6 +80,7 @@ CREATE TABLE IF NOT EXISTS posts (
   title                 VARCHAR(255) NOT NULL COMMENT '作品标题',
   copywriting           TEXT         NULL COMMENT '文案内容',
   cover_image_url       VARCHAR(500) NULL COMMENT '封面图URL',
+  cover_thumb_url       VARCHAR(500) NULL COMMENT '封面缩略图URL',
   post_url              VARCHAR(500) NULL COMMENT '作品链接',
   post_type             VARCHAR(32)  NOT NULL COMMENT '作品类型',
   traffic               BIGINT       NOT NULL DEFAULT 0 COMMENT '浏览/播放量',

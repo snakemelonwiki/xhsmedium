@@ -28,6 +28,32 @@ function boolValue(value: unknown): boolean {
   return value === true || value === 1 || value === '1' || value === 'true';
 }
 
+function imageUrl(value: unknown): string | undefined {
+  const raw = text(value);
+  if (!raw) return undefined;
+  if (/^https?:\/\//i.test(raw)) {
+    try {
+      const url = new URL(raw);
+      if (url.hostname === 'uploads' || isLocalUploadUrl(url)) {
+        return url.pathname.startsWith('/uploads/')
+          ? url.pathname
+          : `/uploads${url.pathname}`;
+      }
+    } catch {
+      return raw;
+    }
+    return raw;
+  }
+  const normalized = raw.replace(/^\/+/, '');
+  if (normalized.startsWith('uploads/')) return `/${normalized}`;
+  return raw;
+}
+
+function isLocalUploadUrl(url: URL): boolean {
+  return url.pathname.startsWith('/uploads/')
+    && ['localhost', '127.0.0.1', '::1', '0.0.0.0'].includes(url.hostname.toLowerCase());
+}
+
 export interface FavoriteToggleResult {
   isFavorited: boolean;
   favorites?: number;
@@ -62,7 +88,8 @@ function mapPost(raw: RawRecord): ContentPost {
     employeeName: text(raw.employeeName ?? raw.employee_name),
     postType: text(raw.postType ?? raw.post_type),
     postUrl: text(raw.postUrl ?? raw.post_url),
-    coverImageUrl: text(raw.coverImageUrl ?? raw.cover_image_url),
+    coverImageUrl: imageUrl(raw.coverImageUrl ?? raw.cover_image_url),
+    coverThumbUrl: imageUrl(raw.coverThumbUrl ?? raw.cover_thumb_url),
     publishedAt: text(raw.publishedAt ?? raw.published_at),
     metricsUpdatedAt: text(raw.metricsUpdatedAt ?? raw.metrics_updated_at),
     note: text(raw.note),

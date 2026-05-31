@@ -104,7 +104,15 @@ export default function OperationGalleryPage() {
         {items.length ? (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 16 }}>
             {items.map((post) => (
-              <Card key={post.id} size="small" cover={post.coverImageUrl ? <img src={post.coverImageUrl} alt={post.title} style={{ height: 148, objectFit: 'cover' }} /> : undefined}>
+              <Card
+                key={post.id}
+                size="small"
+                cover={
+                  post.coverThumbUrl || post.coverImageUrl
+                    ? <img src={post.coverThumbUrl || post.coverImageUrl} alt={post.title} style={{ height: 148, objectFit: 'cover' }} />
+                    : undefined
+                }
+              >
                 <Space direction="vertical" size={8} style={{ width: '100%' }}>
                   <Space wrap>
                     <Tag color={post.platform.includes('抖') ? 'blue' : 'red'}>{post.platform}</Tag>

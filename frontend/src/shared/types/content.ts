@@ -19,6 +19,7 @@ export interface ContentPost {
   postType?: string;
   postUrl?: string;
   coverImageUrl?: string;
+  coverThumbUrl?: string;
   publishedAt?: string;
   metricsUpdatedAt?: string;
   note?: string;

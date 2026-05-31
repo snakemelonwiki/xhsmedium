@@ -25,6 +25,9 @@ export class Post {
   @Column({ name: 'cover_image_url', length: 500, nullable: true })
   coverImageUrl: string | null;
 
+  @Column({ name: 'cover_thumb_url', length: 500, nullable: true })
+  coverThumbUrl: string | null;
+
   @Column({ name: 'post_url', length: 500, nullable: true })
   postUrl: string | null;
 

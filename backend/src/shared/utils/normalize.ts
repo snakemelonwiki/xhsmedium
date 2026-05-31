@@ -21,6 +21,32 @@ export const normalizeExternalUrl = (value: unknown): string => {
   return `https://${raw.replace(/^\/+/, '')}`;
 };
 
+export const normalizeMediaUrl = (value: unknown): string => {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  if (/^https?:\/\//i.test(raw)) {
+    try {
+      const url = new URL(raw);
+      if (url.hostname === 'uploads' || isLocalUploadUrl(url)) {
+        return url.pathname.startsWith('/uploads/')
+          ? url.pathname
+          : `/uploads${url.pathname}`;
+      }
+    } catch {
+      return raw;
+    }
+    return raw;
+  }
+  const normalized = raw.replace(/^\/+/, '');
+  if (normalized.startsWith('uploads/')) return `/${normalized}`;
+  return raw;
+};
+
+const isLocalUploadUrl = (url: URL): boolean => {
+  return url.pathname.startsWith('/uploads/')
+    && ['localhost', '127.0.0.1', '::1', '0.0.0.0'].includes(url.hostname.toLowerCase());
+};
+
 export const normalizeTrafficByType = (postType: unknown, traffic: unknown): number => {
   return normalizePostType(postType) === POST_TYPES.HUO_KE ? Number(traffic || 0) : 0;
 };
