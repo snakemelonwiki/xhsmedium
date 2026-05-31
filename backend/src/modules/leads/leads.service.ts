@@ -60,12 +60,37 @@ export class LeadsService {
     return rows.map(this.mapLead);
   }
 
+  /**
+   * 分页查询全部客资，返回总数与当前页数据。
+   */
+  async findAllPage(pagination: { limit: number; offset: number }): Promise<{ total: number; items: any[] }> {
+    const [rows, total] = await this.leadRepository.findAndCount({
+      order: { createdAt: 'DESC' },
+      take: pagination.limit,
+      skip: pagination.offset,
+    });
+    return { total, items: rows.map(this.mapLead) };
+  }
+
   async findByEmployee(employeeId: string): Promise<any[]> {
     const rows = await this.leadRepository.find({
       where: { employeeId },
       order: { createdAt: 'DESC' },
     });
     return rows.map(this.mapLead);
+  }
+
+  /**
+   * 分页查询指定员工客资，返回总数与当前页数据。
+   */
+  async findByEmployeePage(employeeId: string, pagination: { limit: number; offset: number }): Promise<{ total: number; items: any[] }> {
+    const [rows, total] = await this.leadRepository.findAndCount({
+      where: { employeeId },
+      order: { createdAt: 'DESC' },
+      take: pagination.limit,
+      skip: pagination.offset,
+    });
+    return { total, items: rows.map(this.mapLead) };
   }
 
   async create(dto: Partial<Lead>): Promise<void> {

@@ -10,12 +10,13 @@ export class LeadsController {
   @Get()
   async findAll(@Req() req: Request, @Res() res: Response, @Query('scope') scope?: string) {
     const session = (req as any).session;
+    const pagination = this.parsePagination((req as any).query || {});
     if (session?.role === 'staff' && session?.employeeId && scope !== 'all') {
-      const rows = await this.leadsService.findByEmployee(session.employeeId);
-      return res.json(rows);
+      const result = await this.leadsService.findByEmployeePage(session.employeeId, pagination);
+      return res.json(result);
     }
-    const rows = await this.leadsService.findAll();
-    return res.json(rows);
+    const result = await this.leadsService.findAllPage(pagination);
+    return res.json(result);
   }
 
   @Get('stats')
@@ -271,5 +272,20 @@ export class LeadsController {
   async remove(@Param('id') id: string, @Res() res: Response) {
     await this.leadsService.remove(id);
     return res.json({ ok: true });
+  }
+
+  /**
+   * 解析客资列表分页参数，兼容 limit/offset 与 page/pageSize。
+   */
+  private parsePagination(query: any): { limit: number; offset: number } {
+    const pageSize = Number(query?.pageSize);
+    const page = Number(query?.page);
+    const rawLimit = Number(query?.limit);
+    const limit = Math.min(Math.max(Number.isFinite(pageSize) && pageSize > 0 ? pageSize : (Number.isFinite(rawLimit) && rawLimit > 0 ? rawLimit : 20), 1), 200);
+    const rawOffset = Number(query?.offset);
+    const offset = Number.isFinite(page) && page > 0
+      ? (Math.floor(page) - 1) * limit
+      : (Number.isFinite(rawOffset) && rawOffset > 0 ? Math.floor(rawOffset) : 0);
+    return { limit, offset };
   }
 }

@@ -74,7 +74,8 @@ async function inferDouyinCountsFromHtml(page) {
     return {
       likes: null,
       comments: null,
-      favorites: null
+      favorites: null,
+      shares: null
     };
   }
 
@@ -107,6 +108,12 @@ async function inferDouyinCountsFromHtml(page) {
       /"collectCount"\s*:\s*(\d+)/i,
       /"favorite_count"\s*:\s*(\d+)/i,
       /"favoriteCount"\s*:\s*(\d+)/i
+    ]),
+    shares: readByPatterns([
+      /"share_count"\s*:\s*(\d+)/i,
+      /"shareCount"\s*:\s*(\d+)/i,
+      /"share_num"\s*:\s*(\d+)/i,
+      /"shareNum"\s*:\s*(\d+)/i
     ])
   };
 }
@@ -126,7 +133,8 @@ async function readXiaohongshuEngageBar(page) {
     return {
       likes: read(".like-wrapper .count"),
       favorites: read(".collect-wrapper .count"),
-      comments: read(".chat-wrapper .count")
+      comments: read(".chat-wrapper .count"),
+      shares: read(".share-wrapper .count")
     };
   }).catch(() => null);
 }
@@ -167,9 +175,10 @@ async function readXiaohongshuInitialState(page) {
       const likes = pickCount(interact.liked_count ?? interact.likedCount ?? item.liked_count ?? item.likedCount);
       const comments = pickCount(interact.comment_count ?? interact.commentCount ?? item.comment_count ?? item.commentCount ?? item.comments_count);
       const favorites = pickCount(interact.collected_count ?? interact.collectedCount ?? interact.collect_count ?? interact.collectCount ?? item.collected_count ?? item.collectedCount);
+      const shares = pickCount(interact.share_count ?? interact.shareCount ?? interact.shared_count ?? interact.sharedCount ?? item.share_count ?? item.shareCount);
       const title = String(item.title || item.display_title || item.note_title || "").trim();
-      if (likes !== null || comments !== null || favorites !== null) {
-        return { likes, comments, favorites, title };
+      if (likes !== null || comments !== null || favorites !== null || shares !== null) {
+        return { likes, comments, favorites, shares, title };
       }
     }
 
@@ -183,7 +192,8 @@ async function inferXiaohongshuCountsFromHtml(page) {
     return {
       likes: null,
       comments: null,
-      favorites: null
+      favorites: null,
+      shares: null
     };
   }
 
@@ -215,6 +225,12 @@ async function inferXiaohongshuCountsFromHtml(page) {
       /"collectCount"\s*:\s*(\d+)/i,
       /"collect_count"\s*:\s*(\d+)/i,
       /"favorites"\s*:\s*(\d+)/i
+    ]),
+    shares: readByPatterns([
+      /"shareCount"\s*:\s*(\d+)/i,
+      /"share_count"\s*:\s*(\d+)/i,
+      /"shareNum"\s*:\s*(\d+)/i,
+      /"share_num"\s*:\s*(\d+)/i
     ])
   };
 }
@@ -226,6 +242,7 @@ async function inferCountsFromBody(page) {
   const favorites =
     parseCount(text.match(/收藏\s*([\d.,wkW万千]+)/)?.[1]) ??
     parseCount(text.match(/收藏夹\s*([\d.,wkW万千]+)/)?.[1]);
+  const shares = parseCount(text.match(/分享\s*([\d.,wkW万千]+)/)?.[1]);
   const totalComments = parseCount(text.match(/共\s*([\d.,wkW万千]+)\s*条评论/)?.[1]);
   const footerTripleMatch = text.match(/登录后评论\s*([\d.,wkW万千]+)\s*([\d.,wkW万千]+)\s*([\d.,wkW万千]+)\s*发送/);
   const composerTripleMatch = text.match(/说点什么\.\.\.\s*([\d.,wkW万千]+)\s*([\d.,wkW万千]+)\s*([\d.,wkW万千]+)\s*发送/);
@@ -239,7 +256,8 @@ async function inferCountsFromBody(page) {
     text,
     likes: composerLikes ?? footerLikes ?? likes,
     comments: composerComments ?? totalComments ?? footerComments ?? comments,
-    favorites: composerFavorites ?? footerFavorites ?? favorites
+    favorites: composerFavorites ?? footerFavorites ?? favorites,
+    shares
   };
 }
 
@@ -265,6 +283,12 @@ async function scrapeXiaohongshu(page) {
     "[class*='collect'] [class*='count']",
     "[class*='favorite'] [class*='count']"
   ]);
+  const shares = parseCount(initialState?.shares) ?? parseCount(precise?.shares) ?? await readCountBySelectors(page, [
+    ".interactions.engage-bar .interact-container .share-wrapper .count",
+    ".engage-bar .interact-container .share-wrapper .count",
+    "[class*='share'] [class*='count']",
+    "[data-testid*='share'] [class*='count']"
+  ]);
 
   const fallback = await inferCountsFromBody(page);
   return {
@@ -272,7 +296,8 @@ async function scrapeXiaohongshu(page) {
     title: initialState?.title || "",
     likes: likes ?? htmlFallback.likes ?? fallback.likes ?? 0,
     comments: comments ?? htmlFallback.comments ?? fallback.comments ?? 0,
-    favorites: favorites ?? htmlFallback.favorites ?? fallback.favorites ?? 0
+    favorites: favorites ?? htmlFallback.favorites ?? fallback.favorites ?? 0,
+    shares: shares ?? htmlFallback.shares ?? fallback.shares ?? 0
   };
 }
 
@@ -300,13 +325,21 @@ async function scrapeDouyin(page) {
     "[aria-label*='收藏']",
     "[title*='收藏']"
   ]);
+  const shares = await readCountBySelectors(page, [
+    "[data-e2e='share-count']",
+    "[class*='share'] [class*='count']",
+    "span:has-text('分享') + span",
+    "[aria-label*='分享']",
+    "[title*='分享']"
+  ]);
 
   const fallback = await inferCountsFromBody(page);
   return {
     bodyText: fallback.text,
     likes: likes ?? htmlFallback.likes ?? fallback.likes ?? 0,
     comments: comments ?? htmlFallback.comments ?? fallback.comments ?? 0,
-    favorites: favorites ?? htmlFallback.favorites ?? fallback.favorites ?? 0
+    favorites: favorites ?? htmlFallback.favorites ?? fallback.favorites ?? 0,
+    shares: shares ?? htmlFallback.shares ?? fallback.shares ?? 0
   };
 }
 
@@ -419,6 +452,7 @@ async function fetchMetricsFromUrl(url) {
       likes: Number(payload.likes || 0),
       comments: Number(payload.comments || 0),
       favorites: Number(payload.favorites || 0),
+      shares: Number(payload.shares || 0),
       metricsUpdatedAt: new Date().toISOString()
     };
   } finally {

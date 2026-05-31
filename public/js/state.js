@@ -6,6 +6,9 @@
 const state = {
   token: localStorage.getItem("lan_system_token") || "",
   user: null,
+  authRefreshTimer: null,
+  authRefreshPromise: null,
+  authExpiredHandled: false,
   currentView: "dashboard",
   dashboardDate: new Date().toLocaleDateString("en-CA"),
   dashboardMonth: new Date().toLocaleDateString("en-CA").slice(0, 7),
@@ -46,6 +49,10 @@ const state = {
   staffGalleryPlatformFilter: "",
   staffGalleryTypeFilter: "",
   staffGalleryEmployeeFilter: "",
+  staffGalleryAccountFilter: "",
+  staffGalleryMinLeadsFilter: "",
+  staffGalleryMinLikesFilter: "",
+  staffGallerySort: "score",
   staffRankingsDate: new Date().toLocaleDateString("en-CA"),
   staffRankingsMonth: new Date().toLocaleDateString("en-CA").slice(0, 7),
   staffRankingsWeek: getCurrentWeekString(),
@@ -68,11 +75,16 @@ const state = {
   previewImageUrl: "",
   postCoverFile: null,
   postCoverPreviewUrl: "",
+  postCoverUploadError: "",
+  postFormDraftRestorePrompt: null,
+  postSubmitting: false,
+  postBatchRefreshFailures: [],
   leadCaptureFile: null,
   leadCapturePreviewUrl: "",
   leadDraftId: null,
   leadDraftRestorePrompt: null,
   pendingLeadCapture: null,
+  leadSubmitting: false,
   flash: null,
   viewContext: null,
   summary: null,
@@ -85,6 +97,8 @@ const state = {
   teamPosts: [],
   leads: [],
   teamLeads: [],
+  postPagination: { page: 1, pageSize: 20, total: 0 },
+  leadPagination: { page: 1, pageSize: 20, total: 0 },
   analyticsSnapshots: {},
   staffLearningPostIds: [],
   reviewHighlights: [],
@@ -119,7 +133,18 @@ const state = {
   passiveSearchDone: false,
   notifications: [],
   unreadNotificationCount: 0,
-  notificationPanelOpen: false
+  notificationPanelOpen: false,
+  notificationSocketStatus: "idle",
+  notificationSocketMessage: "",
+  plazaView: "all",
+  plazaPosts: [],
+  // A-FE-2 #7 作品批量粘贴导入对话框状态
+  postBulkImportOpen: false,
+  postBulkImportRaw: "",
+  postBulkImportResult: null,
+  leadBulkImportOpen: false,
+  leadBulkImportRaw: "",
+  leadBulkImportResult: null
 };
 
 const POST_TYPES = ["素人贴", "话题贴", "获客贴"];
@@ -136,6 +161,7 @@ function clearPendingPostCover() {
   }
   state.postCoverFile = null;
   state.postCoverPreviewUrl = "";
+  state.postCoverUploadError = "";
 }
 
 function clearPendingLeadCapture() {
@@ -147,14 +173,20 @@ function clearPendingLeadCapture() {
 }
 
 function setPendingPostCover(file) {
-  if (!(file instanceof File)) return;
+  if (!(file instanceof File)) {
+    state.postCoverUploadError = "未读取到文件，请重试。";
+    return false;
+  }
   if (!String(file.type || "").startsWith("image/")) {
-    alert("请粘贴或选择图片文件作为封面。");
-    return;
+    // 仅设错误信息，不弹窗、不动 form 字段
+    state.postCoverUploadError = "请选择图片文件作为封面（jpg/png/webp 等）。";
+    return false;
   }
   clearPendingPostCover();
   state.postCoverFile = file;
   state.postCoverPreviewUrl = URL.createObjectURL(file);
+  state.postCoverUploadError = "";
+  return true;
 }
 
 function setPendingLeadCapture(file) {

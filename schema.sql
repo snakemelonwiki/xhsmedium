@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS posts (
   likes BIGINT NOT NULL DEFAULT 0,
   comments BIGINT NOT NULL DEFAULT 0,
   favorites BIGINT NOT NULL DEFAULT 0,
+  shares BIGINT NOT NULL DEFAULT 0,
   metrics_updated_at DATETIME NULL,
   published_at DATE NOT NULL,
   note TEXT NULL,
@@ -92,6 +93,55 @@ CREATE TABLE IF NOT EXISTS leads (
   INDEX idx_leads_employee_id (employee_id),
   INDEX idx_leads_account_id (account_id),
   INDEX idx_leads_created_at (created_at)
+);
+
+-- v1.0 问题修复版新增表（开发者A：内容运营与管理域）
+CREATE TABLE IF NOT EXISTS post_metrics_history (
+  id VARCHAR(64) PRIMARY KEY,
+  post_id VARCHAR(64) NOT NULL,
+  likes BIGINT NOT NULL DEFAULT 0,
+  comments BIGINT NOT NULL DEFAULT 0,
+  favorites BIGINT NOT NULL DEFAULT 0,
+  shares BIGINT NOT NULL DEFAULT 0,
+  leads_count BIGINT NOT NULL DEFAULT 0,
+  captured_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted TINYINT(1) NOT NULL DEFAULT 0,
+  create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_pmh_post_id (post_id),
+  INDEX idx_pmh_captured_at (captured_at)
+);
+
+CREATE TABLE IF NOT EXISTS favorites (
+  id VARCHAR(64) PRIMARY KEY,
+  user_id VARCHAR(64) NOT NULL,
+  target_type VARCHAR(16) NOT NULL,
+  target_id VARCHAR(64) NOT NULL,
+  deleted TINYINT(1) NOT NULL DEFAULT 0,
+  create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_fav_user_target (user_id, target_type, target_id),
+  INDEX idx_fav_user (user_id),
+  INDEX idx_fav_target (target_type, target_id)
+);
+
+CREATE TABLE IF NOT EXISTS import_tasks (
+  id VARCHAR(64) PRIMARY KEY,
+  import_type VARCHAR(16) NOT NULL,
+  user_id VARCHAR(64) NOT NULL,
+  user_name VARCHAR(64) NULL,
+  total_count INT NOT NULL DEFAULT 0,
+  success_count INT NOT NULL DEFAULT 0,
+  fail_count INT NOT NULL DEFAULT 0,
+  error_file_url VARCHAR(500) NULL,
+  error_detail JSON NULL,
+  source VARCHAR(16) NOT NULL DEFAULT 'excel',
+  deleted TINYINT(1) NOT NULL DEFAULT 0,
+  create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_import_user (user_id),
+  INDEX idx_import_type (import_type),
+  INDEX idx_import_created (create_time)
 );
 
 CREATE TABLE IF NOT EXISTS lead_follow_records (

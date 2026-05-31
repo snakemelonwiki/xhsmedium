@@ -141,6 +141,23 @@ function renderLeadsMonitor() {
     <div class="leads-monitor-grid">
       ${rows.length ? rows.map(renderLeadMonitorCard).join("") : `<div class="empty">暂无符合条件的客资。</div>`}
     </div>
+    ${renderLeadPaginationControls()}
+  `;
+}
+
+function renderLeadPaginationControls() {
+  const page = Number(state.leadPagination?.page || 1);
+  const pageSize = Number(state.leadPagination?.pageSize || 20);
+  const total = Number(state.leadPagination?.total || 0);
+  const pages = Math.max(1, Math.ceil(total / pageSize));
+  return `
+    <div class="panel pagination-bar">
+      <span class="muted">共 ${total} 条，每页 ${pageSize} 条，第 ${page} / ${pages} 页</span>
+      <div class="actions">
+        <button class="ghost js-lead-page" data-page="${page - 1}" type="button" ${page <= 1 ? "disabled" : ""}>上一页</button>
+        <button class="ghost js-lead-page" data-page="${page + 1}" type="button" ${page >= pages ? "disabled" : ""}>下一页</button>
+      </div>
+    </div>
   `;
 }
 
@@ -226,6 +243,7 @@ function renderSalesLeads() {
     <div class="leads-monitor-grid">
       ${rows.length ? rows.map(renderLeadMonitorCard).join("") : `<div class="empty">暂无符合条件的客资。</div>`}
     </div>
+    ${renderLeadPaginationControls()}
   `;
 }
 
@@ -299,6 +317,7 @@ function renderSalesFollowupBoard() {
     <div class="leads-monitor-grid">
       ${rows.length ? rows.map(renderSalesFollowupCard).join("") : `<div class="empty">当前筛选下暂无需要跟进的客资。</div>`}
     </div>
+    ${renderLeadPaginationControls()}
   `;
 }
 
@@ -690,6 +709,7 @@ function renderLeadEntry() {
       </div>
       <div class="toolbar toolbar-end">
         <span class="tag">${editing ? "正在编辑客资" : "今日录入"}</span>
+        <button class="ghost" id="openLeadBulkImportBtn" type="button">批量导入客资</button>
       </div>
     </div>
     ${editing ? "" : renderLeadDraftRestorePrompt()}
@@ -783,6 +803,7 @@ async function saveLeadDraftNow() {
   try {
     await api(`/api/lead-drafts/${state.leadDraftId}`, {
       method: "PUT",
+      skipAuthExpiredHandler: true,
       body: JSON.stringify({
         draftType: "lead",
         contentJson: JSON.stringify(snapshot),
@@ -947,17 +968,51 @@ function renderLeadForm(editing, options = {}) {
         <label class="muted" for="leadCaptureInput">引流截图</label>
         <input id="leadCaptureInput" name="captureImage" type="file" accept="image/*" />
         ${state.leadCapturePreviewUrl
-          ? `<div class="cover-preview-wrap"><span class="muted">当前待上传截图</span><button class="image-trigger image-trigger-inline js-open-image" data-src="${state.leadCapturePreviewUrl}" type="button"><img class="cover-thumb" src="${state.leadCapturePreviewUrl}" alt="待上传引流截图" /></button></div>`
+          ? `<div class="cover-preview-wrap"><span class="muted">当前待上传截图</span><button class="image-trigger image-trigger-inline js-open-image" data-src="${state.leadCapturePreviewUrl}" type="button"><img class="cover-thumb" src="${state.leadCapturePreviewUrl}" alt="待上传引流截图" loading="lazy" decoding="async" /></button></div>`
           : editing?.captureImageUrl
-            ? `<div class="cover-preview-wrap"><span class="muted">当前引流截图</span><button class="image-trigger image-trigger-inline js-open-image" data-src="${editing.captureImageUrl}" type="button"><img class="cover-thumb" src="${editing.captureImageUrl}" alt="当前引流截图" /></button></div>`
+            ? `<div class="cover-preview-wrap"><span class="muted">当前引流截图</span><button class="image-trigger image-trigger-inline js-open-image" data-src="${editing.captureImageUrl}" type="button"><img class="cover-thumb" src="${editing.captureImageUrl}" alt="当前引流截图" loading="lazy" decoding="async" /></button></div>`
             : ``}
       </div>
       <div class="actions full">
-        <button class="primary" type="submit">${editing ? "保存客资" : "提交客资"}</button>
+        <button class="primary" type="submit" ${state.leadSubmitting ? "disabled" : ""}>${state.leadSubmitting ? "提交中…" : (editing ? "保存客资" : "提交客资")}</button>
         ${editing ? `<button class="ghost js-cancel-lead" type="button">取消编辑</button>` : ""}
       </div>
     </form>
   `;
+}
+
+function rerenderLeadCaptureUploader() {
+  const input = document.getElementById("leadCaptureInput");
+  if (!input) return;
+  const wrapper = input.closest(".full");
+  if (!wrapper) return;
+  const editing = state.leads.find((item) => item.id === state.editingLeadId);
+  wrapper.innerHTML = `
+    <label class="muted" for="leadCaptureInput">引流截图</label>
+    <input id="leadCaptureInput" name="captureImage" type="file" accept="image/*" />
+    ${state.leadCapturePreviewUrl
+      ? `<div class="cover-preview-wrap"><span class="muted">当前待上传截图</span><button class="image-trigger image-trigger-inline js-open-image" data-src="${state.leadCapturePreviewUrl}" type="button"><img class="cover-thumb" src="${state.leadCapturePreviewUrl}" alt="待上传引流截图" loading="lazy" decoding="async" /></button></div>`
+      : editing?.captureImageUrl
+        ? `<div class="cover-preview-wrap"><span class="muted">当前引流截图</span><button class="image-trigger image-trigger-inline js-open-image" data-src="${editing.captureImageUrl}" type="button"><img class="cover-thumb" src="${editing.captureImageUrl}" alt="当前引流截图" loading="lazy" decoding="async" /></button></div>`
+        : ``}
+  `;
+  bindLeadCaptureInputEvent();
+}
+
+function bindLeadCaptureInputEvent() {
+  document.getElementById("leadCaptureInput")?.addEventListener("change", (event) => {
+    const [file] = event.target.files || [];
+    if (!file) return;
+    setPendingLeadCapture(file);
+    if (typeof saveLeadDraftNow === "function" && !state.editingLeadId) {
+      saveLeadDraftNow().catch((err) => console.warn("[lead-draft] save after image select failed", err));
+    }
+    if (typeof rerenderLeadCaptureUploader === "function") {
+      rerenderLeadCaptureUploader();
+    } else {
+      renderApp();
+    }
+  });
 }
 
 
@@ -1018,7 +1073,17 @@ async function deleteLead(id) {
 // ===== L5563-L5685 submitLead / submitSalesLead / submitLeadNote / submitSalesLocalProfile / toggleTomorrowFollowup / completeTomorrowFollowup / updateLeadBoardState / remindLead =====
 async function submitLead(event) {
   event.preventDefault();
-  const formData = new FormData(event.currentTarget);
+  const form = event.currentTarget;
+  if (state.leadSubmitting || form.dataset.submitting === "1") return;
+  state.leadSubmitting = true;
+  form.dataset.submitting = "1";
+  const submitButton = form.querySelector('button[type="submit"]');
+  const submitText = submitButton ? submitButton.textContent : "";
+  if (submitButton) {
+    submitButton.disabled = true;
+    submitButton.textContent = "提交中…";
+  }
+  const formData = new FormData(form);
   if (state.leadCaptureFile) {
     formData.set("captureImage", state.leadCaptureFile, state.leadCaptureFile.name || "lead-capture.png");
   }
@@ -1028,10 +1093,26 @@ async function submitLead(event) {
   }
   const id = String(formData.get("id") || "");
   formData.delete("id");
-  await api(id ? `/api/leads/${id}` : "/api/leads", {
-    method: id ? "PUT" : "POST",
-    body: formData
-  });
+  try {
+    await api(id ? `/api/leads/${id}` : "/api/leads", {
+      method: id ? "PUT" : "POST",
+      body: formData
+    });
+  } catch (error) {
+    if (error?.status === 401 && !id && typeof saveLeadDraftNow === "function") {
+      await saveLeadDraftNow().catch((err) => console.warn("[lead-draft] save after 401 failed", err));
+      setFlash("warn", "登录已失效", "已优先保存当前客资草稿，请重新登录后再提交。");
+    } else {
+      setFlash("warn", id ? "客资保存失败" : "客资提交失败", error?.message || "请稍后重试，已填写的内容已保留。");
+    }
+    if (submitButton) {
+      submitButton.disabled = false;
+      submitButton.textContent = submitText || (id ? "保存客资" : "提交客资");
+    }
+    form.dataset.submitting = "0";
+    state.leadSubmitting = false;
+    return;
+  }
   // 提交成功后清理草稿（仅新建场景）
   if (!id && state.leadDraftId) {
     const draftId = state.leadDraftId;
@@ -1042,8 +1123,127 @@ async function submitLead(event) {
   }
   clearPendingLeadCapture();
   state.editingLeadId = "";
+  state.leadSubmitting = false;
+  form.dataset.submitting = "0";
   setFlash("success", id ? "客资已更新" : "客资已录入", "这条客资已经保存到后台数据库，下方记录和主管端监控都会同步更新。");
   await loadData();
+  renderApp();
+}
+
+// ===== #7 客资批量导入：粘贴 + Excel/CSV 文件 =====
+function renderLeadBulkImportDialog() {
+  if (!state.leadBulkImportOpen) return "";
+  const result = state.leadBulkImportResult;
+  const errors = Array.isArray(result?.errors) ? result.errors.slice(0, 50) : [];
+  const resultBlock = result ? `
+    <div class="post-bulk-import-result" style="margin-top:12px;border-top:1px solid #eee;padding-top:10px;">
+      <div style="font-size:14px;color:#333;margin-bottom:6px;">
+        共 <strong>${Number(result.total || 0)}</strong> 行，成功
+        <strong style="color:#16a34a;">${Number(result.success || 0)}</strong>，失败
+        <strong style="color:#c0392b;">${Number(result.fail || 0)}</strong>
+      </div>
+      ${result.errorFileUrl ? `<p style="margin:0 0 6px;"><a href="${result.errorFileUrl}" target="_blank" rel="noopener">下载失败行错误文件</a></p>` : ""}
+      ${errors.length ? `
+        <div style="font-size:12px;color:#666;margin-bottom:4px;">失败明细（前 ${errors.length} 条）：</div>
+        <ul class="post-bulk-import-failed-list" style="max-height:200px;overflow:auto;margin:0;padding:6px 12px;background:#fdecea;border:1px solid #f5b7b1;border-radius:6px;list-style:disc;">
+          ${errors.map((row) => `<li style="font-size:12px;color:#7a1f17;line-height:1.6;"><strong>第 ${Number(row?.row ?? 0)} 行</strong>：${escapeHtml(String(row?.reason || "未知错误"))}<div style="color:#9b3a31;word-break:break-all;">${escapeHtml(String(row?.raw || ""))}</div></li>`).join("")}
+        </ul>
+      ` : ""}
+    </div>
+  ` : "";
+  return `
+    <div class="supervisor-dialog-layer">
+      <div class="supervisor-dialog-backdrop js-close-lead-bulk-import"></div>
+      <div class="supervisor-dialog" role="dialog" aria-modal="true" aria-label="批量导入客资" style="max-width:720px;">
+        <div class="supervisor-dialog-header">
+          <h3>批量导入客资</h3>
+          <p>支持下载模板后上传 xlsx/csv，也支持粘贴多行文本。列顺序：平台、联系方式、昵称、来源账号、备注。</p>
+        </div>
+        <div class="supervisor-note-form" style="display:flex;flex-direction:column;gap:10px;">
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <a class="ghost" href="/api/leads/import-template.xlsx" target="_blank" rel="noopener">下载客资模板</a>
+            <input id="leadBulkImportFileInput" type="file" accept=".xlsx,.xls,.csv,text/csv" />
+            <button class="ghost" id="leadBulkImportFileSubmitBtn" type="button">上传文件导入</button>
+          </div>
+          <textarea id="leadBulkImportInput" rows="10" placeholder="每行一条：平台	联系方式	昵称	来源账号	备注" style="width:100%;font-family:Menlo,Consolas,monospace;font-size:12px;">${escapeHtml(state.leadBulkImportRaw || "")}</textarea>
+          <div class="supervisor-dialog-actions">
+            <button class="ghost" id="leadBulkImportCloseBtn" type="button">取消</button>
+            <button class="primary" id="leadBulkImportSubmitBtn" type="button">提交导入</button>
+          </div>
+          ${resultBlock}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+async function submitLeadBulkImport() {
+  const textarea = document.getElementById("leadBulkImportInput");
+  const raw = textarea ? String(textarea.value || "") : "";
+  const rows = raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  if (!rows.length) {
+    alert("请粘贴需要导入的客资内容。");
+    return;
+  }
+  state.leadBulkImportRaw = raw;
+  const submitBtn = document.getElementById("leadBulkImportSubmitBtn");
+  const originalText = submitBtn ? submitBtn.textContent : "";
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.textContent = "导入中…";
+  }
+  try {
+    const result = await api("/api/leads/import-paste", {
+      method: "POST",
+      body: JSON.stringify({ rows })
+    });
+    state.leadBulkImportResult = result || null;
+    setFlash("success", "客资批量导入完成", `成功 ${Number(result?.success || 0)} 条，失败 ${Number(result?.fail || 0)} 条。`);
+    await loadData();
+    renderApp();
+  } catch (error) {
+    alert(error?.message || "客资批量导入失败，请稍后重试。");
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = originalText || "提交导入";
+    }
+  }
+}
+
+async function submitLeadBulkImportFile() {
+  const input = document.getElementById("leadBulkImportFileInput");
+  const [file] = input?.files || [];
+  if (!file) {
+    alert("请选择客资导入文件。");
+    return;
+  }
+  const submitBtn = document.getElementById("leadBulkImportFileSubmitBtn");
+  const originalText = submitBtn ? submitBtn.textContent : "";
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.textContent = "上传中…";
+  }
+  try {
+    const body = new FormData();
+    body.set("file", file, file.name || "leads-import.xlsx");
+    const result = await api("/api/leads/import", { method: "POST", body });
+    state.leadBulkImportResult = result || null;
+    setFlash("success", "客资批量导入完成", `成功 ${Number(result?.success || 0)} 条，失败 ${Number(result?.fail || 0)} 条。`);
+    await loadData();
+    renderApp();
+  } catch (error) {
+    alert(error?.message || "客资文件导入失败，请检查模板后重试。");
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = originalText || "上传文件导入";
+    }
+  }
+}
+
+function closeLeadBulkImportDialog() {
+  state.leadBulkImportOpen = false;
+  state.leadBulkImportRaw = "";
+  state.leadBulkImportResult = null;
   renderApp();
 }
 

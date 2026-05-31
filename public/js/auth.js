@@ -12,18 +12,23 @@ async function init() {
   }
 
   try {
+    if (shouldRefreshTokenSoon()) {
+      await refreshAuthToken({ silent: true });
+    }
     const me = await api("/api/auth/me");
     state.user = me.user;
+    scheduleAuthRefresh();
     await loadData();
     renderApp();
+    connectNotificationSocket();
   } catch {
-    localStorage.removeItem("lan_system_token");
-    state.token = "";
+    await handleAuthExpired();
     renderLogin();
   }
 }
 
 async function loadData() {
+  const pageQuery = (pagination) => `page=${Number(pagination?.page || 1)}&pageSize=${Number(pagination?.pageSize || 20)}`;
   const requests = state.user.role === "admin" || state.user.role === "owner"
     ? [
         api("/api/dashboard/summary"),
@@ -32,8 +37,8 @@ async function loadData() {
         api("/api/users"),
         api("/api/employees"),
         api("/api/accounts"),
-        api("/api/posts"),
-        api("/api/leads"),
+        api(`/api/posts?${pageQuery(state.postPagination)}`),
+        api(`/api/leads?${pageQuery(state.leadPagination)}`),
         api("/api/analytics/snapshots")
       ]
     : [
@@ -43,8 +48,8 @@ async function loadData() {
         Promise.resolve([]),
         Promise.resolve([]),
         api("/api/accounts"),
-        api("/api/posts"),
-        api("/api/leads"),
+        api(`/api/posts?${pageQuery(state.postPagination)}`),
+        api(`/api/leads?${pageQuery(state.leadPagination)}`),
         Promise.resolve({ snapshots: {} })
       ];
   const normalizedRequests = state.user.role === "sales"
@@ -55,28 +60,54 @@ async function loadData() {
         Promise.resolve([]),
         Promise.resolve([]),
         api("/api/accounts"),
-        api("/api/posts"),
-        api("/api/leads"),
+        api(`/api/posts?${pageQuery(state.postPagination)}`),
+        api(`/api/leads?${pageQuery(state.leadPagination)}`),
         Promise.resolve({ snapshots: {} }),
         api("/api/notifications")
       ]
     : [...requests, api("/api/notifications")];
 
   const [summary, distribution, rankings, users, employees, accounts, posts, leads, analyticsSnapshots, notifications] = await Promise.all(normalizedRequests);
+  const normalizedPosts = normalizePagedList(posts);
+  const normalizedLeads = normalizePagedList(leads);
   state.summary = summary;
   state.distribution = distribution;
   state.rankings = rankings;
   state.users = users || [];
   state.employees = employees;
   state.accounts = accounts;
-  state.posts = posts;
-  state.leads = leads;
+  state.posts = normalizedPosts.items;
+  state.leads = normalizedLeads.items;
+  state.postPagination.total = normalizedPosts.total;
+  state.leadPagination.total = normalizedLeads.total;
   state.analyticsSnapshots = analyticsSnapshots.snapshots || {};
   state.notifications = notifications?.items || [];
   state.unreadNotificationCount = Number(notifications?.unreadCount || 0);
   alignStateDatesToAvailableData();
-  state.teamPosts = state.user.role === "staff" ? await api("/api/posts?scope=all") : posts;
-  state.teamLeads = state.user.role === "staff" ? await api("/api/leads?scope=all") : leads;
+  if (state.user.role === "staff") {
+    // 员工端作品广场：后端会强制 view=excellent，只返回精选作品
+    try {
+      const plazaResp = await api("/api/posts/plaza?view=excellent");
+      const plazaRows = Array.isArray(plazaResp?.rows)
+        ? plazaResp.rows
+        : (Array.isArray(plazaResp) ? plazaResp : []);
+      state.teamPosts = plazaRows;
+      state.plazaPosts = plazaRows;
+      state.plazaView = "excellent";
+    } catch (err) {
+      console.warn("[plaza] load excellent posts failed", err);
+      state.teamPosts = [];
+      state.plazaPosts = [];
+    }
+  } else {
+    state.teamPosts = state.posts;
+  }
+  if (state.user.role === "staff") {
+    const teamLeadsResp = await api(`/api/leads?scope=all&${pageQuery(state.leadPagination)}`);
+    state.teamLeads = normalizePagedList(teamLeadsResp).items;
+  } else {
+    state.teamLeads = state.leads;
+  }
   state.staffLearningPostIds = state.user.role === "staff" ? loadStaffLearningPostIds() : [];
   state.salesLeadLocalProfiles = state.user.role === "sales" ? loadSalesLeadLocalProfiles() : {};
   state.salesTomorrowFollowupIds = state.user.role === "sales" ? loadSalesTomorrowFollowupIds() : [];
@@ -84,6 +115,34 @@ async function loadData() {
     state.reviewHighlights = loadReviewCollection("review_highlights");
     state.reviewSamples = loadReviewCollection("review_samples");
   }
+}
+
+function normalizePagedList(response) {
+  if (Array.isArray(response)) {
+    return { total: response.length, items: response };
+  }
+  if (response && Array.isArray(response.items)) {
+    return { total: Number(response.total ?? response.items.length), items: response.items };
+  }
+  return { total: 0, items: [] };
+}
+
+async function loadPostsPage(page) {
+  state.postPagination.page = Math.max(1, Number(page || 1));
+  const resp = await api(`/api/posts?page=${state.postPagination.page}&pageSize=${state.postPagination.pageSize}`);
+  const normalized = normalizePagedList(resp);
+  state.posts = normalized.items;
+  state.postPagination.total = normalized.total;
+  if (state.user?.role !== "staff") state.teamPosts = state.posts;
+}
+
+async function loadLeadsPage(page) {
+  state.leadPagination.page = Math.max(1, Number(page || 1));
+  const resp = await api(`/api/leads?page=${state.leadPagination.page}&pageSize=${state.leadPagination.pageSize}`);
+  const normalized = normalizePagedList(resp);
+  state.leads = normalized.items;
+  state.leadPagination.total = normalized.total;
+  if (state.user?.role !== "staff") state.teamLeads = state.leads;
 }
 
 
@@ -144,9 +203,12 @@ function renderLogin() {
       });
       state.token = data.token;
       state.user = data.user;
+      state.authExpiredHandled = false;
       localStorage.setItem("lan_system_token", state.token);
+      scheduleAuthRefresh();
       await loadData();
       renderApp();
+      connectNotificationSocket();
     } catch (error) {
       alert(error.message);
     }

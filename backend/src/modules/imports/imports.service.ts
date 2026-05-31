@@ -6,6 +6,7 @@ import { Lead } from '../../entities/lead.entity';
 import { makeId } from '../../shared/utils/id-generator';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NOTIFICATION_TYPES } from '../../shared/notifications';
+import { getProjectRoot, writeImportErrorFile } from './import-error-file.util';
 
 export interface ImportRowError {
   row: number;
@@ -20,6 +21,7 @@ export interface ImportPasteResult {
   success: number;
   fail: number;
   errors: ImportRowError[];
+  errorFileUrl?: string | null;
 }
 
 interface ParsedLeadRow {
@@ -99,7 +101,6 @@ export class ImportsService {
       totalCount: 0,
       successCount: 0,
       failCount: 0,
-      status: 'processing',
     });
     return this.importTaskRepository.save(task);
   }
@@ -108,16 +109,14 @@ export class ImportsService {
     totalCount: number;
     successCount: number;
     failCount: number;
-    status: string;
+    status?: string;
     errorFileUrl?: string | null;
   }): Promise<void> {
     await this.importTaskRepository.update(id, {
       totalCount: patch.totalCount,
       successCount: patch.successCount,
       failCount: patch.failCount,
-      status: patch.status,
       errorFileUrl: patch.errorFileUrl ?? null,
-      finishedAt: new Date(),
     });
   }
 
@@ -129,6 +128,20 @@ export class ImportsService {
 
   async listTasks(userId: string, importType?: string): Promise<any[]> {
     const where: any = { userId };
+    if (importType) where.importType = importType;
+    const rows = await this.importTaskRepository.find({
+      where,
+      order: { createdAt: 'DESC' },
+      take: 200,
+    });
+    return rows.map((r) => this.mapTask(r));
+  }
+
+  /**
+   * 主管端查询全员导入记录，可按导入类型过滤。
+   */
+  async listAllTasks(importType?: string): Promise<any[]> {
+    const where: any = {};
     if (importType) where.importType = importType;
     const rows = await this.importTaskRepository.find({
       where,
@@ -207,11 +220,12 @@ export class ImportsService {
       }
     }
 
+    const errorFileUrl = writeImportErrorFile(getProjectRoot(), task.id, errors);
     await this.finishTask(task.id, {
       totalCount: total,
       successCount: success,
       failCount: fail,
-      status: 'done',
+      errorFileUrl,
     });
 
     // §11.1 import_done: 批量导入任务结束，通知发起人。
@@ -235,6 +249,7 @@ export class ImportsService {
       success,
       fail,
       errors,
+      errorFileUrl,
     };
   }
 
@@ -247,9 +262,7 @@ export class ImportsService {
       successCount: row.successCount,
       failCount: row.failCount,
       errorFileUrl: row.errorFileUrl,
-      status: row.status,
       createdAt: row.createdAt,
-      finishedAt: row.finishedAt,
     };
   }
 }

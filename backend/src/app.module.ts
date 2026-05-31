@@ -1,25 +1,29 @@
-import { Module } from '@nestjs/common';
+import { Module, MiddlewareConsumer, NestModule } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
+import { SessionMiddleware } from './shared/middleware/session.middleware';
 import { User } from './entities/user.entity';
 import { Employee } from './entities/employee.entity';
 import { Account } from './entities/account.entity';
 import { Post } from './entities/post.entity';
 import { Lead } from './entities/lead.entity';
+import { Favorite } from './entities/favorite.entity';
+import { ImportTask } from './entities/import-task.entity';
+import { PostMetricsHistory } from './entities/post-metrics-history.entity';
 import { LeadFollowRecord } from './entities/lead-follow-record.entity';
 import { LeadDraft } from './entities/lead-draft.entity';
 import { CollaborationTask } from './entities/collaboration-task.entity';
 import { Order } from './entities/order.entity';
 import { OrderFollowRecord } from './entities/order-follow-record.entity';
-import { ImportTask } from './entities/import-task.entity';
 import { Notification } from './entities/notification.entity';
 import { AuthModule } from './modules/auth/auth.module';
 import { EmployeesModule } from './modules/employees/employees.module';
 import { UsersModule } from './modules/users/users.module';
 import { AccountsModule } from './modules/accounts/accounts.module';
 import { PostsModule } from './modules/posts/posts.module';
+import { FavoritesModule } from './modules/favorites/favorites.module';
 import { LeadsModule } from './modules/leads/leads.module';
 import { LeadDraftsModule } from './modules/lead-drafts/lead-drafts.module';
 import { LeadsParserModule } from './modules/leads-parser/leads-parser.module';
@@ -47,7 +51,7 @@ import { AnalyticsModule } from './modules/analytics/analytics.module';
         username: config.get('MYSQL_USER', 'root'),
         password: config.get('MYSQL_PASSWORD', ''),
         database: config.get('MYSQL_DATABASE', 'lan_dual_role_system'),
-        entities: [User, Employee, Account, Post, Lead, LeadFollowRecord, LeadDraft, CollaborationTask, Order, OrderFollowRecord, ImportTask, Notification],
+        entities: [User, Employee, Account, Post, Lead, LeadFollowRecord, LeadDraft, CollaborationTask, Order, OrderFollowRecord, ImportTask, PostMetricsHistory, Favorite, Notification],
         synchronize: false,
         charset: 'utf8mb4',
       }),
@@ -66,6 +70,7 @@ import { AnalyticsModule } from './modules/analytics/analytics.module';
     UsersModule,
     AccountsModule,
     PostsModule,
+    FavoritesModule,
     LeadsModule,
     LeadDraftsModule,
     LeadsParserModule,
@@ -79,4 +84,9 @@ import { AnalyticsModule } from './modules/analytics/analytics.module';
     AnalyticsModule,
   ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer): void {
+    // 全局解析 JWT 并填充 req.session，供各控制器做角色/员工过滤
+    consumer.apply(SessionMiddleware).forRoutes('*');
+  }
+}

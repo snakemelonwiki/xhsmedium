@@ -4,6 +4,10 @@
 
 // ===== L594-L818 renderApp / renderFlash / renderNotificationPanel / renderCurrentView / renderImageViewer =====
 function renderApp() {
+  // #10 性能底座：每次切换/重渲染视图前，统一清理上一视图登记的定时器、未完成请求等资源
+  if (typeof viewCleanup !== "undefined" && typeof viewCleanup.runAll === "function") {
+    viewCleanup.runAll();
+  }
   const isOwner = state.user.role === "owner";
   const isAdmin = state.user.role === "admin";
   const isSales = state.user.role === "sales";
@@ -11,6 +15,7 @@ function renderApp() {
     ["dashboard", "总览"],
     ["personal-board", "个人看板"],
     ["posts", "作品看板"],
+    ["staff-gallery", "作品广场"],
     ["account-viz", "分析看板"],
     ["leads", "客资看板"],
     ["employees", "员工管理"],
@@ -20,6 +25,7 @@ function renderApp() {
   const staffViews = [
     ["staff-rankings", "运营排行榜"],
     ["personal-board", "个人看板"],
+    ["staff-gallery", "作品广场"],
     ["post-entry", "作品录入"],
     ["staff-leads-board", "客资看板"],
     ["lead-entry", "客资录入"],
@@ -76,6 +82,8 @@ function renderApp() {
         ${renderCurrentView()}
         ${renderImageViewer()}
         ${renderReviewNoteDialog()}
+        ${renderPostBulkImportDialog()}
+        ${typeof renderLeadBulkImportDialog === "function" ? renderLeadBulkImportDialog() : ""}
       </main>
     </div>
   `;
@@ -91,9 +99,12 @@ function renderApp() {
     try {
       await api("/api/auth/logout", { method: "POST" });
     } catch {}
+    disconnectNotificationSocket();
+    if (state.authRefreshTimer) clearTimeout(state.authRefreshTimer);
     localStorage.removeItem("lan_system_token");
     state.token = "";
     state.user = null;
+    state.authExpiredHandled = false;
     renderLogin();
   });
 
@@ -141,11 +152,12 @@ function renderFlash() {
 
 function renderNotificationPanel() {
   const hasUnread = state.unreadNotificationCount > 0;
+  const socketMessage = state.notificationSocketMessage || "消息通道已连接";
   return `
     <div class="workspace-actions">
       <button class="ghost notification-toggle ${hasUnread ? "has-unread" : ""}" id="notificationToggleBtn" type="button">
         消息
-        ${hasUnread ? `<span class="notification-badge">${state.unreadNotificationCount}</span>` : ""}
+        <span class="notification-badge" id="notificationBadge" style="${hasUnread ? "" : "display:none"}">${state.unreadNotificationCount}</span>
       </button>
       ${state.notificationPanelOpen ? `
         <div class="notification-panel">
@@ -153,16 +165,11 @@ function renderNotificationPanel() {
             <strong>消息提醒</strong>
             <button class="ghost" id="notificationCloseBtn" type="button">关闭</button>
           </div>
-          <div class="notification-list">
-            ${state.notifications.length
-              ? state.notifications.map((item) => `
-                  <button class="notification-item ${item.unread ? "unread" : ""} js-notification-item" data-id="${item.id}" type="button">
-                    <strong>${item.title || "系统消息"}</strong>
-                    <p>${item.message || ""}</p>
-                    <span>${item.createdAt ? formatDate(item.createdAt) : ""}</span>
-                  </button>
-                `).join("")
-              : `<div class="notification-item"><strong>暂无消息</strong><p>当前还没有新的提醒。</p></div>`}
+          <div class="muted" id="notificationSocketStatus" data-status="${state.notificationSocketStatus}">
+            ${socketMessage}
+          </div>
+          <div class="notification-list" id="notificationList">
+            ${renderNotificationListItems()}
           </div>
         </div>
       ` : ""}
@@ -179,6 +186,8 @@ function renderCurrentView() {
         return renderPersonalBoard();
       case "posts":
         return renderPostsMonitor();
+      case "staff-gallery":
+        return renderPostsGallery();
       case "account-viz":
         return renderAccountVisualization();
       case "leads":
@@ -210,6 +219,8 @@ function renderCurrentView() {
       return renderStaffRankings();
     case "personal-board":
       return renderStaffPersonalBoard();
+    case "staff-gallery":
+      return renderPostsGallery();
     case "post-entry":
       return renderPostEntry();
     case "staff-leads-board":
@@ -230,7 +241,7 @@ function renderImageViewer() {
       <div class="image-viewer-backdrop js-close-image-viewer"></div>
       <div class="image-viewer-dialog" role="dialog" aria-modal="true" aria-label="封面预览">
         <button class="ghost image-viewer-close js-close-image-viewer" type="button">关闭</button>
-        <img src="${state.previewImageUrl}" alt="封面预览" class="image-viewer-image" />
+        <img src="${state.previewImageUrl}" alt="封面预览" class="image-viewer-image" loading="lazy" decoding="async" />
       </div>
     </div>
   `;
@@ -320,16 +331,9 @@ function bindViewEvents() {
   document.querySelectorAll(".js-sales-feedback-form").forEach((form) => form.addEventListener("submit", submitSalesLead));
   document.querySelectorAll(".js-lead-note-form").forEach((form) => form.addEventListener("submit", submitLeadNote));
   document.querySelectorAll(".js-sales-local-profile-form").forEach((form) => form.addEventListener("submit", submitSalesLocalProfile));
-  document.getElementById("leadCaptureInput")?.addEventListener("change", (event) => {
-    const [file] = event.target.files || [];
-    if (!file) return;
-    setPendingLeadCapture(file);
-    // 图片选择后立刻保存一次草稿（不 debounce）
-    if (typeof saveLeadDraftNow === "function" && !state.editingLeadId) {
-      saveLeadDraftNow().catch((err) => console.warn("[lead-draft] save after image select failed", err));
-    }
-    renderApp();
-  });
+  if (typeof bindLeadCaptureInputEvent === "function") {
+    bindLeadCaptureInputEvent();
+  }
   document.querySelector('#leadForm select[name="accountId"]')?.addEventListener("change", (event) => {
     const postSelect = document.getElementById("leadPostSelect");
     if (!postSelect) return;
@@ -350,6 +354,7 @@ function bindViewEvents() {
     state.notificationPanelOpen = false;
     renderApp();
   });
+  bindNotificationItemEvents();
   document.getElementById("dashboardDateInput")?.addEventListener("change", (event) => {
     state.dashboardDate = event.target.value;
     renderApp();
@@ -388,30 +393,37 @@ function bindViewEvents() {
   });
   document.getElementById("postMonitorModeInput")?.addEventListener("change", (event) => {
     state.postMonitorMode = event.target.value;
+    state.postPagination.page = 1;
     renderApp();
   });
   document.getElementById("postMonitorDateInput")?.addEventListener("change", (event) => {
     state.postMonitorDate = event.target.value;
+    state.postPagination.page = 1;
     renderApp();
   });
   document.getElementById("postMonitorMonthInput")?.addEventListener("change", (event) => {
     state.postMonitorMonth = event.target.value;
+    state.postPagination.page = 1;
     renderApp();
   });
   document.getElementById("postMonitorWeekInput")?.addEventListener("change", (event) => {
     state.postMonitorWeek = event.target.value;
+    state.postPagination.page = 1;
     renderApp();
   });
   document.getElementById("leadMonitorModeInput")?.addEventListener("change", (event) => {
     state.leadMonitorMode = event.target.value;
+    state.leadPagination.page = 1;
     renderApp();
   });
   document.getElementById("leadMonitorDateInput")?.addEventListener("change", (event) => {
     state.leadMonitorDate = event.target.value;
+    state.leadPagination.page = 1;
     renderApp();
   });
   document.getElementById("leadMonitorWeekInput")?.addEventListener("change", (event) => {
     state.leadMonitorWeek = event.target.value;
+    state.leadPagination.page = 1;
     renderApp();
   });
   document.getElementById("analyticsDateInput")?.addEventListener("change", (event) => {
@@ -510,8 +522,13 @@ function bindViewEvents() {
     state.staffGalleryMonth = event.target.value;
     renderApp();
   });
-  document.getElementById("staffGalleryScopeInput")?.addEventListener("change", (event) => {
-    state.staffGalleryScope = event.target.value;
+  document.getElementById("staffGalleryScopeInput")?.addEventListener("change", async (event) => {
+    const newValue = event.target.value;
+    state.staffGalleryScope = newValue;
+    // A-FE-7 #9：staff 端切到「只看我的收藏」时复用 plaza favorites 视图拉一次数据
+    if (newValue === "favorites" && state.user?.role === "staff" && typeof loadPlazaPosts === "function") {
+      await loadPlazaPosts("favorites");
+    }
     renderApp();
   });
   document.getElementById("staffGalleryPlatformFilter")?.addEventListener("change", (event) => {
@@ -524,6 +541,22 @@ function bindViewEvents() {
   });
   document.getElementById("staffGalleryEmployeeFilter")?.addEventListener("change", (event) => {
     state.staffGalleryEmployeeFilter = event.target.value;
+    renderApp();
+  });
+  document.getElementById("staffGalleryAccountFilter")?.addEventListener("change", (event) => {
+    state.staffGalleryAccountFilter = event.target.value;
+    renderApp();
+  });
+  document.getElementById("staffGalleryMinLeadsFilter")?.addEventListener("input", (event) => {
+    state.staffGalleryMinLeadsFilter = event.target.value;
+    renderApp();
+  });
+  document.getElementById("staffGalleryMinLikesFilter")?.addEventListener("input", (event) => {
+    state.staffGalleryMinLikesFilter = event.target.value;
+    renderApp();
+  });
+  document.getElementById("staffGallerySort")?.addEventListener("change", (event) => {
+    state.staffGallerySort = event.target.value;
     renderApp();
   });
   document.getElementById("staffRankingsModeInput")?.addEventListener("change", (event) => {
@@ -563,15 +596,18 @@ function bindViewEvents() {
   document.getElementById("postMonitorEmployeeFilter")?.addEventListener("change", (event) => {
     state.postMonitorEmployeeFilter = event.target.value;
     state.postMonitorAccountFilter = "";
+    state.postPagination.page = 1;
     renderApp();
   });
   document.getElementById("postMonitorPlatformFilter")?.addEventListener("change", (event) => {
     state.postMonitorPlatformFilter = event.target.value;
     state.postMonitorAccountFilter = "";
+    state.postPagination.page = 1;
     renderApp();
   });
   document.getElementById("postMonitorAccountFilter")?.addEventListener("change", (event) => {
     state.postMonitorAccountFilter = event.target.value;
+    state.postPagination.page = 1;
     renderApp();
   });
   document.getElementById("postMonitorSortInput")?.addEventListener("change", (event) => {
@@ -581,12 +617,14 @@ function bindViewEvents() {
   document.getElementById("leadMonitorEmployeeFilter")?.addEventListener("change", (event) => {
     state.leadMonitorEmployeeFilter = event.target.value;
     state.leadMonitorAccountFilter = "";
+    state.leadPagination.page = 1;
     state.leadStats = null;
     refreshLeadStatsForCurrentView();
     renderApp();
   });
   document.getElementById("leadMonitorAccountFilter")?.addEventListener("change", (event) => {
     state.leadMonitorAccountFilter = event.target.value;
+    state.leadPagination.page = 1;
     state.leadStats = null;
     refreshLeadStatsForCurrentView();
     renderApp();
@@ -594,30 +632,35 @@ function bindViewEvents() {
   document.getElementById("leadMonitorPlatformFilter")?.addEventListener("change", (event) => {
     state.leadMonitorPlatformFilter = event.target.value;
     state.leadMonitorAccountFilter = "";
+    state.leadPagination.page = 1;
     state.leadStats = null;
     refreshLeadStatsForCurrentView();
     renderApp();
   });
   document.getElementById("leadMonitorPostTypeFilter")?.addEventListener("change", (event) => {
     state.leadMonitorPostTypeFilter = event.target.value;
+    state.leadPagination.page = 1;
     state.leadStats = null;
     refreshLeadStatsForCurrentView();
     renderApp();
   });
   document.getElementById("leadMonitorStatusFilter")?.addEventListener("change", (event) => {
     state.leadMonitorStatusFilter = event.target.value;
+    state.leadPagination.page = 1;
     state.leadStats = null;
     refreshLeadStatsForCurrentView();
     renderApp();
   });
   document.getElementById("leadMonitorDateInput")?.addEventListener("change", (event) => {
     state.leadMonitorDate = event.target.value;
+    state.leadPagination.page = 1;
     state.leadStats = null;
     refreshLeadStatsForCurrentView();
     renderApp();
   });
   document.getElementById("leadMonitorWeekInput")?.addEventListener("change", (event) => {
     state.leadMonitorWeek = event.target.value;
+    state.leadPagination.page = 1;
     state.leadStats = null;
     refreshLeadStatsForCurrentView();
     renderApp();
@@ -635,6 +678,20 @@ function bindViewEvents() {
     state.salesFollowupAccountFilter = event.target.value;
     renderApp();
   });
+  document.querySelectorAll(".js-post-page").forEach((el) => el.addEventListener("click", async () => {
+    const pageSize = Number(state.postPagination?.pageSize || 20);
+    const pages = Math.max(1, Math.ceil(Number(state.postPagination?.total || 0) / pageSize));
+    const nextPage = Math.min(Math.max(1, Number(el.dataset.page || 1)), pages);
+    await loadPostsPage(nextPage);
+    renderApp();
+  }));
+  document.querySelectorAll(".js-lead-page").forEach((el) => el.addEventListener("click", async () => {
+    const pageSize = Number(state.leadPagination?.pageSize || 20);
+    const pages = Math.max(1, Math.ceil(Number(state.leadPagination?.total || 0) / pageSize));
+    const nextPage = Math.min(Math.max(1, Number(el.dataset.page || 1)), pages);
+    await loadLeadsPage(nextPage);
+    renderApp();
+  }));
   document.querySelector('#postForm select[name="postType"]')?.addEventListener("change", (event) => {
     const trafficField = document.getElementById("postTrafficField");
     const trafficInput = document.querySelector('#postForm input[name="traffic"]');
@@ -649,8 +706,13 @@ function bindViewEvents() {
   document.getElementById("postCoverInput")?.addEventListener("change", (event) => {
     const file = event.target.files && event.target.files[0];
     if (!file) return;
-    setPendingPostCover(file);
-    renderApp();
+    const ok = setPendingPostCover(file);
+    // A-FE-5 #11 仅刷新封面上传区，不动表单字段；失败时只在封面区显示红色错误
+    rerenderPostCoverUploader();
+    if (!ok) {
+      // 静默：错误已写入 state.postCoverUploadError 并展示在 uploader 区
+      try { event.target.value = ""; } catch (_err) {}
+    }
   });
   document.getElementById("postCoverPasteHint")?.addEventListener("paste", (event) => {
     const items = Array.from(event.clipboardData?.items || []);
@@ -659,11 +721,12 @@ function bindViewEvents() {
     event.preventDefault();
     const file = imageItem.getAsFile();
     if (!file) return;
-    setPendingPostCover(file);
-    setFlash("success", "封面已粘贴", "可以继续填写其他信息，提交时会一起上传这张封面。");
-    renderApp();
+    const ok = setPendingPostCover(file);
+    rerenderPostCoverUploader();
+    if (ok) setFlash("success", "封面已粘贴", "可以继续填写其他信息，提交时会一起上传这张封面。");
   });
-  document.getElementById("postForm")?.addEventListener("paste", (event) => {
+  // 把 form 上的 paste 改成 uploader 容器上的 paste（封面已脱离 form）
+  document.getElementById("postCoverUploader")?.addEventListener("paste", (event) => {
     const active = document.activeElement;
     if (active && ["INPUT", "TEXTAREA"].includes(active.tagName) && active !== document.getElementById("postCoverPasteHint")) return;
     const items = Array.from(event.clipboardData?.items || []);
@@ -672,21 +735,32 @@ function bindViewEvents() {
     event.preventDefault();
     const file = imageItem.getAsFile();
     if (!file) return;
-    setPendingPostCover(file);
-    setFlash("success", "封面已粘贴", "可以继续填写其他信息，提交时会一起上传这张封面。");
-    renderApp();
+    const ok = setPendingPostCover(file);
+    rerenderPostCoverUploader();
+    if (ok) setFlash("success", "封面已粘贴", "可以继续填写其他信息，提交时会一起上传这张封面。");
   });
-  document.getElementById("employeeSearchInput")?.addEventListener("input", (event) => {
-    state.employeeSearch = event.target.value;
+  if (typeof bindPostFormDraftEvents === "function") {
+    bindPostFormDraftEvents();
+  }
+  // #10 性能底座：员工搜索框走 debounce(250)，避免每按一键就触发一次整页 renderApp
+  const _onEmployeeSearchInput = debounce((value) => {
+    state.employeeSearch = value;
     renderApp();
+  }, 250);
+  document.getElementById("employeeSearchInput")?.addEventListener("input", (event) => {
+    _onEmployeeSearchInput(event.target.value);
   });
   document.getElementById("employeeStatusFilter")?.addEventListener("change", (event) => {
     state.employeeStatusFilter = event.target.value;
     renderApp();
   });
-  document.getElementById("accountSearchInput")?.addEventListener("input", (event) => {
-    state.accountSearch = event.target.value;
+  // #10 性能底座：账号搜索框走 debounce(250)
+  const _onAccountSearchInput = debounce((value) => {
+    state.accountSearch = value;
     renderApp();
+  }, 250);
+  document.getElementById("accountSearchInput")?.addEventListener("input", (event) => {
+    _onAccountSearchInput(event.target.value);
   });
   document.getElementById("accountEmployeeFilter")?.addEventListener("change", (event) => {
     state.accountEmployeeFilter = event.target.value;
@@ -703,9 +777,56 @@ function bindViewEvents() {
   document.querySelectorAll(".js-edit-post").forEach((el) => el.addEventListener("click", () => { clearPendingPostCover(); state.editingPostId = el.dataset.id; state.currentView = state.user.role === "admin" ? "posts" : "post-entry"; renderApp(); }));
   document.querySelectorAll(".js-delete-post").forEach((el) => el.addEventListener("click", () => deletePost(el.dataset.id)));
   document.querySelectorAll(".js-save-post-suggestion").forEach((el) => el.addEventListener("click", () => savePostSuggestion(el.dataset.id)));
+  document.querySelectorAll(".js-plaza-view-switch").forEach((el) => el.addEventListener("click", async () => {
+    const view = el.dataset.plazaView || "all";
+    state.plazaView = view;
+    if (typeof loadPlazaPosts === "function") {
+      await loadPlazaPosts(view);
+    }
+    renderApp();
+  }));
+  // A-FE-4 #9 心形收藏按钮：作品广场 / 作品看板共用
+  document.querySelectorAll(".js-toggle-favorite-post").forEach((el) => el.addEventListener("click", () => toggleFavoritePost(el)));
+  document.querySelectorAll(".js-refresh-post-metrics").forEach((el) => el.addEventListener("click", () => handleRefreshPostMetricsClick(el)));
+  document.querySelector(".js-retry-failed-post-refresh")?.addEventListener("click", retryFailedPostRefreshes);
+  document.querySelector(".js-clear-post-refresh-failures")?.addEventListener("click", () => {
+    state.postBatchRefreshFailures = [];
+    renderApp();
+  });
+  // A-FE-3b 批量刷新当前筛选作品互动数据
+  document.getElementById("batchRefreshFilteredPostsBtn")?.addEventListener("click", handleBatchRefreshFilteredPosts);
+  // A-FE-2 #7 作品批量粘贴导入：打开/提交/取消 + 分隔符单选互斥
+  document.getElementById("openPostBulkImportBtn")?.addEventListener("click", () => {
+    state.postBulkImportOpen = true;
+    state.postBulkImportRaw = "";
+    state.postBulkImportResult = null;
+    renderApp();
+  });
+  document.getElementById("postBulkImportSubmitBtn")?.addEventListener("click", submitPostBulkImport);
+  document.getElementById("postBulkImportFileSubmitBtn")?.addEventListener("click", submitPostBulkImportFile);
+  document.getElementById("postBulkImportCloseBtn")?.addEventListener("click", closePostBulkImportDialog);
+  document.querySelectorAll(".js-close-post-bulk-import").forEach((el) => el.addEventListener("click", closePostBulkImportDialog));
+  document.querySelectorAll(".js-post-bulk-delimiter").forEach((el) => {
+    el.addEventListener("click", () => {
+      // 本地 DOM toggle：仅维护 checked 状态，不入 state；提交时通过 :checked + data-value 取值
+      document.querySelectorAll(".js-post-bulk-delimiter").forEach((other) => {
+        other.checked = other === el;
+      });
+    });
+  });
   document.getElementById("rollbackSnapshotDateInput")?.addEventListener("change", (event) => {
     state.rollbackSnapshotDate = event.target.value;
   });
+  document.getElementById("openLeadBulkImportBtn")?.addEventListener("click", () => {
+    state.leadBulkImportOpen = true;
+    state.leadBulkImportRaw = "";
+    state.leadBulkImportResult = null;
+    renderApp();
+  });
+  document.getElementById("leadBulkImportSubmitBtn")?.addEventListener("click", submitLeadBulkImport);
+  document.getElementById("leadBulkImportFileSubmitBtn")?.addEventListener("click", submitLeadBulkImportFile);
+  document.getElementById("leadBulkImportCloseBtn")?.addEventListener("click", closeLeadBulkImportDialog);
+  document.querySelectorAll(".js-close-lead-bulk-import").forEach((el) => el.addEventListener("click", closeLeadBulkImportDialog));
   document.getElementById("refreshScopedMetricsBtn")?.addEventListener("click", refreshScopedMetrics);
   document.getElementById("rollbackScopedMetricsBtn")?.addEventListener("click", rollbackScopedMetrics);
   document.querySelectorAll(".js-edit-lead").forEach((el) => el.addEventListener("click", () => { clearPendingLeadCapture(); state.editingLeadId = el.dataset.id; state.currentView = state.user.role === "admin" ? "leads" : state.user.role === "sales" ? "sales-leads" : "lead-entry"; renderApp(); }));

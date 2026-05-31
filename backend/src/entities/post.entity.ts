@@ -43,6 +43,9 @@ export class Post {
   @Column({ type: 'bigint', default: 0 })
   favorites: number;
 
+  @Column({ type: 'bigint', default: 0 })
+  shares: number;
+
   @Column({ name: 'metrics_updated_at', type: 'datetime', nullable: true })
   metricsUpdatedAt: Date | null;
 

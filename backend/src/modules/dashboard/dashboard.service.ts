@@ -101,7 +101,10 @@ export class DashboardService {
   }
 
   async refreshEnteredData(): Promise<any> {
-    // Legacy: trigger snapshot refresh
-    return { ok: true };
+    const [postCount, leadCount] = await Promise.all([
+      this.postRepo.count(),
+      this.leadRepo.count(),
+    ]);
+    return { ok: true, postCount, leadCount };
   }
 }

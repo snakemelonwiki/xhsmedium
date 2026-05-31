@@ -31,6 +31,20 @@ export class AuthController {
     return res.json({ user });
   }
 
+  @Post('refresh')
+  async refresh(@Req() req: Request, @Res() res: Response) {
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    if (!token) {
+      return res.status(HttpStatus.UNAUTHORIZED).json({ message: '未登录' });
+    }
+    try {
+      const result = await this.authService.refreshToken(token);
+      return res.json(result);
+    } catch (error: any) {
+      return res.status(error.status || HttpStatus.UNAUTHORIZED).json(error.response || { message: error.message });
+    }
+  }
+
   @Post('logout')
   logout(@Req() req: Request, @Res() res: Response) {
     const token = req.headers.authorization?.replace('Bearer ', '');

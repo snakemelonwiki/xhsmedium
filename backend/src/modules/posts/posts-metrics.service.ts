@@ -30,6 +30,7 @@ export class PostsMetricsService {
       likes: Number(metrics.likes || 0),
       comments: Number(metrics.comments || 0),
       favorites: Number(metrics.favorites || 0),
+      shares: metrics.shares === undefined || metrics.shares === null ? undefined : Number(metrics.shares || 0),
       metricsUpdatedAt: new Date().toISOString(),
     };
   }
