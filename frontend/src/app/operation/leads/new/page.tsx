@@ -1,26 +1,66 @@
 'use client';
 
 import { Button, Card, Form, Input, Select, Space, Typography, message } from 'antd';
+import { useRouter } from 'next/navigation';
+import { useEffect, useState } from 'react';
 
 import { apiClient } from '@/shared/api/apiClient';
-import { ImageUploadField } from '@/shared/components/forms';
+import { listAssignableSalesUsers, listSourceAccounts, listSourcePosts, type CatalogOption } from '@/shared/api/catalog';
+import { DraftFormShell, ImageUploadField, clearDraft, saveDraft } from '@/shared/components/forms';
 import { useSubmitLock } from '@/shared/hooks/useSubmitLock';
+
+const DRAFT_KEY = 'operation.leads.new';
 
 export default function OperationLeadNewPage() {
   const [form] = Form.useForm();
   const { submitting, run } = useSubmitLock();
+  const router = useRouter();
+  const accountId = Form.useWatch('accountId', form);
+  const [salesUsers, setSalesUsers] = useState<CatalogOption[]>([]);
+  const [accounts, setAccounts] = useState<CatalogOption[]>([]);
+  const [posts, setPosts] = useState<CatalogOption[]>([]);
+  const [catalogLoading, setCatalogLoading] = useState(false);
+
+  useEffect(() => {
+    setCatalogLoading(true);
+    Promise.all([listAssignableSalesUsers(), listSourceAccounts()])
+      .then(([nextSalesUsers, nextAccounts]) => {
+        setSalesUsers(nextSalesUsers);
+        setAccounts(nextAccounts);
+      })
+      .catch((err) => {
+        message.warning(err instanceof Error ? err.message : '基础数据加载失败');
+      })
+      .finally(() => setCatalogLoading(false));
+  }, []);
+
+  useEffect(() => {
+    listSourcePosts(accountId)
+      .then(setPosts)
+      .catch(() => setPosts([]));
+  }, [accountId]);
 
   async function submit(values: Record<string, unknown>) {
-    await run(async () => {
-      await apiClient.post('/leads', {
-        ...values,
-        status: values.assignedSalesUserId ? 'assigned' : 'new',
-        addStatus: 'not_added',
-        processStatus: 'not_contacted',
+    try {
+      await run(async () => {
+        const assignedSalesUserId = values.assignedSalesUserId ? String(values.assignedSalesUserId) : undefined;
+        const selectedSalesUser = salesUsers.find((item) => item.id === assignedSalesUserId);
+        await apiClient.post('/leads', {
+          ...values,
+          assignedSalesUserId,
+          assignedSalesUserName: selectedSalesUser?.name ?? '',
+          status: assignedSalesUserId ? 'assigned' : 'new',
+          addStatus: 'not_added',
+          processStatus: 'not_contacted',
+        });
+        clearDraft(DRAFT_KEY);
+        message.success('客资已录入');
+        form.resetFields();
+        router.push('/operation/leads');
       });
-      message.success('客资已录入');
-      form.resetFields();
-    });
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '客资提交失败，已保留当前填写内容');
+    }
   }
 
   return (
@@ -30,40 +70,73 @@ export default function OperationLeadNewPage() {
         <Typography.Paragraph type="secondary">录入客户来源和联系方式，并分配给销售继续跟进。</Typography.Paragraph>
       </div>
       <Card>
-        <Form form={form} layout="vertical" onFinish={submit} preserve>
-          <div className="form-grid">
-            <Form.Item name="platform" label="来源平台" initialValue="xiaohongshu" rules={[{ required: true, message: '请选择平台' }]}>
-              <Select
-                options={[
-                  { label: '小红书', value: 'xiaohongshu' },
-                  { label: '抖音', value: 'douyin' },
-                ]}
-              />
-            </Form.Item>
-            <Form.Item name="nickname" label="客户昵称">
-              <Input placeholder="客户昵称" />
-            </Form.Item>
-            <Form.Item name="contactInfo" label="联系方式" rules={[{ required: true, message: '请输入联系方式' }]}>
-              <Input placeholder="微信/电话/私信账号" />
-            </Form.Item>
-            <Form.Item name="assignedSalesUserId" label="分配销售 ID">
-              <Input placeholder="后续可替换为销售下拉" />
-            </Form.Item>
-            <Form.Item name="accountId" label="来源账号 ID">
-              <Input />
-            </Form.Item>
-            <Form.Item name="postId" label="来源作品 ID">
-              <Input />
-            </Form.Item>
-            <Form.Item className="full-row" name="majorContent" label="需求备注">
-              <Input.TextArea rows={4} placeholder="客户诉求、地区、专业方向和其他备注" />
-            </Form.Item>
-            <Form.Item className="full-row" name="captureImageUrl" label="引流截图">
-              <ImageUploadField bucket="lead-captures" />
-            </Form.Item>
-          </div>
-          <Button type="primary" htmlType="submit" loading={submitting}>提交客资</Button>
-        </Form>
+        <DraftFormShell draftKey={DRAFT_KEY} form={form}>
+          <Form
+            form={form}
+            layout="vertical"
+            onFinish={submit}
+            onValuesChange={(_, values) => saveDraft(DRAFT_KEY, values)}
+            preserve
+          >
+            <div className="form-grid">
+              <Form.Item name="platform" label="来源平台" initialValue="xiaohongshu" rules={[{ required: true, message: '请选择平台' }]}>
+                <Select
+                  options={[
+                    { label: '小红书', value: 'xiaohongshu' },
+                    { label: '抖音', value: 'douyin' },
+                  ]}
+                />
+              </Form.Item>
+              <Form.Item name="accountId" label="来源账号" rules={[{ required: true, message: '请选择来源账号' }]}>
+                <Select
+                  showSearch
+                  loading={catalogLoading}
+                  optionFilterProp="label"
+                  placeholder="选择来源账号"
+                  options={accounts.map((item) => ({
+                    label: item.platform ? `${item.name}（${item.platform}）` : item.name,
+                    value: item.id,
+                  }))}
+                />
+              </Form.Item>
+              <Form.Item name="postId" label="来源作品">
+                <Select
+                  allowClear
+                  showSearch
+                  optionFilterProp="label"
+                  placeholder="选择来源作品"
+                  options={posts.map((item) => ({ label: item.name, value: item.id }))}
+                />
+              </Form.Item>
+              <Form.Item name="assignedSalesUserId" label="分配销售">
+                <Select
+                  allowClear
+                  showSearch
+                  loading={catalogLoading}
+                  optionFilterProp="label"
+                  placeholder="选择销售账号"
+                  options={salesUsers.map((item) => ({ label: item.name, value: item.id }))}
+                />
+              </Form.Item>
+              <Form.Item name="nickname" label="客户昵称">
+                <Input placeholder="客户昵称" />
+              </Form.Item>
+              <Form.Item name="contactInfo" label="联系方式" rules={[{ required: true, message: '请输入联系方式' }]}>
+                <Input placeholder="微信/电话/私信账号" />
+              </Form.Item>
+              <Form.Item name="ip" label="地区">
+                <Input placeholder="省市或客户 IP 属地" />
+              </Form.Item>
+              <Form.Item className="full-row" name="majorContent" label="需求备注">
+                <Input.TextArea rows={4} placeholder="客户诉求、专业方向和其他备注" />
+              </Form.Item>
+              <Form.Item className="full-row" name="captureImageUrl" label="引流截图">
+                <ImageUploadField bucket="lead-captures" />
+              </Form.Item>
+            </div>
+            <Button type="primary" htmlType="submit" loading={submitting}>提交客资</Button>
+          </Form>
+        </DraftFormShell>
       </Card>
     </Space>
   );

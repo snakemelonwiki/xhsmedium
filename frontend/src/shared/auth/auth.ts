@@ -62,7 +62,7 @@ export function getPortHomePath(port: string, fallbackRole: AppRole = 'operation
  * 判断角色是否可以访问目标路径。
  */
 export function canAccessPath(role: AppRole | undefined, path: string): boolean {
-  if (path === '/' || path.startsWith('/login')) {
+  if (path === '/' || path.startsWith('/login') || path.startsWith('/forbidden')) {
     return true;
   }
 
@@ -75,6 +75,17 @@ export function canAccessPath(role: AppRole | undefined, path: string): boolean 
   }
 
   return isPathInPrefix(path, PORT_PREFIX_BY_ROLE[role]);
+}
+
+/**
+ * 返回受保护页面需要执行的认证跳转；无需跳转时返回 undefined。
+ */
+export function getAuthRedirectPath(user: AppUser | undefined, path: string): string | undefined {
+  if (!user) {
+    return canAccessPath(undefined, path) ? undefined : '/login';
+  }
+
+  return canAccessPath(user.role, path) ? undefined : '/forbidden';
 }
 
 /**
@@ -96,6 +107,17 @@ export function readStoredUser(storage: Pick<Storage, 'getItem'> = window.localS
   }
 
   return undefined;
+}
+
+/**
+ * 读取完整认证态；token 缺失时忽略残留用户信息。
+ */
+export function readAuthenticatedUser(storage: Pick<Storage, 'getItem'> = window.localStorage): AppUser | undefined {
+  if (!storage.getItem(STORAGE_KEYS.token)) {
+    return undefined;
+  }
+
+  return readStoredUser(storage);
 }
 
 /**

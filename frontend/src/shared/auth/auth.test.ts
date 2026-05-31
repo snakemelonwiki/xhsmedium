@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 
 import {
   canAccessPath,
+  getAuthRedirectPath,
   getDefaultHomePath,
   getPortHomePath,
   isAppRole,
+  readAuthenticatedUser,
   STORAGE_KEYS,
   type AppRole,
 } from './auth';
@@ -43,6 +45,12 @@ describe('auth route helpers', () => {
     expect(canAccessPath('admin', '/academic')).toBe(true);
   });
 
+  it('redirects unauthenticated users to login and unauthorized users to forbidden', () => {
+    expect(getAuthRedirectPath(undefined, '/operation/leads')).toBe('/login');
+    expect(getAuthRedirectPath({ id: '1', name: '销售', role: 'sales' }, '/operation/leads')).toBe('/forbidden');
+    expect(getAuthRedirectPath({ id: '1', name: '销售', role: 'sales' }, '/sales/leads')).toBeUndefined();
+  });
+
   it('validates roles and exposes stable localStorage keys', () => {
     const roles: AppRole[] = ['operation', 'sales', 'academic', 'admin'];
 
@@ -50,5 +58,14 @@ describe('auth route helpers', () => {
     expect(isAppRole('staff')).toBe(false);
     expect(STORAGE_KEYS.token).toBe('xhsmedium.token');
     expect(STORAGE_KEYS.user).toBe('xhsmedium.user');
+  });
+
+  it('rejects stored users when the token is missing', () => {
+    const user = JSON.stringify({ id: '1', name: '运营', role: 'operation' });
+    const storage = {
+      getItem: (key: string) => key === STORAGE_KEYS.user ? user : null,
+    };
+
+    expect(readAuthenticatedUser(storage)).toBeUndefined();
   });
 });

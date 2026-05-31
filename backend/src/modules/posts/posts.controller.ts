@@ -140,7 +140,15 @@ export class PostsController {
 
   @Put(':id')
   @UseGuards(DebounceGuard)
-  async update(@Param('id') id: string, @Body() body: any, @Res() res: Response) {
+  async update(@Param('id') id: string, @Body() body: any, @Req() req: Request, @Res() res: Response) {
+    const session = (req as any).session;
+    if (session?.role === 'staff') {
+      const post = await this.postsService.findById(id);
+      if (!post) return res.status(404).json({ message: '作品不存在' });
+      if (post.employeeId !== session.employeeId) {
+        return res.status(403).json({ ok: false, message: '无权操作他人作品' });
+      }
+    }
     await this.postsService.update(id, {
       accountId: body.accountId,
       title: body.title,
@@ -221,7 +229,15 @@ export class PostsController {
   }
 
   @Delete(':id')
-  async remove(@Param('id') id: string, @Res() res: Response) {
+  async remove(@Param('id') id: string, @Req() req: Request, @Res() res: Response) {
+    const session = (req as any).session;
+    if (session?.role === 'staff') {
+      const post = await this.postsService.findById(id);
+      if (!post) return res.status(404).json({ message: '作品不存在' });
+      if (post.employeeId !== session.employeeId) {
+        return res.status(403).json({ ok: false, message: '无权操作他人作品' });
+      }
+    }
     await this.postsService.remove(id);
     return res.json({ ok: true });
   }

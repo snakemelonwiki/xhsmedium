@@ -25,6 +25,13 @@ const TYPE_ALIASES: Record<string, CollaborationTaskType> = {
   second_contact: 'second_touch',
 };
 
+type CollaborationActor = {
+  actorUserId?: string;
+  actorEmployeeId?: string;
+  actorRole?: string;
+  legacyDirectHandler?: boolean;
+};
+
 interface CreateDto {
   leadId: string;
   type: CollaborationTaskType | string;
@@ -37,6 +44,7 @@ interface ListQuery {
   status?: string;
   leadId?: string;
   userId?: string;
+  employeeId?: string;
 }
 
 @Injectable()
@@ -50,14 +58,6 @@ export class CollaborationTasksService {
     private readonly userRepository: Repository<User>,
     private readonly notificationsService: NotificationsService,
   ) {}
-
-  private applyScope(qb: any, query: ListQuery): void {
-    if (query.scope === 'mine' || query.scope === 'requester' || query.scope === 'sales') {
-      qb.andWhere('t.requester_id = :uid', { uid: query.userId || '' });
-    } else if (query.scope === 'inbox' || query.scope === 'handler' || query.scope === 'operations') {
-      qb.andWhere('t.handler_id = :uid', { uid: query.userId || '' });
-    }
-  }
 
   async create(dto: CreateDto): Promise<CollaborationTask> {
     if (!dto.leadId) throw new Error('leadId required');
@@ -138,7 +138,20 @@ export class CollaborationTasksService {
   async list(query: ListQuery): Promise<any[]> {
     const qb = this.repo.createQueryBuilder('t');
 
-    this.applyScope(qb, query);
+    const scope = this.normalizeScope(query.scope);
+    if (scope === 'mine') {
+      qb.andWhere('t.requester_id = :uid', { uid: query.userId || '' });
+    } else if (scope === 'inbox') {
+      qb.leftJoin(Lead, 'l', 'l.id = t.lead_id');
+      qb.andWhere(
+        '(t.handler_id = :uid OR (t.status = :pendingStatus AND l.employee_id = :employeeId))',
+        {
+          uid: query.userId || '',
+          pendingStatus: 'pending',
+          employeeId: query.employeeId || '',
+        },
+      );
+    }
 
     if (query.status) {
       qb.andWhere('t.status = :status', { status: query.status });
@@ -163,7 +176,20 @@ export class CollaborationTasksService {
 
     const qb = this.repo.createQueryBuilder('t');
 
-    this.applyScope(qb, query);
+    const scope = this.normalizeScope(query.scope);
+    if (scope === 'mine') {
+      qb.andWhere('t.requester_id = :uid', { uid: query.userId || '' });
+    } else if (scope === 'inbox') {
+      qb.leftJoin(Lead, 'l', 'l.id = t.lead_id');
+      qb.andWhere(
+        '(t.handler_id = :uid OR (t.status = :pendingStatus AND l.employee_id = :employeeId))',
+        {
+          uid: query.userId || '',
+          pendingStatus: 'pending',
+          employeeId: query.employeeId || '',
+        },
+      );
+    }
 
     if (query.status) {
       qb.andWhere('t.status = :status', { status: query.status });
@@ -183,6 +209,15 @@ export class CollaborationTasksService {
     return Math.min(n, 200);
   }
 
+  /**
+   * 兼容旧前端 scope 命名，统一成后端权限语义。
+   */
+  private normalizeScope(scope?: string): 'mine' | 'inbox' | 'all' | string {
+    if (scope === 'requester' || scope === 'sales') return 'mine';
+    if (scope === 'handler' || scope === 'operations') return 'inbox';
+    return scope || 'all';
+  }
+
   async claim(id: string, handlerId: string): Promise<CollaborationTask | null> {
     const task = await this.repo.findOne({ where: { id } });
     if (!task) return null;
@@ -197,7 +232,12 @@ export class CollaborationTasksService {
     return this.repo.findOne({ where: { id } });
   }
 
-  async handle(id: string, handledNote: string, handlerId?: string): Promise<CollaborationTask | null> {
+  async handle(
+    id: string,
+    handledNote: string,
+    actor: CollaborationActor | string = {},
+  ): Promise<CollaborationTask | null> {
+    const handlerActor = this.normalizeActor(actor);
     const task = await this.repo.findOne({ where: { id } });
     if (!task) return null;
     if (task.status !== 'handling' && task.status !== 'pending') {
@@ -206,10 +246,11 @@ export class CollaborationTasksService {
     if (hasBrokenEncoding(handledNote)) {
       throw new Error('handledNote contains invalid characters; please ensure UTF-8 encoding');
     }
+    await this.assertCanHandle(task, handlerActor);
     const cleanNote = sanitizeText(handledNote);
     await this.repo.update(id, {
       status: 'handled',
-      handlerId: task.handlerId || handlerId || null,
+      handlerId: task.handlerId || handlerActor.actorUserId || null,
       handledNote: cleanNote,
       handledAt: new Date(),
     });
@@ -223,7 +264,7 @@ export class CollaborationTasksService {
     if (task.requesterId) {
       await this.notificationsService.create({
         receiverIds: [task.requesterId],
-        senderId: task.handlerId || handlerId || null,
+        senderId: task.handlerId || handlerActor.actorUserId || null,
         portType: 'sales',
         typeCode: NOTIFICATION_TYPES.COLLAB_HANDLED,
         title: '协同任务已处理',
@@ -236,6 +277,47 @@ export class CollaborationTasksService {
     }
 
     return updated;
+  }
+
+  /**
+   * 校验协同处理权限：已认领任务仅处理人可处理；待处理任务仅来源运营或管理员可处理。
+   */
+  private async assertCanHandle(
+    task: CollaborationTask,
+    actor: CollaborationActor,
+  ): Promise<void> {
+    if (actor.actorRole === 'admin' || actor.actorRole === 'owner') {
+      return;
+    }
+    if (!actor.actorUserId) {
+      throw new Error('handler required');
+    }
+    if (actor.legacyDirectHandler) {
+      return;
+    }
+    if (task.handlerId) {
+      if (task.handlerId !== actor.actorUserId) {
+        throw new Error('no permission to handle task');
+      }
+      return;
+    }
+    const lead = await this.leadRepository.findOne({
+      where: { id: task.leadId },
+      select: { employeeId: true },
+    });
+    if (!lead || lead.employeeId !== actor.actorEmployeeId) {
+      throw new Error('no permission to handle task');
+    }
+  }
+
+  /**
+   * 兼容旧 service 调用传 handlerId 字符串；控制器路径传完整 actor 做权限校验。
+   */
+  private normalizeActor(actor: CollaborationActor | string): CollaborationActor {
+    if (typeof actor === 'string') {
+      return { actorUserId: actor, legacyDirectHandler: true };
+    }
+    return actor;
   }
 
   async close(id: string): Promise<CollaborationTask | null> {

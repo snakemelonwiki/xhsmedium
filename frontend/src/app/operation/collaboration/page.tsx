@@ -15,7 +15,7 @@ export default function OperationCollaborationPage() {
   const { submitting, run } = useSubmitLock();
 
   async function loadTasks() {
-    const result = await listCollaborationTasks({ scope: 'handler', pageSize: 20 });
+    const result = await listCollaborationTasks({ scope: 'inbox', pageSize: 20 });
     setItems(result.items);
   }
 

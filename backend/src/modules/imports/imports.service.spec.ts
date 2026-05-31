@@ -6,11 +6,11 @@ describe('ImportsService #7 import tasks', () => {
     const repo = {
       find: jest.fn().mockResolvedValue(rows),
     };
-    const service = new ImportsService(repo as any, {} as any, {} as any);
+    const service = new ImportsService(repo as any, {} as any, {} as any, {} as any, {} as any);
     return { service, repo };
   };
 
-  it('lists all import tasks for admin owner view without user filter', async () => {
+  it('lists import tasks for current user and type', async () => {
     const task = {
       id: 'task-1',
       importType: 'posts',
@@ -23,10 +23,10 @@ describe('ImportsService #7 import tasks', () => {
     } as ImportTask;
     const { service, repo } = buildService([task]);
 
-    const result = await service.listAllTasks('posts');
+    const result = await service.listTasks('user-1', 'posts');
 
     expect(repo.find).toHaveBeenCalledWith({
-      where: { importType: 'posts' },
+      where: { userId: 'user-1', importType: 'posts' },
       order: { createdAt: 'DESC' },
       take: 200,
     });

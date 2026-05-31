@@ -101,9 +101,22 @@ export function NotificationBell({ pollIntervalMs = 0 }: NotificationBellProps) 
 function fallbackRoute(item: NotificationItem) {
   const type = item.targetType?.toLowerCase();
   const targetId = item.targetId;
+  const normalizedPort = item.portType === 'operations' ? 'operation' : item.portType;
   if (!type || targetId === undefined || targetId === null) return undefined;
-  if (type.includes('lead')) return `/sales/leads/${targetId}`;
-  if (type.includes('collaboration')) return '/sales/collaboration';
-  if (type.includes('order')) return `/sales/orders/${targetId}`;
+  if (type.includes('lead')) {
+    return normalizedPort === 'operation'
+      ? `/operation/leads?leadId=${targetId}`
+      : `/sales/leads/${targetId}`;
+  }
+  if (type.includes('collaboration')) {
+    return normalizedPort === 'operation'
+      ? `/operation/collaboration?taskId=${targetId}`
+      : `/sales/collaboration?taskId=${targetId}`;
+  }
+  if (type.includes('order')) {
+    if (normalizedPort === 'academic') return `/academic/orders?orderId=${targetId}`;
+    if (normalizedPort === 'admin') return `/admin/orders?orderId=${targetId}`;
+    return `/sales/orders/${targetId}`;
+  }
   return undefined;
 }

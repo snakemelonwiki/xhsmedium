@@ -1,6 +1,6 @@
 'use client';
 
-import { UploadOutlined } from '@ant-design/icons';
+import { DeleteOutlined, UploadOutlined } from '@ant-design/icons';
 import { Button, Image, Space, Upload, message } from 'antd';
 import type { UploadProps } from 'antd';
 import { useState } from 'react';
@@ -41,7 +41,14 @@ export function ImageUploadField({ value, onChange, bucket }: ImageUploadFieldPr
       <Upload {...props}>
         <Button icon={<UploadOutlined />} loading={uploading}>上传图片</Button>
       </Upload>
-      {value ? <Image src={value} alt="已上传图片" width={160} /> : null}
+      {value ? (
+        <Space direction="vertical" size={8}>
+          <Image src={value} alt="已上传图片" width={160} />
+          <Button size="small" danger icon={<DeleteOutlined />} onClick={() => onChange?.('')}>
+            删除图片
+          </Button>
+        </Space>
+      ) : null}
     </Space>
   );
 }

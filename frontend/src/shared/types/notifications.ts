@@ -10,6 +10,7 @@ export interface NotificationItem {
   createdAt: string;
   targetType?: string;
   targetId?: string | number;
+  portType?: string;
   routeHint?: string;
 }
 

@@ -48,6 +48,7 @@ export class CollaborationTasksController {
         status,
         leadId,
         userId,
+        employeeId: session?.employeeId || '',
         limit: Number(limit) || 20,
         offset: Number(offset) || 0,
       });
@@ -58,6 +59,7 @@ export class CollaborationTasksController {
       status,
       leadId,
       userId,
+      employeeId: session?.employeeId || '',
     });
     return res.json(rows);
   }
@@ -82,9 +84,13 @@ export class CollaborationTasksController {
   @Patch(':id/handle')
   async handle(@Param('id') id: string, @Body() body: any, @Req() req: Request, @Res() res: Response) {
     const session = (req as any).session;
-    const handlerId = session?.userId || session?.id || body.actorUserId || '';
+    const actorUserId = session?.userId || session?.id || body.actorUserId || '';
     try {
-      const task = await this.service.handle(id, body.handledNote || body.result || '', handlerId);
+      const task = await this.service.handle(id, body.handledNote || body.result || '', {
+        actorUserId,
+        actorEmployeeId: session?.employeeId || '',
+        actorRole: session?.role || '',
+      });
       if (!task) return res.status(404).json({ ok: false, message: 'not found' });
       return res.json({ ok: true, task });
     } catch (err: any) {

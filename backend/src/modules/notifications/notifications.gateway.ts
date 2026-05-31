@@ -5,6 +5,7 @@ import {
   WebSocketGateway,
   WebSocketServer,
 } from '@nestjs/websockets';
+import { JwtService } from '@nestjs/jwt';
 import { Server, Socket } from 'socket.io';
 
 @WebSocketGateway({
@@ -15,19 +16,46 @@ export class NotificationsGateway implements OnGatewayConnection, OnGatewayDisco
   @WebSocketServer()
   server: Server;
 
+  constructor(private readonly jwtService?: JwtService) {}
+
   handleConnection(client: Socket) {
-    const userId = this.getUserId(client);
+    let userId = '';
+    try {
+      userId = this.resolveUserId(client);
+    } catch (_err) {
+      userId = '';
+    }
     if (userId) {
+      client.data = client.data || {};
+      client.data.userId = userId;
       client.join(this.room(userId));
       client.emit('notification.connected', { ok: true, userId });
+      client.emit('notification:connected', { ok: true, userId });
+      return;
     }
+    client.emit('notification:error', { message: '登录状态已失效，请重新登录' });
+    client.disconnect(true);
   }
 
   handleDisconnect(_client: Socket) {}
 
   @SubscribeMessage('notification.subscribe')
   subscribe(client: Socket, payload: any) {
-    const userId = String(payload?.userId || this.getUserId(client) || '').trim();
+    return this.subscribeUser(client, payload);
+  }
+
+  @SubscribeMessage('notification:subscribe')
+  subscribeLegacy(client: Socket, payload: any) {
+    return this.subscribeUser(client, payload);
+  }
+
+  @SubscribeMessage('notification:ping')
+  handlePing() {
+    return { ok: true, event: 'notification:pong' };
+  }
+
+  private subscribeUser(client: Socket, payload: any) {
+    const userId = String(payload?.userId || client.data?.userId || this.getUserId(client) || '').trim();
     if (!userId) return { ok: false };
     client.join(this.room(userId));
     return { ok: true };
@@ -36,6 +64,7 @@ export class NotificationsGateway implements OnGatewayConnection, OnGatewayDisco
   emitCreated(userId: string, notification: any) {
     if (!userId || !this.server) return;
     this.server.to(this.room(userId)).emit('notification.created', notification);
+    this.server.to(this.room(userId)).emit('notification:new', notification);
   }
 
   private room(userId: string): string {
@@ -46,5 +75,20 @@ export class NotificationsGateway implements OnGatewayConnection, OnGatewayDisco
     const auth = client.handshake.auth || {};
     const query = client.handshake.query || {};
     return String(auth.userId || query.userId || '').trim();
+  }
+
+  private resolveUserId(client: Socket): string {
+    const token = this.getToken(client);
+    if (!token) return this.getUserId(client);
+    const payload = this.jwtService?.verify(token);
+    return String(payload?.sub || payload?.userId || payload?.id || '').trim();
+  }
+
+  private getToken(client: Socket): string {
+    const auth = client.handshake.auth || {};
+    const query = client.handshake.query || {};
+    const header = String(client.handshake.headers?.authorization || '');
+    const bearer = header.startsWith('Bearer ') ? header.slice(7) : '';
+    return String(auth.token || query.token || bearer || '').trim();
   }
 }

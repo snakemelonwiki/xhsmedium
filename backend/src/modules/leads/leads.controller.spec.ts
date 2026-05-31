@@ -36,6 +36,7 @@ describe('LeadsController', () => {
 
   it('updates sales status through PATCH /leads/:id/status', async () => {
     const leadsService = {
+      canAccessLead: jest.fn().mockResolvedValue(true),
       updateSalesStatus: jest.fn().mockResolvedValue({ id: 'lead-1', addStatus: 'added', status: 'added_success' }),
     } as any;
     const controller = new LeadsController(leadsService, {} as any);
@@ -63,7 +64,10 @@ describe('LeadsController', () => {
     const collaborationTasksService = {
       create: jest.fn().mockResolvedValue({ id: 'task-1', leadId: 'lead-1' }),
     } as any;
-    const controller = new LeadsController({} as any, collaborationTasksService);
+    const leadsService = {
+      canAccessLead: jest.fn().mockResolvedValue(true),
+    } as any;
+    const controller = new LeadsController(leadsService, collaborationTasksService);
     const res = response();
 
     await controller.createCollaboration(

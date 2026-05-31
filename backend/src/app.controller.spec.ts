@@ -15,8 +15,8 @@ describe('AppController', () => {
   });
 
   describe('root', () => {
-    it('should return "Hello World!"', () => {
-      expect(appController.getHello()).toBe('Hello World!');
+    it('returns backend health text', () => {
+      expect(appController.getHello()).toBe('运营中台 NestJS 后端已启动');
     });
   });
 });

@@ -50,40 +50,35 @@ describe('PostsController pagination', () => {
 
   it('默认按 20 条分页返回作品列表', async () => {
     const postsService = {
-      findAllPage: jest.fn().mockResolvedValue({ total: 21, items: [{ id: 'post-1' }] }),
+      findPaged: jest.fn().mockResolvedValue({ total: 21, items: [{ id: 'post-1' }], limit: 20, offset: 0 }),
     } as any;
     const controller = new PostsController(postsService, {} as any);
     const res = response();
 
-    await controller.findAll({ session: { role: 'admin', userId: '' }, query: {} } as any, res);
+    await controller.findAll({ session: { role: 'admin', userId: '' } } as any, res, '20', '0');
 
-    expect(postsService.findAllPage).toHaveBeenCalledWith({ limit: 20, offset: 0 });
-    expect(res.json).toHaveBeenCalledWith({ total: 21, items: [{ id: 'post-1' }] });
-  });
-
-  it('支持 page/pageSize 查询参数', async () => {
-    const postsService = {
-      findAllWithFavoritePage: jest.fn().mockResolvedValue({ total: 100, items: [{ id: 'post-21' }] }),
-    } as any;
-    const controller = new PostsController(postsService, {} as any);
-    const res = response();
-
-    await controller.findAll({ session: { role: 'admin', userId: 'user-1' }, query: { page: '2', pageSize: '20' } } as any, res);
-
-    expect(postsService.findAllWithFavoritePage).toHaveBeenCalledWith('user-1', { limit: 20, offset: 20 });
-    expect(res.json).toHaveBeenCalledWith({ total: 100, items: [{ id: 'post-21' }] });
+    expect(postsService.findPaged).toHaveBeenCalledWith(
+      expect.objectContaining({}),
+      20,
+      0,
+    );
+    expect(res.json).toHaveBeenCalledWith({ total: 21, items: [{ id: 'post-1' }], limit: 20, offset: 0 });
   });
 
   it('支持 limit/offset 查询参数', async () => {
     const postsService = {
-      findByEmployeePage: jest.fn().mockResolvedValue({ total: 30, items: [{ id: 'post-11' }] }),
+      findPaged: jest.fn().mockResolvedValue({ total: 30, items: [{ id: 'post-11' }], limit: 10, offset: 10 }),
     } as any;
     const controller = new PostsController(postsService, {} as any);
     const res = response();
 
-    await controller.findAll({ session: { role: 'staff', employeeId: 'emp-1', userId: '' }, query: { limit: '10', offset: '10' } } as any, res);
+    await controller.findAll({ session: { role: 'staff', employeeId: 'emp-1', userId: '' } } as any, res, '10', '10');
 
-    expect(postsService.findByEmployeePage).toHaveBeenCalledWith('emp-1', { limit: 10, offset: 10 });
-    expect(res.json).toHaveBeenCalledWith({ total: 30, items: [{ id: 'post-11' }] });
+    expect(postsService.findPaged).toHaveBeenCalledWith(
+      expect.objectContaining({ employeeId: 'emp-1' }),
+      10,
+      10,
+    );
+    expect(res.json).toHaveBeenCalledWith({ total: 30, items: [{ id: 'post-11' }], limit: 10, offset: 10 });
   });
 });

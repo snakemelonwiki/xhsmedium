@@ -20,7 +20,11 @@ describe('PostsController refresh metrics', () => {
 
     expect(response.json).toHaveBeenCalledWith({
       ok: true,
-      results: [expect.objectContaining({ id: 'post-1', success: false, message: '登录已失效' })],
+      scoped: false,
+      requested: 1,
+      refreshed: 0,
+      failed: 1,
+      results: [expect.objectContaining({ id: 'post-1', success: false, reason: '登录已失效' })],
     });
   });
 });
