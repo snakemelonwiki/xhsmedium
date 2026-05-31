@@ -64,6 +64,20 @@ chmod +x start.sh
    cd backend && npm install && cd ..
    ```
 
+   如果需要使用小红书 / 抖音抓取、作品数据刷新、打开平台登录浏览器等 Playwright 功能，还需要在项目根目录安装浏览器内核：
+
+   ```bash
+   npm run install:browsers
+   ```
+
+   该命令会把 Chromium 下载到当前机器的 Playwright 缓存目录，不会写入仓库，也不需要提交浏览器文件。
+
+   Linux 服务器也执行同一个命令；首次部署如果缺少系统运行库，可改用：
+
+   ```bash
+   npx playwright install --with-deps chromium
+   ```
+
 4. **初始化数据库 schema** ——
 
    ```bash
@@ -79,6 +93,7 @@ chmod +x start.sh
 | 命令 | 作用 |
 | --- | --- |
 | `npm start` | 同时启动 legacy proxy + NestJS |
+| `npm run install:browsers` | 安装 Playwright Chromium，用于小红书 / 抖音抓取与作品数据刷新 |
 | `node scripts/run-migrations.js` | 应用未执行的 migrations |
 | `node scripts/run-migrations.js --status` | 查看迁移状态 |
 | `node scripts/run-migrations.js --down=M2__leads_backfill` | 回滚指定迁移 |
@@ -122,3 +137,6 @@ A：密码加密用的是 bcrypt，明文校验已废弃。建议通过 NestJS �
 
 **Q：迁移卡住或报错？**
 A：先 `node scripts/run-migrations.js --status` 看进度，再参考 `migrations/README.md` 的"故障排查"段落。
+
+**Q：刷新作品数据时报 Playwright 浏览器不存在？**
+A：在项目根目录执行 `npm run install:browsers`。Linux 服务器如果还提示缺少依赖库，执行 `npx playwright install --with-deps chromium`。

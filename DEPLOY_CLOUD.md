@@ -53,6 +53,20 @@ bash deploy/package-code-only.sh
 npm install
 ```
 
+如果服务器需要使用小红书 / 抖音抓取、作品数据刷新、打开平台登录浏览器等 Playwright 功能，还要安装 Chromium：
+
+```bash
+npm run install:browsers
+```
+
+Linux 首次部署如果提示缺少浏览器系统依赖，执行：
+
+```bash
+npx playwright install --with-deps chromium
+```
+
+该命令只安装到服务器本机缓存，不需要也不应该把浏览器文件提交到 Git。
+
 ## 五、配置 MySQL
 
 ### 1. 创建数据库

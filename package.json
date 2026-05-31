@@ -10,6 +10,7 @@
     "start:legacy": "node server.js",
     "start:backend": "cd backend && npm run start:dev",
     "debug:link": "node scripts/debug-link.js",
+    "install:browsers": "playwright install chromium",
     "install:all": "npm install && cd backend && npm install"
   },
   "dependencies": {
