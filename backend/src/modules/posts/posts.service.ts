@@ -17,6 +17,14 @@ interface PostListFilters {
   sort?: string;
 }
 
+interface PlazaFilters {
+  view: 'all' | 'excellent' | 'favorites';
+  platform?: string;
+  postType?: string;
+  employeeId?: string;
+  userId?: string;
+}
+
 @Injectable()
 export class PostsService {
   constructor(
@@ -88,6 +96,68 @@ export class PostsService {
 
   async findByEmployeePaged(employeeId: string, limit: number, offset: number): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
     return this.findPaged({ employeeId }, limit, offset);
+  }
+
+  async findPlaza(filters: PlazaFilters): Promise<any[]> {
+    const params: any[] = [filters.userId || ''];
+    const whereParts = ['1=1'];
+
+    if (filters.platform) {
+      whereParts.push('p.platform = ?');
+      params.push(filters.platform);
+    }
+    if (filters.postType) {
+      whereParts.push('p.post_type = ?');
+      params.push(filters.postType);
+    }
+    if (filters.employeeId) {
+      whereParts.push('p.employee_id = ?');
+      params.push(filters.employeeId);
+    }
+
+    let favoriteJoin = '';
+    if (filters.view === 'favorites') {
+      favoriteJoin = `
+        INNER JOIN favorites fav_join
+          ON fav_join.target_type = 'post'
+         AND fav_join.target_id = p.id COLLATE utf8mb4_unicode_ci
+         AND fav_join.user_id = ?
+      `;
+      params.push(filters.userId || '');
+    }
+
+    const havingClause = filters.view === 'excellent' ? 'HAVING leads_count >= 5' : '';
+    const sql = `
+      SELECT
+        p.id, p.employee_id, p.account_id, p.platform, p.title, p.copywriting,
+        p.cover_image_url, p.post_url, p.post_type, p.traffic,
+        p.likes, p.comments, p.favorites, p.shares,
+        p.metrics_updated_at, p.published_at, p.note, p.supervisor_suggestion,
+        p.created_at, p.updated_at,
+        e.name AS employee_name,
+        a.account_name,
+        (SELECT COUNT(*) FROM leads l WHERE l.post_id = p.id) AS leads_count,
+        (SELECT COUNT(*) FROM favorites fav_total
+          WHERE fav_total.target_type = 'post'
+            AND fav_total.target_id = p.id COLLATE utf8mb4_unicode_ci
+        ) AS favorite_count,
+        EXISTS(
+          SELECT 1 FROM favorites fav
+          WHERE fav.target_type = 'post'
+            AND fav.target_id = p.id COLLATE utf8mb4_unicode_ci
+            AND fav.user_id = ?
+        ) AS is_favorited
+      FROM posts p
+      LEFT JOIN employees e ON e.id = p.employee_id
+      LEFT JOIN accounts a ON a.id = p.account_id
+      ${favoriteJoin}
+      WHERE ${whereParts.join(' AND ')}
+      ${havingClause}
+      ORDER BY leads_count DESC, p.likes DESC, p.published_at DESC, p.created_at DESC
+    `;
+
+    const rows = await this.postRepository.query(sql, params);
+    return (rows as any[]).map((row) => this.mapPostRow(row));
   }
 
   private clampLimit(limit: number): number {
@@ -181,6 +251,36 @@ export class PostsService {
 
   async remove(id: string): Promise<void> {
     await this.postRepository.delete(id);
+  }
+
+  private mapPostRow(row: any): any {
+    return {
+      id: row.id,
+      employeeId: row.employee_id,
+      employeeName: row.employee_name || '',
+      accountId: row.account_id,
+      accountName: row.account_name || '',
+      platform: row.platform,
+      title: row.title,
+      copywriting: row.copywriting || '',
+      coverImageUrl: row.cover_image_url,
+      postUrl: row.post_url,
+      postType: normalizePostType(row.post_type),
+      traffic: normalizeTrafficByType(row.post_type, Number(row.traffic || 0)),
+      likes: Number(row.likes || 0),
+      comments: Number(row.comments || 0),
+      favorites: Number(row.favorites || 0),
+      shares: Number(row.shares || 0),
+      metricsUpdatedAt: row.metrics_updated_at,
+      publishedAt: row.published_at,
+      note: row.note,
+      supervisorSuggestion: row.supervisor_suggestion || '',
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      leadsCount: Number(row.leads_count || 0),
+      favoriteCount: Number(row.favorite_count || 0),
+      isFavorited: Number(row.is_favorited || 0) === 1,
+    };
   }
 
   private mapPost(row: Post): any {

@@ -35,6 +35,10 @@ const state = {
   postMonitorWeek: getCurrentWeekString(),
   postMonitorMode: "day",
   postMonitorSort: "time",
+  postBatchRefreshFailures: [],
+  postBulkImportOpen: false,
+  postBulkImportRaw: "",
+  postBulkImportResult: null,
   leadMonitorDate: new Date().toLocaleDateString("en-CA"),
   leadMonitorWeek: getCurrentWeekString(),
   leadMonitorMode: "day",
@@ -43,9 +47,15 @@ const state = {
   staffGalleryWeek: getCurrentWeekString(),
   staffGalleryMode: "week",
   staffGalleryScope: "all",
+  plazaView: "all",
+  plazaPosts: [],
   staffGalleryPlatformFilter: "",
   staffGalleryTypeFilter: "",
   staffGalleryEmployeeFilter: "",
+  staffGalleryAccountFilter: "",
+  staffGalleryMinLeadsFilter: "",
+  staffGalleryMinLikesFilter: "",
+  staffGallerySort: "score",
   staffRankingsDate: new Date().toLocaleDateString("en-CA"),
   staffRankingsMonth: new Date().toLocaleDateString("en-CA").slice(0, 7),
   staffRankingsWeek: getCurrentWeekString(),
@@ -316,6 +326,4 @@ async function toggleStaffLearningPost(postId) {
   setFlash("success", isSaved ? "已加入学习清单" : "已移出学习清单", isSaved ? "这条作品已经加入学习清单，后面可以反复回看。" : "这条作品已经从你的学习清单里移除。");
   renderApp();
 }
-
-
 

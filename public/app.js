@@ -14,6 +14,7 @@ function renderApp() {
     ["dashboard", "总览"],
     ["personal-board", "个人看板"],
     ["posts", "作品看板"],
+    ["staff-gallery", "作品广场"],
     ["account-viz", "分析看板"],
     ["leads", "客资看板"],
     ["orders", "订单看板"],
@@ -27,6 +28,7 @@ function renderApp() {
   const staffViews = [
     ["staff-rankings", "运营排行榜"],
     ["personal-board", "个人看板"],
+    ["staff-gallery", "作品广场"],
     ["post-entry", "作品录入"],
     ["staff-leads-board", "客资看板"],
     ["lead-entry", "客资录入"],
@@ -123,7 +125,7 @@ function renderApp() {
   `;
 
   document.querySelectorAll("[data-view]").forEach((button) => {
-    button.addEventListener("click", () => {
+    button.addEventListener("click", async () => {
       // T-17: 切换视图时取消未完成请求，避免旧页面请求影响新页面
       if (typeof abortAllPendingRequests === "function") abortAllPendingRequests();
       state.currentView = button.dataset.view;
@@ -131,6 +133,9 @@ function renderApp() {
       if (button.dataset.view === "sales-collabs" || button.dataset.view === "lead-collabs") {
         state.collabTasks = null;
         state.collabTasksLoading = false;
+      }
+      if (button.dataset.view === "staff-gallery" && typeof loadPlazaPosts === "function") {
+        await loadPlazaPosts(state.plazaView || "all");
       }
       renderApp();
     });
@@ -270,6 +275,8 @@ function renderCurrentView() {
         return renderPersonalBoard();
       case "posts":
         return renderPostsMonitor();
+      case "staff-gallery":
+        return renderPostsGallery();
       case "account-viz":
         return renderAccountVisualization();
       case "leads":
@@ -332,6 +339,8 @@ function renderCurrentView() {
       return renderStaffRankings();
     case "personal-board":
       return renderStaffPersonalBoard();
+    case "staff-gallery":
+      return renderPostsGallery();
     case "post-entry":
       return renderPostEntry();
     case "staff-leads-board":
@@ -672,8 +681,11 @@ function bindViewEvents() {
     state.staffGalleryMonth = event.target.value;
     renderApp();
   });
-  document.getElementById("staffGalleryScopeInput")?.addEventListener("change", (event) => {
+  document.getElementById("staffGalleryScopeInput")?.addEventListener("change", async (event) => {
     state.staffGalleryScope = event.target.value;
+    if (event.target.value === "favorites" && typeof loadPlazaPosts === "function") {
+      await loadPlazaPosts("favorites");
+    }
     renderApp();
   });
   document.getElementById("staffGalleryPlatformFilter")?.addEventListener("change", (event) => {
@@ -686,6 +698,22 @@ function bindViewEvents() {
   });
   document.getElementById("staffGalleryEmployeeFilter")?.addEventListener("change", (event) => {
     state.staffGalleryEmployeeFilter = event.target.value;
+    renderApp();
+  });
+  document.getElementById("staffGalleryAccountFilter")?.addEventListener("change", (event) => {
+    state.staffGalleryAccountFilter = event.target.value;
+    renderApp();
+  });
+  document.getElementById("staffGalleryMinLeadsFilter")?.addEventListener("input", (event) => {
+    state.staffGalleryMinLeadsFilter = event.target.value;
+    renderApp();
+  });
+  document.getElementById("staffGalleryMinLikesFilter")?.addEventListener("input", (event) => {
+    state.staffGalleryMinLikesFilter = event.target.value;
+    renderApp();
+  });
+  document.getElementById("staffGallerySort")?.addEventListener("change", (event) => {
+    state.staffGallerySort = event.target.value;
     renderApp();
   });
   document.getElementById("staffRankingsModeInput")?.addEventListener("change", (event) => {
@@ -866,11 +894,45 @@ function bindViewEvents() {
   document.querySelectorAll(".js-edit-post").forEach((el) => el.addEventListener("click", () => { clearPendingPostCover(); state.editingPostId = el.dataset.id; state.currentView = state.user.role === "admin" ? "posts" : "post-entry"; renderApp(); }));
   document.querySelectorAll(".js-delete-post").forEach((el) => el.addEventListener("click", () => deletePost(el.dataset.id)));
   document.querySelectorAll(".js-save-post-suggestion").forEach((el) => el.addEventListener("click", () => savePostSuggestion(el.dataset.id)));
+  document.querySelectorAll(".js-plaza-view-switch").forEach((el) => el.addEventListener("click", async () => {
+    const view = el.dataset.plazaView || "all";
+    state.plazaView = view;
+    if (typeof loadPlazaPosts === "function") {
+      await loadPlazaPosts(view);
+    }
+    renderApp();
+  }));
+  document.querySelectorAll(".js-toggle-favorite-post").forEach((el) => el.addEventListener("click", () => toggleFavoritePost(el)));
   document.getElementById("rollbackSnapshotDateInput")?.addEventListener("change", (event) => {
     state.rollbackSnapshotDate = event.target.value;
   });
   document.getElementById("refreshScopedMetricsBtn")?.addEventListener("click", refreshScopedMetrics);
   document.getElementById("rollbackScopedMetricsBtn")?.addEventListener("click", rollbackScopedMetrics);
+  document.querySelectorAll(".js-refresh-post-metrics").forEach((el) => el.addEventListener("click", () => handleRefreshPostMetricsClick(el)));
+  document.getElementById("batchRefreshFilteredPostsBtn")?.addEventListener("click", handleBatchRefreshFilteredPosts);
+  document.querySelector(".js-retry-failed-post-refresh")?.addEventListener("click", retryFailedPostRefreshes);
+  document.querySelector(".js-clear-post-refresh-failures")?.addEventListener("click", () => {
+    state.postBatchRefreshFailures = [];
+    renderApp();
+  });
+  document.getElementById("openPostBulkImportBtn")?.addEventListener("click", () => {
+    state.postBulkImportOpen = true;
+    state.postBulkImportRaw = "";
+    state.postBulkImportResult = null;
+    renderApp();
+  });
+  document.getElementById("postBulkImportSubmitBtn")?.addEventListener("click", submitPostBulkImport);
+  document.getElementById("postBulkImportFileSubmitBtn")?.addEventListener("click", submitPostBulkImportFile);
+  document.getElementById("postBulkImportCloseBtn")?.addEventListener("click", closePostBulkImportDialog);
+  document.querySelectorAll(".js-close-post-bulk-import").forEach((el) => el.addEventListener("click", closePostBulkImportDialog));
+  document.querySelectorAll(".js-post-bulk-delimiter").forEach((el) => {
+    el.addEventListener("change", () => {
+      document.querySelectorAll(".js-post-bulk-delimiter").forEach((item) => {
+        if (item !== el) item.checked = false;
+      });
+      el.checked = true;
+    });
+  });
   document.querySelectorAll(".js-edit-lead").forEach((el) => el.addEventListener("click", () => { clearPendingLeadCapture(); state.editingLeadId = el.dataset.id; state.currentView = state.user.role === "admin" ? "leads" : state.user.role === "sales" ? "sales-leads" : "lead-entry"; renderApp(); }));
   document.querySelectorAll(".js-edit-followup").forEach((el) => el.addEventListener("click", () => {
     clearPendingLeadCapture();
@@ -958,7 +1020,7 @@ function bindViewEvents() {
     button.addEventListener("click", () => {
       state.staffGalleryEmployeeFilter = button.dataset.owner || "";
       state.staffGalleryScope = "all";
-      state.currentView = "gallery";
+      state.currentView = "staff-gallery";
       renderApp();
     });
   });

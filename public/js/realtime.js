@@ -1,17 +1,17 @@
 // realtime.js — Socket.IO notification bridge
-let notificationSocket = null;
+window.notificationSocket = window.notificationSocket || null;
 
 function initNotificationSocket() {
   if (!state.user?.id || typeof io !== "function") return;
-  if (notificationSocket) {
-    notificationSocket.disconnect();
-    notificationSocket = null;
+  if (window.notificationSocket) {
+    window.notificationSocket.disconnect();
+    window.notificationSocket = null;
   }
   const wsPort = window.location.port === "3002" || window.location.port === "3003"
     ? "8090"
     : (window.location.port === "3000" || window.location.port === "3001" ? "8089" : window.location.port);
   const socketOrigin = `${window.location.protocol}//${window.location.hostname}${wsPort ? `:${wsPort}` : ""}`;
-  notificationSocket = io(`${socketOrigin}/notifications`, {
+  const notificationSocket = io(`${socketOrigin}/notifications`, {
     auth: { userId: state.user.id },
     query: { userId: state.user.id },
     transports: ["websocket", "polling"],
@@ -35,9 +35,8 @@ function initNotificationSocket() {
 	}
 
 function closeNotificationSocket() {
-  if (!notificationSocket) return;
-  notificationSocket.disconnect();
-  notificationSocket = null;
+  if (!window.notificationSocket) return;
+  window.notificationSocket.disconnect();
 	window.notificationSocket = null;
 }
 

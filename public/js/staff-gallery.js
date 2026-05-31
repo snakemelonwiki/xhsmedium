@@ -91,6 +91,8 @@ function leadMatchesPost(lead, post) {
 }
 
 function getLeadCountForPost(post, leadPool = getStaffTeamLeads()) {
+  if (post && post.leadsCount !== undefined && post.leadsCount !== null) return Number(post.leadsCount || 0);
+  if (post && post.leadCount !== undefined && post.leadCount !== null) return Number(post.leadCount || 0);
   return leadPool.filter((item) => leadMatchesPost(item, post)).length;
 }
 
@@ -665,18 +667,12 @@ async function toggleFavoritePost(button) {
   const originalText = button.textContent;
   button.textContent = favored ? "取消中…" : "收藏中…";
   try {
-    if (favored) {
-      // 取消收藏：DELETE /api/favorites/post/:id
-      await api(`/api/favorites/post/${encodeURIComponent(id)}`, { method: "DELETE" });
-    } else {
-      // 新增收藏：POST /api/favorites { targetType, targetId }
-      await api("/api/favorites", {
-        method: "POST",
-        body: JSON.stringify({ targetType: "post", targetId: id })
-      });
-    }
+    const result = await api("/api/favorites/toggle", {
+      method: "POST",
+      body: JSON.stringify({ targetType: "post", targetId: id })
+    });
     // 同步更新三个数据源里的 isFavorited，避免下次渲染状态不一致
-    const nextFavored = !favored;
+    const nextFavored = result?.favorited !== undefined ? Boolean(result.favorited) : !favored;
     const syncFavorited = (rows) => {
       if (!Array.isArray(rows)) return;
       rows.forEach((post) => {

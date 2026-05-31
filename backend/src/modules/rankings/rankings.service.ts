@@ -1,8 +1,11 @@
 import { Injectable } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { Post } from '../../entities/post.entity';
 import { DashboardService } from '../dashboard/dashboard.service';
 import { PostsService } from '../posts/posts.service';
 import { LeadsService } from '../leads/leads.service';
-import { normalizePostType } from '../../shared/utils/normalize';
+import { normalizePostType, normalizeTrafficByType } from '../../shared/utils/normalize';
 
 @Injectable()
 export class RankingsService {
@@ -10,6 +13,8 @@ export class RankingsService {
     private readonly dashboardService: DashboardService,
     private readonly postsService: PostsService,
     private readonly leadsService: LeadsService,
+    @InjectRepository(Post)
+    private readonly postRepository: Repository<Post>,
   ) {}
 
   async getRankings(type: string, date: string): Promise<any[]> {
@@ -58,26 +63,55 @@ export class RankingsService {
     return { items, total, limit, offset };
   }
 
-  async getLearningPosts(days: number = 7, _userId = ''): Promise<any[]> {
-    const posts = await this.postsService.findAll();
-    const leads = await this.leadsService.findAll();
+  async getLearningPosts(days: number = 7, userId = ''): Promise<any[]> {
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - days);
+    const cutoffStr = cutoff.toISOString().slice(0, 10);
 
-    const leadCountByPost: Record<string, number> = {};
-    for (const lead of leads) {
-      if (lead.postId) {
-        leadCountByPost[lead.postId] = (leadCountByPost[lead.postId] || 0) + 1;
-      }
-    }
+    const sql = `
+      SELECT
+        p.id, p.employee_id, p.account_id, p.platform, p.title, p.copywriting,
+        p.cover_image_url, p.post_url, p.post_type, p.traffic,
+        p.likes, p.comments, p.favorites, p.shares,
+        p.metrics_updated_at, p.published_at,
+        p.created_at, p.updated_at,
+        (SELECT COUNT(*) FROM leads l WHERE l.post_id = p.id) AS leads_count,
+        EXISTS(
+          SELECT 1 FROM favorites fav
+          WHERE fav.target_type = 'post'
+            AND fav.target_id = p.id COLLATE utf8mb4_unicode_ci
+            AND fav.user_id = ?
+        ) AS is_favorited
+      FROM posts p
+      WHERE p.published_at >= ?
+      HAVING leads_count >= 1
+      ORDER BY leads_count DESC, p.likes DESC, p.published_at DESC, p.created_at DESC
+      LIMIT 10
+    `;
 
-    return posts
-      .filter((p) => new Date(p.publishedAt) >= cutoff)
-      .map((p) => ({
-        ...p,
-        leadCount: leadCountByPost[p.id] || 0,
-      }))
-      .sort((a, b) => b.leadCount - a.leadCount || b.likes - a.likes)
-      .slice(0, 10);
+    const rows = await this.postRepository.query(sql, [userId || '', cutoffStr]);
+    return (rows as any[]).map((row) => ({
+      id: row.id,
+      employeeId: row.employee_id,
+      accountId: row.account_id,
+      platform: row.platform,
+      title: row.title,
+      copywriting: row.copywriting || '',
+      coverImageUrl: row.cover_image_url,
+      postUrl: row.post_url,
+      postType: normalizePostType(row.post_type),
+      traffic: normalizeTrafficByType(row.post_type, Number(row.traffic || 0)),
+      likes: Number(row.likes || 0),
+      comments: Number(row.comments || 0),
+      favorites: Number(row.favorites || 0),
+      shares: Number(row.shares || 0),
+      metricsUpdatedAt: row.metrics_updated_at,
+      publishedAt: row.published_at,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      leadCount: Number(row.leads_count || 0),
+      leadsCount: Number(row.leads_count || 0),
+      isFavorited: Number(row.is_favorited || 0) === 1,
+    }));
   }
 }

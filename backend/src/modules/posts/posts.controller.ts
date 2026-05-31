@@ -71,6 +71,40 @@ export class PostsController {
     return res.json(rows);
   }
 
+  /**
+   * 作品广场：
+   * - staff 强制只看优秀作品（获客数 >= 5）
+   * - admin/owner 可切换 all/excellent/favorites
+   * 返回字段包含 leadsCount、favoriteCount、isFavorited。
+   */
+  @Get('plaza')
+  async findPlaza(
+    @Req() req: Request,
+    @Res() res: Response,
+    @Query('view') view?: string,
+    @Query('platform') platform?: string,
+    @Query('postType') postType?: string,
+    @Query('employeeId') employeeId?: string,
+  ) {
+    const session = (req as any).session;
+    const role = session?.role || '';
+    const userId = session?.userId || session?.id || '';
+    const allowedViews = new Set(['all', 'excellent', 'favorites']);
+    const requestedView = allowedViews.has(String(view || '').toLowerCase())
+      ? String(view || '').toLowerCase()
+      : 'all';
+    const effectiveView = role === 'staff' ? 'excellent' : requestedView;
+
+    const rows = await this.postsService.findPlaza({
+      view: effectiveView as 'all' | 'excellent' | 'favorites',
+      platform: platform || undefined,
+      postType: postType || undefined,
+      employeeId: employeeId || undefined,
+      userId,
+    });
+    return res.json({ ok: true, view: effectiveView, rows });
+  }
+
   @Post()
   @UseGuards(DebounceGuard)
   async create(@Body() body: any, @Req() req: Request, @Res() res: Response) {
