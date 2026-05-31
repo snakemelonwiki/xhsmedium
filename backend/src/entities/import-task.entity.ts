@@ -2,9 +2,10 @@ import {
   Entity, PrimaryColumn, Column, CreateDateColumn, Index,
 } from 'typeorm';
 
+// 映射 #7 导入记录核心字段；DDL 中 user_name / error_detail / source / deleted / update_time
+// 由数据库默认值维护，当前业务路径不写入。
 @Entity('import_tasks')
 @Index('idx_import_user_id', ['userId'])
-@Index('idx_import_status', ['status'])
 export class ImportTask {
   @PrimaryColumn({ length: 64 })
   id: string;
@@ -24,13 +25,13 @@ export class ImportTask {
   @Column({ name: 'fail_count', type: 'int', default: 0 })
   failCount: number;
 
-  @Column({ name: 'error_file_url', length: 500, nullable: true })
-  errorFileUrl: string | null;
-
   @Column({ length: 32, default: 'processing' })
   status: string;
 
-  @CreateDateColumn({ name: 'created_at' })
+  @Column({ name: 'error_file_url', length: 500, nullable: true })
+  errorFileUrl: string | null;
+
+  @CreateDateColumn({ name: 'create_time' })
   createdAt: Date;
 
   @Column({ name: 'finished_at', type: 'datetime', nullable: true })

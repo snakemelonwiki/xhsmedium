@@ -58,7 +58,7 @@ export class RankingsService {
     return { items, total, limit, offset };
   }
 
-  async getLearningPosts(days: number = 7): Promise<any[]> {
+  async getLearningPosts(days: number = 7, _userId = ''): Promise<any[]> {
     const posts = await this.postsService.findAll();
     const leads = await this.leadsService.findAll();
     const cutoff = new Date();
