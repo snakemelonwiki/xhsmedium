@@ -15,6 +15,8 @@ export class RankingsController {
     @Query('date') date?: string,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
+    @Query('platform') platform?: string,
+    @Query('period') period?: string,
   ) {
     const session = (req as any).session;
     const targetDate = date || todayString();
@@ -25,10 +27,11 @@ export class RankingsController {
         targetDate,
         Number(limit) || 20,
         Number(offset) || 0,
+        { platform, period },
       );
       return res.json(result);
     }
-    const rows = await this.rankingsService.getRankings(type || 'posts', targetDate);
+    const rows = await this.rankingsService.getRankings(type || 'posts', targetDate, { platform, period });
     return res.json(rows);
   }
 

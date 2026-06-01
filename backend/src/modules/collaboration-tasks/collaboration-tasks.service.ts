@@ -45,6 +45,7 @@ interface ListQuery {
   leadId?: string;
   userId?: string;
   employeeId?: string;
+  role?: string;
 }
 
 @Injectable()
@@ -137,11 +138,33 @@ export class CollaborationTasksService {
 
   async list(query: ListQuery): Promise<any[]> {
     const qb = this.repo.createQueryBuilder('t');
+    this.applyCollabScope(qb, query);
+    if (query.status) {
+      qb.andWhere('t.status = :status', { status: query.status });
+    }
+    if (query.leadId) {
+      qb.andWhere('t.lead_id = :leadId', { leadId: query.leadId });
+    }
+    qb.orderBy('t.requested_at', 'DESC');
+    const rows = await qb.getMany();
+    return this.mapTasks(rows);
+  }
 
-    const scope = this.normalizeScope(query.scope);
-    if (scope === 'mine') {
-      qb.andWhere('t.requester_id = :uid', { uid: query.userId || '' });
-    } else if (scope === 'inbox') {
+  /**
+   * 协同任务可见性过滤，list/listPaged 共用：
+   * - admin/owner + scope=all → 不过滤
+   * - 其它角色 scope=all → 强制降级 mine（避免越权读全表）
+   * - scope=mine：自己发起的
+   * - scope=inbox：自己被指派 或 来源运营负责池中待处理
+   * - 默认（无 scope / 未知 scope）→ mine
+   */
+  private applyCollabScope(qb: any, query: ListQuery): void {
+    const rawScope = this.normalizeScope(query.scope);
+    const role = query.role || '';
+    const isAdminLike = role === 'admin' || role === 'owner';
+    const effectiveScope = rawScope === 'all' && !isAdminLike ? 'mine' : rawScope;
+    if (effectiveScope === 'all') return;
+    if (effectiveScope === 'inbox') {
       qb.leftJoin(Lead, 'l', 'l.id = t.lead_id');
       qb.andWhere(
         '(t.handler_id = :uid OR (t.status = :pendingStatus AND l.employee_id = :employeeId))',
@@ -151,18 +174,10 @@ export class CollaborationTasksService {
           employeeId: query.employeeId || '',
         },
       );
+      return;
     }
-
-    if (query.status) {
-      qb.andWhere('t.status = :status', { status: query.status });
-    }
-    if (query.leadId) {
-      qb.andWhere('t.lead_id = :leadId', { leadId: query.leadId });
-    }
-
-    qb.orderBy('t.requested_at', 'DESC');
-    const rows = await qb.getMany();
-    return this.mapTasks(rows);
+    // 默认 mine
+    qb.andWhere('t.requester_id = :uid', { uid: query.userId || '' });
   }
 
   // §9 / AC-10.2 协同任务列表分页
@@ -176,21 +191,7 @@ export class CollaborationTasksService {
 
     const qb = this.repo.createQueryBuilder('t');
 
-    const scope = this.normalizeScope(query.scope);
-    if (scope === 'mine') {
-      qb.andWhere('t.requester_id = :uid', { uid: query.userId || '' });
-    } else if (scope === 'inbox') {
-      qb.leftJoin(Lead, 'l', 'l.id = t.lead_id');
-      qb.andWhere(
-        '(t.handler_id = :uid OR (t.status = :pendingStatus AND l.employee_id = :employeeId))',
-        {
-          uid: query.userId || '',
-          pendingStatus: 'pending',
-          employeeId: query.employeeId || '',
-        },
-      );
-    }
-
+    this.applyCollabScope(qb, query);
     if (query.status) {
       qb.andWhere('t.status = :status', { status: query.status });
     }
@@ -211,11 +212,15 @@ export class CollaborationTasksService {
 
   /**
    * 兼容旧前端 scope 命名，统一成后端权限语义。
+   * 重要：未识别的 scope（含空、outgoing/incoming 旧字段）一律落到 mine，避免越权回退到 all。
+   * admin/owner 想看全表必须显式传 scope=all（applyCollabScope 才会放行）。
    */
-  private normalizeScope(scope?: string): 'mine' | 'inbox' | 'all' | string {
-    if (scope === 'requester' || scope === 'sales') return 'mine';
-    if (scope === 'handler' || scope === 'operations') return 'inbox';
-    return scope || 'all';
+  private normalizeScope(scope?: string): 'mine' | 'inbox' | 'all' {
+    const raw = String(scope || '').trim().toLowerCase();
+    if (raw === 'all') return 'all';
+    if (raw === 'inbox' || raw === 'handler' || raw === 'operations' || raw === 'incoming') return 'inbox';
+    // mine / requester / sales / outgoing / 空 / 未知 → mine
+    return 'mine';
   }
 
   async claim(id: string, handlerId: string): Promise<CollaborationTask | null> {

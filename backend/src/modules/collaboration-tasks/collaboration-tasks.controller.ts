@@ -39,6 +39,7 @@ export class CollaborationTasksController {
   ) {
     const session = (req as any).session;
     const userId = session?.userId || session?.id || actorUserId || '';
+    const role = session?.role || '';
     // §9 / AC-10.2：传了 limit 或 offset 任一即视为分页请求，返回 { items, total, limit, offset }；
     //   不传任何分页参数 → 兼容旧前端：返回纯数组。
     const wantsPaging = limit !== undefined || offset !== undefined;
@@ -49,6 +50,7 @@ export class CollaborationTasksController {
         leadId,
         userId,
         employeeId: session?.employeeId || '',
+        role,
         limit: Number(limit) || 20,
         offset: Number(offset) || 0,
       });
@@ -60,6 +62,7 @@ export class CollaborationTasksController {
       leadId,
       userId,
       employeeId: session?.employeeId || '',
+      role,
     });
     return res.json(rows);
   }

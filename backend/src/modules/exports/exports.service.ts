@@ -391,8 +391,30 @@ export class ExportsService {
     if (filter.academicUserId) {
       qb.andWhere('o.academic_user_id = :au', { au: filter.academicUserId });
     }
-    if (filter.role === 'academic' && filter.currentUserId && filter.scope !== 'all') {
-      qb.andWhere('o.academic_user_id = :uid', { uid: filter.currentUserId });
+    // 角色边界（与 orders.service.list 保持一致，避免 export 越权下载）：
+    //   admin / owner + scope=all → 不加限制
+    //   academic + scope=pool       → academic_user_id IS NULL
+    //   academic + 其它/默认        → 池单 + 自己已认领
+    //   sales / 其它非 admin        → 只看自己经手的销售/教务订单
+    const role = String(filter.role || '');
+    const uid = String(filter.currentUserId || '');
+    const scope = String(filter.scope || '');
+    const isAdminLike = role === 'admin' || role === 'owner';
+    if (!(isAdminLike && (scope === 'all' || !scope))) {
+      if (role === 'academic') {
+        if (scope === 'pool') {
+          qb.andWhere('o.academic_user_id IS NULL');
+        } else if (uid) {
+          qb.andWhere('(o.academic_user_id IS NULL OR o.academic_user_id = :auid)', { auid: uid });
+        } else {
+          qb.andWhere('o.academic_user_id IS NULL');
+        }
+      } else if (uid) {
+        qb.andWhere('(o.sales_user_id = :suid OR o.academic_user_id = :suid)', { suid: uid });
+      } else {
+        // 没有 uid 又非 admin → 不返回任何行，避免泄露
+        qb.andWhere('1 = 0');
+      }
     }
     if (filter.from) qb.andWhere('o.created_at >= :from', { from: filter.from });
     if (filter.to) qb.andWhere('o.created_at < :to', { to: filter.to });

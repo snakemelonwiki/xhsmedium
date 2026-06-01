@@ -34,20 +34,7 @@ export class ImportsController {
     return res.json(result);
   }
 
-  @Get('leads/import-template.xlsx')
-  async downloadTemplate(@Res() res: Response) {
-    const BOM = '﻿';
-    const csv =
-      BOM +
-      '平台,联系方式,昵称,来源账号,备注\n' +
-      '小红书,13800138000,示例客户,运营A,客户备注示例\n';
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader(
-      'Content-Disposition',
-      'attachment; filename="leads_import_template.csv"',
-    );
-    return res.send(csv);
-  }
+  // leads/import-template.xlsx 已挪到 LeadsController（避免被 leads/:id 路由抢占）。
 
   @Post('posts/import-paste')
   async importPostsPaste(@Body() body: any, @Req() req: Request, @Res() res: Response) {
@@ -76,17 +63,7 @@ export class ImportsController {
     return res.json(result);
   }
 
-  @Get('posts/import-template.xlsx')
-  async downloadPostsTemplate(@Res() res: Response) {
-    const BOM = '﻿';
-    const csv =
-      BOM +
-      '平台,标题,作品类型,作品链接,账号ID,发布时间,文案,封面URL,流量,点赞,评论,收藏,备注\n' +
-      '小红书,示例作品,获客贴,https://example.com,,2026-05-31,示例文案,,0,0,0,0,备注\n';
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', 'attachment; filename="posts_import_template.csv"');
-    return res.send(csv);
-  }
+  // posts/import-template.xlsx 已挪到 PostsController（避免被 posts/:id 路由抢占）。
 
   @Get('import-tasks/:id')
   async getTask(@Param('id') id: string, @Res() res: Response) {

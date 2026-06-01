@@ -69,7 +69,6 @@ export function AppLayout({ role, title, children }: AppLayoutProps) {
         <Layout>
           <Header className="app-header">
             <div>
-              <Typography.Text type="secondary">当前端口</Typography.Text>
               <Typography.Title level={4}>{title}</Typography.Title>
             </div>
             <Space size={16}>

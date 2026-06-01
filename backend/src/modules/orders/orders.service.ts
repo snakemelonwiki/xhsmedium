@@ -137,32 +137,56 @@ export class OrdersService {
       qb.andWhere('o.order_status = :status', { status: options.status });
     }
 
-    const isAdminLike = options.sessionRole === 'admin' || options.sessionRole === 'owner';
-
-    if (options.role === 'academic') {
-      if (options.scope === 'all' && isAdminLike) {
-        // no extra filter
-      } else {
-        // default: mine — restrict to academic_user_id = current user
-        if (!options.currentUserId) {
-          return [];
-        }
-        qb.andWhere('o.academic_user_id = :uid', { uid: options.currentUserId });
-      }
-    } else if (!isAdminLike) {
-      // non-admin without role=academic: default to records they sold
-      if (options.currentUserId) {
-        qb.andWhere(
-          '(o.sales_user_id = :uid OR o.academic_user_id = :uid)',
-          { uid: options.currentUserId },
-        );
-      } else {
-        return [];
-      }
-    }
+    this.applyOrdersScope(qb, options);
+    if ((qb as any)._earlyReturnEmpty) return [];
 
     const rows = await qb.getMany();
     return rows.map((r) => this.mapOrder(r));
+  }
+
+  /**
+   * 统一的订单可见性过滤，list/listPaged 共用，避免两处分支漂移：
+   * - admin/owner：scope=all 看全量；其他 scope 仍受限于自己的销售/教务身份
+   * - role=academic + scope=pool          → 只看池单（academic_user_id IS NULL）
+   * - role=academic + scope=academic/mine → 池单 + 已分配给自己的单（默认教务端视角）
+   * - role=academic + scope=assigned      → 仅已分配给自己的单
+   * - role=sales 等其他角色               → 仅自己经手的销售/教务订单
+   */
+  private applyOrdersScope(qb: any, options: ListOrdersOptions): void {
+    const isAdminLike = options.sessionRole === 'admin' || options.sessionRole === 'owner';
+
+    if (isAdminLike && (options.scope === 'all' || !options.scope)) {
+      return;
+    }
+
+    if (options.role === 'academic' || options.sessionRole === 'academic') {
+      if (options.scope === 'pool') {
+        qb.andWhere('o.academic_user_id IS NULL');
+        return;
+      }
+      if (options.scope === 'assigned' || options.scope === 'mine') {
+        if (!options.currentUserId) { qb._earlyReturnEmpty = true; return; }
+        qb.andWhere('o.academic_user_id = :uid', { uid: options.currentUserId });
+        return;
+      }
+      // 默认教务视角（scope=academic 或未传）：池单 + 自己已认领
+      if (!options.currentUserId) {
+        qb.andWhere('o.academic_user_id IS NULL');
+        return;
+      }
+      qb.andWhere(
+        '(o.academic_user_id IS NULL OR o.academic_user_id = :uid)',
+        { uid: options.currentUserId },
+      );
+      return;
+    }
+
+    // 销售或未知角色：只看自己经手的销售/教务订单
+    if (!options.currentUserId) { qb._earlyReturnEmpty = true; return; }
+    qb.andWhere(
+      '(o.sales_user_id = :uid OR o.academic_user_id = :uid)',
+      { uid: options.currentUserId },
+    );
   }
 
   // §9 / AC-10.2 订单列表分页
@@ -181,26 +205,9 @@ export class OrdersService {
       qb.andWhere('o.order_status = :status', { status: options.status });
     }
 
-    const isAdminLike = options.sessionRole === 'admin' || options.sessionRole === 'owner';
-
-    if (options.role === 'academic') {
-      if (options.scope === 'all' && isAdminLike) {
-        // no extra filter
-      } else {
-        if (!options.currentUserId) {
-          return { items: [], total: 0, limit: safeLimit, offset: safeOffset };
-        }
-        qb.andWhere('o.academic_user_id = :uid', { uid: options.currentUserId });
-      }
-    } else if (!isAdminLike) {
-      if (options.currentUserId) {
-        qb.andWhere(
-          '(o.sales_user_id = :uid OR o.academic_user_id = :uid)',
-          { uid: options.currentUserId },
-        );
-      } else {
-        return { items: [], total: 0, limit: safeLimit, offset: safeOffset };
-      }
+    this.applyOrdersScope(qb, options);
+    if ((qb as any)._earlyReturnEmpty) {
+      return { items: [], total: 0, limit: safeLimit, offset: safeOffset };
     }
 
     qb.skip(safeOffset).take(safeLimit);
@@ -219,10 +226,28 @@ export class OrdersService {
     return Math.min(n, 200);
   }
 
-  async findOne(id: string): Promise<any> {
+  async findOne(
+    id: string,
+    actor?: { userId?: string; role?: string },
+  ): Promise<any> {
     const order = await this.orderRepository.findOne({ where: { id } });
     if (!order) {
       throw new NotFoundException('order not found');
+    }
+    if (actor) {
+      const role = actor.role || '';
+      const uid = actor.userId || '';
+      const isAdminLike = role === 'admin' || role === 'owner';
+      if (!isAdminLike) {
+        const canSee =
+          (role === 'sales' && order.salesUserId === uid) ||
+          (role === 'academic' && (order.academicUserId === uid || order.academicUserId == null)) ||
+          (order.salesUserId === uid || order.academicUserId === uid);
+        if (!canSee) {
+          // 不暴露 "存在但无权限"；与不存在一致返回 404
+          throw new NotFoundException('order not found');
+        }
+      }
     }
     const followRecords = await this.orderFollowRepository.find({
       where: { orderId: id },

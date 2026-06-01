@@ -13,7 +13,7 @@ export class User {
   @Column({ length: 255 })
   password: string;
 
-  @Column({ type: 'enum', enum: ['admin', 'staff', 'owner'] })
+  @Column({ type: 'enum', enum: ['admin', 'staff', 'owner', 'sales', 'academic'] })
   role: string;
 
   @Column({ name: 'employee_id', length: 64, nullable: true })

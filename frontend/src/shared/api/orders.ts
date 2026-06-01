@@ -76,3 +76,13 @@ export async function listOrderFollowRecords(id: string): Promise<OrderFollowRec
 export async function updateOrder(id: string, body: Record<string, unknown>) {
   return apiClient.patch(`/orders/${id}`, body);
 }
+
+/**
+ * 教务端新增一条订单跟进节点。nodeType 必填；含"异常"字样后端会向销售发 ORDER_ABNORMAL 通知。
+ */
+export async function createOrderFollowRecord(
+  id: string,
+  body: { nodeType: string; content?: string; nextRemindAt?: string | null },
+) {
+  return apiClient.post(`/orders/${id}/follow-records`, body);
+}

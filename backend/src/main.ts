@@ -29,6 +29,17 @@ function requestLogger(req: any, res: any, next: any) {
   next();
 }
 
+// Process-level safety net: never let a single un-awaited error take down the
+// whole API. Without this an unhandled promise rejection (e.g. QueryFailedError
+// surfaced from an async controller or a Playwright timeout) terminates the
+// Node process and the port goes silent.
+process.on('unhandledRejection', (reason: any) => {
+  console.error('\x1b[31m[unhandledRejection]\x1b[0m', reason?.stack || reason);
+});
+process.on('uncaughtException', (err: Error) => {
+  console.error('\x1b[31m[uncaughtException]\x1b[0m', err?.stack || err);
+});
+
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 

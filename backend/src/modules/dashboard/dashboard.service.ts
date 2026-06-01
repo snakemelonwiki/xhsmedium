@@ -75,19 +75,59 @@ export class DashboardService {
     });
   }
 
-  async rankingRows(today: string = todayString()): Promise<any[]> {
-    const raw = await this.employeeRepo.query(`
-      SELECT
-        e.id AS employee_id,
-        e.name,
-        (SELECT COUNT(*) FROM accounts a WHERE a.employee_id = e.id) AS account_count,
-        (SELECT COUNT(*) FROM posts p WHERE p.employee_id = e.id AND p.published_at = ?) AS today_posts,
-        (SELECT COUNT(*) FROM leads l WHERE l.employee_id = e.id AND DATE(l.created_at) = ?) AS today_leads,
-        (SELECT COALESCE(SUM(CASE WHEN p.post_type IN ('获客贴', '营销贴') THEN p.traffic ELSE 0 END), 0) FROM posts p WHERE p.employee_id = e.id AND p.published_at = ?) AS today_traffic,
-        (SELECT COUNT(*) FROM leads l WHERE l.employee_id = e.id AND DATE(l.created_at) = ? AND l.status = '已成交') AS today_deals
-      FROM employees e
-      ORDER BY e.created_at DESC
-    `, [today, today, today, today]);
+  /**
+   * 排行榜每行的核心计数。
+   * - 不传 from/to：保留旧行为，按单日 `today` 聚合（today* 含义保持向后兼容）
+   * - 传 from..to：按日期区间聚合，仍以 today* 命名返回（前端字段不变），适配主管端"周/月榜"
+   * - platform：可选过滤具体平台（'小红书' / '抖音' / 'xhs' / 'douyin'）
+   */
+  async rankingRows(
+    today: string = todayString(),
+    options: { from?: string; to?: string; platform?: string } = {},
+  ): Promise<any[]> {
+    const platform = this.normalizePlatform(options.platform);
+    const useRange = !!(options.from || options.to);
+    const from = options.from || today;
+    const to = options.to || today;
+
+    const dateClause = useRange
+      ? 'p.published_at BETWEEN ? AND ?'
+      : 'p.published_at = ?';
+    const leadDateClause = useRange
+      ? 'DATE(l.created_at) BETWEEN ? AND ?'
+      : 'DATE(l.created_at) = ?';
+    const platformClause = platform ? ' AND p.platform = ?' : '';
+    const leadPlatformClause = platform ? ' AND l.platform = ?' : '';
+
+    const dateParams = (cl: string) =>
+      cl.includes('BETWEEN') ? [from, to] : [today];
+    const platformParam = platform ? [platform] : [];
+
+    const accountPlatformClause = platform ? ' AND a.platform = ?' : '';
+    const accountParams = platform ? [platform] : [];
+
+    const params: any[] = [
+      ...accountParams,
+      ...dateParams(dateClause), ...platformParam,
+      ...dateParams(leadDateClause), ...platformParam,
+      ...dateParams(dateClause), ...platformParam,
+      ...dateParams(leadDateClause), ...platformParam,
+    ];
+
+    const raw = await this.employeeRepo.query(
+      `SELECT
+         e.id AS employee_id,
+         e.name,
+         (SELECT COUNT(*) FROM accounts a WHERE a.employee_id = e.id${accountPlatformClause}) AS account_count,
+         (SELECT COUNT(*) FROM posts p WHERE p.employee_id = e.id AND ${dateClause}${platformClause}) AS today_posts,
+         (SELECT COUNT(*) FROM leads l WHERE l.employee_id = e.id AND ${leadDateClause}${leadPlatformClause}) AS today_leads,
+         (SELECT COALESCE(SUM(CASE WHEN p.post_type IN ('获客贴', '营销贴') THEN p.traffic ELSE 0 END), 0)
+            FROM posts p WHERE p.employee_id = e.id AND ${dateClause}${platformClause}) AS today_traffic,
+         (SELECT COUNT(*) FROM leads l WHERE l.employee_id = e.id AND ${leadDateClause}${leadPlatformClause} AND l.status = '已成交') AS today_deals
+       FROM employees e
+       ORDER BY e.created_at DESC`,
+      params,
+    );
 
     return (raw as any[]).map((row) => ({
       employeeId: row.employee_id,
@@ -98,6 +138,14 @@ export class DashboardService {
       todayTraffic: Number(row.today_traffic || 0),
       todayDeals: Number(row.today_deals || 0),
     }));
+  }
+
+  private normalizePlatform(p?: string): string | null {
+    const raw = String(p || '').trim().toLowerCase();
+    if (!raw) return null;
+    if (raw === 'xhs' || raw === '小红书') return '小红书';
+    if (raw === 'douyin' || raw === '抖音') return '抖音';
+    return null;
   }
 
   async refreshEnteredData(): Promise<any> {

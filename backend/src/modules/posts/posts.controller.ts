@@ -132,6 +132,20 @@ export class PostsController {
     return res.json({ ok: true });
   }
 
+  // 注意：批量导入模板下载必须位于 `:id` 路由之前，否则 NestJS 会把
+  // `import-template.xlsx` 当作 :id 命中 findOne 并返回"作品不存在"。
+  @Get('import-template.xlsx')
+  async downloadImportTemplate(@Res() res: Response) {
+    const BOM = '﻿';
+    const csv =
+      BOM +
+      '平台,标题,作品类型,作品链接,账号ID,发布时间,文案,封面URL,流量,点赞,评论,收藏,备注\n' +
+      '小红书,示例作品,获客贴,https://example.com,,2026-05-31,示例文案,,0,0,0,0,备注\n';
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="posts_import_template.csv"');
+    return res.send(csv);
+  }
+
   @Get(':id')
   async findOne(@Param('id') id: string, @Res() res: Response) {
     const post = await this.postsService.findById(id);

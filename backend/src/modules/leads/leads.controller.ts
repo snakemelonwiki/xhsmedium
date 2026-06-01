@@ -253,6 +253,23 @@ export class LeadsController {
     return res.json({ ok: true });
   }
 
+  // 注意：批量导入模板下载必须位于 `:id` 路由之前，否则 NestJS 会把
+  // `import-template.xlsx` 当作 :id 命中 findOne 并返回 404。
+  @Get('import-template.xlsx')
+  async downloadImportTemplate(@Res() res: Response) {
+    const BOM = '﻿';
+    const csv =
+      BOM +
+      '平台,联系方式,昵称,来源账号,备注\n' +
+      '小红书,13800138000,示例客户,运营A,客户备注示例\n';
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader(
+      'Content-Disposition',
+      'attachment; filename="leads_import_template.csv"',
+    );
+    return res.send(csv);
+  }
+
   @Get(':id')
   async findOne(@Param('id') id: string, @Req() req: Request, @Res() res: Response) {
     const session = (req as any).session;

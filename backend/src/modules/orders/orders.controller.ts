@@ -79,9 +79,13 @@ export class OrdersController {
   }
 
   @Get('orders/:id')
-  async findOne(@Param('id') id: string, @Res() res: Response) {
+  async findOne(@Param('id') id: string, @Req() req: Request, @Res() res: Response) {
+    const session = (req as any).session;
     try {
-      const order = await this.ordersService.findOne(id);
+      const order = await this.ordersService.findOne(id, {
+        userId: session?.userId || session?.id || '',
+        role: session?.role || '',
+      });
       return res.json(order);
     } catch (err: any) {
       const code = err?.status || 404;

@@ -17,10 +17,33 @@ export class RankingsService {
     private readonly postRepository: Repository<Post>,
   ) {}
 
-  async getRankings(type: string, date: string): Promise<any[]> {
-    const rows = await this.dashboardService.rankingRows(date);
-    const posts = await this.postsService.findAll();
-    const leads = await this.leadsService.findAll();
+  /**
+   * 排行榜入口。
+   * - type: posts / leads（保留原语义）
+   * - date: 兼容旧前端单日参数
+   * - options.period: 'today' | '7d' | '30d'（None / today → 单日；7d/30d → 近 N 天区间）
+   * - options.platform: xhs / douyin / 小红书 / 抖音（filter posts & leads）
+   */
+  async getRankings(
+    type: string,
+    date: string,
+    options: { period?: string; platform?: string } = {},
+  ): Promise<any[]> {
+    const range = this.resolveDateRange(date, options.period);
+    const rows = await this.dashboardService.rankingRows(date, {
+      from: range.from,
+      to: range.to,
+      platform: options.platform,
+    });
+
+    // 历史 total post 计数（不限日期，限平台），用于"累计作品/累计客资"等指标
+    const platformFilter = this.normalizePlatform(options.platform);
+    const posts = (await this.postsService.findAll()).filter(
+      (p) => !platformFilter || p.platform === platformFilter,
+    );
+    const leads = (await this.leadsService.findAll()).filter(
+      (l) => !platformFilter || l.platform === platformFilter,
+    );
 
     if (type === 'posts') {
       const postCountByEmployee: Record<string, { total: number; xhs: number; douyin: number }> = {};
@@ -54,13 +77,42 @@ export class RankingsService {
     return rows;
   }
 
-  async getRankingsPaged(type: string, date: string, limit: number, offset: number): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
+  async getRankingsPaged(
+    type: string,
+    date: string,
+    limit: number,
+    offset: number,
+    options: { period?: string; platform?: string } = {},
+  ): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
     // TODO: 当前为内存分页，getRankings 会全量加载 posts + leads。当数据量增长时，
     // 需要将聚合逻辑下沉到 SQL，避免全表加载后再 slice。后续可改为纯 SQL 聚合或缓存。
-    const allRows = await this.getRankings(type, date);
+    const allRows = await this.getRankings(type, date, options);
     const total = allRows.length;
     const items = allRows.slice(offset, offset + limit);
     return { items, total, limit, offset };
+  }
+
+  private resolveDateRange(date: string, period?: string): { from?: string; to?: string } {
+    const p = String(period || '').trim().toLowerCase();
+    if (!p || p === 'today') return {};
+    const days = p === '7d' || p === '7' ? 7 : p === '30d' || p === '30' ? 30 : 0;
+    if (!days) return {};
+    const to = new Date(date);
+    if (isNaN(to.getTime())) return {};
+    const from = new Date(to);
+    from.setDate(from.getDate() - (days - 1));
+    return {
+      from: from.toISOString().slice(0, 10),
+      to: to.toISOString().slice(0, 10),
+    };
+  }
+
+  private normalizePlatform(p?: string): string | null {
+    const raw = String(p || '').trim().toLowerCase();
+    if (!raw) return null;
+    if (raw === 'xhs' || raw === '小红书') return '小红书';
+    if (raw === 'douyin' || raw === '抖音') return '抖音';
+    return null;
   }
 
   async getLearningPosts(days: number = 7, userId = ''): Promise<any[]> {

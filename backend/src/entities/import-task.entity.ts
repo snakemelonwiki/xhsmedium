@@ -31,7 +31,7 @@ export class ImportTask {
   @Column({ name: 'error_file_url', length: 500, nullable: true })
   errorFileUrl: string | null;
 
-  @CreateDateColumn({ name: 'create_time' })
+  @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 
   @Column({ name: 'finished_at', type: 'datetime', nullable: true })

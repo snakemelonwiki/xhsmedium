@@ -29,13 +29,13 @@ CREATE TABLE IF NOT EXISTS employees (
 -- ============================================================
 -- 2. users
 -- backend/src/entities/user.entity.ts + auth/app role routing.
--- role 用 VARCHAR，避免实体里旧 enum 与当前 sales/academic 业务角色冲突。
+-- role 保持 ENUM 类型（原始 schema 定义），通过追加枚举值的方式扩展 owner/sales/academic。
 -- ============================================================
 CREATE TABLE IF NOT EXISTS users (
   id           VARCHAR(64)  PRIMARY KEY,
   username     VARCHAR(64)  NOT NULL UNIQUE COMMENT '登录用户名',
   password     VARCHAR(255) NOT NULL COMMENT '登录密码或 bcrypt hash',
-  role         VARCHAR(32)  NOT NULL DEFAULT 'staff' COMMENT 'admin/staff/owner/sales/academic',
+  role         ENUM('admin','staff','owner','sales','academic') NOT NULL COMMENT '账号角色（原 admin/staff 基础上追加 owner/sales/academic）',
   employee_id  VARCHAR(64)  NULL COMMENT '关联员工ID',
   status       VARCHAR(32)  NOT NULL DEFAULT 'active' COMMENT 'active/inactive/locked',
   created_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -301,7 +301,7 @@ CREATE TABLE IF NOT EXISTS import_tasks (
   fail_count     INT          NOT NULL DEFAULT 0 COMMENT '失败数',
   status         VARCHAR(32)  NOT NULL DEFAULT 'processing' COMMENT 'processing/done/failed',
   error_file_url VARCHAR(500) NULL COMMENT '错误文件URL',
-  create_time    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  created_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   finished_at    DATETIME     NULL COMMENT '完成时间',
 
   INDEX idx_import_user_id (user_id),

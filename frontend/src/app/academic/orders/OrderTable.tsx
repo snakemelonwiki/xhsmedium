@@ -155,12 +155,22 @@ export function OrderTable({ title, description, scope, status, showStatusFilter
         dataIndex: 'id',
         key: 'id',
         width: 180,
-        render: (value: string, record) => (
-          <Space direction="vertical" size={0}>
-            <Typography.Text strong copyable>{value}</Typography.Text>
-            <Typography.Text type="secondary">{record.serviceType || '未填写服务类型'}</Typography.Text>
-          </Space>
-        ),
+        render: (value: string, record) => {
+          // 教务端的所有 actionMode（academic / abnormal）跳教务详情，
+          // 销售端跳销售详情，admin 也跳销售详情（复用销售端只读视图）。
+          const detailHref =
+            actionMode === 'academic' || actionMode === 'abnormal'
+              ? `/academic/orders/${value}`
+              : `/sales/orders/${value}`;
+          return (
+            <Space direction="vertical" size={0}>
+              <a href={detailHref}>
+                <Typography.Text strong>{value}</Typography.Text>
+              </a>
+              <Typography.Text type="secondary">{record.serviceType || '未填写服务类型'}</Typography.Text>
+            </Space>
+          );
+        },
       },
       {
         title: '销售',

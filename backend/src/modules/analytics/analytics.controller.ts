@@ -1,22 +1,18 @@
-import { Controller, Get, Query, Req, Res } from '@nestjs/common';
-import { Request, Response } from 'express';
+import { Controller, Get, Query, Res } from '@nestjs/common';
+import { Response } from 'express';
+import { AnalyticsService } from './analytics.service';
 
 @Controller('analytics')
 export class AnalyticsController {
+  constructor(private readonly analytics: AnalyticsService) {}
+
+  /**
+   * 最近 N 天的日聚合，替代旧 daily-snapshots.json。
+   * 默认 7 天；前端如需更长区间传 ?days=30。
+   */
   @Get('snapshots')
-  async getSnapshots(@Query('date') date: string, @Res() res: Response) {
-    // Legacy: returns daily snapshots from JSON
-    const fs = require('fs');
-    const path = require('path');
-    const snapshotFile = path.join(__dirname, '..', '..', '..', 'daily-snapshots.json');
-    if (!fs.existsSync(snapshotFile)) {
-      return res.json({ snapshots: {} });
-    }
-    try {
-      const raw = JSON.parse(fs.readFileSync(snapshotFile, 'utf8'));
-      return res.json(raw.snapshots || {});
-    } catch {
-      return res.json({ snapshots: {} });
-    }
+  async getSnapshots(@Query('days') days: string | undefined, @Res() res: Response) {
+    const result = await this.analytics.getSnapshots(Number(days) || 7);
+    return res.json(result);
   }
 }
