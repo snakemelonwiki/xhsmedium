@@ -35,8 +35,8 @@ export default function AdminAnalyticsPage() {
   return (
     <Space direction="vertical" size={16} className="page-stack">
       <div>
-        <Typography.Title level={2}>基础分析</Typography.Title>
-        <Typography.Paragraph type="secondary">迁移已有主管分析页的核心指标、作品类型分布和员工榜单。</Typography.Paragraph>
+        <Typography.Title level={2}>分析看板</Typography.Title>
+        <Typography.Paragraph type="secondary">查看主管视角核心指标、作品类型分布和员工榜单。</Typography.Paragraph>
       </div>
       <div className="metric-grid">
         <Card><Statistic title="今日客资" value={summary?.todayLeads ?? 0} /></Card>

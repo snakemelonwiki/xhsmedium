@@ -40,6 +40,7 @@ import { ToolsModule } from './modules/tools/tools.module';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { ExportsModule } from './modules/exports/exports.module';
 import { OperationLogsModule } from './modules/operation-logs/operation-logs.module';
+import { SupervisorSuggestionsModule } from './modules/supervisor-suggestions/supervisor-suggestions.module';
 import { UploadsModule } from './modules/uploads/uploads.module';
 import { StorageModule } from './shared/storage/storage.service';
 import { FormattedSqlLogger } from './common/sql-logger';
@@ -103,6 +104,7 @@ import { TokenRefreshInterceptor } from './common/token-refresh.interceptor';
     AnalyticsModule,
     ExportsModule,
     OperationLogsModule,
+    SupervisorSuggestionsModule,
     UploadsModule,
     StorageModule,
   ],

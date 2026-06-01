@@ -8,6 +8,7 @@ const ALLOWED_TYPES: ExportType[] = [
   'collaboration_records',
   'posts',
   'rankings',
+  'accounts',
 ];
 
 // 按角色限制可触发的 exportType，防止低权限角色下载全公司数据。
@@ -16,8 +17,8 @@ const ALLOWED_TYPES: ExportType[] = [
 //   sales：客资（仅自己的）、订单、协同记录
 //   academic：仅订单（仅自己的+池单）
 const ROLE_EXPORT_WHITELIST: Record<string, ExportType[]> = {
-  admin:    ['leads', 'orders', 'collaboration_records', 'posts', 'rankings'],
-  owner:    ['leads', 'orders', 'collaboration_records', 'posts', 'rankings'],
+  admin:    ['leads', 'orders', 'collaboration_records', 'posts', 'rankings', 'accounts'],
+  owner:    ['leads', 'orders', 'collaboration_records', 'posts', 'rankings', 'accounts'],
   staff:    ['leads', 'posts', 'rankings', 'collaboration_records'],
   sales:    ['leads', 'orders', 'collaboration_records'],
   academic: ['orders'],
@@ -66,6 +67,7 @@ export class ExportsController {
         ...raw,
         role: userRole,
         currentUserId: userId,
+        currentEmployeeId: session?.employeeId || '',
         scope: raw.scope || (userRole === 'admin' || userRole === 'owner' ? 'all' : 'mine'),
         _userRole: userRole,
       };
@@ -104,6 +106,28 @@ export class ExportsController {
     }
     const rows = await this.service.listForUser(userId, type || undefined);
     return res.json(rows);
+  }
+
+  /**
+   * 下载已完成的导出文件；无权访问时仍返回 404，避免泄露任务存在性。
+   */
+  @Get(':id/download')
+  async download(@Param('id') id: string, @Req() req: Request, @Res() res: Response) {
+    const session = (req as any).session;
+    const userId = session?.userId || session?.id || '';
+    const role = session?.role || '';
+    const task = await this.service.findOne(id);
+    if (!task) {
+      return res.status(404).json({ ok: false, message: 'not found' });
+    }
+    const isAdminLike = role === 'admin' || role === 'owner';
+    if (!isAdminLike && task.userId && task.userId !== userId) {
+      return res.status(404).json({ ok: false, message: 'not found' });
+    }
+    if (!task.fileUrl || !['completed', 'success'].includes(task.status)) {
+      return res.status(409).json({ ok: false, message: 'export not ready' });
+    }
+    return res.redirect(task.fileUrl);
   }
 
   @Get(':id')

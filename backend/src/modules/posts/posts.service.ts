@@ -94,6 +94,38 @@ export class PostsService {
     return { items: rows.map(this.mapPost), total, limit: safeLimit, offset: safeOffset };
   }
 
+  /**
+   * 根据作品链接识别平台并返回录入表单可直接回填的字段。
+   */
+  parsePostLink(postUrl: string): { platform: string; postUrl: string; title: string } {
+    const normalizedUrl = normalizeExternalUrl(postUrl);
+    const lowerUrl = normalizedUrl.toLowerCase();
+    let platform = '其他';
+    if (lowerUrl.includes('xiaohongshu.com') || lowerUrl.includes('xhslink.com')) {
+      platform = '小红书';
+    } else if (lowerUrl.includes('douyin.com') || lowerUrl.includes('iesdouyin.com')) {
+      platform = '抖音';
+    }
+    return {
+      platform,
+      postUrl: normalizedUrl,
+      title: `${platform}作品`,
+    };
+  }
+
+  /**
+   * 查找重复作品链接，更新时可排除当前作品。
+   */
+  async findDuplicateByUrl(postUrl: string, excludeId?: string): Promise<any | null> {
+    const normalizedUrl = normalizeExternalUrl(postUrl);
+    if (!normalizedUrl) return null;
+    const qb = this.postRepository.createQueryBuilder('p')
+      .where('p.post_url = :postUrl', { postUrl: normalizedUrl });
+    if (excludeId) qb.andWhere('p.id != :excludeId', { excludeId });
+    const row = await qb.getOne();
+    return row ? this.mapPost(row) : null;
+  }
+
   async findByEmployeePaged(employeeId: string, limit: number, offset: number): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
     return this.findPaged({ employeeId }, limit, offset);
   }
@@ -229,11 +261,12 @@ export class PostsService {
     await this.postRepository.update(id, { supervisorSuggestion: suggestion || '' });
   }
 
-  async updateMetrics(id: string, metrics: { likes: number; comments: number; favorites: number; metricsUpdatedAt: Date | null }): Promise<void> {
+  async updateMetrics(id: string, metrics: { likes: number; comments: number; favorites: number; shares?: number; metricsUpdatedAt: Date | null }): Promise<void> {
     await this.postRepository.update(id, {
       likes: metrics.likes,
       comments: metrics.comments,
       favorites: metrics.favorites,
+      shares: Number(metrics.shares || 0),
       metricsUpdatedAt: metrics.metricsUpdatedAt,
     });
   }
@@ -248,6 +281,27 @@ export class PostsService {
       favorites: Number(metrics.favorites || 0),
       shares: Number(metrics.shares || 0),
       leadsCount,
+    }));
+  }
+
+  /**
+   * 查询作品指标历史，按最新记录优先展示。
+   */
+  async getMetricsHistory(postId: string): Promise<any[]> {
+    const rows = await this.metricsHistoryRepository.find({
+      where: { postId },
+      order: { createdAt: 'DESC' },
+      take: 200,
+    });
+    return rows.map((row) => ({
+      id: row.id,
+      postId: row.postId,
+      likes: Number(row.likes || 0),
+      comments: Number(row.comments || 0),
+      favorites: Number(row.favorites || 0),
+      shares: Number(row.shares || 0),
+      leadsCount: Number(row.leadsCount || 0),
+      createdAt: row.createdAt,
     }));
   }
 

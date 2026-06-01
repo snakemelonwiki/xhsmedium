@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, Req, Res, Query } from '@nestjs/common';
+import { Controller, Get, Post, Put, Patch, Delete, Body, Param, Req, Res, Query } from '@nestjs/common';
 import { EmployeesService } from './employees.service';
 import { Request, Response } from 'express';
 
@@ -6,6 +6,9 @@ import { Request, Response } from 'express';
 export class EmployeesController {
   constructor(private readonly employeesService: EmployeesService) {}
 
+  /**
+   * 查询员工列表，支持分页和关键字过滤。
+   */
   @Get()
   async findAll(
     @Res() res: Response,
@@ -29,6 +32,9 @@ export class EmployeesController {
     return res.json(rows);
   }
 
+  /**
+   * 创建员工并自动生成员工编号。
+   */
   @Post()
   async create(@Body() body: any, @Req() req: Request, @Res() res: Response) {
     const allCodes = await this.employeesService.findAllCodes();
@@ -44,20 +50,50 @@ export class EmployeesController {
     return res.json({ ok: true });
   }
 
+  /**
+   * 更新员工启停状态。
+   */
+  @Patch(':id/status')
+  async updateStatus(@Param('id') id: string, @Body() body: any, @Res() res: Response) {
+    await this.employeesService.updateStatus(id, body.status);
+    return res.json({ ok: true });
+  }
+
+  /**
+   * 更新员工资料。
+   */
   @Put(':id')
   async update(@Param('id') id: string, @Body() body: any, @Res() res: Response) {
+    return this.updateEmployee(id, body, res);
+  }
+
+  /**
+   * 兼容 PATCH 方式更新员工资料。
+   */
+  @Patch(':id')
+  async patch(@Param('id') id: string, @Body() body: any, @Res() res: Response) {
+    return this.updateEmployee(id, body, res);
+  }
+
+  /**
+   * 删除员工，保持现有服务删除策略。
+   */
+  @Delete(':id')
+  async remove(@Param('id') id: string, @Res() res: Response) {
+    await this.employeesService.remove(id);
+    return res.json({ ok: true });
+  }
+
+  /**
+   * 执行员工资料更新，供 PUT/PATCH 复用。
+   */
+  private async updateEmployee(id: string, body: any, res: Response) {
     await this.employeesService.update(id, {
       name: body.name,
       phone: body.phone || null,
       hireDate: body.hireDate || null,
       status: body.status,
     });
-    return res.json({ ok: true });
-  }
-
-  @Delete(':id')
-  async remove(@Param('id') id: string, @Res() res: Response) {
-    await this.employeesService.remove(id);
     return res.json({ ok: true });
   }
 }

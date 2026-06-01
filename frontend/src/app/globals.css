@@ -14,6 +14,8 @@ body {
 }
 
 .app-sider {
+  height: 100vh;
+  overflow-y: auto;
   border-right: 1px solid #e5e8ef;
   background: #ffffff !important;
 }
@@ -40,21 +42,70 @@ body {
 }
 
 .app-header {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 64px;
+  height: 68px;
   padding: 0 24px;
   border-bottom: 1px solid #e5e8ef;
   background: #ffffff;
+  line-height: normal;
 }
 
-.app-header h4 {
-  margin: 0;
+.app-header-context {
+  display: grid;
+  gap: 3px;
+}
+
+.app-header-eyebrow {
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.app-header-title.ant-typography {
+  margin: 0 !important;
+  font-size: 18px;
+  line-height: 24px;
+}
+
+.app-route-progress {
+  position: absolute;
+  right: 0;
+  bottom: -1px;
+  left: 0;
+  height: 2px;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 160ms ease;
+}
+
+.app-route-progress::after {
+  display: block;
+  width: 34%;
+  height: 100%;
+  background: #1677ff;
+  content: "";
+  transform: translateX(-110%);
+}
+
+.app-route-progress.is-visible {
+  opacity: 1;
+}
+
+.app-route-progress.is-visible::after {
+  animation: app-route-progress 900ms ease-in-out infinite;
+}
+
+@keyframes app-route-progress {
+  to {
+    transform: translateX(395%);
+  }
 }
 
 .app-content {
-  padding: 24px;
+  padding: 24px 28px 32px;
 }
 
 .page-stack {
@@ -239,6 +290,20 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+.app-content > .page-stack > .toolbar-row {
+  min-height: 76px;
+}
+
+.app-content > .page-stack > .toolbar-row h2.ant-typography {
+  margin: 0 0 6px;
+  font-size: 28px;
+  line-height: 36px;
+}
+
+.app-content > .page-stack > .toolbar-row .ant-typography {
+  margin-bottom: 0;
 }
 
 .lead-card {

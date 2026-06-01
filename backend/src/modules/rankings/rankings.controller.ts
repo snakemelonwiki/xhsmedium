@@ -36,6 +36,28 @@ export class RankingsController {
   }
 
   /**
+   * A端运营排行榜契约别名，统一承载作品数、客资数、流量和学习榜入口。
+   */
+  @Get('operations')
+  async getOperationRankings(
+    @Res() res: Response,
+    @Query('type') type?: string,
+    @Query('period') period?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+    @Query('platform') platform?: string,
+  ) {
+    const result = await this.rankingsService.getRankingsPaged(
+      type || 'posts',
+      todayString(),
+      Number(limit) || 20,
+      Number(offset) || 0,
+      { platform, period },
+    );
+    return res.json(result);
+  }
+
+  /**
    * 学习榜：返回最近 N 天发布且有获客的 Top10 作品，附带 isFavorited。
    * 当前登录用户的 userId 来自全局 SessionMiddleware；未登录时 isFavorited 全部为 false。
    */
