@@ -6,7 +6,9 @@ import { Order } from '../../entities/order.entity';
 import { OrderFollowRecord } from '../../entities/order-follow-record.entity';
 import { User } from '../../entities/user.entity';
 import { CollaborationTask } from '../../entities/collaboration-task.entity';
+import { Post } from '../../entities/post.entity';
 import { Account } from '../../entities/account.entity';
+import { Employee } from '../../entities/employee.entity';
 import { ExportsController } from './exports.controller';
 import { ExportsService } from './exports.service';
 import { NotificationsModule } from '../notifications/notifications.module';
@@ -21,7 +23,9 @@ import { OperationLogsModule } from '../operation-logs/operation-logs.module';
       OrderFollowRecord,
       User,
       CollaborationTask,
+      Post,
       Account,
+      Employee,
     ]),
     NotificationsModule,
     OperationLogsModule,

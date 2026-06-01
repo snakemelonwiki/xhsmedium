@@ -10,7 +10,7 @@
     "start:legacy": "node server.js",
     "start:backend": "cd backend && npm run start:dev",
     "start:frontend": "cd frontend && npm run build && npm run start",
-    "start:frontend:dev": "cd frontend && npm run dev",
+    "start:frontend:dev": "concurrently --kill-others-on-fail -n frontend,warmup \"cd frontend && npm run dev\" \"node scripts/warm-frontend-routes.js\"",
     "build:frontend": "cd frontend && npm run build",
     "serve:frontend": "cd frontend && npm run start",
     "debug:link": "node scripts/debug-link.js",

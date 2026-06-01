@@ -7,7 +7,9 @@ import { Order } from '../../entities/order.entity';
 import { OrderFollowRecord } from '../../entities/order-follow-record.entity';
 import { User } from '../../entities/user.entity';
 import { CollaborationTask } from '../../entities/collaboration-task.entity';
+import { Post } from '../../entities/post.entity';
 import { Account } from '../../entities/account.entity';
+import { Employee } from '../../entities/employee.entity';
 import { makeId } from '../../shared/utils/id-generator';
 import { StorageService } from '../../shared/storage/storage.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -124,8 +126,12 @@ export class ExportsService {
     private readonly orderRepo: Repository<Order>,
     @InjectRepository(CollaborationTask)
     private readonly collabRepo: Repository<CollaborationTask>,
+    @InjectRepository(Post)
+    private readonly postRepo: Repository<Post>,
     @InjectRepository(Account)
     private readonly accountRepo: Repository<Account>,
+    @InjectRepository(Employee)
+    private readonly employeeRepo: Repository<Employee>,
     @InjectRepository(OrderFollowRecord)
     private readonly orderFollowRepo: Repository<OrderFollowRecord>,
     @InjectRepository(User)
@@ -253,10 +259,12 @@ export class ExportsService {
         rowCount = csv ? csv.split('\r\n').filter(Boolean).length - 1 : 0;
         break;
       case 'posts':
+        csv = await this.buildPostsCsv(filter);
+        rowCount = csv ? csv.split('\r\n').filter(Boolean).length - 1 : 0;
+        break;
       case 'rankings':
-        // A 端导出待实现，先落一份占位文件，避免下载链接 404
-        csv = 'A 端导出待实现\n';
-        rowCount = 0;
+        csv = await this.buildRankingsCsv(filter);
+        rowCount = csv ? csv.split('\r\n').filter(Boolean).length - 1 : 0;
         break;
       default:
         csv = '未知导出类型\n';
@@ -272,9 +280,6 @@ export class ExportsService {
 
     // §11.1 export_done: 通知发起人下载
     if (task.userId) {
-      const filter = this.parseFilter(task.filterJson);
-      const userRole = filter._userRole || 'staff';
-
       // 根据用户角色设置正确的端口类型
       let portType: 'operations' | 'sales' | 'academic' = 'operations';
       if (userRole === 'sales') {
@@ -706,6 +711,165 @@ export class ExportsService {
     return this.toCsv(headers, data);
   }
 
+  // ---------- A端 posts / rankings / accounts CSV ----------
+
+  /**
+   * 导出作品数据，普通运营默认只导出自己 employeeId 范围。
+   */
+  private async buildPostsCsv(filter: Record<string, any>): Promise<string> {
+    const qb = this.postRepo
+      .createQueryBuilder('p')
+      .leftJoin('employees', 'e', 'e.id = p.employee_id')
+      .leftJoin('accounts', 'a', 'a.id = p.account_id')
+      .select([
+        'p.created_at AS createdAt',
+        'p.published_at AS publishedAt',
+        'p.platform AS platform',
+        'p.title AS title',
+        'p.post_type AS postType',
+        'p.post_url AS postUrl',
+        'p.likes AS likes',
+        'p.comments AS comments',
+        'p.favorites AS favorites',
+        'p.shares AS shares',
+        'p.traffic AS traffic',
+        'p.supervisor_suggestion AS supervisorSuggestion',
+        'e.name AS employeeName',
+        'a.account_name AS accountName',
+      ])
+      .orderBy('p.published_at', 'DESC')
+      .addOrderBy('p.created_at', 'DESC');
+    this.applyPostFilters(qb, filter);
+    const rows = await qb.getRawMany();
+    return this.toCsv(
+      ['创建时间', '发布时间', '平台', '运营', '账号', '标题', '类型', '链接', '点赞', '评论', '收藏', '转发', '流量', '主管建议'],
+      rows.map((r: any) => [
+        r.createdAt ? new Date(r.createdAt) : '',
+        r.publishedAt || '',
+        r.platform || '',
+        r.employeeName || '',
+        r.accountName || '',
+        r.title || '',
+        r.postType || '',
+        r.postUrl || '',
+        r.likes || 0,
+        r.comments || 0,
+        r.favorites || 0,
+        r.shares || 0,
+        r.traffic || 0,
+        r.supervisorSuggestion || '',
+      ]),
+    );
+  }
+
+  /**
+   * 导出运营排行榜，口径与 A 端看板保持为 SQL 聚合。
+   */
+  private async buildRankingsCsv(filter: Record<string, any>): Promise<string> {
+    const platformClause = filter.platform ? ' AND p.platform = ?' : '';
+    const leadPlatformClause = filter.platform ? ' AND l.platform = ?' : '';
+    const params = filter.platform
+      ? [filter.platform, filter.platform, filter.platform]
+      : [];
+    const rows = await this.employeeRepo.query(
+      `SELECT
+         e.name AS employee_name,
+         (SELECT COUNT(*) FROM posts p WHERE p.employee_id = e.id${platformClause}) AS post_count,
+         (SELECT COUNT(*) FROM leads l WHERE l.employee_id = e.id${leadPlatformClause}) AS lead_count,
+         (SELECT COALESCE(SUM(p.likes), 0) FROM posts p WHERE p.employee_id = e.id${platformClause}) AS likes
+       FROM employees e
+       ORDER BY lead_count DESC, likes DESC, post_count DESC`,
+      params,
+    );
+    return this.toCsv(
+      ['员工', '作品数', '客资数', '点赞数'],
+      rows.map((r: any) => [
+        r.employee_name || '',
+        r.post_count || 0,
+        r.lead_count || 0,
+        r.likes || 0,
+      ]),
+    );
+  }
+
+  /**
+   * 导出运营账号，主管/管理员可导出全量，运营仅导出自己负责账号。
+   * 角色边界：admin / owner / supervisor 全量；staff 限本人 employeeId；其它角色不允许
+   */
+  private async buildAccountsCsv(filter: Record<string, any>): Promise<string> {
+    const qb: SelectQueryBuilder<Account> = this.accountRepo.createQueryBuilder('a');
+
+    if (filter.platform) qb.andWhere('a.platform = :platform', { platform: filter.platform });
+    if (filter.employeeId) qb.andWhere('a.employee_id = :eid', { eid: filter.employeeId });
+    if (filter.status) qb.andWhere('a.status = :status', { status: filter.status });
+    if (filter.keyword) {
+      const kw = `%${String(filter.keyword).trim()}%`;
+      qb.andWhere(
+        '(a.account_name LIKE :kw OR a.account_uid LIKE :kw OR a.persona LIKE :kw OR a.positioning LIKE :kw)',
+        { kw },
+      );
+    }
+
+    // 角色边界：admin / owner / supervisor 看全部；staff 默认看自己名下；其它角色不允许
+    const role = String(filter.role || filter._userRole || '');
+    const uid = String(filter.currentUserId || '');
+    const scope = String(filter.scope || '');
+    const isAdminLike = role === 'admin' || role === 'owner' || role === 'supervisor';
+    if (!(isAdminLike && (scope === 'all' || !scope))) {
+      if (role === 'staff' && uid) {
+        qb.andWhere('a.employee_id = :auid', { auid: uid });
+      } else {
+        // 非 admin 也没指定 staff+uid → 不返回任何行
+        qb.andWhere('1 = 0');
+      }
+    }
+
+    qb.orderBy('a.created_at', 'DESC');
+    const rows = await qb.getMany();
+
+    const headers = [
+      '创建时间',
+      '账号ID',
+      '运营负责人',
+      '平台',
+      '账号名称',
+      '账号UID',
+      '主页链接',
+      '人设',
+      '定位',
+      '发布计划',
+      '状态',
+    ];
+    const data = rows.map((r) => [
+      r.createdAt,
+      r.id || '',
+      r.employeeId || '',
+      r.platform || '',
+      r.accountName || '',
+      r.accountUid || '',
+      r.profileUrl || '',
+      r.persona || '',
+      r.positioning || '',
+      r.postingPlan || '',
+      r.status || '',
+    ]);
+    return this.toCsv(headers, data);
+  }
+
+  private applyPostFilters(qb: SelectQueryBuilder<Post>, filter: Record<string, any>): void {
+    if (filter.employeeId) qb.andWhere('p.employee_id = :employeeId', { employeeId: filter.employeeId });
+    if (filter.accountId) qb.andWhere('p.account_id = :accountId', { accountId: filter.accountId });
+    if (filter.platform) qb.andWhere('p.platform = :platform', { platform: filter.platform });
+    if (filter.postType) qb.andWhere('p.post_type = :postType', { postType: filter.postType });
+    if (filter.from) qb.andWhere('p.published_at >= :from', { from: filter.from });
+    if (filter.to) qb.andWhere('p.published_at <= :to', { to: filter.to });
+    const role = String(filter.role || filter._userRole || '');
+    if (!['admin', 'owner', 'supervisor'].includes(role)) {
+      const employeeId = String(filter.employeeId || filter.currentEmployeeId || '');
+      if (employeeId) qb.andWhere('p.employee_id = :selfEmployeeId', { selfEmployeeId: employeeId });
+    }
+  }
+
   // ---------- mapping ----------
 
   private mapTask(row: ExportTask): any {
@@ -860,67 +1024,5 @@ export class ExportsService {
       // eslint-disable-next-line no-console
       console.warn('[exports] log export_download failed:', err?.message || err);
     }
-  }
-
-  // ---------- accounts CSV ----------
-
-  private async buildAccountsCsv(filter: Record<string, any>): Promise<string> {
-    const qb: SelectQueryBuilder<Account> = this.accountRepo.createQueryBuilder('a');
-
-    if (filter.platform) qb.andWhere('a.platform = :platform', { platform: filter.platform });
-    if (filter.employeeId) qb.andWhere('a.employee_id = :eid', { eid: filter.employeeId });
-    if (filter.status) qb.andWhere('a.status = :status', { status: filter.status });
-    if (filter.keyword) {
-      const kw = `%${String(filter.keyword).trim()}%`;
-      qb.andWhere(
-        '(a.account_name LIKE :kw OR a.account_uid LIKE :kw OR a.persona LIKE :kw OR a.positioning LIKE :kw)',
-        { kw },
-      );
-    }
-
-    // 角色边界：admin / owner 看全部；staff 默认看自己名下；其它角色不允许
-    const role = String(filter.role || '');
-    const uid = String(filter.currentUserId || '');
-    const scope = String(filter.scope || '');
-    const isAdminLike = role === 'admin' || role === 'owner';
-    if (!(isAdminLike && (scope === 'all' || !scope))) {
-      if (role === 'staff' && uid) {
-        qb.andWhere('a.employee_id = :auid', { auid: uid });
-      } else {
-        // 非 admin 也没指定 staff+uid → 不返回任何行
-        qb.andWhere('1 = 0');
-      }
-    }
-
-    qb.orderBy('a.created_at', 'DESC');
-    const rows = await qb.getMany();
-
-    const headers = [
-      '创建时间',
-      '账号ID',
-      '运营负责人',
-      '平台',
-      '账号名称',
-      '账号UID',
-      '主页链接',
-      '人设',
-      '定位',
-      '发布计划',
-      '状态',
-    ];
-    const data = rows.map((r) => [
-      r.createdAt,
-      r.id || '',
-      r.employeeId || '',
-      r.platform || '',
-      r.accountName || '',
-      r.accountUid || '',
-      r.profileUrl || '',
-      r.persona || '',
-      r.positioning || '',
-      r.postingPlan || '',
-      r.status || '',
-    ]);
-    return this.toCsv(headers, data);
   }
 }

@@ -12,18 +12,30 @@ export class AccountsService {
     private readonly accountRepository: Repository<Account>,
   ) {}
 
-  async findAll(keyword = '', platform = ''): Promise<any[]> {
+  /**
+   * 查询账号列表，可按员工隔离运营角色数据 + 按平台过滤。
+   */
+  async findAll(keyword = '', platform = '', employeeId?: string): Promise<any[]> {
     const rows = await this.accountRepository.find({
       order: { createdAt: 'DESC' },
-      where: this.buildWhere(keyword, platform),
+      where: this.buildWhere(keyword, platform, employeeId),
     });
     return this.attachEmployeeNames(rows.map((r) => this.mapAccount(r)));
   }
 
-  async findAllPaged(limit: number, offset: number, keyword = '', platform = ''): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
+  /**
+   * 分页查询账号列表，可按员工隔离运营角色数据 + 按平台过滤。
+   */
+  async findAllPaged(
+    limit: number,
+    offset: number,
+    keyword = '',
+    platform = '',
+    employeeId?: string,
+  ): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
     const [rows, total] = await this.accountRepository.findAndCount({
       order: { createdAt: 'DESC' },
-      where: this.buildWhere(keyword, platform),
+      where: this.buildWhere(keyword, platform, employeeId),
       take: limit,
       skip: offset,
     });
@@ -73,6 +85,16 @@ export class AccountsService {
     return items.map((i) => ({ ...i, employeeName: nameMap.get(i.employeeId) || '' }));
   }
 
+  /**
+   * 按账号 ID 查询账号，用于写操作权限判断。
+   */
+  async findById(id: string): Promise<Account | null> {
+    return this.accountRepository.findOne({ where: { id } });
+  }
+
+  /**
+   * 创建账号资料。
+   */
   async create(dto: Partial<Account>): Promise<any> {
     const account = this.accountRepository.create({
       ...dto,
@@ -83,6 +105,9 @@ export class AccountsService {
     return this.accountRepository.save(account);
   }
 
+  /**
+   * 更新账号资料。
+   */
   async update(id: string, dto: Partial<Account>): Promise<void> {
     const updates: any = {};
     if (dto.profileUrl !== undefined) updates.profileUrl = dto.profileUrl ? normalizeExternalUrl(dto.profileUrl) : null;
@@ -97,27 +122,45 @@ export class AccountsService {
     await this.accountRepository.update(id, updates);
   }
 
+  /**
+   * 更新账号启停状态。
+   */
+  async updateStatus(id: string, status: string): Promise<void> {
+    await this.accountRepository.update(id, { status });
+  }
+
+  /**
+   * 更新账号发布计划。
+   */
   async updatePostingPlan(id: string, postingPlan: string): Promise<void> {
     await this.accountRepository.update(id, { postingPlan: postingPlan || '' });
   }
 
+  /**
+   * 删除账号。
+   */
   async remove(id: string): Promise<void> {
     await this.accountRepository.delete(id);
   }
 
-  private buildWhere(keyword: string, platform: string) {
+  /**
+   * 组装账号查询条件：关键字模糊 + 平台精确 + 员工范围隔离。
+   */
+  private buildWhere(keyword: string, platform: string, employeeId?: string) {
     const kw = String(keyword || '').trim();
     const pf = String(platform || '').trim();
     const platformFilter = pf ? { platform: pf } : null;
+    const employeeFilter = employeeId !== undefined ? { employeeId } : null;
+    const baseFilter = { ...(platformFilter ?? {}), ...(employeeFilter ?? {}) };
 
     if (!kw) {
-      return platformFilter ?? undefined;
+      return Object.keys(baseFilter).length ? baseFilter : undefined;
     }
 
     const like = Like(`%${kw}%`);
-    const fields = ['accountName', 'accountUid', 'employeeId', 'persona', 'positioning', 'status'] as const;
+    const fields = ['accountName', 'accountUid', 'employeeId', 'platform', 'persona', 'positioning', 'status'] as const;
     return fields.map((field) => ({
-      ...(platformFilter ?? {}),
+      ...baseFilter,
       [field]: like,
     }));
   }

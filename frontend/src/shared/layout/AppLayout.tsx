@@ -5,7 +5,7 @@ import { Avatar, Button, Dropdown, Layout, Menu, Space, Typography } from 'antd'
 import type { MenuProps } from 'antd';
 import { usePathname, useRouter } from 'next/navigation';
 import type { ReactNode } from 'react';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import {
   clearAuth,
@@ -33,13 +33,19 @@ export function AppLayout({ role, title, children }: AppLayoutProps) {
   const pathname = usePathname();
   const router = useRouter();
   const [user, setUser] = useState<AppUser>();
+  const [pendingPath, setPendingPath] = useState<string>();
   const handleAuthenticated = useCallback((nextUser: AppUser) => setUser(nextUser), []);
+  const prefetchMenuItem = useCallback((path: string) => router.prefetch(path), [router]);
 
   const visibleRole = user?.role ?? role;
   const menuItems = useMemo(() => getMenuItemsByRole(visibleRole), [visibleRole]);
   const selectedKey = menuItems
     .filter((item) => pathname === item.path || pathname.startsWith(`${item.path}/`))
     .sort((a, b) => b.path.length - a.path.length)[0]?.path;
+
+  useEffect(() => {
+    setPendingPath(undefined);
+  }, [pathname]);
 
   const userMenu: MenuProps['items'] = [
     {
@@ -57,39 +63,41 @@ export function AppLayout({ role, title, children }: AppLayoutProps) {
     <AuthGuard onAuthenticated={handleAuthenticated}>
       <NotificationProvider>
         <UploadConfigProvider>
-        <Layout className="app-shell">
-          <Sider width={232} className="app-sider">
-            <div className="app-brand">
-              <span className="app-brand-mark">X</span>
-              <span>运营中台</span>
-            </div>
-            <Menu
-              mode="inline"
-              selectedKeys={selectedKey ? [selectedKey] : []}
-              items={toAntdMenuItems(menuItems)}
-              onClick={({ key }) => router.push(String(key))}
-            />
-          </Sider>
-          <Layout>
-            <Header className="app-header">
-              <div>
-                <Typography.Title level={4}>{title}</Typography.Title>
+          <Layout className="app-shell">
+            <Sider width={232} className="app-sider">
+              <div className="app-brand">
+                <span className="app-brand-mark">X</span>
+                <span>运营中台</span>
               </div>
-              <Space size={16}>
-                <NotificationBell pollIntervalMs={60000} />
-                <Dropdown menu={{ items: userMenu }} placement="bottomRight">
-                  <Button type="text">
-                    <Space>
-                      <Avatar size="small" icon={<UserOutlined />} />
-                      <span>{user?.name ?? '未登录'}</span>
-                    </Space>
-                  </Button>
-                </Dropdown>
-              </Space>
-            </Header>
-            <Content className="app-content">{children}</Content>
+              <Menu
+                mode="inline"
+                selectedKeys={pendingPath ? [pendingPath] : selectedKey ? [selectedKey] : []}
+                items={toAntdMenuItems(menuItems, prefetchMenuItem)}
+                onClick={({ key }) => setPendingPath(String(key) === pathname ? undefined : String(key))}
+              />
+            </Sider>
+            <Layout>
+              <Header className="app-header">
+                <div className="app-header-context">
+                  <Typography.Text className="app-header-eyebrow" type="secondary">当前端口</Typography.Text>
+                  <Typography.Title className="app-header-title" level={4}>{title}</Typography.Title>
+                </div>
+                <Space size={16}>
+                  <NotificationBell pollIntervalMs={60000} />
+                  <Dropdown menu={{ items: userMenu }} placement="bottomRight">
+                    <Button type="text">
+                      <Space>
+                        <Avatar size="small" icon={<UserOutlined />} />
+                        <span>{user?.name ?? '未登录'}</span>
+                      </Space>
+                    </Button>
+                  </Dropdown>
+                </Space>
+                <div className={`app-route-progress${pendingPath ? ' is-visible' : ''}`} aria-hidden="true" />
+              </Header>
+              <Content className="app-content" aria-busy={Boolean(pendingPath)}>{children}</Content>
+            </Layout>
           </Layout>
-        </Layout>
         </UploadConfigProvider>
       </NotificationProvider>
     </AuthGuard>

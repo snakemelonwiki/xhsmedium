@@ -78,6 +78,7 @@ export class ExportsController {
         ...raw,
         role: userRole,
         currentUserId: userId,
+        currentEmployeeId: session?.employeeId || '',
         scope: raw.scope || (userRole === 'admin' || userRole === 'owner' ? 'all' : 'mine'),
         _userRole: userRole,
       };
