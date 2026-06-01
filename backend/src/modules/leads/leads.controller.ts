@@ -3,8 +3,11 @@ import { LeadsService } from './leads.service';
 import { Request, Response } from 'express';
 import { makeId } from '../../shared/utils/id-generator';
 import { DebounceGuard } from '../../common/debounce.guard';
+import { AuthGuard, Public } from '../../common/auth.guard';
 import { CollaborationTasksService } from '../collaboration-tasks/collaboration-tasks.service';
 import { OperationLogsService } from '../operation-logs/operation-logs.service';
+import { NotificationsService } from '../notifications/notifications.service';
+import { NOTIFICATION_TYPES } from '../../shared/notifications';
 import {
   OPERATION_LOG_ACTIONS,
   OPERATION_LOG_TARGET_TYPES,
@@ -13,11 +16,13 @@ import {
 } from '../../shared/operation-logs.constants';
 
 @Controller('leads')
+@UseGuards(AuthGuard)
 export class LeadsController {
   constructor(
     private readonly leadsService: LeadsService,
     private readonly collaborationTasksService: CollaborationTasksService,
     private readonly operationLogs: OperationLogsService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   @Get()
@@ -264,6 +269,7 @@ export class LeadsController {
   // 注意：批量导入模板下载必须位于 `:id` 路由之前，否则 NestJS 会把
   // `import-template.xlsx` 当作 :id 命中 findOne 并返回 404。
   @Get('import-template.xlsx')
+  @Public()
   async downloadImportTemplate(@Res() res: Response) {
     const BOM = '﻿';
     const csv =
@@ -344,6 +350,25 @@ export class LeadsController {
       } catch (logErr) {
         // eslint-disable-next-line no-console
         console.error('[leads] operation log failed', (logErr as any)?.message || logErr);
+      }
+      // BF-15 修复：改派时通知新销售（仅当分配到真实用户时）
+      const newSalesId = (body.assignedSalesUserId || '').toString().trim();
+      if (newSalesId) {
+        try {
+          await this.notificationsService.create({
+            receiverIds: [newSalesId],
+            senderId: actorUserId || null,
+            portType: 'sales',
+            typeCode: NOTIFICATION_TYPES.LEAD_ASSIGNED,
+            title: '客资已改派给您',
+            content: `客资 ${(before as any).contactInfo || ''} 已从 ${(before as any).assignedSalesUserName || (before as any).assignedSalesUserId || '未分配'} 改派给您，请尽快跟进`,
+            relatedId: id,
+            relatedType: 'lead',
+          });
+        } catch (notifErr) {
+          // eslint-disable-next-line no-console
+          console.error('[leads] reassign notification failed', (notifErr as any)?.message || notifErr);
+        }
       }
     }
     return res.json({ ok: true });

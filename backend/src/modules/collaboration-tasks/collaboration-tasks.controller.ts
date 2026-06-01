@@ -1,7 +1,8 @@
-import { Body, Controller, Get, Param, Patch, Post, Put, Query, Req, Res } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Put, Query, Req, Res, UseGuards } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { CollaborationTasksService } from './collaboration-tasks.service';
 import { OperationLogsService } from '../operation-logs/operation-logs.service';
+import { AuthGuard } from '../../common/auth.guard';
 import {
   OPERATION_LOG_ACTIONS,
   OPERATION_LOG_TARGET_TYPES,
@@ -10,6 +11,7 @@ import {
 } from '../../shared/operation-logs.constants';
 
 @Controller('collaboration-tasks')
+@UseGuards(AuthGuard)
 export class CollaborationTasksController {
   constructor(
     private readonly service: CollaborationTasksService,

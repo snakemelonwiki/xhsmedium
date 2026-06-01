@@ -1,11 +1,12 @@
 import {
-  Controller, Get, Post, Patch, Body, Param, Req, Res, Query,
+  Controller, Get, Post, Patch, Body, Param, Req, Res, Query, UseGuards,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { OrdersService } from './orders.service';
 import { RemindersService } from './reminders.service';
 import { OrderAbnormalFeedbackService } from './order-abnormal-feedback.service';
 import { OperationLogsService } from '../operation-logs/operation-logs.service';
+import { AuthGuard } from '../../common/auth.guard';
 import {
   OPERATION_LOG_ACTIONS,
   OPERATION_LOG_TARGET_TYPES,
@@ -14,6 +15,7 @@ import {
 } from '../../shared/operation-logs.constants';
 
 @Controller()
+@UseGuards(AuthGuard)
 export class OrdersController {
   constructor(
     private readonly ordersService: OrdersService,

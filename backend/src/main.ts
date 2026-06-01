@@ -1,8 +1,11 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
+import { Reflector } from '@nestjs/core';
 import { AppModule } from './app.module';
 import * as path from 'path';
 import { createBodySizeGuard } from './common/body-size.middleware';
+import { AuthGuard } from './common/auth.guard';
 
 // HTTP request logger
 function requestLogger(req: any, res: any, next: any) {
@@ -42,6 +45,9 @@ process.on('uncaughtException', (err: Error) => {
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+
+  // 注入 AuthGuard 依赖（避免子模块未 import JwtModule 导致 DI 失败）
+  AuthGuard.configure(app.get(JwtService), app.get(Reflector));
 
   app.setGlobalPrefix('api');
 

@@ -10,7 +10,7 @@ import {
 import { Lead } from '../../entities/lead.entity';
 import { User } from '../../entities/user.entity';
 import { makeId } from '../../shared/utils/id-generator';
-import { sanitizeText, hasBrokenEncoding } from '../../shared/sanitize';
+import { sanitizeText } from '../../shared/sanitize';
 import { NotificationsService } from '../notifications/notifications.service';
 import { OperationLogsService } from '../operation-logs/operation-logs.service';
 import { NOTIFICATION_TYPES } from '../../shared/notifications';
@@ -81,10 +81,8 @@ export class CollaborationTasksService {
     if (!normalizedType) {
       throw new Error('invalid type');
     }
-    // 防御编码损坏（如客户端用错编码发送）
-    if (hasBrokenEncoding(dto.reason)) {
-      throw new Error('reason contains invalid characters; please ensure UTF-8 encoding');
-    }
+    // PF-04 修复：去掉 hasBrokenEncoding 拦截。前端 fetch 默认 UTF-8，中文是合法输入。
+    // 真正损坏的字符（U+FFFD）会由 sanitizeText 静默清理。
     const cleanReason = sanitizeText(dto.reason);
     const lead = await this.leadRepository.findOne({
       where: { id: dto.leadId },
@@ -291,9 +289,7 @@ export class CollaborationTasksService {
     if (task.status !== 'handling' && task.status !== 'pending') {
       throw new Error(`cannot handle task in status ${task.status}`);
     }
-    if (hasBrokenEncoding(handledNote)) {
-      throw new Error('handledNote contains invalid characters; please ensure UTF-8 encoding');
-    }
+    // PF-04 修复：去掉 hasBrokenEncoding 拦截
     await this.assertCanHandle(task, handlerActor);
     const cleanNote = sanitizeText(handledNote);
     await this.repo.update(id, {
