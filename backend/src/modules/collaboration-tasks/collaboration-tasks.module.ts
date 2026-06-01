@@ -6,11 +6,13 @@ import { User } from '../../entities/user.entity';
 import { CollaborationTasksController } from './collaboration-tasks.controller';
 import { CollaborationTasksService } from './collaboration-tasks.service';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { OperationLogsModule } from '../operation-logs/operation-logs.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([CollaborationTask, Lead, User]),
     NotificationsModule,
+    OperationLogsModule,
   ],
   controllers: [CollaborationTasksController],
   providers: [CollaborationTasksService],

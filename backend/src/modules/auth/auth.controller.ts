@@ -1,10 +1,20 @@
 import { Controller, Post, Get, Req, Res, HttpStatus } from '@nestjs/common';
-import { AuthService } from './auth.service';
 import { Request, Response } from 'express';
+import { AuthService } from './auth.service';
+import { OperationLogsService } from '../operation-logs/operation-logs.service';
+import {
+  OPERATION_LOG_ACTIONS,
+  OPERATION_LOG_TARGET_TYPES,
+  parseIp,
+  stringifyDetail,
+} from '../../shared/operation-logs.constants';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly operationLogs: OperationLogsService,
+  ) {}
 
   @Post('login')
   async login(@Req() req: Request, @Res() res: Response) {
@@ -15,6 +25,23 @@ export class AuthController {
     const requestPort = originPort || Number((req.socket as any)?.localPort || 3000);
     try {
       const result = await this.authService.login(username, password, requestPort);
+      // 写操作日志：登录成功（best-effort）
+      try {
+        await this.operationLogs.log({
+          userId: result?.user?.id || '',
+          action: OPERATION_LOG_ACTIONS.LOGIN,
+          targetType: OPERATION_LOG_TARGET_TYPES.USER,
+          targetId: result?.user?.id || '',
+          detail: stringifyDetail({
+            username: result?.user?.username || username,
+            role: result?.user?.role || '',
+          }),
+          ip: parseIp(req),
+        });
+      } catch (logErr) {
+        // eslint-disable-next-line no-console
+        console.error('[auth] operation log failed', (logErr as any)?.message || logErr);
+      }
       return res.json(result);
     } catch (error: any) {
       return res.status(error.status || 401).json(error.response || { message: error.message });
@@ -51,9 +78,27 @@ export class AuthController {
   @Post('logout')
   logout(@Req() req: Request, @Res() res: Response) {
     const token = req.headers.authorization?.replace('Bearer ', '');
+    // 用户 ID 优先从 session / 解析 token 拿
+    const userId = (req as any).session?.userId
+      || (req as any).user?.sub
+      || '';
     if (token) {
       this.authService.logout(token);
     }
+    // 写操作日志：登出（best-effort）
+    void this.operationLogs
+      .log({
+        userId,
+        action: OPERATION_LOG_ACTIONS.LOGOUT,
+        targetType: OPERATION_LOG_TARGET_TYPES.USER,
+        targetId: userId,
+        detail: stringifyDetail({ token: token ? 'present' : 'absent' }),
+        ip: parseIp(req),
+      })
+      .catch((logErr: any) => {
+        // eslint-disable-next-line no-console
+        console.error('[auth] operation log failed', logErr?.message || logErr);
+      });
     return res.json({ ok: true });
   }
 }

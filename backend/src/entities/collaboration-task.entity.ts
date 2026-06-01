@@ -12,7 +12,8 @@ export type CollaborationTaskStatus =
   | 'pending'
   | 'handling'
   | 'handled'
-  | 'closed';
+  | 'closed'
+  | 'timeout';
 
 @Entity('collaboration_tasks')
 @Index('idx_collab_lead', ['leadId'])
@@ -43,7 +44,7 @@ export class CollaborationTask {
 
   @Column({
     type: 'enum',
-    enum: ['pending', 'handling', 'handled', 'closed'],
+    enum: ['pending', 'handling', 'handled', 'closed', 'timeout'],
     default: 'pending',
   })
   status: CollaborationTaskStatus;

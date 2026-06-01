@@ -1,31 +1,43 @@
 import { Body, Controller, Get, Param, Post, Query, Req, Res } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { ExportsService, ExportType } from './exports.service';
+import { OperationLogsService } from '../operation-logs/operation-logs.service';
+import {
+  OPERATION_LOG_ACTIONS,
+  OPERATION_LOG_TARGET_TYPES,
+  parseIp,
+  stringifyDetail,
+} from '../../shared/operation-logs.constants';
 
 const ALLOWED_TYPES: ExportType[] = [
   'leads',
   'orders',
+  'order_progress',
   'collaboration_records',
   'posts',
   'rankings',
+  'accounts',
 ];
 
 // 按角色限制可触发的 exportType，防止低权限角色下载全公司数据。
 //   admin / owner：所有类型
-//   staff（运营）：作品、客资、协同记录、排行榜
-//   sales：客资（仅自己的）、订单、协同记录
-//   academic：仅订单（仅自己的+池单）
+//   staff（运营）：作品、账号、客资、协同记录、排行榜
+//   sales：客资（仅自己的）、订单、订单跟进、协同记录
+//   academic：订单、订单跟进（仅自己的+池单）
 const ROLE_EXPORT_WHITELIST: Record<string, ExportType[]> = {
-  admin:    ['leads', 'orders', 'collaboration_records', 'posts', 'rankings'],
-  owner:    ['leads', 'orders', 'collaboration_records', 'posts', 'rankings'],
-  staff:    ['leads', 'posts', 'rankings', 'collaboration_records'],
-  sales:    ['leads', 'orders', 'collaboration_records'],
-  academic: ['orders'],
+  admin:    ['leads', 'orders', 'order_progress', 'collaboration_records', 'posts', 'rankings', 'accounts'],
+  owner:    ['leads', 'orders', 'order_progress', 'collaboration_records', 'posts', 'rankings', 'accounts'],
+  staff:    ['leads', 'posts', 'rankings', 'collaboration_records', 'accounts'],
+  sales:    ['leads', 'orders', 'order_progress', 'collaboration_records'],
+  academic: ['orders', 'order_progress'],
 };
 
 @Controller('exports')
 export class ExportsController {
-  constructor(private readonly service: ExportsService) {}
+  constructor(
+    private readonly service: ExportsService,
+    private readonly operationLogs: OperationLogsService,
+  ) {}
 
   /**
    * 创建一个异步导出任务。
@@ -75,6 +87,24 @@ export class ExportsController {
         exportType,
         filterJson: filter,
       });
+      // 写操作日志：导出任务创建（best-effort）
+      try {
+        await this.operationLogs.log({
+          userId,
+          action: OPERATION_LOG_ACTIONS.EXPORT_CREATE,
+          targetType: OPERATION_LOG_TARGET_TYPES.EXPORT_TASK,
+          targetId: result.id,
+          detail: stringifyDetail({
+            exportType,
+            scope: filter.scope,
+            role: userRole,
+          }),
+          ip: parseIp(req),
+        });
+      } catch (logErr) {
+        // eslint-disable-next-line no-console
+        console.error('[exports] operation log failed', (logErr as any)?.message || logErr);
+      }
       return res.json({ ok: true, ...result });
     } catch (err: any) {
       return res.status(422).json({ ok: false, message: err?.message || String(err) });
@@ -121,5 +151,57 @@ export class ExportsController {
       return res.status(404).json({ ok: false, message: 'not found' });
     }
     return res.json(task);
+  }
+
+  /**
+   * 下载已完成的导出文件。
+   * - 权限：仅任务创建者可下载；admin / owner 可下载全部
+   * - 状态：仅 status === 'completed' 可下载
+   * - 写 operation_logs（action='export_download'）
+   */
+  @Get(':id/download')
+  async download(@Param('id') id: string, @Req() req: Request, @Res() res: Response) {
+    const session = (req as any).session;
+    const userId = session?.userId || session?.id || '';
+    const role = session?.role || '';
+    if (!userId || !role) {
+      return res.status(401).json({ ok: false, message: 'unauthorized' });
+    }
+    const result: any = await this.service.resolveDownload(id, userId, role);
+    if (!result || result.ok !== true) {
+      return res.status(result?.status || 400).json({ ok: false, message: result?.message || 'download_failed' });
+    }
+    // 写下载日志（不影响主流程）
+    void this.service.logDownload({
+      taskId: id,
+      userId,
+      role,
+      exportType: result.exportType,
+      ip: this.getClientIp(req),
+    }).catch(() => {
+      // ignore
+    });
+    const filename = this.buildDownloadFilename(result.exportType, id, result.ext);
+    res.setHeader('Content-Type', result.contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Length', String(result.fileSize));
+    // 优先 stream 本地文件；OSS 模式下 redirect 到签名 URL
+    if (result.redirectUrl) {
+      return res.redirect(result.redirectUrl);
+    }
+    return res.sendFile(result.filePath);
+  }
+
+  private buildDownloadFilename(exportType: string, id: string, ext: string): string {
+    // 文件名里加 exportType 前缀 + taskId 前 8 位，便于辨识
+    const short = (id || '').slice(0, 8);
+    const safeType = String(exportType || 'export').replace(/[^a-zA-Z0-9_\-]/g, '');
+    return `${safeType}_${short}.${ext}`;
+  }
+
+  private getClientIp(req: Request): string {
+    const xff = (req.headers['x-forwarded-for'] as string) || '';
+    if (xff) return xff.split(',')[0].trim();
+    return (req.socket as any)?.remoteAddress || (req as any).ip || '';
   }
 }

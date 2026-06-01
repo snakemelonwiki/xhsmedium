@@ -4,12 +4,20 @@ import { Request, Response } from 'express';
 import { makeId } from '../../shared/utils/id-generator';
 import { DebounceGuard } from '../../common/debounce.guard';
 import { CollaborationTasksService } from '../collaboration-tasks/collaboration-tasks.service';
+import { OperationLogsService } from '../operation-logs/operation-logs.service';
+import {
+  OPERATION_LOG_ACTIONS,
+  OPERATION_LOG_TARGET_TYPES,
+  parseIp,
+  stringifyDetail,
+} from '../../shared/operation-logs.constants';
 
 @Controller('leads')
 export class LeadsController {
   constructor(
     private readonly leadsService: LeadsService,
     private readonly collaborationTasksService: CollaborationTasksService,
+    private readonly operationLogs: OperationLogsService,
   ) {}
 
   @Get()
@@ -286,7 +294,14 @@ export class LeadsController {
 
   @Put(':id')
   @UseGuards(DebounceGuard)
-  async update(@Param('id') id: string, @Body() body: any, @Res() res: Response) {
+  async update(@Param('id') id: string, @Body() body: any, @Req() req: Request, @Res() res: Response) {
+    const session = (req as any).session;
+    const actorUserId = session?.userId || session?.id || '';
+    const before = await this.leadsService.findOne(id, {
+      actorUserId,
+      actorEmployeeId: session?.employeeId || '',
+      actorRole: session?.role || '',
+    });
     await this.leadsService.update(id, {
       accountId: body.accountId,
       postId: body.postId || null,
@@ -308,6 +323,29 @@ export class LeadsController {
       addStatus: body.addStatus,
       intention: body.intention,
     });
+    // REASSIGN：本次请求把 assigned_sales_user_id 改成与原值不同的人，视为改派
+    if (
+      before
+      && body.assignedSalesUserId !== undefined
+      && (before as any).assignedSalesUserId !== body.assignedSalesUserId
+    ) {
+      try {
+        await this.operationLogs.log({
+          userId: actorUserId,
+          action: OPERATION_LOG_ACTIONS.REASSIGN,
+          targetType: OPERATION_LOG_TARGET_TYPES.LEAD,
+          targetId: id,
+          detail: stringifyDetail({
+            from: (before as any).assignedSalesUserId || null,
+            to: body.assignedSalesUserId || null,
+          }),
+          ip: parseIp(req),
+        });
+      } catch (logErr) {
+        // eslint-disable-next-line no-console
+        console.error('[leads] operation log failed', (logErr as any)?.message || logErr);
+      }
+    }
     return res.json({ ok: true });
   }
 

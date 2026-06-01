@@ -17,7 +17,7 @@ describe('CollaborationTasksService', () => {
     leadRepo.findOne.mockResolvedValue({ id: 'lead-1', employeeId: 'emp-1', contactInfo: 'wx-1' });
     userRepo.findOne.mockResolvedValue({ id: 'op-user-1' });
 
-    const service = new CollaborationTasksService(taskRepo as any, leadRepo as any, userRepo as any, notifications as any);
+    const service = new CollaborationTasksService(taskRepo as any, leadRepo as any, userRepo as any, notifications as any, { log: jest.fn() } as any);
     const task = await service.create({
       leadId: 'lead-1',
       requesterId: 'sales-1',
@@ -50,7 +50,7 @@ describe('CollaborationTasksService', () => {
       })
       .mockResolvedValueOnce({ id: 'task-1', status: 'handled', handledNote: 'done' });
 
-    const service = new CollaborationTasksService(taskRepo as any, leadRepo as any, userRepo as any, notifications as any);
+    const service = new CollaborationTasksService(taskRepo as any, leadRepo as any, userRepo as any, notifications as any, { log: jest.fn() } as any);
     const task = await service.handle('task-1', 'done', 'op-user-1');
 
     expect(task).toMatchObject({ id: 'task-1', status: 'handled' });

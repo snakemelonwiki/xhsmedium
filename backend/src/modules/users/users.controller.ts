@@ -2,10 +2,20 @@ import { Controller, Get, Post, Body, Req, Res, Query } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { Request, Response } from 'express';
 import { makeId } from '../../shared/utils/id-generator';
+import { OperationLogsService } from '../operation-logs/operation-logs.service';
+import {
+  OPERATION_LOG_ACTIONS,
+  OPERATION_LOG_TARGET_TYPES,
+  parseIp,
+  stringifyDetail,
+} from '../../shared/operation-logs.constants';
 
 @Controller('users')
 export class UsersController {
-  constructor(private readonly usersService: UsersService) {}
+  constructor(
+    private readonly usersService: UsersService,
+    private readonly operationLogs: OperationLogsService,
+  ) {}
 
   @Get()
   async findAll(
@@ -58,7 +68,9 @@ export class UsersController {
   }
 
   @Post('staff')
-  async createStaff(@Body() body: any, @Res() res: Response) {
+  async createStaff(@Body() body: any, @Req() req: Request, @Res() res: Response) {
+    const session = (req as any).session;
+    const userId = session?.userId || session?.id || '';
     const { username, password, employeeId, status } = body;
     const duplicated = await this.usersService.findByUsername(username);
     if (duplicated) {
@@ -71,6 +83,24 @@ export class UsersController {
       employeeId,
       status: status || 'active',
     });
+    // 写操作日志：用户/员工账号创建
+    try {
+      await this.operationLogs.log({
+        userId,
+        action: OPERATION_LOG_ACTIONS.CREATE,
+        targetType: OPERATION_LOG_TARGET_TYPES.USER,
+        targetId: '',
+        detail: stringifyDetail({
+          username,
+          employeeId,
+          status: status || 'active',
+        }),
+        ip: parseIp(req),
+      });
+    } catch (logErr) {
+      // eslint-disable-next-line no-console
+      console.error('[users] operation log failed', (logErr as any)?.message || logErr);
+    }
     return res.json({ ok: true });
   }
 }

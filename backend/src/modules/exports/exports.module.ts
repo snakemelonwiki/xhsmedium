@@ -3,15 +3,28 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { ExportTask } from '../../entities/export-task.entity';
 import { Lead } from '../../entities/lead.entity';
 import { Order } from '../../entities/order.entity';
+import { OrderFollowRecord } from '../../entities/order-follow-record.entity';
+import { User } from '../../entities/user.entity';
 import { CollaborationTask } from '../../entities/collaboration-task.entity';
+import { Account } from '../../entities/account.entity';
 import { ExportsController } from './exports.controller';
 import { ExportsService } from './exports.service';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { OperationLogsModule } from '../operation-logs/operation-logs.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([ExportTask, Lead, Order, CollaborationTask]),
+    TypeOrmModule.forFeature([
+      ExportTask,
+      Lead,
+      Order,
+      OrderFollowRecord,
+      User,
+      CollaborationTask,
+      Account,
+    ]),
     NotificationsModule,
+    OperationLogsModule,
   ],
   controllers: [ExportsController],
   providers: [ExportsService],

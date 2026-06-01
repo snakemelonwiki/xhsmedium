@@ -126,14 +126,51 @@ export class NotificationsService {
 
   /**
    * Mark every unread notification of the user as read. Returns affected count.
+   * When typeCode is provided, the update is scoped to that notification type.
    */
-  async markAllRead(userId: string): Promise<number> {
+  async markAllRead(userId: string, typeCode?: string): Promise<number> {
     if (!userId) return 0;
+    const qb = this.repo
+      .createQueryBuilder()
+      .update(Notification)
+      .set({ readStatus: 1 });
+    if (typeCode) {
+      qb.where('receiver_id = :uid AND read_status = 0 AND type_code = :typeCode', {
+        uid: userId,
+        typeCode,
+      });
+    } else {
+      qb.where('receiver_id = :uid AND read_status = 0', { uid: userId });
+    }
+    const result = await qb.execute();
+    return result.affected || 0;
+  }
+
+  /**
+   * Mark a batch of notifications (by id) as read. Only notifications owned
+   * by the current user and currently unread are flipped to read. The
+   * id list is deduplicated and any empty entries are dropped. Returns the
+   * number of rows actually updated.
+   */
+  async markReadMany(userId: string, ids: string[]): Promise<number> {
+    if (!userId) return 0;
+    if (!Array.isArray(ids) || ids.length === 0) return 0;
+    const uniqueIds = Array.from(
+      new Set(
+        ids
+          .map((id) => (id == null ? '' : String(id).trim()))
+          .filter((id) => id.length > 0),
+      ),
+    );
+    if (uniqueIds.length === 0) return 0;
     const result = await this.repo
       .createQueryBuilder()
       .update(Notification)
       .set({ readStatus: 1 })
-      .where('receiver_id = :uid AND read_status = 0', { uid: userId })
+      .where('receiver_id = :uid AND read_status = 0 AND id IN (:...ids)', {
+        uid: userId,
+        ids: uniqueIds,
+      })
       .execute();
     return result.affected || 0;
   }

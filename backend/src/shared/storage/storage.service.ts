@@ -21,6 +21,12 @@ export interface PutOptions {
   bom?: boolean;
   /** 自定义 Content-Type（OSS 模式下生效，本地暂不用） */
   contentType?: string;
+  /**
+   * 单次上传覆盖当前 driver；'local' 强制写本地，'oss' 强制写 OSS。
+   * 缺省时走 this.driver（来自 OBJECT_STORAGE_DRIVER 环境变量）。
+   * 当前端在 Modal 里选了与默认不同的目标时使用。
+   */
+  driverOverride?: 'local' | 'oss';
 }
 
 type StorageEnv = Record<string, string | undefined>;
@@ -74,9 +80,13 @@ export class StorageService {
       const bom = Buffer.from([0xef, 0xbb, 0xbf]);
       body = Buffer.concat([bom, buf]);
     }
-    if (this.isOssDriver()) {
+    const effectiveDriver = opts.driverOverride === 'oss' || opts.driverOverride === 'local'
+      ? opts.driverOverride
+      : this.driver;
+    if (effectiveDriver === 'oss') {
+      const client = this.ossClient || this.createOssClient();
       const objectName = this.toObjectName(safeBucket, safeKey);
-      await this.ossClient!.put(objectName, body, this.toOssPutOptions(opts));
+      await client!.put(objectName, body, this.toOssPutOptions(opts));
       return this.toAppViewUrl(safeBucket, safeKey);
     }
 
@@ -128,6 +138,17 @@ export class StorageService {
   /** 当前 driver（用于诊断） */
   getDriver(): string {
     return this.driver;
+  }
+
+  /**
+   * 给定一个 driverOverride 选项，返回实际生效的 driver。
+   * 用作单次上传完成后向调用方回报"落到哪里了"。
+   */
+  resolveEffectiveDriver(opts?: { driverOverride?: 'local' | 'oss' }): 'local' | 'oss' {
+    if (opts?.driverOverride === 'oss' || opts?.driverOverride === 'local') {
+      return opts.driverOverride;
+    }
+    return this.driver === 'oss' ? 'oss' : 'local';
   }
 
   /**

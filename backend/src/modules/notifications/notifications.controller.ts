@@ -93,6 +93,45 @@ export class NotificationsController {
     return res.json({ ok: true, affected });
   }
 
+  /**
+   * Batch mark notifications as read.
+   * Body: { ids: string[] } — accepts either an explicit list of notification ids
+   * or { all: true } to mark every unread notification of the current user.
+   */
+  @Post('mark-read')
+  async markReadMany(
+    @Body() body: any,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    const session = (req as any).session;
+    const userId = session?.userId || session?.id || body?.actorUserId || '';
+    const rawIds = Array.isArray(body?.ids) ? body.ids : [];
+    const ids: string[] = rawIds
+      .map((id: unknown) => (id == null ? '' : String(id).trim()))
+      .filter((id: string) => id.length > 0);
+    const affected = await this.notificationsService.markReadMany(userId, ids);
+    return res.json({ ok: true, affected });
+  }
+
+  /**
+   * Mark every unread notification of the current user as read.
+   * Body (optional): { typeCode?: string } — when provided, only notifications
+   * matching that type are marked read.
+   */
+  @Post('mark-all-read')
+  async markAllReadByType(
+    @Body() body: any,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    const session = (req as any).session;
+    const userId = session?.userId || session?.id || body?.actorUserId || '';
+    const typeCode = body?.typeCode ? String(body.typeCode).trim() : undefined;
+    const affected = await this.notificationsService.markAllRead(userId, typeCode || undefined);
+    return res.json({ ok: true, affected });
+  }
+
   private resolvePortType(userRole: string): string {
     if (userRole === 'sales') return 'sales';
     if (userRole === 'academic') return 'academic';

@@ -9,8 +9,10 @@
     "start:dev": "concurrently \"npm run start:legacy\" \"npm run start:backend\"",
     "start:legacy": "node server.js",
     "start:backend": "cd backend && npm run start:dev",
-    "start:frontend": "cd frontend && npm run dev",
+    "start:frontend": "cd frontend && npm run build && npm run start",
+    "start:frontend:dev": "cd frontend && npm run dev",
     "build:frontend": "cd frontend && npm run build",
+    "serve:frontend": "cd frontend && npm run start",
     "debug:link": "node scripts/debug-link.js",
     "install:browsers": "playwright install chromium",
     "install:all": "npm install && cd backend && npm install && cd ../frontend && npm install"

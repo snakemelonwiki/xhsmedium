@@ -1,6 +1,7 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { In, LessThanOrEqual, Repository } from 'typeorm';
 import {
   CollaborationTask,
   CollaborationTaskType,
@@ -11,7 +12,11 @@ import { User } from '../../entities/user.entity';
 import { makeId } from '../../shared/utils/id-generator';
 import { sanitizeText, hasBrokenEncoding } from '../../shared/sanitize';
 import { NotificationsService } from '../notifications/notifications.service';
+import { OperationLogsService } from '../operation-logs/operation-logs.service';
 import { NOTIFICATION_TYPES } from '../../shared/notifications';
+
+const COLLAB_TIMEOUT_HOURS = 24;
+const COLLAB_SCAN_BATCH = 100;
 
 const ALLOWED_TYPES: CollaborationTaskType[] = [
   'remind_customer',
@@ -42,14 +47,22 @@ interface CreateDto {
 interface ListQuery {
   scope?: 'mine' | 'inbox' | 'all' | string;
   status?: string;
+  type?: string;
   leadId?: string;
   userId?: string;
   employeeId?: string;
   role?: string;
+  // 1.2 搜索/筛选 — 模糊搜索（协同原因/客户昵称/联系方式）+ 时间范围
+  keyword?: string;
+  startAt?: string;
+  endAt?: string;
 }
 
 @Injectable()
 export class CollaborationTasksService {
+  private readonly logger = new Logger(CollaborationTasksService.name);
+  private running = false;
+
   constructor(
     @InjectRepository(CollaborationTask)
     private readonly repo: Repository<CollaborationTask>,
@@ -58,6 +71,7 @@ export class CollaborationTasksService {
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
     private readonly notificationsService: NotificationsService,
+    private readonly operationLogsService: OperationLogsService,
   ) {}
 
   async create(dto: CreateDto): Promise<CollaborationTask> {
@@ -138,6 +152,9 @@ export class CollaborationTasksService {
 
   async list(query: ListQuery): Promise<any[]> {
     const qb = this.repo.createQueryBuilder('t');
+    // 模糊搜索条件可能引用 leads.*,所以在 applyCollabScope 之前先 leftJoin;
+    // applyCollabScope 内部若已 join 同一 alias 会复用 QueryBuilder 自身 join。
+    this.applyCollabFilters(qb, query);
     this.applyCollabScope(qb, query);
     if (query.status) {
       qb.andWhere('t.status = :status', { status: query.status });
@@ -148,6 +165,31 @@ export class CollaborationTasksService {
     qb.orderBy('t.requested_at', 'DESC');
     const rows = await qb.getMany();
     return this.mapTasks(rows);
+  }
+
+  /**
+   * 1.2 协同任务筛选：type / 模糊搜索（reason / 客户昵称/联系方式）/ 时间范围。
+   * 注意：inbox 分支在 applyCollabScope 内会再 leftJoin leads，使用同样 alias 'l' 不会冲突。
+   */
+  private applyCollabFilters(qb: any, query: ListQuery): void {
+    if (query.type && ALLOWED_TYPES.includes(query.type as CollaborationTaskType)) {
+      qb.andWhere('t.type = :type', { type: query.type });
+    }
+    const kw = query.keyword && query.keyword.trim();
+    if (kw) {
+      const like = `%${kw}%`;
+      qb.leftJoin(Lead, 'l', 'l.id = t.lead_id');
+      qb.andWhere(
+        '(t.reason LIKE :kw OR l.nickname LIKE :kw OR l.contact_info LIKE :kw)',
+        { kw: like },
+      );
+    }
+    if (query.startAt) {
+      qb.andWhere('t.requested_at >= :startAt', { startAt: query.startAt });
+    }
+    if (query.endAt) {
+      qb.andWhere('t.requested_at <= :endAt', { endAt: query.endAt });
+    }
   }
 
   /**
@@ -191,6 +233,7 @@ export class CollaborationTasksService {
 
     const qb = this.repo.createQueryBuilder('t');
 
+    this.applyCollabFilters(qb, query);
     this.applyCollabScope(qb, query);
     if (query.status) {
       qb.andWhere('t.status = :status', { status: query.status });
@@ -330,6 +373,159 @@ export class CollaborationTasksService {
     if (!task) return null;
     await this.repo.update(id, { status: 'closed' as CollaborationTaskStatus });
     return this.repo.findOne({ where: { id } });
+  }
+
+  /**
+   * 协同任务超时扫描器：每 30 分钟跑一次。
+   * 规则：created_at 距今超过 24 小时且 status ∈ {pending, handling} 的任务 → 标 timeout。
+   * 给 来源运营（reporter=user） + 主管（role=admin） 发 COLLABORATION_TIMEOUT 通知，
+   * 并写 operation_logs (action='status_change')，便于事后追溯。
+   * 幂等：timeout 状态的任务不会被再扫回去。
+   */
+  @Cron(CronExpression.EVERY_30_MINUTES, { name: 'collabTimeoutScan' })
+  async handleTimeoutScan(): Promise<void> {
+    if (this.running) {
+      // 上一轮还没跑完（或卡死），跳过避免堆积
+      return;
+    }
+    this.running = true;
+    try {
+      await this.runOnce();
+    } catch (err: any) {
+      this.logger.error(`collab timeout scan failed: ${err?.message || err}`);
+    } finally {
+      this.running = false;
+    }
+  }
+
+  /**
+   * 单轮扫描（暴露 public 给 controller 手动 trigger）。
+   * 限 COLLAB_SCAN_BATCH=100 条/轮：单次跑过久会卡主调度循环。
+   */
+  async runOnce(): Promise<{ scanned: number; marked: number; notified: number; failed: number }> {
+    return this.scanTimeouts();
+  }
+
+  async scanTimeouts(): Promise<{ scanned: number; marked: number; notified: number; failed: number }> {
+    const threshold = new Date(Date.now() - COLLAB_TIMEOUT_HOURS * 3600 * 1000);
+    const dueList = await this.repo.find({
+      where: {
+        status: In(['pending', 'handling'] as CollaborationTaskStatus[]),
+        createdAt: LessThanOrEqual(threshold),
+      },
+      order: { createdAt: 'ASC' },
+      take: COLLAB_SCAN_BATCH,
+    });
+    if (!dueList.length) {
+      return { scanned: 0, marked: 0, notified: 0, failed: 0 };
+    }
+
+    let marked = 0;
+    let notified = 0;
+    let failed = 0;
+
+    for (const task of dueList) {
+      try {
+        // 幂等保护：再次查一遍，避免中途被改完又回退成非 timeout
+        const fresh = await this.repo.findOne({ where: { id: task.id } });
+        if (!fresh) continue;
+        if (fresh.status === 'timeout' || fresh.status === 'handled' || fresh.status === 'closed') {
+          continue;
+        }
+        if (fresh.status !== 'pending' && fresh.status !== 'handling') {
+          continue;
+        }
+
+        const updateResult = await this.repo
+          .createQueryBuilder()
+          .update(CollaborationTask)
+          .set({ status: 'timeout' as CollaborationTaskStatus })
+          .where('id = :id AND status IN (:...active)', {
+            id: fresh.id,
+            active: ['pending', 'handling'],
+          })
+          .execute();
+        if ((updateResult.affected || 0) === 0) {
+          // 已被其他 worker 抢先改完，跳过
+          continue;
+        }
+        marked += 1;
+
+        // lead.status 保持 'in_collaboration'，不强制改（按需求）。
+
+        // 接收者：来源运营（handlerId） + 主管（role=admin）
+        const receivers = new Set<string>();
+        if (fresh.handlerId) receivers.add(fresh.handlerId);
+        if (fresh.requesterId) receivers.add(fresh.requesterId);
+        const admins = await this.userRepository.find({
+          where: { role: 'admin' },
+          select: { id: true },
+        });
+        admins.forEach((a) => receivers.add(a.id));
+
+        if (receivers.size > 0) {
+          await this.notificationsService.create({
+            receiverIds: Array.from(receivers),
+            senderId: null,
+            portType: 'operations',
+            typeCode: NOTIFICATION_TYPES.COLLABORATION_TIMEOUT,
+            title: '协同任务超时',
+            content: `协同任务 #${fresh.id} 已超过 ${COLLAB_TIMEOUT_HOURS} 小时未处理`,
+            relatedId: fresh.id,
+            relatedType: 'collaboration_task',
+          });
+          notified += 1;
+        }
+
+        // 写 operation_logs（system 触发，使用固定的 system 标识作为 userId）
+        try {
+          await this.operationLogsService.log({
+            userId: 'system',
+            action: 'status_change',
+            targetType: 'collaboration_task',
+            targetId: fresh.id,
+            detail: `pending/handling → timeout (>= ${COLLAB_TIMEOUT_HOURS}h)`,
+          });
+        } catch (logErr: any) {
+          // log 失败不影响主流程
+          this.logger.warn(
+            `collab timeout log failed (task=${fresh.id}): ${logErr?.message || logErr}`,
+          );
+        }
+      } catch (err: any) {
+        failed += 1;
+        this.logger.error(
+          `collab timeout process failed (task=${task.id}): ${err?.message || err}`,
+        );
+      }
+    }
+
+    if (marked > 0 || failed > 0) {
+      this.logger.log(
+        `collab timeout scan: scanned=${dueList.length} marked=${marked} notified=${notified} failed=${failed}`,
+      );
+    }
+    return { scanned: dueList.length, marked, notified, failed };
+  }
+
+  /**
+   * 列出当前所有 timeout 状态的协同任务（admin/owner 用）。
+   * 复用 list() 的可见性过滤 → admin/owner 传 scope=all 才能看到全表。
+   */
+  async listTimeouts(query: { limit?: number; offset?: number; userId?: string; role?: string }) {
+    const safeLimit = Math.min(Math.max(Number(query.limit) || 50, 1), 200);
+    const safeOffset = Math.max(Number(query.offset) || 0, 0);
+    const isAdminLike = query.role === 'admin' || query.role === 'owner';
+
+    const qb = this.repo.createQueryBuilder('t').where('t.status = :status', { status: 'timeout' });
+    if (!isAdminLike) {
+      // 非 admin/owner 仅看自己相关（自己发起的 / 自己被指派的）
+      qb.andWhere('(t.requester_id = :uid OR t.handler_id = :uid)', { uid: query.userId || '' });
+    }
+    qb.orderBy('t.created_at', 'ASC').take(safeLimit).skip(safeOffset);
+    const [rows, total] = await qb.getManyAndCount();
+    const items = await this.mapTasks(rows);
+    return { items, total, limit: safeLimit, offset: safeOffset };
   }
 
   private async mapTasks(rows: CollaborationTask[]): Promise<any[]> {
