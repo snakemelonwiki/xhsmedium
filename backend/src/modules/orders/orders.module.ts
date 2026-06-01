@@ -6,6 +6,7 @@ import { Lead } from '../../entities/lead.entity';
 import { User } from '../../entities/user.entity';
 import { OrdersController } from './orders.controller';
 import { OrdersService } from './orders.service';
+import { RemindersService } from './reminders.service';
 import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
@@ -14,7 +15,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
     NotificationsModule,
   ],
   controllers: [OrdersController],
-  providers: [OrdersService],
-  exports: [OrdersService],
+  providers: [OrdersService, RemindersService],
+  exports: [OrdersService, RemindersService],
 })
 export class OrdersModule {}

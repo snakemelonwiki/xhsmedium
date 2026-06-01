@@ -3,10 +3,14 @@ import {
 } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { OrdersService } from './orders.service';
+import { RemindersService } from './reminders.service';
 
 @Controller()
 export class OrdersController {
-  constructor(private readonly ordersService: OrdersService) {}
+  constructor(
+    private readonly ordersService: OrdersService,
+    private readonly remindersService: RemindersService,
+  ) {}
 
   /**
    * Sales marks a lead as deal-closed; spawns the order in a single transaction.
@@ -76,6 +80,45 @@ export class OrdersController {
       sessionRole,
     });
     return res.json(rows);
+  }
+
+  /**
+   * 教务/销售视角的"节点提醒"列表：列出自己跟进过 OR 自己名下订单
+   * 中下次提醒时间已到 / 即将在 upcomingHours 小时内到的记录。
+   * 必须放在 `@Get('orders/:id')` 之前，否则 'reminders' 会被路由参数 :id 抢占。
+   */
+  @Get('orders/reminders/pending')
+  async listPendingReminders(
+    @Req() req: Request,
+    @Res() res: Response,
+    @Query('upcomingHours') upcomingHours?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const session = (req as any).session;
+    const userId = session?.userId || session?.id || '';
+    if (!userId) {
+      return res.status(401).json({ ok: false, message: 'unauthenticated' });
+    }
+    const items = await this.remindersService.listPending(userId, {
+      upcomingHours: upcomingHours !== undefined ? Number(upcomingHours) : undefined,
+      limit: limit !== undefined ? Number(limit) : undefined,
+    });
+    return res.json({ items, total: items.length });
+  }
+
+  /**
+   * 手动触发一次提醒扫描（仅 admin/owner 可用）；
+   * 用于本地回归与生产侧应急（如调度卡死后手动催发）。
+   */
+  @Post('orders/reminders/scan')
+  async triggerScan(@Req() req: Request, @Res() res: Response) {
+    const session = (req as any).session;
+    const role = session?.role || '';
+    if (role !== 'admin' && role !== 'owner') {
+      return res.status(403).json({ ok: false, message: 'forbidden' });
+    }
+    const result = await this.remindersService.runOnce();
+    return res.json({ ok: true, ...result });
   }
 
   @Get('orders/:id')

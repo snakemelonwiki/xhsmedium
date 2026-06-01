@@ -3,6 +3,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
+import { ScheduleModule } from '@nestjs/schedule';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { User } from './entities/user.entity';
 import { Employee } from './entities/employee.entity';
@@ -82,6 +83,7 @@ import { TokenRefreshInterceptor } from './common/token-refresh.interceptor';
       }),
     }),
     PassportModule.register({ defaultStrategy: 'jwt' }),
+    ScheduleModule.forRoot(),
     AuthModule,
     EmployeesModule,
     UsersModule,

@@ -29,21 +29,30 @@ CREATE TABLE IF NOT EXISTS employees (
 -- ============================================================
 -- 2. users
 -- backend/src/entities/user.entity.ts + auth/app role routing.
--- role 保持 ENUM 类型（原始 schema 定义），通过追加枚举值的方式扩展 owner/sales/academic。
+-- 角色 → 前端入口：
+--   admin    → /admin/*   主管端（运营管理，跨员工聚合视图）
+--   staff    → /operation/* 运营员工端（portType='operations'）
+--   owner    → 仅 OWNER_PORT（默认 3001）登录的总后台
+--   sales    → /sales/*   销售端
+--   academic → /academic/* 教务端
+-- role 保持 ENUM 类型（原始 schema 定义），通过追加枚举值的方式扩展 owner/sales/academic；
+-- 不可删除已有枚举值、不可修改字段类型；新增角色需同步 user.entity.ts 与迁移（参考 M5）。
 -- ============================================================
 CREATE TABLE IF NOT EXISTS users (
-  id           VARCHAR(64)  PRIMARY KEY,
-  username     VARCHAR(64)  NOT NULL UNIQUE COMMENT '登录用户名',
-  password     VARCHAR(255) NOT NULL COMMENT '登录密码或 bcrypt hash',
-  role         ENUM('admin','staff','owner','sales','academic') NOT NULL COMMENT '账号角色（原 admin/staff 基础上追加 owner/sales/academic）',
-  employee_id  VARCHAR(64)  NULL COMMENT '关联员工ID',
-  status       VARCHAR(32)  NOT NULL DEFAULT 'active' COMMENT 'active/inactive/locked',
-  created_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  id           VARCHAR(64)  PRIMARY KEY                        COMMENT '用户唯一ID（UUID）',
+  username     VARCHAR(64)  NOT NULL UNIQUE                    COMMENT '登录用户名（全局唯一）',
+  password     VARCHAR(255) NOT NULL                           COMMENT '登录密码：bcrypt hash 或历史明文',
+  role         ENUM('admin','staff','owner','sales','academic') NOT NULL
+                                                                COMMENT '账号角色：admin主管端 | staff运营员工 | owner总后台 | sales销售 | academic教务',
+  employee_id  VARCHAR(64)  NULL                               COMMENT '关联员工ID（employees.id）；owner 等纯账号可为空',
+  status       VARCHAR(32)  NOT NULL DEFAULT 'active'          COMMENT '账号状态：active正常 | inactive停用 | locked锁定',
+  created_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '账号创建时间',
+  updated_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                                                                COMMENT '账号最后更新时间',
 
   INDEX idx_users_role        (role),
   INDEX idx_users_employee_id (employee_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='系统用户账号表';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='系统用户账号表（按 role 区分前端入口与数据范围）';
 
 -- ============================================================
 -- 3. accounts
@@ -259,10 +268,12 @@ CREATE TABLE IF NOT EXISTS order_follow_records (
   node_type      VARCHAR(32) NOT NULL COMMENT '节点类型',
   content        TEXT        NULL COMMENT '跟进内容',
   next_remind_at DATETIME    NULL COMMENT '下次提醒时间',
+  reminder_sent_at DATETIME  NULL COMMENT '节点提醒已发送时间(NULL=未发送)',
   created_at     DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
   INDEX idx_order_follow_order_id (order_id),
-  INDEX idx_order_follow_user_id  (user_id)
+  INDEX idx_order_follow_user_id  (user_id),
+  INDEX idx_order_follow_remind   (next_remind_at, reminder_sent_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='订单跟进记录表';
 
 -- ============================================================

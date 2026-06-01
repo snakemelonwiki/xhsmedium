@@ -36,12 +36,11 @@ export class AuthService {
       throw new UnauthorizedException({ message: '用户名或密码错误' });
     }
 
+    // 端口隔离仅保留"非 owner 不可从总后台入口登录"这一道反向保护，
+    // owner 角色现在允许从主前端入口登录（统一到 Next.js）。
     const ownerPort = Number(this.configService.get('OWNER_PORT', 3001));
     if (requestPort === ownerPort && user.role !== 'owner') {
       throw new UnauthorizedException({ message: '这个入口是总后台，请使用总后台账号登录' });
-    }
-    if (requestPort !== ownerPort && user.role === 'owner') {
-      throw new UnauthorizedException({ message: '总后台账号请从 3001 端口登录' });
     }
 
     const employees = await this.employeeRepository.find();

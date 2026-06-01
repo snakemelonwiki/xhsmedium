@@ -3,7 +3,7 @@ export const STORAGE_KEYS = {
   user: 'xhsmedium.user',
 } as const;
 
-export const APP_ROLES = ['operation', 'sales', 'academic', 'admin'] as const;
+export const APP_ROLES = ['operation', 'sales', 'academic', 'admin', 'owner'] as const;
 
 export type AppRole = (typeof APP_ROLES)[number];
 
@@ -20,6 +20,8 @@ const DEFAULT_HOME_BY_ROLE: Record<AppRole, string> = {
   sales: '/sales/leads',
   academic: '/academic',
   admin: '/admin',
+  // owner 复用主管端的全套页面，但有独立的 /owner 落地路径承载"总后台"字样
+  owner: '/owner',
 };
 
 const HOME_BY_PORT: Record<string, AppRole> = {
@@ -34,6 +36,7 @@ const PORT_PREFIX_BY_ROLE: Record<AppRole, string> = {
   sales: '/sales',
   academic: '/academic',
   admin: '/admin',
+  owner: '/owner',
 };
 
 /**
@@ -70,7 +73,8 @@ export function canAccessPath(role: AppRole | undefined, path: string): boolean 
     return false;
   }
 
-  if (role === 'admin') {
+  // admin/owner 都是"主管 / 总后台"视角，可访问全部端的页面
+  if (role === 'admin' || role === 'owner') {
     return Object.values(PORT_PREFIX_BY_ROLE).some((prefix) => isPathInPrefix(path, prefix));
   }
 
