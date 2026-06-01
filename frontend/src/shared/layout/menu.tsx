@@ -2,6 +2,7 @@ import {
   BarChartOutlined,
   BookOutlined,
   DatabaseOutlined,
+  ExportOutlined,
   FormOutlined,
   FundOutlined,
   ImportOutlined,
@@ -192,6 +193,13 @@ export const APP_MENU_ITEMS: AppMenuItem[] = [
     label: '节点提醒',
     path: '/academic/reminders',
     icon: <ProjectOutlined />,
+    roles: ['academic'],
+  },
+  {
+    key: 'academic-exports',
+    label: '导出中心',
+    path: '/academic/exports',
+    icon: <ExportOutlined />,
     roles: ['academic'],
   },
   {

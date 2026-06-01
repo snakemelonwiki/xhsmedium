@@ -3,58 +3,39 @@
 import { BellOutlined } from '@ant-design/icons';
 import { Badge, Button, Dropdown, Empty, List, Space, Typography } from 'antd';
 import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback } from 'react';
 
-import { listNotifications, markNotificationRead } from '@/shared/api/notifications';
+import { useNotifications } from '@/shared/contexts/NotificationContext';
 import { StatusTag } from '@/shared/components/status';
 import type { NotificationItem } from '@/shared/types/notifications';
 
 type NotificationBellProps = {
+  /** 兼容旧接口：实时通道 + 兜底轮询已在 NotificationContext 内统一管理，这里忽略。 */
   pollIntervalMs?: number;
 };
 
 /**
- * Minimal polling notification entry used by all port headers and message pages.
+ * Minimal notification bell used by all port headers.
+ * 数据由 NotificationContext 提供：socket 实时推送 + 60s 兜底轮询。
  */
-export function NotificationBell({ pollIntervalMs = 0 }: NotificationBellProps) {
+export function NotificationBell(_props: NotificationBellProps = {}) {
   const router = useRouter();
-  const [items, setItems] = useState<NotificationItem[]>([]);
-  const [unreadCount, setUnreadCount] = useState(0);
-  const [loading, setLoading] = useState(false);
+  const { items, unreadCount, loading, refresh, markRead } = useNotifications();
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    try {
-      const result = await listNotifications({ pageSize: 8 });
-      setItems(result.items);
-      setUnreadCount(Number(result.unreadCount || result.items.filter((item) => item.unread).length));
-    } catch {
-      setItems([]);
-      setUnreadCount(0);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    refresh();
-    if (!pollIntervalMs) return undefined;
-    const timer = window.setInterval(refresh, pollIntervalMs);
-    return () => window.clearInterval(timer);
-  }, [pollIntervalMs, refresh]);
-
-  const openNotification = useCallback(async (item: NotificationItem) => {
-    const route = item.routeHint ?? fallbackRoute(item);
-    if (item.unread) {
-      setItems((current) => current.map((entry) => (entry.id === item.id ? { ...entry, unread: false } : entry)));
-      setUnreadCount((current) => Math.max(0, current - 1));
-      markNotificationRead(item.id).catch(() => {
-        setItems((current) => current.map((entry) => (entry.id === item.id ? { ...entry, unread: true } : entry)));
-        setUnreadCount((current) => current + 1);
-      });
-    }
-    if (route) router.push(route);
-  }, [router]);
+  const openNotification = useCallback(
+    async (item: NotificationItem) => {
+      const route = item.routeHint ?? fallbackRoute(item);
+      if (item.unread) {
+        try {
+          await markRead(item.id);
+        } catch {
+          // context 已做乐观回滚，吞掉即可
+        }
+      }
+      if (route) router.push(route);
+    },
+    [markRead, router],
+  );
 
   const overlay = (
     <div className="notification-panel">

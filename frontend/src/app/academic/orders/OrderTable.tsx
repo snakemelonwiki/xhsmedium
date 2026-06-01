@@ -1,14 +1,17 @@
 'use client';
 
-import { ReloadOutlined } from '@ant-design/icons';
-import { Alert, Button, Card, Input, Modal, Pagination, Select, Space, Table, Tag, Typography, message } from 'antd';
+import { DownloadOutlined, ReloadOutlined } from '@ant-design/icons';
+import { Alert, Button, Card, DatePicker, Input, Modal, Pagination, Select, Space, Table, Tag, Typography, message } from 'antd';
 import type { TableColumnsType } from 'antd';
+import type { Dayjs } from 'dayjs';
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 
 import { listOrders, updateOrder } from '@/shared/api/orders';
+import { createExport, type ExportFilter } from '@/shared/api/exports';
 import { readStoredUser } from '@/shared/auth/auth';
 import type { OrderItem, OrderScope, OrderStatusCode } from '@/shared/types/orders';
+import { HANDOVER_STATUS_OPTIONS, HandoverStatusCode, handoverStatusMeta } from '@/shared/api/enums';
 
 const orderStatusOptions: { label: string; value: OrderStatusCode }[] = [
   { label: '待领取', value: 'to_receive' },
@@ -43,6 +46,10 @@ interface OrderTableProps {
   status?: string;
   showStatusFilter?: boolean;
   actionMode: 'academic' | 'abnormal' | 'sales' | 'admin';
+  /** 顶部工具栏额外按钮（如异常页的"导出异常记录"） */
+  toolbarExtra?: React.ReactNode;
+  /** 自定义行操作渲染（用于异常页加"关闭"按钮） */
+  renderRowExtra?: (record: OrderItem) => React.ReactNode;
 }
 
 function renderOrderStatus(status: string) {
@@ -52,6 +59,11 @@ function renderOrderStatus(status: string) {
 
 function renderPaidStatus(status: string) {
   const meta = paidStatusMeta[status] ?? { label: status || '未知', color: 'default' };
+  return <Tag color={meta.color}>{meta.label}</Tag>;
+}
+
+function renderHandoverStatus(status: string | null | undefined) {
+  const meta = handoverStatusMeta(status);
   return <Tag color={meta.color}>{meta.label}</Tag>;
 }
 
@@ -66,20 +78,32 @@ function getCurrentAcademicUserId() {
   return user?.id || user?.employeeId || '';
 }
 
-export function OrderTable({ title, description, scope, status, showStatusFilter, actionMode }: OrderTableProps) {
+export function OrderTable({ title, description, scope, status, showStatusFilter, actionMode, toolbarExtra, renderRowExtra }: OrderTableProps) {
   const router = useRouter();
   const [items, setItems] = useState<OrderItem[]>([]);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [total, setTotal] = useState(0);
   const [statusFilter, setStatusFilter] = useState(status ?? '');
+  const [handoverFilter, setHandoverFilter] = useState<HandoverStatusCode | ''>('');
+  const [abnormalOnly, setAbnormalOnly] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [updatingId, setUpdatingId] = useState('');
   const [assigningOrder, setAssigningOrder] = useState<OrderItem>();
   const [assignAcademicUserId, setAssignAcademicUserId] = useState('');
+  const [exportModalOpen, setExportModalOpen] = useState(false);
+  const [exportSubmitting, setExportSubmitting] = useState(false);
+  const [exportRange, setExportRange] = useState<[Dayjs, Dayjs] | null>(null);
+  const [exportStatus, setExportStatus] = useState<string>('');
+  const [exportPaidStatus, setExportPaidStatus] = useState<string>('');
 
-  async function loadOrders(nextPage = page, nextPageSize = pageSize, nextStatus = statusFilter) {
+  async function loadOrders(
+    nextPage = page,
+    nextPageSize = pageSize,
+    nextStatus = statusFilter,
+    nextHandover = handoverFilter,
+  ) {
     setLoading(true);
     setError('');
     try {
@@ -88,6 +112,7 @@ export function OrderTable({ title, description, scope, status, showStatusFilter
         page: nextPage,
         pageSize: nextPageSize,
         status: nextStatus || undefined,
+        handoverStatus: nextHandover || undefined,
       });
       setItems(result.items);
       setTotal(result.total);
@@ -143,10 +168,36 @@ export function OrderTable({ title, description, scope, status, showStatusFilter
     setAssignAcademicUserId('');
   }
 
+  async function submitExportOrders() {
+    setExportSubmitting(true);
+    try {
+      const filter: ExportFilter = {
+        scope: actionMode === 'academic' || actionMode === 'abnormal' ? 'academic' : (scope || 'all'),
+      };
+      if (exportStatus) filter.status = exportStatus;
+      if (exportPaidStatus) filter.paidStatus = exportPaidStatus;
+      if (exportRange) {
+        filter.from = exportRange[0].startOf('day').toISOString();
+        filter.to = exportRange[1].endOf('day').toISOString();
+      }
+      const result = await createExport({ exportType: 'orders', filter });
+      message.success(`导出任务已创建（#${result.id.slice(0, 8)}），完成后会通知`);
+      setExportModalOpen(false);
+      setExportRange(null);
+      setExportStatus('');
+      setExportPaidStatus('');
+      router.push('/academic/exports');
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '导出任务创建失败');
+    } finally {
+      setExportSubmitting(false);
+    }
+  }
+
   useEffect(() => {
-    loadOrders(1, pageSize, statusFilter);
+    loadOrders(1, pageSize, statusFilter, handoverFilter);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scope, statusFilter]);
+  }, [scope, statusFilter, handoverFilter]);
 
   const columns = useMemo<TableColumnsType<OrderItem>>(() => {
     const baseColumns: TableColumnsType<OrderItem> = [
@@ -191,6 +242,12 @@ export function OrderTable({ title, description, scope, status, showStatusFilter
         render: renderOrderStatus,
       },
       {
+        title: '交接',
+        dataIndex: 'handoverStatus',
+        key: 'handoverStatus',
+        render: (value?: string | null) => renderHandoverStatus(value),
+      },
+      {
         title: '付款状态',
         dataIndex: 'paidStatus',
         key: 'paidStatus',
@@ -228,12 +285,15 @@ export function OrderTable({ title, description, scope, status, showStatusFilter
         }
         if (actionMode === 'abnormal') {
           return (
-            <Button
-              loading={updatingId === record.id}
-              onClick={() => patchOrder(record.id, { order_status: 'in_progress' }, '已标记为处理中')}
-            >
-              处理
-            </Button>
+            <Space>
+              <Button
+                loading={updatingId === record.id}
+                onClick={() => patchOrder(record.id, { order_status: 'in_progress' }, '已标记为处理中')}
+              >
+                处理
+              </Button>
+              {renderRowExtra ? renderRowExtra(record) : null}
+            </Space>
           );
         }
         return (
@@ -254,15 +314,21 @@ export function OrderTable({ title, description, scope, status, showStatusFilter
     });
 
     return baseColumns;
-  }, [actionMode, router, updatingId]);
+  }, [actionMode, renderRowExtra, router, updatingId]);
+
+  const displayItems = useMemo(
+    () => (abnormalOnly ? items.filter((it) => it.orderStatus === 'abnormal') : items),
+    [items, abnormalOnly],
+  );
 
   return (
     <Space direction="vertical" size={16} className="page-stack">
-      <div className="toolbar-row">
-        <div>
-          <Typography.Title level={2}>{title}</Typography.Title>
-          <Typography.Paragraph type="secondary">{description}</Typography.Paragraph>
-        </div>
+      {title || description ? (
+        <div className="toolbar-row">
+          <div>
+            {title ? <Typography.Title level={2}>{title}</Typography.Title> : null}
+            {description ? <Typography.Paragraph type="secondary">{description}</Typography.Paragraph> : null}
+          </div>
         <Space wrap>
           {showStatusFilter ? (
             <Select
@@ -275,11 +341,34 @@ export function OrderTable({ title, description, scope, status, showStatusFilter
               ]}
             />
           ) : null}
+          <Select
+            value={handoverFilter}
+            style={{ width: 144 }}
+            onChange={(value) => setHandoverFilter(value as HandoverStatusCode | '')}
+            options={HANDOVER_STATUS_OPTIONS}
+            placeholder="交接状态"
+          />
+          {actionMode === 'sales' ? (
+            <Select
+              value={abnormalOnly ? 'abnormal' : 'all'}
+              style={{ width: 132 }}
+              onChange={(value) => setAbnormalOnly(value === 'abnormal')}
+              options={[
+                { label: '全部订单', value: 'all' },
+                { label: '仅含异常', value: 'abnormal' },
+              ]}
+            />
+          ) : null}
+          {toolbarExtra}
           <Button icon={<ReloadOutlined />} onClick={() => loadOrders()} loading={loading}>
             刷新
           </Button>
+          <Button icon={<DownloadOutlined />} onClick={() => setExportModalOpen(true)}>
+            导出订单
+          </Button>
         </Space>
       </div>
+      ) : null}
 
       {error ? <Alert type="warning" showIcon message={error} /> : null}
 
@@ -287,7 +376,7 @@ export function OrderTable({ title, description, scope, status, showStatusFilter
         <Table<OrderItem>
           rowKey="id"
           columns={columns}
-          dataSource={items}
+          dataSource={displayItems}
           loading={loading}
           pagination={false}
           scroll={{ x: 1040 }}
@@ -297,7 +386,7 @@ export function OrderTable({ title, description, scope, status, showStatusFilter
           pageSize={pageSize}
           total={total}
           showSizeChanger
-          onChange={(nextPage, nextPageSize) => loadOrders(nextPage, nextPageSize, statusFilter)}
+          onChange={(nextPage, nextPageSize) => loadOrders(nextPage, nextPageSize, statusFilter, handoverFilter)}
           style={{ marginTop: 16, textAlign: 'right' }}
         />
       </Card>
@@ -318,6 +407,69 @@ export function OrderTable({ title, description, scope, status, showStatusFilter
             placeholder="请输入 academic_user_id"
             allowClear
           />
+        </Space>
+      </Modal>
+
+      <Modal
+        title="导出订单"
+        open={exportModalOpen}
+        onCancel={() => {
+          if (exportSubmitting) return;
+          setExportModalOpen(false);
+        }}
+        onOk={submitExportOrders}
+        confirmLoading={exportSubmitting}
+        okText="创建导出"
+        destroyOnClose
+      >
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Typography.Text type="secondary">
+            任务创建后会在导出中心异步生成 CSV，完成后会通过消息通知。
+          </Typography.Text>
+          <div>
+            <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 4 }}>
+              订单状态
+            </Typography.Text>
+            <Select
+              value={exportStatus}
+              allowClear
+              placeholder="全部"
+              style={{ width: '100%' }}
+              onChange={setExportStatus}
+              options={[
+                { label: '全部', value: '' },
+                ...orderStatusOptions.map((o) => ({ label: o.label, value: o.value as string })),
+              ]}
+            />
+          </div>
+          <div>
+            <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 4 }}>
+              付款状态
+            </Typography.Text>
+            <Select
+              value={exportPaidStatus}
+              allowClear
+              placeholder="全部"
+              style={{ width: '100%' }}
+              onChange={setExportPaidStatus}
+              options={[
+                { label: '全部', value: '' },
+                { label: '未付款', value: 'unpaid' },
+                { label: '部分付款', value: 'partial' },
+                { label: '已付款', value: 'paid' },
+              ]}
+            />
+          </div>
+          <div>
+            <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 4 }}>
+              时间范围
+            </Typography.Text>
+            <DatePicker.RangePicker
+              value={exportRange}
+              onChange={(range) => setExportRange((range as [Dayjs, Dayjs]) || null)}
+              style={{ width: '100%' }}
+            />
+          </div>
         </Space>
       </Modal>
     </Space>

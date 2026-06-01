@@ -59,6 +59,17 @@ export function NotificationListPage({ title, description }: NotificationListPag
         message.warning(err instanceof Error ? err.message : '标记已读失败');
       }
     }
+    // 订单异常消息：显式跳销售端订单详情（即便 backend 没回 routeHint 也能兜底）
+    if (
+      item.notificationType === 'order_abnormal' ||
+      item.targetType === 'order_abnormal'
+    ) {
+      const target = item.targetId;
+      if (target != null) {
+        router.push(`/sales/orders/${target}`);
+        return;
+      }
+    }
     if (item.routeHint) {
       router.push(item.routeHint);
       return;

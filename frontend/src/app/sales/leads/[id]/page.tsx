@@ -1,16 +1,35 @@
 'use client';
 
-import { Alert, Button, Card, Descriptions, Form, Image, Input, Modal, Select, Space, Tabs, Typography, message } from 'antd';
+import {
+  Alert,
+  Button,
+  Card,
+  DatePicker,
+  Descriptions,
+  Form,
+  Image,
+  Input,
+  InputNumber,
+  Modal,
+  Select,
+  Space,
+  Tabs,
+  Tooltip,
+  Typography,
+  message,
+} from 'antd';
 import { useParams, useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import {
+  closeLeadDeal,
   createCollaborationTask,
   createLeadFollowRecord,
   getLeadDetail,
   listCollaborationTasks,
   listLeadFollowRecords,
   updateLeadBoard,
+  type CloseLeadDealPayload,
 } from '@/shared/api/leads';
 import { LeadTimeline } from '@/shared/components/leads';
 import { StatusTag } from '@/shared/components/status';
@@ -18,6 +37,24 @@ import { LeadStatus, LeadAddStatus, LeadProcessStatus, CollaborationStatus } fro
 import { getStatusMeta } from '@/shared/constants/status';
 import { useSubmitLock } from '@/shared/hooks/useSubmitLock';
 import type { LeadTimelineItem, SalesLead } from '@/shared/types/leads';
+
+const FOLLOW_TYPE_OPTIONS = [
+  { label: '电话沟通', value: 'phone' },
+  { label: '微信沟通', value: 'wechat' },
+  { label: '添加好友', value: 'add_friend' },
+  { label: '发资料', value: 'send_material' },
+  { label: '报价', value: 'quote' },
+  { label: '其他', value: 'other' },
+];
+
+type CloseDealFormValues = {
+  amount?: number | string;
+  serviceType?: string;
+  contractStatus?: 'unsigned' | 'signed' | 'pending';
+  paidStatus?: 'unpaid' | 'partial' | 'paid';
+  deliveryRequirement?: string;
+  expectedHandleTime?: { format?: () => string; toISOString?: () => string } | string | null;
+};
 
 export default function SalesLeadDetailPage() {
   const params = useParams<{ id: string }>();
@@ -27,7 +64,9 @@ export default function SalesLeadDetailPage() {
   const [timeline, setTimeline] = useState<LeadTimelineItem[]>([]);
   const [form] = Form.useForm();
   const [collaborationForm] = Form.useForm();
+  const [closeDealForm] = Form.useForm();
   const [collaborationOpen, setCollaborationOpen] = useState(false);
+  const [closeDealOpen, setCloseDealOpen] = useState(false);
   const { submitting, run } = useSubmitLock();
 
   async function loadDetail() {
@@ -87,6 +126,34 @@ export default function SalesLeadDetailPage() {
     });
   }
 
+  async function submitCloseDeal(values: CloseDealFormValues) {
+    await run(async () => {
+      try {
+        const expectedHandleTime = normalizeExpectedHandleTime(values.expectedHandleTime);
+        const payload: CloseLeadDealPayload = {
+          amount: values.amount ?? null,
+          serviceType: values.serviceType ?? null,
+          contractStatus: values.contractStatus || undefined,
+          paidStatus: values.paidStatus || undefined,
+          deliveryRequirement: values.deliveryRequirement ?? null,
+          expectedHandleTime,
+        };
+        await closeLeadDeal(leadId, payload);
+        message.success('已标记成交，订单已创建');
+        setCloseDealOpen(false);
+        closeDealForm.resetFields();
+        await loadDetail();
+      } catch (err) {
+        message.error(err instanceof Error ? err.message : '标记成交失败');
+      }
+    });
+  }
+
+  const canCloseDeal = useMemo(() => {
+    if (!lead) return false;
+    return lead.status === LeadStatus.IN_FOLLOWUP || lead.addStatus === LeadAddStatus.ADDED;
+  }, [lead]);
+
   return (
     <Space direction="vertical" size={16} className="page-stack">
       <div className="toolbar-row">
@@ -94,9 +161,21 @@ export default function SalesLeadDetailPage() {
           <Typography.Title level={2}>客资详情</Typography.Title>
           <Typography.Paragraph type="secondary">查看客户来源、销售跟进和运营协同记录。</Typography.Paragraph>
         </div>
-        <Space>
+        <Space wrap>
           <Button onClick={() => router.push('/sales/leads')}>返回列表</Button>
           <Button onClick={() => router.push(`/sales/collaboration?leadId=${leadId}`)}>打开协同页</Button>
+          <Tooltip
+            title={canCloseDeal ? '请填写成交金额、产品类型与交付要求' : '仅在跟进中或已添加通过的客资可标记成交'}
+          >
+            <Button
+              type="primary"
+              ghost
+              disabled={!canCloseDeal}
+              onClick={() => setCloseDealOpen(true)}
+            >
+              标记成交
+            </Button>
+          </Tooltip>
           <Button type="primary" onClick={() => setCollaborationOpen(true)} loading={submitting}>申请运营协同</Button>
         </Space>
       </div>
@@ -120,6 +199,10 @@ export default function SalesLeadDetailPage() {
             { key: 'sourcePlatform', label: '来源平台', children: lead?.source?.platform ?? '-' },
             { key: 'sourceAccount', label: '来源账号', children: lead?.source?.accountName ?? lead?.source?.accountId ?? '-' },
             { key: 'sourcePost', label: '来源作品', children: lead?.source?.postTitle ?? lead?.source?.postId ?? '-' },
+            { key: 'ipRegion', label: 'IP / 地区', children: '-' },
+            { key: 'requirementNote', label: '需求备注', children: '-' },
+            { key: 'supervisorNote', label: '主管备注', children: '-' },
+            { key: 'orderInfo', label: '订单 / 教务交付进度', children: '-' },
             { key: 'status', label: '客资状态', children: <StatusTag kind="leadStatus" code={lead?.status ?? LeadStatus.ASSIGNED} /> },
             { key: 'addStatus', label: '添加状态', children: <StatusTag kind="addStatus" code={lead?.addStatus ?? LeadAddStatus.NOT_ADDED} /> },
             { key: 'processStatus', label: '处理状态', children: <StatusTag kind="processStatus" code={lead?.processStatus ?? 'not_contacted'} /> },
@@ -176,6 +259,9 @@ export default function SalesLeadDetailPage() {
                           { label: '待判断', value: 'unknown' },
                         ]}
                       />
+                    </Form.Item>
+                    <Form.Item name="followType" label="跟进类型" initialValue="wechat">
+                      <Select options={FOLLOW_TYPE_OPTIONS} placeholder="选择本次跟进的方式" />
                     </Form.Item>
                     <Form.Item name="nextFollowTime" label="下次跟进时间">
                       <Input type="datetime-local" />
@@ -239,6 +325,65 @@ export default function SalesLeadDetailPage() {
           </Space>
         </Form>
       </Modal>
+
+      <Modal
+        title="标记成交"
+        open={closeDealOpen}
+        onCancel={() => setCloseDealOpen(false)}
+        footer={null}
+        destroyOnClose={false}
+      >
+        <Form form={closeDealForm} layout="vertical" onFinish={submitCloseDeal} preserve>
+          <div className="form-grid">
+            <Form.Item
+              name="amount"
+              label="成交金额（元）"
+              rules={[{ required: true, message: '请输入成交金额' }]}
+            >
+              <InputNumber min={0} precision={2} style={{ width: '100%' }} placeholder="0.00" />
+            </Form.Item>
+            <Form.Item
+              name="serviceType"
+              label="产品类型"
+              rules={[{ required: true, message: '请输入产品类型' }]}
+            >
+              <Input placeholder="如：1v1 私教 / 训练营 / 录播课" />
+            </Form.Item>
+            <Form.Item name="contractStatus" label="合同状态" initialValue="pending">
+              <Select
+                options={[
+                  { label: '未签', value: 'unsigned' },
+                  { label: '已签', value: 'signed' },
+                  { label: '待补', value: 'pending' },
+                ]}
+              />
+            </Form.Item>
+            <Form.Item name="paidStatus" label="付款状态" initialValue="unpaid">
+              <Select
+                options={[
+                  { label: '未付款', value: 'unpaid' },
+                  { label: '部分付款', value: 'partial' },
+                  { label: '已付款', value: 'paid' },
+                ]}
+              />
+            </Form.Item>
+            <Form.Item className="full-row" name="deliveryRequirement" label="交付要求">
+              <Input.TextArea rows={3} placeholder="上课时间、形式、教练偏好等" />
+            </Form.Item>
+            <Form.Item className="full-row" name="expectedHandleTime" label="期望处理时间">
+              <DatePicker
+                showTime
+                style={{ width: '100%' }}
+                placeholder="选择期望处理时间"
+              />
+            </Form.Item>
+          </div>
+          <Space>
+            <Button type="primary" htmlType="submit" loading={submitting}>提交成交</Button>
+            <Button onClick={() => setCloseDealOpen(false)}>取消</Button>
+          </Space>
+        </Form>
+      </Modal>
     </Space>
   );
 }
@@ -259,4 +404,18 @@ function nextAction(lead: SalesLead) {
   if (lead.addStatus === LeadAddStatus.NOT_PASSED) return '发起运营提醒或二次触达协同';
   if (lead.addStatus === LeadAddStatus.ADDED) return '推进沟通、报价或成交';
   return getStatusMeta('processStatus', lead.processStatus).actionHint;
+}
+
+function normalizeExpectedHandleTime(value: CloseDealFormValues['expectedHandleTime']): string | null {
+  if (!value) return null;
+  if (typeof value === 'string') return value || null;
+  if (value && typeof value === 'object') {
+    if (typeof value.format === 'function') {
+      return value.format();
+    }
+    if (typeof value.toISOString === 'function') {
+      return value.toISOString();
+    }
+  }
+  return null;
 }

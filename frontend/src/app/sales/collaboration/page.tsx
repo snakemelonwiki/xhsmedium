@@ -1,8 +1,9 @@
 'use client';
 
-import { Alert, Button, Card, Form, Input, Select, Space, Typography, message } from 'antd';
+import { Alert, Button, Card, DatePicker, Form, Input, Select, Space, Typography, message } from 'antd';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
+import dayjs, { type Dayjs } from 'dayjs';
 
 import { createCollaborationTask, listCollaborationTasks, listSalesLeads, updateLeadBoard } from '@/shared/api/leads';
 import { LeadTimeline } from '@/shared/components/leads';
@@ -16,6 +17,7 @@ type CollaborationFormValues = {
   urgency: 'normal' | 'urgent' | 'critical';
   reason: string;
   remark?: string;
+  expectedHandleTime?: Dayjs | null;
 };
 
 export default function SalesCollaborationPage() {
@@ -54,7 +56,17 @@ export default function SalesCollaborationPage() {
 
   async function submit(values: CollaborationFormValues) {
     await run(async () => {
-      await createCollaborationTask(values);
+      const expectedHandleTime = values.expectedHandleTime
+        ? values.expectedHandleTime.toISOString()
+        : null;
+      await createCollaborationTask({
+        leadId: values.leadId,
+        type: values.type,
+        urgency: values.urgency,
+        reason: values.reason,
+        remark: values.remark,
+        expectedHandleTime,
+      });
       await updateLeadBoard(values.leadId, {
         status: LeadStatus.IN_COLLABORATION,
         collaborationStatus: CollaborationStatus.PENDING,
@@ -62,7 +74,7 @@ export default function SalesCollaborationPage() {
       }).catch(() => undefined);
       message.success('协同申请已提交');
       setSubmittedLeadId(values.leadId);
-      form.resetFields(['type', 'urgency', 'reason', 'remark']);
+      form.resetFields(['type', 'urgency', 'reason', 'remark', 'expectedHandleTime']);
       await loadTasks();
     });
   }
@@ -128,6 +140,20 @@ export default function SalesCollaborationPage() {
             </Form.Item>
             <Form.Item className="full-row" name="remark" label="补充备注">
               <Input.TextArea rows={2} placeholder="可补充客户上下文、已尝试动作或沟通口径" />
+            </Form.Item>
+            <Form.Item
+              className="full-row"
+              name="expectedHandleTime"
+              label="期望处理时间"
+              extra="后端暂未消费（1.2 排期使用），不影响当前提交"
+            >
+              <DatePicker
+                showTime={{ format: 'HH:mm' }}
+                format="YYYY-MM-DD HH:mm"
+                placeholder="选择期望运营处理的时间点"
+                style={{ width: 280 }}
+                disabledDate={(current) => Boolean(current && current.isBefore(dayjs().startOf('day')))}
+              />
             </Form.Item>
           </div>
           <Button type="primary" htmlType="submit" loading={submitting}>提交协同</Button>

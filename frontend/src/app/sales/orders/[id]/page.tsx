@@ -1,11 +1,11 @@
 'use client';
 
-import { Button, Card, Descriptions, Empty, Space, Spin, Timeline, Typography, message } from 'antd';
+import { Button, Card, Descriptions, Empty, Space, Spin, Table, Tag, Timeline, Typography, message } from 'antd';
 import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
-import { getOrderDetail, listOrderFollowRecords } from '@/shared/api/orders';
-import type { OrderFollowRecord, OrderItem } from '@/shared/types/orders';
+import { getOrderDetail, listAbnormalFeedbacks, listOrderFollowRecords } from '@/shared/api/orders';
+import type { OrderAbnormalFeedback, OrderFollowRecord, OrderItem } from '@/shared/types/orders';
 
 function formatDate(value?: string | null) {
   return value ? new Date(value).toLocaleString() : '-';
@@ -15,27 +15,53 @@ function emptyText(value?: string | null) {
   return value || '-';
 }
 
+const abnormalTypeLabels: Record<string, string> = {
+  client_uncooperative: '客户不配合',
+  material_missing: '资料缺失',
+  teacher_no_response: '老师无响应',
+  cycle_risk: '周期风险',
+  payment_issue: '付款异常',
+  other: '其它',
+};
+
+const expectedHelperLabels: Record<string, string> = {
+  sales: '销售',
+  supervisor: '主管',
+  operation: '运营',
+  other: '其它',
+};
+
+const abnormalStatusMeta: Record<string, { label: string; color: string }> = {
+  open: { label: '待处理', color: 'red' },
+  handling: { label: '处理中', color: 'orange' },
+  closed: { label: '已关闭', color: 'green' },
+};
+
 export default function SalesOrderDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const orderId = String(params.id);
   const [order, setOrder] = useState<OrderItem>();
   const [records, setRecords] = useState<OrderFollowRecord[]>([]);
+  const [feedbacks, setFeedbacks] = useState<OrderAbnormalFeedback[]>([]);
   const [loading, setLoading] = useState(false);
 
   async function loadDetail() {
     setLoading(true);
     try {
-      const [detail, followRecords] = await Promise.all([
+      const [detail, followRecords, abnormalList] = await Promise.all([
         getOrderDetail(orderId),
         listOrderFollowRecords(orderId),
+        listAbnormalFeedbacks(orderId).catch(() => [] as OrderAbnormalFeedback[]),
       ]);
       setOrder(detail);
       setRecords(followRecords);
+      setFeedbacks(Array.isArray(abnormalList) ? abnormalList : []);
     } catch (err) {
       message.error(err instanceof Error ? err.message : '订单详情加载失败');
       setOrder(undefined);
       setRecords([]);
+      setFeedbacks([]);
     } finally {
       setLoading(false);
     }
@@ -51,7 +77,7 @@ export default function SalesOrderDetailPage() {
       <div className="toolbar-row">
         <div>
           <Typography.Title level={2}>订单详情</Typography.Title>
-          <Typography.Paragraph type="secondary">查看订单履约状态和教务跟进时间线。</Typography.Paragraph>
+          <Typography.Paragraph type="secondary">查看订单履约状态、教务跟进时间线与异常反馈。</Typography.Paragraph>
         </div>
         <Space>
           <Button onClick={() => router.push('/sales/orders')}>返回列表</Button>
@@ -79,6 +105,65 @@ export default function SalesOrderDetailPage() {
                 { key: 'remark', label: '备注', children: emptyText(order?.remark) },
               ]}
             />
+          </Card>
+
+          <Card title="异常反馈">
+            {feedbacks.length > 0 ? (
+              <Table<OrderAbnormalFeedback>
+                rowKey="id"
+                dataSource={feedbacks}
+                pagination={false}
+                columns={[
+                  {
+                    title: '异常类型',
+                    dataIndex: 'abnormalType',
+                    key: 'abnormalType',
+                    width: 140,
+                    render: (value: string) => abnormalTypeLabels[value] ?? (value || '-'),
+                  },
+                  {
+                    title: '说明',
+                    dataIndex: 'description',
+                    key: 'description',
+                    render: (value?: string | null) => emptyText(value),
+                  },
+                  {
+                    title: '期望协助',
+                    dataIndex: 'expectedHelper',
+                    key: 'expectedHelper',
+                    width: 120,
+                    render: (value?: string | null) =>
+                      value ? (expectedHelperLabels[value] ?? value) : '-',
+                  },
+                  {
+                    title: '状态',
+                    dataIndex: 'status',
+                    key: 'status',
+                    width: 100,
+                    render: (value: string) => {
+                      const meta = abnormalStatusMeta[value] ?? { label: value || '未知', color: 'default' };
+                      return <Tag color={meta.color}>{meta.label}</Tag>;
+                    },
+                  },
+                  {
+                    title: '上报时间',
+                    dataIndex: 'createdAt',
+                    key: 'createdAt',
+                    width: 180,
+                    render: (value?: string) => formatDate(value),
+                  },
+                  {
+                    title: '关闭时间',
+                    dataIndex: 'closedAt',
+                    key: 'closedAt',
+                    width: 180,
+                    render: (value?: string | null) => formatDate(value),
+                  },
+                ]}
+              />
+            ) : (
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无异常反馈" />
+            )}
           </Card>
 
           <Card title="跟进时间线">

@@ -24,6 +24,7 @@ export interface AdminEmployee {
 export interface AdminAccount {
   id: string;
   employeeId?: string;
+  employeeName?: string;
   platform?: string;
   profileUrl?: string | null;
   accountName: string;
@@ -50,6 +51,8 @@ export interface AdminDashboardSummary {
   xhsFavorites: number;
   douyinTraffic: number;
   xhsTraffic: number;
+  // 异常订单数：后端尚未返回，前端默认 0；保留字段为后续对接。
+  abnormalOrders?: number;
 }
 
 export interface AdminPostTypeDistribution {

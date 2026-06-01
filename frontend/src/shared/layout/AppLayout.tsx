@@ -14,6 +14,8 @@ import {
 } from '@/shared/auth/auth';
 import { AuthGuard } from '@/shared/auth/AuthGuard';
 import { NotificationBell } from '@/shared/components/notifications';
+import { NotificationProvider } from '@/shared/contexts/NotificationContext';
+import { UploadConfigProvider } from '@/shared/contexts/UploadConfigProvider';
 import { getMenuItemsByRole, toAntdMenuItems } from '@/shared/layout/menu';
 
 const { Content, Header, Sider } = Layout;
@@ -53,39 +55,43 @@ export function AppLayout({ role, title, children }: AppLayoutProps) {
 
   return (
     <AuthGuard onAuthenticated={handleAuthenticated}>
-      <Layout className="app-shell">
-        <Sider width={232} className="app-sider">
-          <div className="app-brand">
-            <span className="app-brand-mark">X</span>
-            <span>运营中台</span>
-          </div>
-          <Menu
-            mode="inline"
-            selectedKeys={selectedKey ? [selectedKey] : []}
-            items={toAntdMenuItems(menuItems)}
-            onClick={({ key }) => router.push(String(key))}
-          />
-        </Sider>
-        <Layout>
-          <Header className="app-header">
-            <div>
-              <Typography.Title level={4}>{title}</Typography.Title>
+      <NotificationProvider>
+        <UploadConfigProvider>
+        <Layout className="app-shell">
+          <Sider width={232} className="app-sider">
+            <div className="app-brand">
+              <span className="app-brand-mark">X</span>
+              <span>运营中台</span>
             </div>
-            <Space size={16}>
-              <NotificationBell pollIntervalMs={60000} />
-              <Dropdown menu={{ items: userMenu }} placement="bottomRight">
-                <Button type="text">
-                  <Space>
-                    <Avatar size="small" icon={<UserOutlined />} />
-                    <span>{user?.name ?? '未登录'}</span>
-                  </Space>
-                </Button>
-              </Dropdown>
-            </Space>
-          </Header>
-          <Content className="app-content">{children}</Content>
+            <Menu
+              mode="inline"
+              selectedKeys={selectedKey ? [selectedKey] : []}
+              items={toAntdMenuItems(menuItems)}
+              onClick={({ key }) => router.push(String(key))}
+            />
+          </Sider>
+          <Layout>
+            <Header className="app-header">
+              <div>
+                <Typography.Title level={4}>{title}</Typography.Title>
+              </div>
+              <Space size={16}>
+                <NotificationBell pollIntervalMs={60000} />
+                <Dropdown menu={{ items: userMenu }} placement="bottomRight">
+                  <Button type="text">
+                    <Space>
+                      <Avatar size="small" icon={<UserOutlined />} />
+                      <span>{user?.name ?? '未登录'}</span>
+                    </Space>
+                  </Button>
+                </Dropdown>
+              </Space>
+            </Header>
+            <Content className="app-content">{children}</Content>
+          </Layout>
         </Layout>
-      </Layout>
+        </UploadConfigProvider>
+      </NotificationProvider>
     </AuthGuard>
   );
 }

@@ -13,6 +13,8 @@ export type OrderStatusCode =
 
 export type PaidStatusCode = 'unpaid' | 'partial' | 'paid';
 
+export type HandoverStatusCode = 'pending' | 'handed_over' | 'accepted' | 'rejected';
+
 export interface OrderItem {
   id: string;
   leadId?: string;
@@ -24,7 +26,13 @@ export interface OrderItem {
   amount?: string | null;
   paidStatus: PaidStatusCode | string;
   orderStatus: OrderStatusCode | string;
+  handoverStatus?: HandoverStatusCode | string;
   remark?: string | null;
+  // 教务端详情扩展字段（后端暂未全部返回，缺失时显示 '-'）
+  deliveryRequirement?: string | null;
+  materialStatus?: string | null;
+  teacher?: string | null;
+  salesSummary?: string | null;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -42,4 +50,35 @@ export interface OrderFollowRecord {
 export interface OrderListQuery extends PageQuery {
   scope: OrderScope;
   status?: string;
+  handoverStatus?: string;
+}
+
+// ─── 订单异常反馈 ──────────────────────────────────────────────────────────
+
+export type AbnormalTypeCode =
+  | 'client_uncooperative'
+  | 'material_missing'
+  | 'teacher_no_response'
+  | 'cycle_risk'
+  | 'payment_issue'
+  | 'other';
+
+export type ExpectedHelperCode = 'sales' | 'supervisor' | 'operation' | 'other';
+
+export type AbnormalFeedbackStatus = 'open' | 'handling' | 'closed';
+
+export interface OrderAbnormalFeedback {
+  id: string;
+  orderId: string;
+  leadId?: string | null;
+  reporterUserId: string;
+  abnormalType: AbnormalTypeCode | string;
+  description?: string | null;
+  expectedHelper?: ExpectedHelperCode | string | null;
+  status: AbnormalFeedbackStatus | string;
+  createdAt?: string;
+  updatedAt?: string;
+  closedAt?: string | null;
+  closedBy?: string | null;
+  closeNote?: string | null;
 }
