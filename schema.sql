@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS employees (
 --   academic → /academic/* 教务端
 -- role 保持 ENUM 类型（原始 schema 定义），通过追加枚举值的方式扩展 owner/sales/academic；
 -- 不可删除已有枚举值、不可修改字段类型；新增角色需同步 user.entity.ts 与迁移（参考 M5）。
+-- 迁移来源：M5（role 增加 owner/sales/academic 枚举值）、M12（刷新全部列注释）
 -- ============================================================
 CREATE TABLE IF NOT EXISTS users (
   id           VARCHAR(64)  PRIMARY KEY                        COMMENT '用户唯一ID（UUID）',
@@ -80,6 +81,7 @@ CREATE TABLE IF NOT EXISTS accounts (
 -- ============================================================
 -- 4. posts
 -- backend/src/entities/post.entity.ts + posts/rankings/imports services.
+-- 迁移来源：M10（追加 cover_thumb_url 封面缩略图URL字段）
 -- ============================================================
 CREATE TABLE IF NOT EXISTS posts (
   id                    VARCHAR(64)  PRIMARY KEY,
@@ -123,6 +125,7 @@ CREATE TABLE IF NOT EXISTS posts (
 --   process_status: not_contacted / waiting_pass / communicating /
 --                   quoted / deal_pending / deal_done / invalid
 --   add_status: not_added / applied / not_passed / operation_reminded / added
+-- 迁移来源：M1（6 列扩展 + process_status ENUM）→ M6（add_status/status ENUM）→ M9（VARCHAR 终态）
 -- ============================================================
 CREATE TABLE IF NOT EXISTS leads (
   id                       VARCHAR(64)  PRIMARY KEY,
@@ -177,6 +180,7 @@ CREATE TABLE IF NOT EXISTS leads (
 -- ============================================================
 -- 6. lead_follow_records
 -- backend/src/entities/lead-follow-record.entity.ts
+-- 迁移来源：M4（替换 ddl/03 留下的 BIGINT 旧表为 VARCHAR(64) UUID 风格）
 -- ============================================================
 CREATE TABLE IF NOT EXISTS lead_follow_records (
   id               VARCHAR(64) PRIMARY KEY,
@@ -193,8 +197,26 @@ CREATE TABLE IF NOT EXISTS lead_follow_records (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='客资跟进记录表';
 
 -- ============================================================
+-- 6b. lead_files
+-- 迁移来源：M4（替换 ddl/03 留下的 BIGINT 旧表，与全局 VARCHAR(64) UUID 风格对齐）
+-- 业务现状：当前代码未引用此表，但线上库已建，按 M4 终态保留以备客资附件/截图使用
+-- ============================================================
+CREATE TABLE IF NOT EXISTS lead_files (
+  id          VARCHAR(64)  PRIMARY KEY,
+  lead_id     VARCHAR(64)  NOT NULL                COMMENT '所属客资ID',
+  file_url    VARCHAR(500) NOT NULL                COMMENT '文件URL',
+  file_type   VARCHAR(32)  NOT NULL DEFAULT 'image' COMMENT '文件类型: image/screenshot/document',
+  uploaded_by VARCHAR(64)  NOT NULL                COMMENT '上传人 users.id',
+  created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '上传时间',
+
+  INDEX idx_lead_files_lead     (lead_id),
+  INDEX idx_lead_files_uploader (uploaded_by)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='客资附件/截图表';
+
+-- ============================================================
 -- 7. lead_drafts
 -- backend/src/entities/lead-draft.entity.ts
+-- 迁移来源：M3（按 schema.sql §7 字段建表，库内原本缺失）
 -- ============================================================
 CREATE TABLE IF NOT EXISTS lead_drafts (
   id           VARCHAR(64) PRIMARY KEY,
@@ -212,6 +234,9 @@ CREATE TABLE IF NOT EXISTS lead_drafts (
 -- ============================================================
 -- 8. collaboration_tasks
 -- backend/src/entities/collaboration-task.entity.ts
+-- 迁移来源：M3（替换早期 ddl/04 BIGINT 旧表为 VARCHAR(64) 风格）、
+--          M15（status 枚举追加 'timeout'，配合 collabTimeoutScan 30min 扫描器）、
+--          M16（追加 idx_collab_created_at）
 -- ============================================================
 CREATE TABLE IF NOT EXISTS collaboration_tasks (
   id           VARCHAR(64) PRIMARY KEY,
@@ -220,22 +245,26 @@ CREATE TABLE IF NOT EXISTS collaboration_tasks (
   handler_id   VARCHAR(64) NULL COMMENT '处理人用户ID',
   type         ENUM('remind_customer','supplement_info','verify_identity','second_touch') NOT NULL COMMENT '协作类型',
   reason       TEXT        NULL COMMENT '协作原因',
-  status       ENUM('pending','handling','handled','closed') NOT NULL DEFAULT 'pending' COMMENT '协作状态',
+  status       ENUM('pending','handling','handled','closed','timeout') NOT NULL DEFAULT 'pending' COMMENT '协作状态(含超时态 timeout;由 M15 迁移追加,配合 collabTimeoutScan 30min 扫描器使用)',
   handled_note TEXT        NULL COMMENT '处理备注',
   requested_at DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
   handled_at   DATETIME    NULL COMMENT '处理完成时间',
   created_at   DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at   DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 
-  INDEX idx_collab_lead      (lead_id),
-  INDEX idx_collab_requester (requester_id),
-  INDEX idx_collab_handler   (handler_id),
-  INDEX idx_collab_status    (status)
+  INDEX idx_collab_lead        (lead_id),
+  INDEX idx_collab_requester   (requester_id),
+  INDEX idx_collab_handler     (handler_id),
+  INDEX idx_collab_status      (status),
+  INDEX idx_collab_created_at  (created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='协同任务表';
 
 -- ============================================================
 -- 9. orders
 -- backend/src/entities/order.entity.ts
+-- 迁移来源：M3（替换早期 ddl/04 BIGINT 旧表为 VARCHAR(64) 风格）、
+--          M14（追加 handover_status 交接状态字段）、
+--          M16（追加 idx_orders_paid_status）
 -- ============================================================
 CREATE TABLE IF NOT EXISTS orders (
   id                VARCHAR(64) PRIMARY KEY,
@@ -246,6 +275,7 @@ CREATE TABLE IF NOT EXISTS orders (
   amount            DECIMAL(12,2) NULL COMMENT '成交金额',
   paid_status       ENUM('unpaid','partial','paid') NOT NULL DEFAULT 'unpaid' COMMENT '付款状态',
   order_status      ENUM('to_receive','in_progress','awaiting_client_info','awaiting_teacher','to_deliver','completed','abnormal') NOT NULL DEFAULT 'to_receive' COMMENT '订单状态',
+  handover_status   VARCHAR(16) NOT NULL DEFAULT 'pending' COMMENT '交接状态: pending待交接 | handed_over已交接 | accepted已接收 | rejected已拒收(由 M14 迁移追加;销售成交时默认 handed_over,教务可 accept/reject)',
   remark            TEXT        NULL COMMENT '备注',
   created_at        DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at        DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -254,12 +284,17 @@ CREATE TABLE IF NOT EXISTS orders (
   INDEX idx_orders_sales_user_id    (sales_user_id),
   INDEX idx_orders_academic_user_id (academic_user_id),
   INDEX idx_orders_order_status     (order_status),
+  INDEX idx_orders_paid_status      (paid_status),
+  INDEX idx_orders_handover_status  (handover_status),
   INDEX idx_orders_created_at       (created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='订单表';
 
 -- ============================================================
 -- 10. order_follow_records
 -- backend/src/entities/order-follow-record.entity.ts
+-- 迁移来源：M3（替换早期 ddl/04 BIGINT 旧表为 VARCHAR(64) 风格）、
+--          M11（追加 reminder_sent_at 节点提醒幂等字段）、
+--          M16（追加 idx_order_follow_created_at）
 -- ============================================================
 CREATE TABLE IF NOT EXISTS order_follow_records (
   id             VARCHAR(64) PRIMARY KEY,
@@ -271,14 +306,16 @@ CREATE TABLE IF NOT EXISTS order_follow_records (
   reminder_sent_at DATETIME  NULL COMMENT '节点提醒已发送时间(NULL=未发送)',
   created_at     DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-  INDEX idx_order_follow_order_id (order_id),
-  INDEX idx_order_follow_user_id  (user_id),
-  INDEX idx_order_follow_remind   (next_remind_at, reminder_sent_at)
+  INDEX idx_order_follow_order_id     (order_id),
+  INDEX idx_order_follow_user_id      (user_id),
+  INDEX idx_order_follow_remind       (next_remind_at, reminder_sent_at),
+  INDEX idx_order_follow_created_at   (created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='订单跟进记录表';
 
 -- ============================================================
 -- 11. notifications
 -- backend/src/entities/notification.entity.ts
+-- 迁移来源：M3（替换早期 ddl/05 BIGINT 旧表为 VARCHAR(64) 风格）
 -- ============================================================
 CREATE TABLE IF NOT EXISTS notifications (
   id           VARCHAR(64)  PRIMARY KEY,
@@ -302,6 +339,8 @@ CREATE TABLE IF NOT EXISTS notifications (
 -- ============================================================
 -- 12. import_tasks
 -- backend/src/entities/import-task.entity.ts + imports service.
+-- 迁移来源：M3（按方案 §8.1 补全字段建表）、
+--          M8（idempotent 兜底补 created_at/finished_at/error_file_url/status 兼容列）
 -- ============================================================
 CREATE TABLE IF NOT EXISTS import_tasks (
   id             VARCHAR(64)  PRIMARY KEY,
@@ -322,6 +361,7 @@ CREATE TABLE IF NOT EXISTS import_tasks (
 -- ============================================================
 -- 13. operation_logs
 -- backend/src/entities/operation-log.entity.ts
+-- 迁移来源：M7（BIGINT 自增主键 → VARCHAR(64) UUID 主键）
 -- ============================================================
 CREATE TABLE IF NOT EXISTS operation_logs (
   id          VARCHAR(64) PRIMARY KEY,
@@ -342,6 +382,7 @@ CREATE TABLE IF NOT EXISTS operation_logs (
 -- ============================================================
 -- 14. exports
 -- backend/src/entities/export-task.entity.ts
+-- 迁移来源：M3（替换早期 ddl/04 BIGINT 旧表为 VARCHAR(64) 风格）
 -- ============================================================
 CREATE TABLE IF NOT EXISTS exports (
   id          VARCHAR(64)  PRIMARY KEY,
@@ -362,6 +403,8 @@ CREATE TABLE IF NOT EXISTS exports (
 -- ============================================================
 -- 15. favorites
 -- backend/src/entities/favorite.entity.ts + favorites/posts/rankings services.
+-- 迁移来源：M3（按 schema.sql 字段建表，库内原本缺失）、
+--          M8（idempotent 兜底补 created_at 兼容列）
 -- ============================================================
 CREATE TABLE IF NOT EXISTS favorites (
   id          VARCHAR(64) PRIMARY KEY,
@@ -378,6 +421,8 @@ CREATE TABLE IF NOT EXISTS favorites (
 -- ============================================================
 -- 16. post_metrics_history
 -- backend/src/entities/post-metrics-history.entity.ts
+-- 迁移来源：M3（按 schema.sql 字段建表，库内原本缺失）、
+--          M8（idempotent 兜底 IF NOT EXISTS 重建）
 -- ============================================================
 CREATE TABLE IF NOT EXISTS post_metrics_history (
   id          VARCHAR(64) PRIMARY KEY,
@@ -392,3 +437,34 @@ CREATE TABLE IF NOT EXISTS post_metrics_history (
   INDEX idx_history_post_id    (post_id),
   INDEX idx_history_created_at (created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='作品指标刷新历史表';
+
+-- ============================================================
+-- 17. order_abnormal_feedbacks
+-- backend/src/modules/orders/order-abnormal-feedback.service.ts + M13 迁移
+-- 订单异常反馈独立表（替换原"节点类型含异常"的字符串匹配判定）
+-- 状态机：open / handling / closed；驱动 orders.orderStatus='abnormal'；
+-- 关闭后回退到 in_progress / to_receive。
+-- 迁移来源：M13（建表）、M16（追加 idx_oaf_created_at）
+-- ============================================================
+CREATE TABLE IF NOT EXISTS order_abnormal_feedbacks (
+  id                VARCHAR(64)  NOT NULL COMMENT '异常反馈主键ID（UUID）',
+  order_id          VARCHAR(64)  NOT NULL COMMENT '关联订单ID（orders.id）',
+  lead_id           VARCHAR(64)  NULL     COMMENT '关联客资ID（leads.id，冗余便于查询客资维度）',
+  reporter_user_id  VARCHAR(64)  NOT NULL COMMENT '反馈提交人ID（users.id，一般是教务）',
+  abnormal_type     VARCHAR(32)  NOT NULL COMMENT '异常类型：client_uncooperative 客户不配合 | material_missing 素材缺失 | teacher_no_response 老师未响应 | cycle_risk 周期风险 | payment_issue 款项问题 | other 其他',
+  description       TEXT         NULL     COMMENT '异常描述',
+  expected_helper   VARCHAR(32)  NULL     COMMENT '期望协助方：sales 销售 | supervisor 主管 | operation 运营 | other 其他',
+  status            VARCHAR(16)  NOT NULL DEFAULT 'open' COMMENT '状态：open 待处理 | handling 处理中 | closed 已关闭',
+  created_at        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  updated_at        DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  closed_at         DATETIME     NULL     COMMENT '关闭时间',
+  closed_by         VARCHAR(64)  NULL     COMMENT '关闭操作人ID（users.id）',
+  close_note        TEXT         NULL     COMMENT '关闭备注/解决方案',
+
+  PRIMARY KEY (id),
+  KEY idx_oaf_order_id    (order_id),
+  KEY idx_oaf_status      (status),
+  KEY idx_oaf_reporter    (reporter_user_id),
+  KEY idx_oaf_created_at  (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  COMMENT='订单异常反馈表：教务端可独立提交，状态机驱动 orders.orderStatus=abnormal，关闭后回退到进行中';
