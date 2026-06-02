@@ -1,10 +1,14 @@
 'use client';
 
-import { Alert, Card, Empty, Pagination, Radio, Space, Table, Typography } from 'antd';
+import { DownloadOutlined } from '@ant-design/icons';
+import { Alert, Button, Card, Empty, message, Pagination, Radio, Space, Table, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useEffect, useState } from 'react';
 
 import { apiClient } from '@/shared/api/apiClient';
+import { createExport } from '@/shared/api/exports';
+
+import { buildRankingExportFilter } from './exportFilter';
 
 type RankingRow = {
   employeeId: string;
@@ -36,6 +40,7 @@ export default function AdminRankingsPage() {
   const [period, setPeriod] = useState<Period>('today');
   const [platform, setPlatform] = useState<Platform>('');
   const [loading, setLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string>();
   const pageSize = 20;
 
@@ -83,6 +88,18 @@ export default function AdminRankingsPage() {
     { title: '区间成交', dataIndex: 'todayDeals', width: 100 },
   ];
 
+  async function handleExport() {
+    setExporting(true);
+    try {
+      await createExport({ exportType: 'rankings', filter: buildRankingExportFilter({ type, period, platform }) });
+      message.success('已创建排行榜导出任务，可到导出中心下载');
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '排行榜导出创建失败');
+    } finally {
+      setExporting(false);
+    }
+  }
+
   return (
     <Space direction="vertical" size={16} className="page-stack">
       <div>
@@ -107,6 +124,9 @@ export default function AdminRankingsPage() {
             <Radio.Button value="xhs">小红书</Radio.Button>
             <Radio.Button value="douyin">抖音</Radio.Button>
           </Radio.Group>
+          <Button icon={<DownloadOutlined />} loading={exporting} onClick={handleExport}>
+            当前筛选导出
+          </Button>
         </Space>
         {error ? <Alert type="warning" showIcon message="排行榜暂不可用" description={error} style={{ marginBottom: 16 }} /> : null}
         <Table

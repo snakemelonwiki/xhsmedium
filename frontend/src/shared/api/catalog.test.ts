@@ -19,13 +19,14 @@ describe('catalog API helpers', () => {
     getMock.mockReset();
   });
 
-  it('loads active staff accounts for the sales assignment selector', async () => {
+  it('loads active sales accounts for the sales assignment selector', async () => {
     getMock.mockResolvedValue({
       items: [
-        { id: 'user-1', username: 'sales-a', status: 'active' },
+        { id: 'user-1', username: 'sales-a', role: 'sales', status: 'active' },
+        { id: 'user-2', username: 'operation-a', role: 'staff', status: 'active' },
         { id: 'user-2', username: 'disabled', status: 'disabled' },
       ],
-      total: 2,
+      total: 3,
       limit: 200,
       offset: 0,
     });
@@ -34,8 +35,8 @@ describe('catalog API helpers', () => {
       { id: 'user-1', name: 'sales-a', employeeId: undefined },
     ]);
 
-    expect(getMock).toHaveBeenCalledWith('/users/staff', {
-      query: { limit: 200, offset: 0 },
+    expect(getMock).toHaveBeenCalledWith('/users', {
+      query: { role: 'sales', limit: 200, offset: 0 },
     });
   });
 });

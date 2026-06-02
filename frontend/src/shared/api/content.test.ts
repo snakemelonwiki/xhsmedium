@@ -14,7 +14,7 @@ vi.mock('./apiClient', async (importOriginal) => {
   };
 });
 
-import { listGalleryPosts, togglePostFavorite } from './content';
+import { listGalleryPosts, listPosts, listRankings, togglePostFavorite } from './content';
 
 describe('togglePostFavorite', () => {
   beforeEach(() => {
@@ -99,6 +99,57 @@ describe('content image URL mapping', () => {
           coverImageUrl: '/uploads/1777456340857-origin.png',
         },
       ],
+    });
+  });
+});
+
+describe('content list query helpers', () => {
+  beforeEach(() => {
+    getMock.mockReset();
+    postMock.mockReset();
+  });
+
+  it('passes operation post filters through to the posts API', async () => {
+    getMock.mockResolvedValue({ items: [], total: 0, limit: 20, offset: 0 });
+
+    await listPosts({
+      page: 1,
+      pageSize: 20,
+      platform: 'xiaohongshu',
+      accountId: 'acc-1',
+      postType: 'note',
+      trafficMin: 100,
+      trafficMax: 500,
+    });
+
+    expect(getMock).toHaveBeenCalledWith('/posts', {
+      query: {
+        page: 1,
+        pageSize: 20,
+        platform: 'xiaohongshu',
+        accountId: 'acc-1',
+        postType: 'note',
+        trafficMin: 100,
+        trafficMax: 500,
+        limit: 20,
+        offset: 0,
+      },
+    });
+  });
+
+  it('passes ranking type, period and platform through to the rankings API', async () => {
+    getMock.mockResolvedValue({ items: [], total: 0, limit: 20, offset: 0 });
+
+    await listRankings('traffic', { page: 2, pageSize: 20, period: '7d', platform: 'xhs' });
+
+    expect(getMock).toHaveBeenCalledWith('/rankings', {
+      query: {
+        type: 'traffic',
+        period: '7d',
+        platform: 'xhs',
+        limit: 20,
+        offset: 20,
+      },
     });
   });
 });

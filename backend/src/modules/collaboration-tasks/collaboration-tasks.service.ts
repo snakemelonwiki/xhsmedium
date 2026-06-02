@@ -17,6 +17,10 @@ import { NOTIFICATION_TYPES } from '../../shared/notifications';
 
 const COLLAB_TIMEOUT_HOURS = 24;
 const COLLAB_SCAN_BATCH = 100;
+const LEAD_STATUS_IN_COLLABORATION = 'in_collaboration';
+const LEAD_STATUS_OPERATION_HANDLED = 'operation_handled';
+const LEAD_ADD_STATUS_OPERATION_REMINDED = 'operation_reminded';
+const TASK_LEAD_JOIN = 'l.id COLLATE utf8mb4_unicode_ci = t.lead_id COLLATE utf8mb4_unicode_ci';
 
 const ALLOWED_TYPES: CollaborationTaskType[] = [
   'remind_customer',
@@ -107,7 +111,7 @@ export class CollaborationTasksService {
     } as Partial<CollaborationTask>);
     await this.repo.save(entity);
     await this.leadRepository.update(dto.leadId, {
-      status: 'in_collaboration',
+      status: LEAD_STATUS_IN_COLLABORATION,
     });
 
     // §11.1 collab_requested: 通知客资来源运营。
@@ -176,7 +180,7 @@ export class CollaborationTasksService {
     const kw = query.keyword && query.keyword.trim();
     if (kw) {
       const like = `%${kw}%`;
-      qb.leftJoin(Lead, 'l', 'l.id = t.lead_id');
+      qb.leftJoin(Lead, 'l', TASK_LEAD_JOIN);
       qb.andWhere(
         '(t.reason LIKE :kw OR l.nickname LIKE :kw OR l.contact_info LIKE :kw)',
         { kw: like },
@@ -205,7 +209,7 @@ export class CollaborationTasksService {
     const effectiveScope = rawScope === 'all' && !isAdminLike ? 'mine' : rawScope;
     if (effectiveScope === 'all') return;
     if (effectiveScope === 'inbox') {
-      qb.leftJoin(Lead, 'l', 'l.id = t.lead_id');
+      qb.leftJoin(Lead, 'l', TASK_LEAD_JOIN);
       qb.andWhere(
         '(t.handler_id = :uid OR (t.status = :pendingStatus AND l.employee_id = :employeeId))',
         {
@@ -312,8 +316,8 @@ export class CollaborationTasksService {
     });
     const updated = await this.repo.findOne({ where: { id } });
     await this.leadRepository.update(task.leadId, {
-      status: 'operation_handled',
-      addStatus: 'operation_reminded',
+      status: LEAD_STATUS_OPERATION_HANDLED,
+      addStatus: LEAD_ADD_STATUS_OPERATION_REMINDED,
     });
 
     // §11.1 collab_handled: 协同任务被处理完结，回写给原发起人。
@@ -404,7 +408,7 @@ export class CollaborationTasksService {
     //   - 销售端 GET /api/leads?status=in_collaboration 永远看到这条 lead
     //   - 状态机卡死，create 协同时若 lead 已经是 in_collaboration，create() 会无脑覆盖
     //   - 销售端看不到 lead 已回到可继续跟进的状态
-    // 修复：close 成功后查 lead 当前 status；如果是 in_collaboration → 改为 in_followup
+    // 修复：close 成功后查 lead 当前 status；如果是协同中 → 改为 in_followup
     //   其它情况（in_followup / new / assigned / operation_handled / added_success / invalid）
     //   不动，避免覆盖更下游的状态。
     // 失败仅记日志，不阻断 close 主流程（lead 状态可后续由 updateBoard / addFollowRecord 修复）。
@@ -413,7 +417,7 @@ export class CollaborationTasksService {
         where: { id: task.leadId },
         select: { id: true, status: true },
       });
-      if (lead && lead.status === 'in_collaboration') {
+      if (lead && lead.status === LEAD_STATUS_IN_COLLABORATION) {
         await this.leadRepository.update(task.leadId, { status: 'in_followup' });
       }
     } catch (err: any) {

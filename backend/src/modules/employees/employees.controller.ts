@@ -41,7 +41,7 @@ export class EmployeesController {
 
   /**
    * 查询员工列表，支持分页和关键字过滤。
-   * 所有已登录用户可读（用于改派/分配等场景的展示），employees 表无 password 字段。
+   * 员工列表包含组织人员信息，仅 admin/owner 可读。
    */
   @Get()
   async findAll(
@@ -53,6 +53,7 @@ export class EmployeesController {
     @Query('search') search?: string,
     @Query('q') q?: string,
   ) {
+    if (!ensureEmployeeAdmin(req, res)) return;
     const wantsPaging = limit !== undefined || offset !== undefined;
     const nextKeyword = keyword || search || q || '';
     if (wantsPaging) {

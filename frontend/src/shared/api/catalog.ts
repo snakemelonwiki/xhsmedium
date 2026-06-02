@@ -18,15 +18,16 @@ function text(value: unknown): string | undefined {
 }
 
 /**
- * 读取可分配销售账号候选；当前后端只有 staff 账号列表，前端先使用活跃账号作为候选。
+ * 读取可分配销售账号候选。
  */
 export async function listAssignableSalesUsers(): Promise<CatalogOption[]> {
-  const payload = await apiClient.get<unknown>('/users/staff', {
-    query: { limit: 200, offset: 0 },
+  const payload = await apiClient.get<unknown>('/users', {
+    query: { role: 'sales', limit: 200, offset: 0 },
   });
   const paged = normalizePagedResult<RawRecord>(payload);
 
   return paged.items
+    .filter((item) => (text(item.role) ?? 'sales') === 'sales')
     .filter((item) => (text(item.status) ?? 'active') === 'active')
     .map((item) => ({
       id: text(item.id) ?? '',

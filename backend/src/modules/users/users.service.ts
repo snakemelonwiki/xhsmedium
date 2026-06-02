@@ -50,6 +50,26 @@ export class UsersService {
     return rows.map(toSafeUser);
   }
 
+  /**
+   * 查询可分配销售账号候选，仅返回 active sales 的安全字段。
+   */
+  async findAssignableSalesUsersPaged(options: { limit: number; offset: number }): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
+    const safeLimit = this.clampLimit(options.limit);
+    const safeOffset = Math.max(Number(options.offset) || 0, 0);
+    const [rows, total] = await this.userRepository.findAndCount({
+      where: { role: 'sales', status: 'active' },
+      order: { createdAt: 'DESC' },
+      skip: safeOffset,
+      take: safeLimit,
+    });
+    return {
+      items: rows.map(toSafeUser),
+      total,
+      limit: safeLimit,
+      offset: safeOffset,
+    };
+  }
+
   async findStaffUsers(): Promise<any[]> {
     const rows = await this.userRepository.find({
       where: { role: 'staff' },

@@ -410,19 +410,23 @@ export class LeadsController {
     if (!canAccess) {
       return res.status(404).json({ ok: false, message: 'not found' });
     }
-    await this.leadsService.updateBoard(id, {
-      status: body.status,
-      assignedSalesUserId: body.assignedSalesUserId,
-      assignedSalesUserName: body.assignedSalesUserName,
-      processStatus: body.processStatus,
-      addStatus: body.addStatus,
-      intention: body.intention,
-      intentionLevel: body.intentionLevel,
-      nextFollowTime: body.nextFollowTime,
-      followNote: body.followNote,
-      followType: body.followType,
-    }, actorUserId);
-    return res.json({ ok: true });
+    try {
+      await this.leadsService.updateBoard(id, {
+        status: body.status,
+        assignedSalesUserId: body.assignedSalesUserId,
+        assignedSalesUserName: body.assignedSalesUserName,
+        processStatus: body.processStatus,
+        addStatus: body.addStatus,
+        intention: body.intention,
+        intentionLevel: body.intentionLevel,
+        nextFollowTime: body.nextFollowTime,
+        followNote: body.followNote,
+        followType: body.followType,
+      }, actorUserId);
+      return res.json({ ok: true });
+    } catch (err: any) {
+      return res.status(422).json({ ok: false, message: err.message || 'invalid' });
+    }
   }
 
   @Patch(':id/status')

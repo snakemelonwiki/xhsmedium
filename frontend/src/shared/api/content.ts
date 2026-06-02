@@ -211,10 +211,15 @@ export async function togglePostFavorite(postId: string): Promise<FavoriteToggle
   };
 }
 
-export async function listRankings(type: 'posts' | 'leads' = 'posts', query: PageQuery = {}): Promise<PagedResult<RankingRow>> {
+export async function listRankings(type: string = 'posts', query: PageQuery = {}): Promise<PagedResult<RankingRow>> {
   const { page, pageSize, limit, offset } = withPaging(query);
+  const filters = { ...query };
+  delete filters.page;
+  delete filters.pageSize;
+  delete filters.limit;
+  delete filters.offset;
   const payload = await apiClient.get<unknown>('/rankings', {
-    query: { type, limit, offset },
+    query: { ...filters, type, limit, offset },
   });
   const paged = normalizePagedResult<RawRecord>(payload);
   return {

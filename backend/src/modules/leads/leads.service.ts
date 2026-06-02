@@ -51,19 +51,25 @@ interface LeadFilterOptions {
   to?: string;
 }
 
-const LEAD_STATUS_CODES = new Set(['new', 'assigned', 'in_followup', 'in_collaboration', 'operation_handled', 'added_success', 'deal_done', 'invalid']);
-const ADD_STATUS_CODES = new Set(['not_added', 'applied', 'not_passed', 'operation_reminded', 'added']);
+const LEAD_STATUS_IN_COLLABORATION = 'in_collaboration';
+const LEAD_STATUS_OPERATION_HANDLED = 'operation_handled';
+const ADD_STATUS_OPERATION_REMINDED = 'operation_reminded';
+
+const LEAD_STATUS_CODES = new Set(['new', 'assigned', 'in_followup', LEAD_STATUS_IN_COLLABORATION, LEAD_STATUS_OPERATION_HANDLED, 'added_success', 'deal_done', 'invalid']);
+const ADD_STATUS_CODES = new Set(['not_added', 'applied', 'not_passed', ADD_STATUS_OPERATION_REMINDED, 'added']);
 const PROCESS_STATUS_CODES = new Set(['not_contacted', 'waiting_pass', 'communicating', 'quoted', 'deal_pending', 'deal_done', 'invalid']);
 
 const STATUS_ALIASES: Record<string, string> = {
   contact_added: 'added_success',
   added: 'added_success',
   rejected: 'invalid',
+  in_collaboration: LEAD_STATUS_IN_COLLABORATION,
+  operation_handled: LEAD_STATUS_OPERATION_HANDLED,
   '新客资': 'new',
   '已分配': 'assigned',
   '跟进中': 'in_followup',
-  '协同中': 'in_collaboration',
-  '运营已处理': 'operation_handled',
+  '协同中': LEAD_STATUS_IN_COLLABORATION,
+  '运营已处理': LEAD_STATUS_OPERATION_HANDLED,
   '已添加通过': 'added_success',
   '无效客资': 'invalid',
 };
@@ -71,10 +77,11 @@ const STATUS_ALIASES: Record<string, string> = {
 const ADD_STATUS_ALIASES: Record<string, string> = {
   rejected: 'not_passed',
   waiting_pass: 'applied',
+  operation_reminded: ADD_STATUS_OPERATION_REMINDED,
   '未添加': 'not_added',
   '已申请添加': 'applied',
   '客户未通过': 'not_passed',
-  '运营已提醒': 'operation_reminded',
+  '运营已提醒': ADD_STATUS_OPERATION_REMINDED,
   '已添加通过': 'added',
 };
 
@@ -342,10 +349,7 @@ export class LeadsService {
       next.status = nextLeadStatus;
     }
 
-    const updateResult = await this.leadRepository.update(
-      { id, updatedAt: current.updatedAt } as any,
-      next,
-    );
+    const updateResult = await this.leadRepository.update(id, next);
     if (!updateResult.affected) {
       throw new ConflictException('客资状态已被其他人更新，请刷新后重试');
     }
@@ -495,7 +499,7 @@ export class LeadsService {
       if (nextAddStatus === 'rejected') next.addStatus = 'not_passed';
       return;
     }
-    if (!next.status && hasFollowSignal && current.status !== 'in_collaboration' && current.status !== 'operation_handled') {
+    if (!next.status && hasFollowSignal && !this.isCollaborationStatus(current.status) && !this.isOperationHandledStatus(current.status)) {
       next.status = 'in_followup';
     }
   }
@@ -504,16 +508,30 @@ export class LeadsService {
     if (dto.status !== undefined) return dto.status || current.status;
     if (dto.processStatus === 'invalid') return 'invalid';
     if (dto.addStatus === 'added') return 'added_success';
-    if (dto.processStatus === 'in_collaboration') return 'in_collaboration';
-    if (dto.processStatus === 'operation_handled') return 'operation_handled';
+    if (dto.processStatus === 'in_collaboration') return LEAD_STATUS_IN_COLLABORATION;
+    if (dto.processStatus === 'operation_handled') return LEAD_STATUS_OPERATION_HANDLED;
     const hasSalesAction =
       dto.processStatus !== undefined ||
       dto.addStatus !== undefined ||
       Boolean(dto.followNote && dto.followNote.trim());
-    if (hasSalesAction && current.status !== 'in_collaboration') {
+    if (hasSalesAction && !this.isCollaborationStatus(current.status)) {
       return 'in_followup';
     }
     return null;
+  }
+
+  /**
+   * 判断客资是否处于协同中。
+   */
+  private isCollaborationStatus(status?: string | null): boolean {
+    return status === LEAD_STATUS_IN_COLLABORATION;
+  }
+
+  /**
+   * 判断客资是否已由运营处理。
+   */
+  private isOperationHandledStatus(status?: string | null): boolean {
+    return status === LEAD_STATUS_OPERATION_HANDLED;
   }
 
   private normalizeBoardPatch(dto: BoardPatchDto): BoardPatchDto {

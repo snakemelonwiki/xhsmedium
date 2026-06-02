@@ -74,6 +74,39 @@ describe('CollaborationTasksService', () => {
     }));
   });
 
+  it('uses an explicit collation when joining leads for inbox lists', async () => {
+    const taskRepo = makeRepo();
+    const leadRepo = makeRepo();
+    const userRepo = makeRepo();
+    const notifications = { create: jest.fn(async () => undefined) };
+    const qb: any = {
+      leftJoin: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      skip: jest.fn().mockReturnThis(),
+      take: jest.fn().mockReturnThis(),
+      getManyAndCount: jest.fn().mockResolvedValue([[], 0]),
+    };
+    taskRepo.createQueryBuilder.mockReturnValue(qb);
+
+    const service = new CollaborationTasksService(taskRepo as any, leadRepo as any, userRepo as any, notifications as any, { log: jest.fn() } as any);
+    await service.listPaged({
+      scope: 'inbox',
+      status: 'pending',
+      userId: 'user-test-staff-01',
+      employeeId: 'emp-test-staff-01',
+      role: 'staff',
+      limit: 20,
+      offset: 0,
+    });
+
+    expect(qb.leftJoin).toHaveBeenCalledWith(
+      expect.any(Function),
+      'l',
+      expect.stringContaining('COLLATE utf8mb4_unicode_ci'),
+    );
+  });
+
   // TC-PERM-037 P0 修复：close 越权回归
   describe('close (TC-PERM-037)', () => {
     it('allows requester to close their own task', async () => {

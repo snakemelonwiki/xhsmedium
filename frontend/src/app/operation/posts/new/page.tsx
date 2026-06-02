@@ -1,5 +1,6 @@
 'use client';
 
+import { LinkOutlined } from '@ant-design/icons';
 import { Button, Card, Form, Input, Select, Space, Typography, message } from 'antd';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
@@ -60,6 +61,25 @@ export default function OperationPostNewPage() {
     });
   }
 
+  function parsePostUrl() {
+    const rawUrl = String(form.getFieldValue('postUrl') || '').trim();
+    if (!rawUrl) {
+      message.warning('请先粘贴作品链接');
+      return;
+    }
+    const nextValues: Record<string, string> = {};
+    if (/douyin\.com|iesdouyin\.com/i.test(rawUrl)) {
+      nextValues.platform = 'douyin';
+    } else if (/xiaohongshu\.com|xhslink\.com/i.test(rawUrl)) {
+      nextValues.platform = 'xiaohongshu';
+    }
+    if (!form.getFieldValue('title')) {
+      nextValues.title = inferTitleFromUrl(rawUrl);
+    }
+    form.setFieldsValue(nextValues);
+    message.success('已根据链接回填平台和标题');
+  }
+
   return (
     <Space direction="vertical" size={16} className="page-stack">
       <div>
@@ -87,12 +107,17 @@ export default function OperationPostNewPage() {
               />
             </Form.Item>
             <Form.Item className="full-row" name="postUrl" label="作品链接" rules={[{ required: true, message: '请输入作品链接' }]}>
-              <Input placeholder="粘贴小红书/抖音作品链接" />
+              <Space.Compact style={{ width: '100%' }}>
+                <Input id="postUrl" aria-label="作品链接" placeholder="粘贴小红书/抖音作品链接" />
+                <Button icon={<LinkOutlined />} onClick={parsePostUrl}>
+                  解析链接
+                </Button>
+              </Space.Compact>
             </Form.Item>
             <Form.Item name="title" label="标题">
               <Input placeholder="作品标题" />
             </Form.Item>
-            <Form.Item name="accountId" label="来源账号">
+            <Form.Item name="accountId" label="来源账号 ID">
               {accountOptions.length > 0 ? (
                 <Select
                   allowClear
@@ -130,4 +155,14 @@ function formatLocalDate(date: Date) {
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const day = String(date.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
+}
+
+function inferTitleFromUrl(rawUrl: string): string {
+  try {
+    const url = new URL(rawUrl);
+    const slug = url.pathname.split('/').filter(Boolean).pop();
+    return slug ? `作品 ${slug.slice(0, 24)}` : '待补充标题';
+  } catch {
+    return '待补充标题';
+  }
 }

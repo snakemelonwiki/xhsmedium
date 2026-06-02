@@ -1,6 +1,8 @@
 'use client';
 
-import { Alert, Button, Card, Empty, List, Space, Statistic, Typography } from 'antd';
+import { CalendarOutlined } from '@ant-design/icons';
+import { Alert, Button, Card, DatePicker, Empty, List, Space, Statistic, Typography } from 'antd';
+import type { Dayjs } from 'dayjs';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 
@@ -13,6 +15,12 @@ export default function OperationDashboardPage() {
   const [recentPosts, setRecentPosts] = useState<ContentPost[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
+
+  function openAccountCalendar(date: Dayjs | null) {
+    if (!date) return;
+    const day = date.format('YYYY-MM-DD');
+    window.location.href = `/operation/posts?from=${day}&to=${day}`;
+  }
 
   async function load() {
     setLoading(true);
@@ -57,6 +65,12 @@ export default function OperationDashboardPage() {
           <Typography.Paragraph type="secondary">聚合今日作品、客资和互动指标，快速进入常用运营动作。</Typography.Paragraph>
         </div>
         <Space wrap>
+          <DatePicker
+            aria-label="账号日历"
+            placeholder="账号日历"
+            suffixIcon={<CalendarOutlined />}
+            onChange={openAccountCalendar}
+          />
           <Link href="/operation/posts/new"><Button type="primary">录入作品</Button></Link>
           <Link href="/operation/leads/new"><Button>录入客资</Button></Link>
         </Space>

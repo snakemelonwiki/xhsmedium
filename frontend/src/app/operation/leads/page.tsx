@@ -1,14 +1,18 @@
 'use client';
 
 import { ProTable, type ProColumns } from '@ant-design/pro-components';
-import { Button, Card, Empty, Input, Select, Space, Typography } from 'antd';
+import { DownloadOutlined } from '@ant-design/icons';
+import { Button, Card, Empty, Input, message, Select, Space, Typography } from 'antd';
 import type { TablePaginationConfig } from 'antd';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 
+import { createExport } from '@/shared/api/exports';
 import { listSalesLeads } from '@/shared/api/leads';
 import { StatusTag } from '@/shared/components/status';
 import type { SalesLead } from '@/shared/types/leads';
+
+import { buildOperationLeadsExportFilter } from './exportFilter';
 
 type LeadFilters = {
   platform?: string;
@@ -19,6 +23,7 @@ type LeadFilters = {
 export default function OperationLeadsPage() {
   const [items, setItems] = useState<SalesLead[]>([]);
   const [loading, setLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [filters, setFilters] = useState<LeadFilters>({});
   const [pagination, setPagination] = useState({ current: 1, pageSize: 20, total: 0 });
 
@@ -44,6 +49,25 @@ export default function OperationLeadsPage() {
     load(1).catch(() => setItems([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  async function handleExport() {
+    setExporting(true);
+    try {
+      await createExport({
+        exportType: 'leads',
+        filter: buildOperationLeadsExportFilter({
+          page: pagination.current,
+          pageSize: pagination.pageSize,
+          ...filters,
+        }),
+      });
+      message.success('已创建客资导出任务，可到导出中心下载');
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '客资导出创建失败');
+    } finally {
+      setExporting(false);
+    }
+  }
 
   return (
     <Space direction="vertical" size={16} className="page-stack">
@@ -99,6 +123,9 @@ export default function OperationLeadsPage() {
               load(1, pagination.pageSize, next);
             }}
           />
+          <Button icon={<DownloadOutlined />} loading={exporting} onClick={handleExport}>
+            导出当前筛选
+          </Button>
           <Button onClick={() => load()}>刷新</Button>
           <Link href="/operation/leads/new"><Button type="primary">录入客资</Button></Link>
         </Space>

@@ -47,7 +47,16 @@ export class UsersController {
     @Res() res: Response,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
+    @Query('role') role?: string,
   ) {
+    if (role === 'sales') {
+      const result = await this.usersService.findAssignableSalesUsersPaged({
+        limit: Number(limit) || 200,
+        offset: Number(offset) || 0,
+      });
+      return res.json(result);
+    }
+
     // 仅 admin/owner 可查询完整用户列表（普通员工无需知晓全员账号）
     if (!ensureAccountManager(req, res)) return;
 

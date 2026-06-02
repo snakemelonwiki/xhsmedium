@@ -17,6 +17,8 @@ export type ExportTypeCode =
   | 'rankings'
   | 'accounts';
 
+export type ExportType = ExportTypeCode;
+
 export type ExportStatus = 'pending' | 'processing' | 'completed' | 'failed';
 
 export interface ExportFilter {
@@ -103,4 +105,21 @@ export async function listExports(query: ListExportsQuery = {}): Promise<PagedRe
     pageSize,
     items: paged.items,
   };
+}
+
+export function exportDownloadUrl(id: string): string {
+  return downloadExportUrl(id);
+}
+
+export async function createExportTask(
+  exportType: ExportType,
+  filter: ExportFilter = {},
+): Promise<CreateExportResult> {
+  return createExport({ exportType, filter });
+}
+
+export async function listExportTasks(
+  query: ListExportsQuery = {},
+): Promise<PagedResult<ExportTask>> {
+  return listExports(query);
 }

@@ -20,6 +20,8 @@ export default function OperationLeadNewPage() {
   const [accounts, setAccounts] = useState<CatalogOption[]>([]);
   const [posts, setPosts] = useState<CatalogOption[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [pasteText, setPasteText] = useState('');
 
   useEffect(() => {
     setCatalogLoading(true);
@@ -53,6 +55,7 @@ export default function OperationLeadNewPage() {
           addStatus: 'not_added',
           processStatus: 'not_contacted',
         });
+        setSubmitted(true);
         clearDraft(DRAFT_KEY);
         message.success('客资已录入');
         form.resetFields();
@@ -61,6 +64,16 @@ export default function OperationLeadNewPage() {
     } catch (err) {
       message.error(err instanceof Error ? err.message : '客资提交失败，已保留当前填写内容');
     }
+  }
+
+  function parsePastedLead() {
+    const parsed = parseLeadText(pasteText);
+    if (!Object.keys(parsed).length) {
+      message.warning('未识别到可回填字段');
+      return;
+    }
+    form.setFieldsValue(parsed);
+    message.success('已识别并回填客资信息');
   }
 
   return (
@@ -75,10 +88,23 @@ export default function OperationLeadNewPage() {
             form={form}
             layout="vertical"
             onFinish={submit}
-            onValuesChange={(_, values) => saveDraft(DRAFT_KEY, values)}
+            onValuesChange={(_, values) => {
+              if (!submitted) saveDraft(DRAFT_KEY, values);
+            }}
             preserve
           >
             <div className="form-grid">
+              <Form.Item className="full-row" label="粘贴解析">
+                <Space.Compact style={{ width: '100%' }}>
+                  <Input.TextArea
+                    rows={3}
+                    value={pasteText}
+                    onChange={(event) => setPasteText(event.target.value)}
+                    placeholder="粘贴客户昵称、微信/手机号、平台和需求描述"
+                  />
+                  <Button onClick={parsePastedLead}>识别</Button>
+                </Space.Compact>
+              </Form.Item>
               <Form.Item name="platform" label="来源平台" initialValue="xiaohongshu" rules={[{ required: true, message: '请选择平台' }]}>
                 <Select
                   options={[
@@ -114,7 +140,7 @@ export default function OperationLeadNewPage() {
                   showSearch
                   loading={catalogLoading}
                   optionFilterProp="label"
-                  placeholder="选择销售账号"
+                  placeholder={salesUsers.length > 0 ? '选择销售账号' : '暂无可分配销售账号'}
                   options={salesUsers.map((item) => ({ label: item.name, value: item.id }))}
                 />
               </Form.Item>
@@ -140,4 +166,20 @@ export default function OperationLeadNewPage() {
       </Card>
     </Space>
   );
+}
+
+function parseLeadText(raw: string): Record<string, string> {
+  const text = raw.trim();
+  if (!text) return {};
+  const result: Record<string, string> = {};
+  const phone = text.match(/1[3-9]\d{9}/)?.[0];
+  const wechat = text.match(/(?:微信|wx|wechat)[:：\s]*([a-zA-Z][-_a-zA-Z0-9]{5,19})/i)?.[1];
+  const nickname = text.match(/(?:昵称|客户|姓名)[:：\s]*([^\s,，;；]+)/)?.[1];
+
+  if (/抖音|douyin/i.test(text)) result.platform = 'douyin';
+  if (/小红书|xiaohongshu|xhs/i.test(text)) result.platform = 'xiaohongshu';
+  if (phone || wechat) result.contactInfo = phone || wechat || '';
+  if (nickname) result.nickname = nickname;
+  result.majorContent = text;
+  return result;
 }
