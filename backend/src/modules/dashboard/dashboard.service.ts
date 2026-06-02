@@ -7,6 +7,10 @@ import { Employee } from '../../entities/employee.entity';
 import { Account } from '../../entities/account.entity';
 import { normalizePostType } from '../../shared/utils/normalize';
 import { todayString } from '../../shared/utils/date-utils';
+import { CacheService } from '../../shared/cache.service';
+
+/** 5 分钟缓存 TTL（毫秒） */
+const CACHE_TTL_MS = 5 * 60 * 1000;
 
 @Injectable()
 export class DashboardService {
@@ -15,9 +19,20 @@ export class DashboardService {
     @InjectRepository(Lead) private readonly leadRepo: Repository<Lead>,
     @InjectRepository(Employee) private readonly employeeRepo: Repository<Employee>,
     @InjectRepository(Account) private readonly accountRepo: Repository<Account>,
+    private readonly cache: CacheService,
   ) {}
 
   async getSummary(today: string = todayString()): Promise<any> {
+    const cacheKey = `dashboard:summary:${today}`;
+    const cached = this.cache.get<ReturnType<typeof this.computeSummary>>(cacheKey);
+    if (cached !== undefined) return cached;
+
+    const result = await this.computeSummary(today);
+    this.cache.set(cacheKey, result, CACHE_TTL_MS);
+    return result;
+  }
+
+  private async computeSummary(today: string): Promise<any> {
     const [updatedEmployees, updatedAccounts, xhsPosts, douyinPosts, xhsMetrics, douyinMetrics, leads, deals] = await Promise.all([
       this.postRepo.createQueryBuilder('p').select('COUNT(DISTINCT p.employeeId)', 'count').where('p.publishedAt = :today', { today }).getRawOne(),
       this.postRepo.createQueryBuilder('p').select('COUNT(DISTINCT p.accountId)', 'count').where('p.publishedAt = :today', { today }).getRawOne(),
@@ -58,6 +73,16 @@ export class DashboardService {
   }
 
   async getPostTypeDistribution(today: string = todayString()): Promise<any[]> {
+    const cacheKey = `dashboard:post-type-dist:${today}`;
+    const cached = this.cache.get<ReturnType<typeof this.computePostTypeDistribution>>(cacheKey);
+    if (cached !== undefined) return cached;
+
+    const result = await this.computePostTypeDistribution(today);
+    this.cache.set(cacheKey, result, CACHE_TTL_MS);
+    return result;
+  }
+
+  private async computePostTypeDistribution(today: string): Promise<any[]> {
     const rawRows = await this.postRepo.query(
       `SELECT post_type, COUNT(*) AS count FROM posts WHERE published_at = ? GROUP BY post_type`,
       [today],
@@ -83,6 +108,16 @@ export class DashboardService {
     range: { from?: string; to?: string } = {},
   ): Promise<any> {
     const { from, to } = this.resolveRange(range);
+    const cacheKey = `dashboard:personal:${employeeId}:${from}:${to}`;
+    const cached = this.cache.get<ReturnType<typeof this.computePersonalDashboard>>(cacheKey);
+    if (cached !== undefined) return cached;
+
+    const result = await this.computePersonalDashboard(employeeId, from, to);
+    this.cache.set(cacheKey, result, CACHE_TTL_MS);
+    return result;
+  }
+
+  private async computePersonalDashboard(employeeId: string, from: string, to: string): Promise<any> {
     const postQb = this.postRepo.createQueryBuilder('p')
       .where('p.employee_id = :employeeId', { employeeId })
       .andWhere('p.published_at BETWEEN :from AND :to', { from, to });
@@ -177,6 +212,16 @@ export class DashboardService {
    */
   async getSupervisorOverview(period: string = 'today'): Promise<any> {
     const { from, to } = this.resolvePeriod(period);
+    const cacheKey = `dashboard:supervisor:overview:${period}:${from}:${to}`;
+    const cached = this.cache.get<ReturnType<typeof this.computeSupervisorOverview>>(cacheKey);
+    if (cached !== undefined) return cached;
+
+    const result = await this.computeSupervisorOverview(from, to, period);
+    this.cache.set(cacheKey, result, CACHE_TTL_MS);
+    return result;
+  }
+
+  private async computeSupervisorOverview(from: string, to: string, period: string): Promise<any> {
     const [postAgg, leadAgg, activeAccountCount, pendingCollab, employees] = await Promise.all([
       this.postRepo.createQueryBuilder('p')
         .select('COUNT(*)', 'postCount')
@@ -223,6 +268,18 @@ export class DashboardService {
    */
   async getSupervisorAnalysis(filters: { platform?: string; employeeId?: string } = {}): Promise<any> {
     const platform = this.normalizePlatform(filters.platform);
+    const platformKey = platform || '_all';
+    const employeeIdKey = filters.employeeId || '_all';
+    const cacheKey = `dashboard:supervisor:analysis:${platformKey}:${employeeIdKey}`;
+    const cached = this.cache.get<ReturnType<typeof this.computeSupervisorAnalysis>>(cacheKey);
+    if (cached !== undefined) return cached;
+
+    const result = await this.computeSupervisorAnalysis(platform, filters.employeeId);
+    this.cache.set(cacheKey, result, CACHE_TTL_MS);
+    return result;
+  }
+
+  private async computeSupervisorAnalysis(platform: string | null, employeeId: string | undefined): Promise<any> {
     const postWhere: string[] = ['1=1'];
     const postParams: any[] = [];
     const leadWhere: string[] = ['1=1'];
@@ -233,11 +290,11 @@ export class DashboardService {
       leadWhere.push('platform = ?');
       leadParams.push(platform);
     }
-    if (filters.employeeId) {
+    if (employeeId) {
       postWhere.push('employee_id = ?');
-      postParams.push(filters.employeeId);
+      postParams.push(employeeId);
       leadWhere.push('employee_id = ?');
-      leadParams.push(filters.employeeId);
+      leadParams.push(employeeId);
     }
     const [platformTrend, postStructure, leadTrend] = await Promise.all([
       this.postRepo.query(
@@ -260,7 +317,7 @@ export class DashboardService {
       ),
     ]);
     return {
-      filters: { platform, employeeId: filters.employeeId || '' },
+      filters: { platform, employeeId: employeeId || '' },
       platformTrend: platformTrend.map((row: any) => ({
         date: row.date,
         platform: row.platform,
@@ -293,7 +350,23 @@ export class DashboardService {
     const useRange = !!(options.from || options.to);
     const from = options.from || today;
     const to = options.to || today;
+    const platformKey = platform || '_all';
+    const cacheKey = `dashboard:rankings:${today}:${from}:${to}:${platformKey}`;
+    const cached = this.cache.get<ReturnType<typeof this.computeRankingRows>>(cacheKey);
+    if (cached !== undefined) return cached;
 
+    const result = await this.computeRankingRows(today, from, to, platform, useRange);
+    this.cache.set(cacheKey, result, CACHE_TTL_MS);
+    return result;
+  }
+
+  private async computeRankingRows(
+    today: string,
+    from: string,
+    to: string,
+    platform: string | null,
+    useRange: boolean,
+  ): Promise<any[]> {
     const dateClause = useRange
       ? 'p.published_at BETWEEN ? AND ?'
       : 'p.published_at = ?';
@@ -410,5 +483,30 @@ export class DashboardService {
       postCount: Number(postCount?.count || 0),
       leadCount: Number(leadCount?.count || 0),
     };
+  }
+
+  /**
+   * 清除所有 dashboard 相关缓存。
+   * 在 posts / leads / accounts 发生写操作后调用（P-P1-03 缓存失效）。
+   *
+   * 使用场景（各模块 service 层）：
+   *   posts.service.ts  : create / update / refreshMetrics → call invalidateAll()
+   *   leads.service.ts   : create / update               → call invalidateAll()
+   *   accounts.service.ts: create / update               → call invalidateAll()
+   *
+   * 也可按需清除特定 key（覆盖更大范围时直接 invalidateAll 更简单）。
+   */
+  invalidateAll(): void {
+    // dashboard:* 前缀清除所有看板缓存（今天/历史日期均清除）
+    this.cache.deleteByPrefix('dashboard:');
+  }
+
+  /**
+   * 仅清除排行榜相关缓存（posts 指标更新时调用）。
+   */
+  invalidateRankings(): void {
+    this.cache.deleteByPrefix('dashboard:rankings');
+    this.cache.deleteByPrefix('dashboard:summary');
+    this.cache.deleteByPrefix('dashboard:post-type-dist');
   }
 }
