@@ -56,7 +56,13 @@ export interface CreateExportResult {
 }
 
 export function downloadExportUrl(id: string): string {
-  return `/api/exports/${encodeURIComponent(id)}/download`;
+  // 浏览器 <a href> 导航无法携带 Authorization 头,所以把 token 拼到 query,
+  // 由后端 JwtAuthMiddleware 从 query.token 兜底解析,避免 401 unauthorized。
+  const path = `/api/exports/${encodeURIComponent(id)}/download`;
+  if (typeof window === 'undefined') return path;
+  const token = window.localStorage.getItem('xhsmedium.token');
+  if (!token) return path;
+  return `${path}?token=${encodeURIComponent(token)}`;
 }
 
 export async function createExport(input: CreateExportInput): Promise<CreateExportResult> {
