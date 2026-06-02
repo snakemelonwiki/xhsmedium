@@ -9,18 +9,21 @@ import { makeId } from '../../shared/utils/id-generator';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NOTIFICATION_TYPES } from '../../shared/notifications';
 
-type PaidStatus = 'unpaid' | 'partial' | 'paid';
+type PaidStatus = 'unpaid' | 'partial' | 'paid' | 'refunded';
 type OrderStatus =
+  | 'pending_accept'
   | 'to_receive'
   | 'in_progress'
   | 'awaiting_client_info'
   | 'awaiting_teacher'
   | 'to_deliver'
   | 'completed'
-  | 'abnormal';
+  | 'abnormal'
+  | 'closed';
 
-const ALLOWED_PAID: PaidStatus[] = ['unpaid', 'partial', 'paid'];
+const ALLOWED_PAID: PaidStatus[] = ['unpaid', 'partial', 'paid', 'refunded'];
 const ALLOWED_ORDER_STATUS: OrderStatus[] = [
+  'pending_accept',
   'to_receive',
   'in_progress',
   'awaiting_client_info',
@@ -28,6 +31,7 @@ const ALLOWED_ORDER_STATUS: OrderStatus[] = [
   'to_deliver',
   'completed',
   'abnormal',
+  'closed',
 ];
 const ALLOWED_HANDOVER_STATUS: HandoverStatusCode[] = [...HANDOVER_STATUS_CODES];
 
@@ -130,6 +134,7 @@ export class OrdersService {
       //     不强行改 `leads.status='deal_done'`，因为该值不在 schema 的合法枚举里。
       await manager.update(Lead, { id: leadId }, {
         processStatus: 'deal_done',
+        dealStatus: 'deal_done',
         status: 'in_followup',
       });
       await manager.insert(Order, {
@@ -341,6 +346,85 @@ export class OrdersService {
     const n = Number(limit) || 20;
     if (n <= 0) return 20;
     return Math.min(n, 200);
+  }
+
+  /**
+   * 教务端首页六宫格汇总。
+   * 复用 applyOrdersScope 自身的可见性过滤（academic 池单 + 自己已认领），
+   * 再叠加按 order_status 分桶的统计；nearDue 用「订单状态在履约中类目 + updated_at 早于 5 天前」近似 7 天内无进展。
+   *
+   * 返回 6 个数字：待接收 / 进行中 / 待客户资料 / 待老师安排 / 即将到期 / 异常。
+   */
+  async getAcademicHomeSummary(currentUserId: string): Promise<{
+    pendingReceive: number;
+    inProgress: number;
+    waitingMaterial: number;
+    waitingTeacher: number;
+    nearDue: number;
+    abnormal: number;
+  }> {
+    // 走 root qb 复用 applyOrdersScope 的可见性逻辑（academic 默认 = 池单 + 自己已认领）。
+    // admin/owner 调用本接口时也回落到"自己经手"（applyOrdersScope 已含）。
+    const scope: ListOrdersOptions = {
+      role: 'academic',
+      sessionRole: 'academic',
+      currentUserId: currentUserId || undefined,
+    };
+
+    async function count(qb: any): Promise<number> {
+      if ((qb as any)._earlyReturnEmpty) return 0;
+      const row = await qb.select('COUNT(o.id)', 'cnt').getRawOne();
+      const cnt = (row as { cnt?: string | number } | undefined)?.cnt;
+      const n = Number(cnt ?? 0);
+      return Number.isFinite(n) ? n : 0;
+    }
+
+    const buildBase = () => {
+      const qb = this.orderRepository.createQueryBuilder('o');
+      this.applyOrdersScope(qb, scope);
+      return qb;
+    };
+
+    // 待接收：池单（academic_user_id IS NULL） + 状态 to_receive。
+    const pendingReceive = await count(
+      buildBase().andWhere('o.order_status = :s', { s: 'to_receive' }),
+    );
+
+    const inProgress = await count(
+      buildBase().andWhere('o.order_status = :s', { s: 'in_progress' }),
+    );
+
+    const waitingMaterial = await count(
+      buildBase().andWhere('o.order_status = :s', { s: 'awaiting_client_info' }),
+    );
+
+    const waitingTeacher = await count(
+      buildBase().andWhere('o.order_status = :s', { s: 'awaiting_teacher' }),
+    );
+
+    // 即将到期：履约中类目 + updated_at 早于 5 天前（≈「7 天内无进展」粗略估算）。
+    // 用 updated_at 兜底，不依赖 order_follow_records.next_remind_at 字段是否填齐。
+    const nearDue = await count(
+      buildBase()
+        .andWhere(
+          "o.order_status IN (:...nearStatuses)",
+          { nearStatuses: ['in_progress', 'awaiting_client_info', 'awaiting_teacher', 'to_deliver'] },
+        )
+        .andWhere('o.updated_at < (NOW() - INTERVAL 5 DAY)'),
+    );
+
+    const abnormal = await count(
+      buildBase().andWhere('o.order_status = :s', { s: 'abnormal' }),
+    );
+
+    return {
+      pendingReceive,
+      inProgress,
+      waitingMaterial,
+      waitingTeacher,
+      nearDue,
+      abnormal,
+    };
   }
 
   async findOne(
@@ -663,7 +747,7 @@ export class OrdersService {
     return {
       orderId: order.id,
       handoverStatus: order.handoverStatus,
-      orderStatus: order.orderStatus,
+      orderStatus: order.orderStatus as OrderStatus,
       academicUserId: order.academicUserId,
       salesUserId: order.salesUserId,
     };
@@ -792,7 +876,10 @@ export class OrdersService {
       );
     }
 
-    const nextOrderStatus: OrderStatus = order.orderStatus === 'to_receive' ? 'in_progress' : order.orderStatus;
+    const nextOrderStatus: OrderStatus =
+      order.orderStatus === 'to_receive' || order.orderStatus === 'pending_accept'
+        ? 'in_progress'
+        : (order.orderStatus as OrderStatus);
     await this.orderRepository.update(orderId, {
       handoverStatus: 'accepted',
       orderStatus: nextOrderStatus,

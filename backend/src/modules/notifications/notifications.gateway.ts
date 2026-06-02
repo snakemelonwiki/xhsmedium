@@ -61,10 +61,33 @@ export class NotificationsGateway implements OnGatewayConnection, OnGatewayDisco
     return { ok: true };
   }
 
+  /**
+   * 文档 1.2 §5.2: 通知事件分发
+   * - 始终 emit `notification.created` / `notification:new`（通用 envelope）
+   * - 按 typeCode 额外 emit 对应的业务事件，便于前端按业务类型精确订阅
+   */
+  private static readonly TYPE_TO_BUSINESS_EVENT: Record<string, string> = {
+    lead_assigned: 'lead.assigned',
+    collaboration_requested: 'collaboration.requested',
+    collaboration_handled: 'collaboration.handled',
+    customer_not_passed: 'lead.customer_not_passed',
+    customer_added: 'lead.added_success',
+    order_created: 'order.created',
+    order_updated: 'order.updated',
+    order_abnormal: 'order.abnormal',
+    export_done: 'export.finished',
+  };
+
   emitCreated(userId: string, notification: any) {
     if (!userId || !this.server) return;
-    this.server.to(this.room(userId)).emit('notification.created', notification);
-    this.server.to(this.room(userId)).emit('notification:new', notification);
+    const room = this.room(userId);
+    this.server.to(room).emit('notification.created', notification);
+    this.server.to(room).emit('notification:new', notification);
+    const businessEvent =
+      NotificationsGateway.TYPE_TO_BUSINESS_EVENT[notification?.typeCode];
+    if (businessEvent) {
+      this.server.to(room).emit(businessEvent, notification);
+    }
   }
 
   private room(userId: string): string {

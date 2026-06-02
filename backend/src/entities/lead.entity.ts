@@ -70,6 +70,9 @@ export class Lead {
   @Column({ name: 'process_status', length: 32, default: 'not_contacted' })
   processStatus: string;
 
+  @Column({ name: 'deal_status', length: 32, default: 'not_deal' })
+  dealStatus: string;
+
   @Column({ name: 'add_status', length: 32, default: 'not_added' })
   addStatus: string;
 

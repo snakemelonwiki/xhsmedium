@@ -44,34 +44,19 @@ export class Order {
 
   @Column({
     name: 'paid_status',
-    type: 'enum',
-    enum: ['unpaid', 'partial', 'paid'],
+    type: 'varchar',
+    length: 32,
     default: 'unpaid',
   })
-  paidStatus: 'unpaid' | 'partial' | 'paid';
+  paidStatus: string;
 
   @Column({
     name: 'order_status',
-    type: 'enum',
-    enum: [
-      'to_receive',
-      'in_progress',
-      'awaiting_client_info',
-      'awaiting_teacher',
-      'to_deliver',
-      'completed',
-      'abnormal',
-    ],
+    type: 'varchar',
+    length: 32,
     default: 'to_receive',
   })
-  orderStatus:
-    | 'to_receive'
-    | 'in_progress'
-    | 'awaiting_client_info'
-    | 'awaiting_teacher'
-    | 'to_deliver'
-    | 'completed'
-    | 'abnormal';
+  orderStatus: string;
 
   @Column({
     name: 'handover_status',

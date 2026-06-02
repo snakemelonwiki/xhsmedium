@@ -96,6 +96,26 @@ export class OrdersController {
     }
   }
 
+  /**
+   * 教务端首页六宫格汇总。
+   * 必须放在 `@Get('orders/:id')` 之前，避免 'academic' 被路由参数 :id 抢占。
+   */
+  @Get('academic/home-summary')
+  async academicHomeSummary(@Req() req: Request, @Res() res: Response) {
+    const userId = getSessionUserId(req) || '';
+    if (!userId) {
+      return res.status(401).json({ ok: false, message: 'unauthenticated' });
+    }
+    try {
+      const data = await this.ordersService.getAcademicHomeSummary(userId);
+      return res.json(data);
+    } catch (err: any) {
+      return res
+        .status(500)
+        .json({ ok: false, message: err?.message || 'home summary failed' });
+    }
+  }
+
   @Get('orders')
   async list(
     @Req() req: Request,

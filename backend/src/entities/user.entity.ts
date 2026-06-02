@@ -31,16 +31,18 @@ export class User {
 
   /**
    * 账号角色，决定可访问的前端入口与接口数据范围：
-   * - admin    主管端（运营管理）
-   * - staff    运营员工
-   * - owner    总后台（仅 OWNER_PORT 入口）
-   * - sales    销售
-   * - academic 教务
+   * - admin      主管端（运营管理）
+   * - supervisor 主管（与 admin 等价但语义清晰；1.2 §10.1）
+   * - staff      运营员工
+   * - operation  运营员工（与 staff 等价但语义清晰；1.2 §10.1）
+   * - owner      总后台（仅 OWNER_PORT 入口）
+   * - sales      销售
+   * - academic   教务
    */
   @Column({
     type: 'enum',
-    enum: ['admin', 'staff', 'owner', 'sales', 'academic'],
-    comment: '账号角色：admin主管端 | staff运营员工 | owner总后台 | sales销售 | academic教务',
+    enum: ['admin', 'staff', 'owner', 'sales', 'academic', 'operation', 'supervisor'],
+    comment: '账号角色：admin/supervisor主管 | staff/operation运营员工 | owner总后台 | sales销售 | academic教务',
   })
   role: string;
 

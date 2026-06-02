@@ -212,3 +212,49 @@ export async function acceptHandoverOrder(orderId: string) {
 export async function rejectHandoverOrder(orderId: string, reason: string) {
   return apiClient.post<{ ok: true }>(`/orders/${orderId}/handover/reject`, { reason });
 }
+
+// ─── 教务端首页六宫格汇总 ───────────────────────────────────────────────
+
+export type AcademicHomeSummary = {
+  pendingReceive: number;
+  inProgress: number;
+  waitingMaterial: number;
+  waitingTeacher: number;
+  nearDue: number;
+  abnormal: number;
+};
+
+const EMPTY_ACADEMIC_HOME_SUMMARY: AcademicHomeSummary = {
+  pendingReceive: 0,
+  inProgress: 0,
+  waitingMaterial: 0,
+  waitingTeacher: 0,
+  nearDue: 0,
+  abnormal: 0,
+};
+
+function academicNumberOrZero(value: unknown): number {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/**
+ * 教务端首页六宫格汇总。后端没有就绪时（v1.2 兼容方案）回退到 0，
+ * 避免阻塞前端 UI 渲染。
+ */
+export async function getAcademicHomeSummary(): Promise<AcademicHomeSummary> {
+  const payload = await apiClient
+    .get<Partial<AcademicHomeSummary> | null>('/academic/home-summary')
+    .catch(() => null);
+  if (!payload || typeof payload !== 'object') {
+    return EMPTY_ACADEMIC_HOME_SUMMARY;
+  }
+  return {
+    pendingReceive: academicNumberOrZero((payload as AcademicHomeSummary).pendingReceive),
+    inProgress: academicNumberOrZero((payload as AcademicHomeSummary).inProgress),
+    waitingMaterial: academicNumberOrZero((payload as AcademicHomeSummary).waitingMaterial),
+    waitingTeacher: academicNumberOrZero((payload as AcademicHomeSummary).waitingTeacher),
+    nearDue: academicNumberOrZero((payload as AcademicHomeSummary).nearDue),
+    abnormal: academicNumberOrZero((payload as AcademicHomeSummary).abnormal),
+  };
+}

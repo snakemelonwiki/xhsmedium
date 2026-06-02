@@ -99,6 +99,12 @@ node scripts/backfill-lead-code.js --force   # 强制重新生成
 | `backend/src/modules/leads/leads.service.ts` | processStatus | "未接" | "not_contacted" |
 | `backend/src/modules/leads/leads.controller.ts` | processStatus | "未接" | "not_contacted" |
 
+## 关于 backend/migrations/
+
+`backend/migrations/` **不是** TypeORM 实际跑的目录。本目录（`migrations/`）才是 — 详见 `scripts/run-migrations.js` 第 38 行 `MIGRATIONS_DIR = path.join(__dirname, '..', 'migrations')` 与 `backend/migrations/README.md`。
+
+新迁移统一命名 `M<next>__<name>.{up,down}.sql` 放本目录；2026-06-02 起 v1.2 性能 Round 2 索引（9 个复合索引）已并入 `M21__v1_2_perf_indexes_round_2.{up,down}.sql`。
+
 未涉及的字段（M1 不动）：
 - `add_status` 默认仍为 "未添加"（VARCHAR）
 - `status` 默认仍为 "新客资"

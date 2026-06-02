@@ -43,8 +43,8 @@ CREATE TABLE IF NOT EXISTS users (
   id           VARCHAR(64)  PRIMARY KEY                        COMMENT '用户唯一ID（UUID）',
   username     VARCHAR(64)  NOT NULL UNIQUE                    COMMENT '登录用户名（全局唯一）',
   password     VARCHAR(255) NOT NULL                           COMMENT '登录密码：bcrypt hash 或历史明文',
-  role         ENUM('admin','staff','owner','sales','academic') NOT NULL
-                                                                COMMENT '账号角色：admin主管端 | staff运营员工 | owner总后台 | sales销售 | academic教务',
+  role         ENUM('admin','staff','owner','sales','academic','operation','supervisor') NOT NULL
+                                                                COMMENT '账号角色：admin/supervisor主管 | staff/operation运营员工 | owner总后台 | sales销售 | academic教务',
   failed_login_count INT NOT NULL DEFAULT 0 COMMENT '登录失败次数（>=5次触发账号锁定）',
   last_failed_at    DATETIME NULL COMMENT '最近一次登录失败时间（UTC），成功登录后重置为NULL',
   employee_id  VARCHAR(64)  NULL                               COMMENT '关联员工ID（employees.id）；owner 等纯账号可为空',
@@ -120,6 +120,7 @@ CREATE TABLE IF NOT EXISTS posts (
 -- ============================================================
 -- 5. leads
 -- backend/src/entities/lead.entity.ts + leads/exports/orders services.
+-- v1.2 增量：M18 新增 deal_status 字段；M16 增量：requirement_note/supervisor_note（已就位）
 -- 状态字段用 VARCHAR，避免旧中文值、迁移枚举值、前端过滤值互相卡死。
 -- 当前 B 端状态机 code：
 --   status: new / assigned / in_followup / in_collaboration /
@@ -140,7 +141,7 @@ CREATE TABLE IF NOT EXISTS leads (
   budget                   VARCHAR(64)  NULL COMMENT '预算',
   major_content            VARCHAR(255) NULL COMMENT '专业/需求',
   ip                       VARCHAR(128) NULL COMMENT 'IP地址',
-  status                   VARCHAR(32)  NOT NULL DEFAULT 'new' COMMENT '客资状态: new/assigned/in_followup/in_collaboration/operation_handled/added_success/invalid',
+  status                   VARCHAR(32)  NOT NULL DEFAULT 'new' COMMENT '客资状态: new/assigned/in_followup/in_collaboration/operation_handled/added_success/deal_done/invalid',
   deal_amount              DECIMAL(12,2) NULL COMMENT '成交金额',
   note                     TEXT         NULL COMMENT '备注',
   requirement_note         TEXT         NULL COMMENT '需求备注（销售端展示）',
@@ -152,6 +153,7 @@ CREATE TABLE IF NOT EXISTS leads (
   assigned_sales_user_id   VARCHAR(64)  NULL COMMENT '分配销售用户ID',
   assigned_sales_user_name VARCHAR(64)  NULL COMMENT '分配销售名称',
   process_status           VARCHAR(32)  NOT NULL DEFAULT 'not_contacted' COMMENT '销售处理状态: not_contacted/waiting_pass/communicating/quoted/deal_pending/deal_done/invalid',
+  deal_status              VARCHAR(32)  NOT NULL DEFAULT 'not_deal' COMMENT '成交状态: not_deal/deal_pending/deal_done/refunded/invalid（M18 新增）',
   add_status               VARCHAR(32)  NOT NULL DEFAULT 'not_added' COMMENT '添加状态: not_added/applied/not_passed/operation_reminded/added',
   intention                VARCHAR(32)  NULL COMMENT '意向',
   lead_code                VARCHAR(32)  NULL COMMENT '客资编号',
@@ -170,6 +172,7 @@ CREATE TABLE IF NOT EXISTS leads (
   INDEX idx_leads_platform                    (platform),
   INDEX idx_leads_status                      (status),
   INDEX idx_leads_process_status              (process_status),
+  INDEX idx_leads_deal_status                 (deal_status),
   INDEX idx_leads_add_status                  (add_status),
   INDEX idx_leads_assigned_sales_user_id      (assigned_sales_user_id),
   INDEX idx_leads_intention_level             (intention_level),
@@ -277,8 +280,8 @@ CREATE TABLE IF NOT EXISTS orders (
   academic_user_id  VARCHAR(64) NULL COMMENT '教务用户ID',
   service_type      VARCHAR(64) NULL COMMENT '服务类型',
   amount            DECIMAL(12,2) NULL COMMENT '成交金额',
-  paid_status       ENUM('unpaid','partial','paid') NOT NULL DEFAULT 'unpaid' COMMENT '付款状态',
-  order_status      ENUM('to_receive','in_progress','awaiting_client_info','awaiting_teacher','to_deliver','completed','abnormal') NOT NULL DEFAULT 'to_receive' COMMENT '订单状态',
+  paid_status       VARCHAR(32) NOT NULL DEFAULT 'unpaid' COMMENT '付款状态：unpaid/partial/paid/refunded',
+  order_status      VARCHAR(32) NOT NULL DEFAULT 'to_receive' COMMENT '订单状态：pending_accept/to_receive/in_progress/awaiting_client_info/awaiting_teacher/to_deliver/completed/abnormal/closed',
   handover_status   VARCHAR(16) NOT NULL DEFAULT 'pending' COMMENT '交接状态: pending待交接 | handed_over已交接 | accepted已接收 | rejected已拒收(由 M14 迁移追加;销售成交时默认 handed_over,教务可 accept/reject)',
   remark            TEXT        NULL COMMENT '备注',
   created_at        DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,

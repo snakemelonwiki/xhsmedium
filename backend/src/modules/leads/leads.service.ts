@@ -51,7 +51,7 @@ interface LeadFilterOptions {
   to?: string;
 }
 
-const LEAD_STATUS_CODES = new Set(['new', 'assigned', 'in_followup', 'in_collaboration', 'operation_handled', 'added_success', 'invalid']);
+const LEAD_STATUS_CODES = new Set(['new', 'assigned', 'in_followup', 'in_collaboration', 'operation_handled', 'added_success', 'deal_done', 'invalid']);
 const ADD_STATUS_CODES = new Set(['not_added', 'applied', 'not_passed', 'operation_reminded', 'added']);
 const PROCESS_STATUS_CODES = new Set(['not_contacted', 'waiting_pass', 'communicating', 'quoted', 'deal_pending', 'deal_done', 'invalid']);
 
