@@ -194,21 +194,49 @@ export class CollaborationTasksController {
     }
   }
 
+  // 同时暴露 PUT 与 PATCH：销售端 /sales/collaboration 与运营端
+  // /operation/collaboration 对 close 接口使用不同 verb，需保持并存。
+  // NestJS 不允许多个 HTTP verb 装饰器修饰同一方法体，所以拆成两个 wrapper，
+  // 内部都委托到 runClose → service.close。TC-PERM-037 P0 修复：close 增加
+  // 发起人/管理员越权校验。
   @Put(':id/close')
-  async close(@Param('id') id: string, @Req() req: Request, @Res() res: Response) {
+  async closePut(@Param('id') id: string, @Req() req: Request, @Res() res: Response) {
+    return this.runClose(id, req, res);
+  }
+
+  @Patch(':id/close')
+  async closePatch(@Param('id') id: string, @Req() req: Request, @Res() res: Response) {
+    return this.runClose(id, req, res);
+  }
+
+  private async runClose(id: string, req: Request, res: Response) {
     const session = (req as any).session;
     const actorUserId = session?.userId || session?.id || '';
-    const task = await this.service.close(id);
-    if (!task) return res.status(404).json({ ok: false, message: 'not found' });
-    // 写操作日志：协同任务关闭
-    await this.logSafe({
-      userId: actorUserId,
-      action: OPERATION_LOG_ACTIONS.UPDATE,
-      targetId: id,
-      detail: { step: 'close' },
-      req,
-    });
-    return res.json({ ok: true, task });
+    const actorRole = session?.role || '';
+    try {
+      const task = await this.service.close(id, {
+        actorUserId,
+        actorRole,
+      });
+      if (!task) return res.status(404).json({ ok: false, message: 'not found' });
+      // 写操作日志：协同任务关闭
+      await this.logSafe({
+        userId: actorUserId,
+        action: OPERATION_LOG_ACTIONS.UPDATE,
+        targetId: id,
+        detail: { step: 'close' },
+        req,
+      });
+      return res.json({ ok: true, task });
+    } catch (err: any) {
+      // assertCanClose 抛 'no permission' / 'close requires user' → 403；
+      // 其它业务错误（理论上不应再出现）→ 422。
+      const msg = err?.message || 'invalid';
+      if (typeof msg === 'string' && /no permission|close requires user/i.test(msg)) {
+        return res.status(403).json({ ok: false, message: msg });
+      }
+      return res.status(422).json({ ok: false, message: msg });
+    }
   }
 
   /**

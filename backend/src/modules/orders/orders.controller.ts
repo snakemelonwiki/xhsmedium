@@ -226,7 +226,14 @@ export class OrdersController {
   ) {
     const session = (req as any).session;
     const userId = session?.userId || session?.id || '';
+    const role = session?.role || '';
     try {
+      // P0 越权修复 (TC-PERM-023)：sales/academic 只能改自己经手 / 自己已认领 / 池单。
+      // 失败一律 404，避免泄漏"订单存在但无权限"信息，与 findOne 的 404 行为一致。
+      const canAccess = await this.ordersService.canAccessOrder(id, { userId, role });
+      if (!canAccess) {
+        return res.status(404).json({ ok: false, message: 'not found' });
+      }
       await this.ordersService.update(id, {
         order_status: body?.order_status,
         paid_status: body?.paid_status,
@@ -269,7 +276,16 @@ export class OrdersController {
   ) {
     const session = (req as any).session;
     const actorUserId = session?.userId || session?.id || body?.actorUserId || '';
+    const role = session?.role || '';
     try {
+      // P0 越权修复：跟进记录必须由有订单可见性的用户提交，否则返 404。
+      const canAccess = await this.ordersService.canAccessOrder(id, {
+        userId: actorUserId,
+        role,
+      });
+      if (!canAccess) {
+        return res.status(404).json({ ok: false, message: 'not found' });
+      }
       await this.ordersService.addFollowRecord(id, actorUserId, {
         nodeType: body?.nodeType,
         content: body?.content,
@@ -439,6 +455,12 @@ export class OrdersController {
       return res.status(401).json({ ok: false, message: 'unauthenticated' });
     }
     try {
+      // P0 越权修复：异常反馈提交人也必须有订单可见性；
+      // 具体的写权限（学术 / 销售 / 主管）由 abnormalFeedbackService.canWrite 二次校验。
+      const canAccess = await this.ordersService.canAccessOrder(id, actor);
+      if (!canAccess) {
+        return res.status(404).json({ ok: false, message: 'not found' });
+      }
       const result = await this.abnormalFeedbackService.create(id, actor, {
         abnormalType: body?.abnormalType,
         description: body?.description,
@@ -512,6 +534,12 @@ export class OrdersController {
       return res.status(401).json({ ok: false, message: 'unauthenticated' });
     }
     try {
+      // P0 越权修复：关闭 / 处理中 操作人也必须有订单可见性；
+      // 具体的关闭权限（创建人 / 主管 / 教务管理员）由 abnormalFeedbackService.canClose 二次校验。
+      const canAccess = await this.ordersService.canAccessOrder(id, actor);
+      if (!canAccess) {
+        return res.status(404).json({ ok: false, message: 'not found' });
+      }
       await this.abnormalFeedbackService.close(id, feedbackId, actor, {
         closeNote: body?.closeNote,
         status: body?.status,

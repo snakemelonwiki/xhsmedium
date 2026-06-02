@@ -364,11 +364,43 @@ export class CollaborationTasksService {
     return actor;
   }
 
-  async close(id: string): Promise<CollaborationTask | null> {
+  async close(
+    id: string,
+    actor: CollaborationActor = {},
+  ): Promise<CollaborationTask | null> {
+    const closeActor = this.normalizeActor(actor);
     const task = await this.repo.findOne({ where: { id } });
     if (!task) return null;
+    // 幂等：已关闭的任务直接返回当前记录，避免重复写入与误报权限错误。
+    if (task.status === 'closed') {
+      return task;
+    }
+    // TC-PERM-037 P0 修复：仅任务发起人（requester）或 admin/owner 可关闭。
+    // 销售员之间不能互关协同任务，运营也不能关闭（非处理权限）。
+    await this.assertCanClose(task, closeActor);
     await this.repo.update(id, { status: 'closed' as CollaborationTaskStatus });
     return this.repo.findOne({ where: { id } });
+  }
+
+  /**
+   * 校验协同关闭权限：
+   * - admin / owner 可关闭任意任务（主管兜底）
+   * - 其它角色：仅任务发起人（requester_id === actorUserId）可关闭
+   * 失败抛 Error，controller 渲染 403。
+   */
+  private assertCanClose(
+    task: CollaborationTask,
+    actor: CollaborationActor,
+  ): void {
+    if (actor.actorRole === 'admin' || actor.actorRole === 'owner') {
+      return;
+    }
+    if (!actor.actorUserId) {
+      throw new Error('close requires user');
+    }
+    if (task.requesterId !== actor.actorUserId) {
+      throw new Error('no permission to close task');
+    }
   }
 
   /**

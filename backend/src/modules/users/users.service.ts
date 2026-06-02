@@ -4,6 +4,22 @@ import { Repository } from 'typeorm';
 import { User } from '../../entities/user.entity';
 import { makeId } from '../../shared/utils/id-generator';
 
+/**
+ * 序列化 User 时过滤敏感字段（password）。
+ * 用于直接返回给 HTTP 响应的辅助方法 —— 不返回 password 哈希/明文。
+ */
+function toSafeUser(u: User): Record<string, any> {
+  return {
+    id: u.id,
+    username: u.username,
+    role: u.role,
+    employeeId: u.employeeId,
+    status: u.status,
+    createdAt: (u as any).createdAt,
+    updatedAt: (u as any).updatedAt,
+  };
+}
+
 @Injectable()
 export class UsersService {
   constructor(
@@ -12,11 +28,17 @@ export class UsersService {
   ) {}
 
   async findAll(): Promise<any[]> {
-    return this.userRepository.find({ order: { createdAt: 'DESC' } });
+    const rows = await this.userRepository.find({ order: { createdAt: 'DESC' } });
+    // B/P0-05: 响应中绝不能包含 password 字段。统一在 service 层 map
+    return rows.map(toSafeUser);
   }
 
   async findStaffUsers(): Promise<any[]> {
-    return this.userRepository.find({ where: { role: 'staff' }, order: { createdAt: 'DESC' } });
+    const rows = await this.userRepository.find({
+      where: { role: 'staff' },
+      order: { createdAt: 'DESC' },
+    });
+    return rows.map(toSafeUser);
   }
 
   async findAllPaged(options: { limit: number; offset: number }): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
@@ -28,13 +50,7 @@ export class UsersService {
       take: safeLimit,
     });
     return {
-      items: rows.map((u) => ({
-        id: u.id,
-        username: u.username,
-        role: u.role,
-        employeeId: u.employeeId,
-        status: u.status,
-      })),
+      items: rows.map(toSafeUser),
       total,
       limit: safeLimit,
       offset: safeOffset,
@@ -51,13 +67,7 @@ export class UsersService {
       take: safeLimit,
     });
     return {
-      items: rows.map((u) => ({
-        id: u.id,
-        username: u.username,
-        role: u.role,
-        employeeId: u.employeeId,
-        status: u.status,
-      })),
+      items: rows.map(toSafeUser),
       total,
       limit: safeLimit,
       offset: safeOffset,

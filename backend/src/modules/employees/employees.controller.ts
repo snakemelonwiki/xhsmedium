@@ -1,7 +1,8 @@
-import { Controller, Get, Post, Put, Patch, Delete, Body, Param, Req, Res, Query } from '@nestjs/common';
+import { Controller, Get, Post, Put, Patch, Delete, Body, Param, Req, Res, Query, UseGuards } from '@nestjs/common';
 import { EmployeesService } from './employees.service';
 import { Request, Response } from 'express';
 import { OperationLogsService } from '../operation-logs/operation-logs.service';
+import { AuthGuard } from '../../common/auth.guard';
 import {
   OPERATION_LOG_ACTIONS,
   OPERATION_LOG_TARGET_TYPES,
@@ -9,7 +10,29 @@ import {
   stringifyDetail,
 } from '../../shared/operation-logs.constants';
 
+/**
+ * 检查当前 session 角色是否在白名单中。
+ * 与 users.controller.ts 同款内联校验，保持 controllers 间风格一致。
+ */
+function hasRole(session: any, allowed: string[]): boolean {
+  const role = String(session?.role || '').toLowerCase();
+  return allowed.includes(role);
+}
+
+/** 员工资料变更（创建/更新/删除/启停）仅 admin/owner 可执行 */
+function ensureEmployeeAdmin(req: Request, res: Response): boolean {
+  const session = (req as any).session;
+  if (!hasRole(session, ['admin', 'owner'])) {
+    res.status(403).json({ ok: false, message: 'forbidden: 仅 admin/owner 可管理员工资料' });
+    return false;
+  }
+  return true;
+}
+
 @Controller('employees')
+// B/P0-05: 整个 employees 控制器在未带 Bearer token 时必须直接 401，
+// 不允许未登录用户拉全表或修改员工资料。AuthGuard 内部已做 token 校验。
+@UseGuards(AuthGuard)
 export class EmployeesController {
   constructor(
     private readonly employeesService: EmployeesService,
@@ -18,9 +41,11 @@ export class EmployeesController {
 
   /**
    * 查询员工列表，支持分页和关键字过滤。
+   * 所有已登录用户可读（用于改派/分配等场景的展示），employees 表无 password 字段。
    */
   @Get()
   async findAll(
+    @Req() req: Request,
     @Res() res: Response,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
@@ -47,6 +72,8 @@ export class EmployeesController {
    */
   @Post()
   async create(@Body() body: any, @Req() req: Request, @Res() res: Response) {
+    if (!ensureEmployeeAdmin(req, res)) return;
+
     const session = (req as any).session;
     const userId = session?.userId || session?.id || '';
     const allCodes = await this.employeesService.findAllCodes();
@@ -83,7 +110,8 @@ export class EmployeesController {
    * 更新员工启停状态。
    */
   @Patch(':id/status')
-  async updateStatus(@Param('id') id: string, @Body() body: any, @Res() res: Response) {
+  async updateStatus(@Param('id') id: string, @Body() body: any, @Req() req: Request, @Res() res: Response) {
+    if (!ensureEmployeeAdmin(req, res)) return;
     await this.employeesService.updateStatus(id, body.status);
     return res.json({ ok: true });
   }
@@ -108,7 +136,8 @@ export class EmployeesController {
    * 删除员工，保持现有服务删除策略。
    */
   @Delete(':id')
-  async remove(@Param('id') id: string, @Res() res: Response) {
+  async remove(@Param('id') id: string, @Req() req: Request, @Res() res: Response) {
+    if (!ensureEmployeeAdmin(req, res)) return;
     await this.employeesService.remove(id);
     return res.json({ ok: true });
   }
@@ -117,6 +146,7 @@ export class EmployeesController {
    * 执行员工资料更新，供 PUT/PATCH 复用。
    */
   private async updateEmployee(id: string, body: any, req: Request, res: Response) {
+    if (!ensureEmployeeAdmin(req, res)) return;
     const session = (req as any).session;
     const userId = session?.userId || session?.id || '';
     await this.employeesService.update(id, {

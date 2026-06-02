@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
 import { Repository, DataSource, In } from 'typeorm';
 import { Order, HANDOVER_STATUS_CODES, HandoverStatusCode } from '../../entities/order.entity';
@@ -139,6 +139,28 @@ export class OrdersService {
     }
 
     return orderId;
+  }
+
+  private async getActorContext(
+    actorUserId: string,
+  ): Promise<{ role: string; employeeId: string | null }> {
+    // P0-NEW-03: 给 handover 4 路由的 owner 校验提供 role / employeeId 上下文。
+    // 一次轻量查询（仅取 role / employee_id），替代在 controller 透传 session。
+    // 返回 { role, employeeId }；role 用于 admin/owner 旁路，employeeId 用于学术 ownership 校验
+    // （orders.academic_user_id 存的是 employees.id，不是 users.id）。
+    if (!actorUserId) return { role: '', employeeId: null };
+    try {
+      const user = await this.userRepository.findOne({
+        where: { id: actorUserId },
+        select: { id: true, role: true, employeeId: true },
+      });
+      return {
+        role: user?.role || '',
+        employeeId: user?.employeeId ?? null,
+      };
+    } catch {
+      return { role: '', employeeId: null };
+    }
   }
 
   async list(options: ListOrdersOptions): Promise<any[]> {
@@ -321,6 +343,36 @@ export class OrdersService {
     };
   }
 
+  /**
+   * P0 越权修复 (TC-PERM-023 等)：控制器层在写操作前调用本方法做归属校验。
+   * 规则与 findOne / applyOrdersScope 中的可见性策略保持一致：
+   * - admin / owner：可访问全部订单
+   * - sales：仅本人经手（sales_user_id = 当前用户）
+   * - academic：仅自己已认领（academic_user_id = 当前用户）或池单（academic_user_id IS NULL）
+   * - 其它 / 未传角色：兜底要求 sales_user_id 或 academic_user_id 与当前用户匹配
+   *
+   * 返回 boolean 而非抛 404，由 controller 统一把 false 翻译为 404 响应，
+   * 避免与"订单不存在"在日志中产生歧义，也与 leads 模块的 canAccessLead 对齐。
+   */
+  async canAccessOrder(
+    orderId: string,
+    actor?: { userId?: string; role?: string },
+  ): Promise<boolean> {
+    if (!orderId) return false;
+    const order = await this.orderRepository.findOne({ where: { id: orderId } });
+    if (!order) return false;
+    const role = actor?.role || '';
+    const uid = actor?.userId || '';
+    if (role === 'admin' || role === 'owner') return true;
+    if (role === 'sales') {
+      return Boolean(uid && order.salesUserId === uid);
+    }
+    if (role === 'academic') {
+      return order.academicUserId === uid || order.academicUserId == null;
+    }
+    return Boolean(uid && (order.salesUserId === uid || order.academicUserId === uid));
+  }
+
   async update(id: string, dto: OrderPatchDto): Promise<void> {
     const current = await this.orderRepository.findOne({ where: { id } });
     if (!current) {
@@ -400,6 +452,28 @@ export class OrdersService {
       nodeType === '已接收' ||
       nodeType === '已签收';
     if (isReceivedNode && order.handoverStatus !== 'accepted') {
+      // P0-NEW-03: 池单（academic_user_id IS NULL）在教务添加"已接收"节点时，
+      // 先把订单认领到当前教务名下（用其 employeeId），再触发自动 acceptHandover。
+      // 这样新加的 ownership 校验（order.academicUserId === actor.employeeId）才能通过。
+      // 若失败不影响主流程（仍保存 follow record），仅 auto-accept 不生效。
+      if (order.academicUserId == null && actorUserId) {
+        try {
+          const actorCtx = await this.getActorContext(actorUserId);
+          // 用 employeeId 优先；缺 employeeId 时兜底用 userId（与历史数据兼容）
+          const targetEmployeeId = actorCtx.employeeId || actorUserId;
+          await this.orderRepository.update(
+            { id: orderId },
+            { academicUserId: targetEmployeeId },
+          );
+          order.academicUserId = targetEmployeeId;
+        } catch (err: any) {
+          // eslint-disable-next-line no-console
+          console.error(
+            '[orders] auto assign academic on received node failed',
+            err?.message || err,
+          );
+        }
+      }
       try {
         await this.acceptHandover(orderId, actorUserId, { silent: true });
       } catch (err: any) {
@@ -417,7 +491,10 @@ export class OrdersService {
   // 的订单上推进到 accepted 时同步把 orderStatus 从 to_receive 推到 in_progress。
   // =====================================================================
 
-  async getHandoverStatus(id: string): Promise<{
+  async getHandoverStatus(
+    id: string,
+    actor?: { userId?: string; role?: string; employeeId?: string | null },
+  ): Promise<{
     orderId: string;
     handoverStatus: HandoverStatusCode;
     orderStatus: OrderStatus;
@@ -427,6 +504,33 @@ export class OrdersService {
     const order = await this.orderRepository.findOne({ where: { id } });
     if (!order) {
       throw new NotFoundException('order not found');
+    }
+    // P0-NEW-03: 读权限校验（与 findOne 一致），避免泄露订单存在性。
+    // 注意：现有 controller 未透传 session，因此 actor 通常为 undefined；
+    // 留出 actor 参数便于未来 controller 补传后立即生效。undefined 时按 401 之外的
+    // 已有行为处理（仅校验订单存在），与改动前完全一致。
+    if (actor && (actor.userId || actor.role || actor.employeeId)) {
+      let role = actor.role || '';
+      let employeeId: string | null = actor.employeeId ?? null;
+      if (!role && actor.userId) {
+        const ctx = await this.getActorContext(actor.userId);
+        role = ctx.role;
+        employeeId = ctx.employeeId;
+      }
+      const uid = actor.userId || '';
+      const isAdminLike = role === 'admin' || role === 'owner';
+      if (!isAdminLike) {
+        const canSee =
+          (role === 'sales' && order.salesUserId === uid) ||
+          (role === 'academic' &&
+            (order.academicUserId === employeeId || order.academicUserId == null)) ||
+          order.salesUserId === uid ||
+          order.academicUserId === employeeId;
+        if (!canSee) {
+          // 不暴露"存在但无权限"，与不存在一致返回 404。
+          throw new NotFoundException('order not found');
+        }
+      }
     }
     return {
       orderId: order.id,
@@ -440,14 +544,35 @@ export class OrdersService {
   /**
    * 销售成交 / 主动发起交接：pending → handed_over。
    * closeDeal 内部已自动设 'handed_over'，本方法主要是暴露给前端按钮调用。
+   *
+   * P0-NEW-03 修复：原代码无 owner 校验，任意登录用户都能把任意订单 handover。
+   * 修复后：
+   *   - admin/owner：旁路 ownership，可对任意订单调用
+   *   - sales：仅当 order.salesUserId === actorUserId
+   *   - 其他角色：403
    */
   async handOver(orderId: string, actorUserId: string): Promise<void> {
-    const order = await this.orderRepository.findOne({ where: { id: orderId } });
+    const [order, ctx] = await Promise.all([
+      this.orderRepository.findOne({ where: { id: orderId } }),
+      this.getActorContext(actorUserId),
+    ]);
     if (!order) {
       throw new NotFoundException('order not found');
     }
     if (!actorUserId) {
       throw new BadRequestException('actor user required');
+    }
+    // P0-NEW-03: owner 校验（admin/owner 旁路；sales 必须是该订单的成交销售）
+    const isAdmin = ctx.role === 'admin' || ctx.role === 'owner';
+    if (!isAdmin) {
+      // role 已知且不是 sales → 角色不符
+      if (ctx.role && ctx.role !== 'sales') {
+        throw new ForbiddenException('only sales or supervisor can hand over an order');
+      }
+      // role 是 sales 但订单归属不匹配 → ownership 不符
+      if (order.salesUserId !== actorUserId) {
+        throw new ForbiddenException('only the sales of the order can hand over');
+      }
     }
     if (order.handoverStatus === 'handed_over') {
       // 幂等：已经交接过的订单直接返回，避免重复通知。
@@ -489,26 +614,54 @@ export class OrdersService {
   }
 
   /**
-   * 教务接单：pending/handed_over → accepted，同时 orderStatus: to_receive → in_progress。
+   * 教务接单：handed_over → accepted，同时 orderStatus: to_receive → in_progress。
    * silent=true 用于内部自动触发（addFollowRecord 'received' 节点），不重复写日志。
+   *
+   * P0-NEW-03 修复：原代码无 owner 校验，任意登录用户都能把任意订单置为 accepted。
+   * 修复后：
+   *   - admin/owner：旁路 ownership
+   *   - academic：仅当 order.academicUserId === actor.employeeId（不是 userId，
+   *     因为 orders.academic_user_id 存的是 employees.id）
+   *   - 其他角色：403
+   * 状态机收紧：仅 'handed_over' 可 accept，'pending'（未先 hand-over）也拒绝；
+   * 'accepted' 幂等；'rejected' 必须先重新发起 hand-over。
    */
   async acceptHandover(
     orderId: string,
     actorUserId: string,
     opts: { silent?: boolean } = {},
   ): Promise<void> {
-    const order = await this.orderRepository.findOne({ where: { id: orderId } });
+    const [order, ctx] = await Promise.all([
+      this.orderRepository.findOne({ where: { id: orderId } }),
+      this.getActorContext(actorUserId),
+    ]);
     if (!order) {
       throw new NotFoundException('order not found');
     }
     if (!actorUserId) {
       throw new BadRequestException('actor user required');
     }
+    // P0-NEW-03: owner 校验
+    const isAdmin = ctx.role === 'admin' || ctx.role === 'owner';
+    if (!isAdmin) {
+      if (ctx.role && ctx.role !== 'academic') {
+        throw new ForbiddenException('only academic or supervisor can accept handover');
+      }
+      if (order.academicUserId !== ctx.employeeId) {
+        throw new ForbiddenException('only the assigned academic can accept handover');
+      }
+    }
+    // P0-NEW-03: 状态机收紧 — 仅 'handed_over' 状态可被 accept
     if (order.handoverStatus === 'accepted') {
       return; // 幂等
     }
     if (order.handoverStatus === 'rejected') {
       throw new BadRequestException('order has been rejected, cannot accept');
+    }
+    if (order.handoverStatus !== 'handed_over') {
+      throw new BadRequestException(
+        `cannot accept from current status: ${order.handoverStatus}, must be handed_over`,
+      );
     }
 
     const nextOrderStatus: OrderStatus = order.orderStatus === 'to_receive' ? 'in_progress' : order.orderStatus;
@@ -546,9 +699,15 @@ export class OrdersService {
   /**
    * 教务拒收：pending/handed_over → rejected。必须传 reason，写 operation_logs。
    * 拒收后通知销售。
+   *
+   * P0-NEW-03 修复：原代码无 owner 校验，任意登录用户都能把任意订单置为 rejected。
+   * 修复后：仅 academic（且必须 order.academicUserId === actor.employeeId）或 admin/owner 可调用。
    */
   async rejectHandover(orderId: string, actorUserId: string, reason: string): Promise<void> {
-    const order = await this.orderRepository.findOne({ where: { id: orderId } });
+    const [order, ctx] = await Promise.all([
+      this.orderRepository.findOne({ where: { id: orderId } }),
+      this.getActorContext(actorUserId),
+    ]);
     if (!order) {
       throw new NotFoundException('order not found');
     }
@@ -558,6 +717,16 @@ export class OrdersService {
     const trimmedReason = (reason || '').trim();
     if (!trimmedReason) {
       throw new BadRequestException('reason required for rejecting handover');
+    }
+    // P0-NEW-03: owner 校验
+    const isAdmin = ctx.role === 'admin' || ctx.role === 'owner';
+    if (!isAdmin) {
+      if (ctx.role && ctx.role !== 'academic') {
+        throw new ForbiddenException('only academic or supervisor can reject handover');
+      }
+      if (order.academicUserId !== ctx.employeeId) {
+        throw new ForbiddenException('only the assigned academic can reject handover');
+      }
     }
     if (order.handoverStatus === 'rejected') {
       return; // 幂等

@@ -1,8 +1,9 @@
-import { Controller, Get, Post, Body, Req, Res, Query } from '@nestjs/common';
+import { Controller, Get, Post, Body, Req, Res, Query, UseGuards } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { Request, Response } from 'express';
 import { makeId } from '../../shared/utils/id-generator';
 import { OperationLogsService } from '../operation-logs/operation-logs.service';
+import { AuthGuard } from '../../common/auth.guard';
 import {
   OPERATION_LOG_ACTIONS,
   OPERATION_LOG_TARGET_TYPES,
@@ -10,7 +11,30 @@ import {
   stringifyDetail,
 } from '../../shared/operation-logs.constants';
 
+/**
+ * 检查当前 session 角色是否在白名单中。
+ * 用于 B/P0-05 修复：users/employees 控制器内部细粒度角色校验，
+ * 避免引入未在仓库内使用过的 @Roles 装饰器（保持与 leads / exports / collab 一致的内联校验风格）。
+ */
+function hasRole(session: any, allowed: string[]): boolean {
+  const role = String(session?.role || '').toLowerCase();
+  return allowed.includes(role);
+}
+
+/** 仅 admin / owner 可访问用户账号管理。 */
+function ensureAccountManager(req: Request, res: Response): boolean {
+  const session = (req as any).session;
+  if (!hasRole(session, ['admin', 'owner'])) {
+    res.status(403).json({ ok: false, message: 'forbidden: 仅 admin/owner 可访问用户账号' });
+    return false;
+  }
+  return true;
+}
+
 @Controller('users')
+// B/P0-05: 整个 users 控制器在未带 Bearer token 时必须直接 401，
+// 不允许未登录用户拉全表 / 创建账号。AuthGuard 内部已做 token 校验。
+@UseGuards(AuthGuard)
 export class UsersController {
   constructor(
     private readonly usersService: UsersService,
@@ -19,10 +43,14 @@ export class UsersController {
 
   @Get()
   async findAll(
+    @Req() req: Request,
     @Res() res: Response,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
   ) {
+    // 仅 admin/owner 可查询完整用户列表（普通员工无需知晓全员账号）
+    if (!ensureAccountManager(req, res)) return;
+
     const wantsPaging = limit !== undefined || offset !== undefined;
     if (wantsPaging) {
       const result = await this.usersService.findAllPaged({
@@ -31,23 +59,20 @@ export class UsersController {
       });
       return res.json(result);
     }
+    // service 层已统一 map 过滤 password，controller 无需再处理
     const users = await this.usersService.findAll();
-    return res.json(users.map((u) => ({
-      id: u.id,
-      username: u.username,
-      password: u.password,
-      role: u.role,
-      employeeId: u.employeeId,
-      status: u.status,
-    })));
+    return res.json(users);
   }
 
   @Get('staff')
   async findStaffUsers(
+    @Req() req: Request,
     @Res() res: Response,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
   ) {
+    if (!ensureAccountManager(req, res)) return;
+
     const wantsPaging = limit !== undefined || offset !== undefined;
     if (wantsPaging) {
       const result = await this.usersService.findStaffUsersPaged({
@@ -57,18 +82,14 @@ export class UsersController {
       return res.json(result);
     }
     const users = await this.usersService.findStaffUsers();
-    return res.json(users.map((u) => ({
-      id: u.id,
-      username: u.username,
-      password: u.password,
-      role: u.role,
-      employeeId: u.employeeId,
-      status: u.status,
-    })));
+    return res.json(users);
   }
 
   @Post('staff')
   async createStaff(@Body() body: any, @Req() req: Request, @Res() res: Response) {
+    // B/P0-05: 创建账号属于高敏感操作，仅 admin/owner 可执行
+    if (!ensureAccountManager(req, res)) return;
+
     const session = (req as any).session;
     const userId = session?.userId || session?.id || '';
     const { username, password, employeeId, status } = body;
