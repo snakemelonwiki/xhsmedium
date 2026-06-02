@@ -2,6 +2,7 @@ import { Body, Controller, Get, Param, Post, Query, Req, Res } from '@nestjs/com
 import { Request, Response } from 'express';
 import { ExportsService, ExportType } from './exports.service';
 import { OperationLogsService } from '../operation-logs/operation-logs.service';
+import { getSessionUserId } from '../../common/session.utils';
 import {
   OPERATION_LOG_ACTIONS,
   OPERATION_LOG_TARGET_TYPES,
@@ -49,7 +50,7 @@ export class ExportsController {
   @Post()
   async create(@Body() body: any, @Req() req: Request, @Res() res: Response) {
     const session = (req as any).session;
-    const userId = session?.userId || session?.id || '';
+    const userId = getSessionUserId(req);
     const userRole = session?.role || '';
     if (!userId || !userRole) {
       return res.status(401).json({ ok: false, message: 'unauthorized' });
@@ -122,7 +123,7 @@ export class ExportsController {
     @Query('offset') offset?: string,
   ) {
     const session = (req as any).session;
-    const userId = session?.userId || session?.id || actorUserId || '';
+    const userId = getSessionUserId(req) || actorUserId || '';
     // 任一存在 → 走 paged → 返回对象；否则数组（兼容旧前端）
     if (limit !== undefined || offset !== undefined) {
       const paged = await this.service.listForUserPaged(
@@ -140,7 +141,7 @@ export class ExportsController {
   @Get(':id')
   async findOne(@Param('id') id: string, @Req() req: Request, @Res() res: Response) {
     const session = (req as any).session;
-    const userId = session?.userId || session?.id || '';
+    const userId = getSessionUserId(req);
     const role = session?.role || '';
     const task = await this.service.findOne(id);
     if (!task) {
@@ -163,7 +164,7 @@ export class ExportsController {
   @Get(':id/download')
   async download(@Param('id') id: string, @Req() req: Request, @Res() res: Response) {
     const session = (req as any).session;
-    const userId = session?.userId || session?.id || '';
+    const userId = getSessionUserId(req);
     const role = session?.role || '';
     if (!userId || !role) {
       return res.status(401).json({ ok: false, message: 'unauthorized' });

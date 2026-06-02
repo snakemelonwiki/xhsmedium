@@ -1,6 +1,7 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, OnModuleDestroy, OnModuleInit, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, SelectQueryBuilder } from 'typeorm';
+import { Queue } from 'bullmq';
 import { ExportTask } from '../../entities/export-task.entity';
 import { Lead } from '../../entities/lead.entity';
 import { Order } from '../../entities/order.entity';
@@ -116,7 +117,11 @@ interface DownloadResult {
 type DownloadError = { ok: false; status: number; message: string };
 
 @Injectable()
-export class ExportsService {
+export class ExportsService implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(ExportsService.name);
+  private exportQueue: Queue | null = null;
+  private readonly redisUrl: string | null = (process.env.REDIS_URL || '').trim() || null;
+
   constructor(
     @InjectRepository(ExportTask)
     private readonly exportRepo: Repository<ExportTask>,
@@ -142,10 +147,78 @@ export class ExportsService {
   ) {}
 
   /**
+   * 启动时按需建 bullmq Queue。
+   * - REDIS_URL 未配置 → 不建 Queue，导出走 in-process setImmediate（与 1.1 行为一致）
+   * - REDIS_URL 已配置但连接失败 → 静默回退，记录 warn，不影响主流程
+   * 队列名为 'exports'，与 exports.processor.ts 中的 Worker 配对。
+   */
+  async onModuleInit(): Promise<void> {
+    if (!this.redisUrl) {
+      this.logger.log('REDIS_URL not set, exports use in-process setImmediate (fallback)');
+      return;
+    }
+    try {
+      this.exportQueue = new Queue('exports', {
+        connection: { url: this.redisUrl },
+        defaultJobOptions: {
+          removeOnComplete: 100,
+          removeOnFail: 200,
+          attempts: 1,
+        },
+      });
+      this.exportQueue.on('error', (err) => {
+        // eslint-disable-next-line no-console
+        console.warn('[exports] queue error:', err?.message || err);
+      });
+      this.logger.log(`exports queue initialized (redis: ${this.redisUrl})`);
+    } catch (err: any) {
+      this.exportQueue = null;
+      // eslint-disable-next-line no-console
+      console.warn('[exports] failed to init bullmq queue, falling back to in-process:', err?.message || err);
+    }
+  }
+
+  async onModuleDestroy(): Promise<void> {
+    if (this.exportQueue) {
+      try {
+        await this.exportQueue.close();
+      } catch (err: any) {
+        // eslint-disable-next-line no-console
+        console.warn('[exports] queue close failed:', err?.message || err);
+      }
+    }
+  }
+
+  /**
    * 创建导出任务，状态置为 processing 并立刻在后台跑实际生成（不阻塞 HTTP 响应）。
    * §11.2 异步生成 + §12 写 exports 表追踪。
+   *
+   * 调度策略（P-P1-02）：
+   *   1) REDIS_URL 已配置且 Queue 初始化成功 → 走 bullmq 队列，
+   *      由 ExportsProcessor 异步消费。失败由 processor 写 status='failed'。
+   *   2) 否则 → 保留 setImmediate 兜底（与 v1.1 行为一致，本地/演示环境无 Redis 也可用）。
+   *   3) queue.add() 抛错（连接抖动）→ 降级到 setImmediate，保证任务不丢。
+   *
+   * 1 分钟防抖（E/P1-03）：
+   *   同 user_id + export_type 在 60 秒内已有未结束的任务时，
+   *   返回已有任务 id 而非新建，避免前端"连续点导出"刷出 N 个重复任务。
+   *   "未结束"指 status IN ('pending', 'processing')；completed/failed 视为窗口已释放。
    */
   async create(dto: CreateDto): Promise<{ id: string; status: string }> {
+    if (dto.userId && dto.exportType) {
+      const since = new Date(Date.now() - 60 * 1000);
+      const recent = await this.exportRepo
+        .createQueryBuilder('e')
+        .where('e.user_id = :uid', { uid: dto.userId })
+        .andWhere('e.export_type = :t', { t: dto.exportType })
+        .andWhere('e.created_at > :since', { since })
+        .andWhere("e.status IN ('pending','processing')")
+        .orderBy('e.created_at', 'DESC')
+        .getOne();
+      if (recent) {
+        return { id: recent.id, status: recent.status };
+      }
+    }
     const id = makeId();
     await this.exportRepo.save(this.exportRepo.create({
       id,
@@ -154,22 +227,65 @@ export class ExportsService {
       filterJson: JSON.stringify(dto.filterJson || {}),
       status: 'processing',
     } as Partial<ExportTask>));
-    // 后台执行，失败时回写 failed
+
+    if (this.exportQueue) {
+      try {
+        await this.exportQueue.add('export', {
+          exportId: id,
+          userId: dto.userId,
+          userRole: dto.userRole,
+        });
+        return { id, status: 'processing' };
+      } catch (err: any) {
+        // eslint-disable-next-line no-console
+        console.warn('[exports] queue.add failed, fallback to setImmediate:', err?.message || err);
+        // 落到下方 setImmediate 兜底
+      }
+    }
+
+    // 后台执行（fallback 路径），失败时回写 failed
     setImmediate(() => {
       this.runExport(id, dto.userId, dto.userRole).catch(async (err: any) => {
         // eslint-disable-next-line no-console
         console.error('[exports] runExport failed', err?.message || err);
         try {
-          await this.exportRepo.update(id, {
-            status: 'failed',
-            finishedAt: new Date(),
-          });
+          await this.markFailed(id, err?.message || String(err));
         } catch (_e) {
           // 忽略二次失败
         }
       });
     });
     return { id, status: 'processing' };
+  }
+
+  /**
+   * Processor 调用入口：消费队列里的导出 job。
+   * 与 create() 走 setImmediate 时的处理逻辑一致（都跑 runExport），
+   * 失败由 BullMQ 走 attempts/retry 策略；最终失败时由 processor 主动调 markFailed。
+   */
+  async executeFromQueue(exportId: string): Promise<void> {
+    await this.runExport(exportId);
+  }
+
+  /**
+   * 显式标记任务失败（processor / setImmediate 兜底共用）。
+   * 不抛错 — 已经是"次生错误"，吞掉避免污染调用方。
+   */
+  async markFailed(exportId: string, reason?: string): Promise<void> {
+    try {
+      await this.exportRepo.update(exportId, {
+        status: 'failed',
+        finishedAt: new Date(),
+      });
+      // reason 仅做日志（schema 上无 error_message 列，避免扩 schema）
+      if (reason) {
+        // eslint-disable-next-line no-console
+        console.warn(`[exports] task ${exportId} failed: ${reason}`);
+      }
+    } catch (err: any) {
+      // eslint-disable-next-line no-console
+      console.warn('[exports] markFailed update failed:', err?.message || err);
+    }
   }
 
   async listForUser(userId: string, exportType?: string): Promise<any[]> {

@@ -11,6 +11,7 @@ import { Account } from '../../entities/account.entity';
 import { Employee } from '../../entities/employee.entity';
 import { ExportsController } from './exports.controller';
 import { ExportsService } from './exports.service';
+import { ExportsProcessor } from './exports.processor';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { OperationLogsModule } from '../operation-logs/operation-logs.module';
 
@@ -31,7 +32,9 @@ import { OperationLogsModule } from '../operation-logs/operation-logs.module';
     OperationLogsModule,
   ],
   controllers: [ExportsController],
-  providers: [ExportsService],
+  // ExportsProcessor 同 module 注册：DI 拉起后由其 onModuleInit 启动 bullmq Worker。
+  // 旧 v1.1 行为（setImmediate）保留为 fallback，对 REDIS_URL 未配置的本地 / 演示环境零影响。
+  providers: [ExportsService, ExportsProcessor],
   exports: [ExportsService],
 })
 export class ExportsModule {}
