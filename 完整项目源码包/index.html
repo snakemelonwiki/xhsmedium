@@ -1,0 +1,755 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>论文订单管理系统</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <section class="login-panel" id="loginPanel">
+      <div class="brand-card">
+        <p class="eyebrow">Paper Order Desk</p>
+        <h1>论文订单管理系统</h1>
+        <p class="brand-text">
+          聚焦教务老师端口，围绕期刊论文订单录入、资料传递、老师审核、投稿跟进、返修、录用、校稿、online与检索全流程管理。
+        </p>
+        <div class="demo-accounts">
+          <h2>演示账号</h2>
+          <div class="demo-account">
+            <span>教务</span>
+            <code>academic / academic123</code>
+          </div>
+        </div>
+      </div>
+
+      <form class="login-card" id="loginForm">
+        <h2>账号登录</h2>
+        <label class="field">
+          <span>账号</span>
+          <input type="text" name="username" placeholder="请输入账号" required>
+        </label>
+        <label class="field">
+          <span>密码</span>
+          <input type="password" name="password" placeholder="请输入密码" required>
+        </label>
+        <button type="submit" class="primary-btn full-width">登录系统</button>
+        <p class="login-hint" id="loginHint">请输入账号和密码</p>
+      </form>
+    </section>
+
+    <section class="dashboard hidden" id="dashboard">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Order Workspace</p>
+          <h2>论文订单工作台</h2>
+        </div>
+        <div class="topbar-actions">
+          <div class="user-badge">
+            <span id="currentUserName">-</span>
+            <small id="currentUserRole">-</small>
+          </div>
+          <button class="ghost-btn" id="logoutBtn" type="button">退出登录</button>
+        </div>
+      </header>
+
+      <nav class="view-switcher">
+        <button class="view-tab active" id="workbenchViewTab" type="button">角色工作台</button>
+        <button class="view-tab" id="formViewTab" type="button">订单录入</button>
+        <button class="view-tab" id="listViewTab" type="button">全部订单</button>
+        <button class="view-tab" id="teacherViewTab" type="button">稳定老师库</button>
+        <button class="view-tab hidden" id="detailViewTab" type="button">订单详情</button>
+      </nav>
+
+      <main class="dashboard-view" id="workbenchView">
+        <section class="panel single-panel">
+          <div class="panel-heading">
+            <div>
+              <p class="section-tag">Workbench</p>
+              <h3 id="workbenchTitle">角色工作台</h3>
+            </div>
+            <div class="stat-chip" id="workbenchBadge">实时监控</div>
+          </div>
+          <div id="workbenchContent" class="workbench-layout"></div>
+        </section>
+      </main>
+
+      <main class="dashboard-view hidden" id="formView">
+        <section class="panel form-panel single-panel">
+          <div class="panel-heading">
+            <div>
+              <p class="section-tag">订单录入</p>
+              <h3 id="formTitle">新建订单</h3>
+            </div>
+            <button class="ghost-btn" id="resetFormBtn" type="button">清空表单</button>
+          </div>
+
+          <form id="orderForm" class="order-form">
+            <input type="hidden" name="id">
+            <input type="hidden" name="authorsData" id="authorsData">
+
+            <div class="form-nav">
+              <a href="#sectionBasic">基础信息</a>
+              <a href="#sectionAuthors">作者信息</a>
+              <a href="#sectionSubmission">投稿信息</a>
+              <a href="#sectionPeople">人员进度</a>
+              <a href="#sectionStatus">状态信息</a>
+              <a href="#sectionFinance">财务信息</a>
+            </div>
+
+            <div class="form-section" id="sectionBasic">
+              <h4>基础信息</h4>
+              <div class="form-grid">
+                <label class="field">
+                  <span>订单编号</span>
+                  <input type="text" name="orderNumber" required>
+                </label>
+                <label class="field">
+                  <span>客户姓名</span>
+                  <input type="text" name="customerName">
+                </label>
+                <label class="field">
+                  <span>学历层级</span>
+                  <select name="degreeLevel">
+                    <option value="">请选择</option>
+                    <option value="专科">专科</option>
+                    <option value="本科">本科</option>
+                    <option value="硕士">硕士</option>
+                    <option value="博士">博士</option>
+                    <option value="职称">职称</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>专业方向</span>
+                  <input type="text" name="majorDirection">
+                </label>
+                <label class="field">
+                  <span>所需区位</span>
+                  <input type="text" name="requiredZone">
+                </label>
+                <label class="field">
+                  <span>文章用途</span>
+                  <input type="text" name="paperUse" placeholder="毕业 / 评职称 / 项目结题">
+                </label>
+              </div>
+            </div>
+
+            <div class="form-section" id="sectionAuthors">
+              <h4>作者信息</h4>
+              <div class="form-grid">
+                <label class="field">
+                  <span>作者登记表上传</span>
+                  <input type="file" id="authorRegistrationInput" accept=".txt,.json,.csv,.pdf,.doc,.docx,.xls,.xlsx">
+                </label>
+                <label class="field">
+                  <span>个人信息登记表状态</span>
+                  <select name="registrationFormStatus">
+                    <option value="未索要">未索要</option>
+                    <option value="已索要">已索要</option>
+                    <option value="已收到">已收到</option>
+                    <option value="已传老师">已传老师</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>传递给老师时间</span>
+                  <input type="datetime-local" name="infoSentToTeacherAt">
+                </label>
+                <label class="field field-wide">
+                  <span>基金信息</span>
+                  <textarea name="fundInfo" rows="2" placeholder="基金名称、编号；没有可填无"></textarea>
+                </label>
+                <label class="field">
+                  <span>投稿邮箱</span>
+                  <input type="email" name="submissionEmail">
+                </label>
+                <label class="field">
+                  <span>投稿邮箱密码</span>
+                  <input type="text" name="submissionEmailPassword">
+                </label>
+              </div>
+              <div class="author-toolbar">
+                <strong>作者列表</strong>
+                <button class="ghost-btn" id="addAuthorBtn" type="button">+ 添加作者</button>
+              </div>
+              <div id="authorsContainer" class="authors-container"></div>
+              <p class="form-hint">上传 txt/json/csv 登记表时会尝试自动识别作者字段；PDF/Word 先保存附件，后续可接入 OCR/文档解析。</p>
+            </div>
+
+            <div class="form-section" id="sectionSubmission">
+              <h4>论文与投稿信息</h4>
+              <div class="form-grid">
+                <label class="field">
+                  <span>操作方式</span>
+                  <select name="operationMethod" id="operationMethod">
+                    <option value="一稿一投">一稿一投</option>
+                    <option value="两稿两投">两稿两投</option>
+                    <option value="三稿三投">三稿三投</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>是否查重</span>
+                  <select name="plagiarismRequirement">
+                    <option value="未确认">未确认</option>
+                    <option value="需要查重">需要查重</option>
+                    <option value="已查重">已查重</option>
+                    <option value="不需要查重">不需要查重</option>
+                  </select>
+                </label>
+              </div>
+
+              <div class="submission-block" data-submission-index="1">
+                <h5>投稿信息 1</h5>
+                <div class="form-grid">
+                  <label class="field field-wide">
+                    <span>论文名称</span>
+                    <input type="text" name="paperTitle">
+                  </label>
+                  <label class="field">
+                    <span>投稿期刊</span>
+                    <input type="text" name="journalName">
+                  </label>
+                  <label class="field">
+                    <span>投稿网址</span>
+                    <input type="url" name="submissionUrl" placeholder="https://...">
+                  </label>
+                  <label class="field">
+                    <span>投稿账号</span>
+                    <input type="text" name="submissionAccount">
+                  </label>
+                  <label class="field">
+                    <span>投稿密码</span>
+                    <input type="text" name="submissionPassword">
+                  </label>
+                  <label class="field">
+                    <span>投稿时间</span>
+                    <input type="datetime-local" name="submittedAt">
+                  </label>
+                </div>
+              </div>
+
+              <div class="submission-block" data-submission-index="2">
+                <h5>投稿信息 2</h5>
+                <div class="form-grid">
+                  <label class="field field-wide">
+                    <span>论文名称</span>
+                    <input type="text" name="paperTitle2">
+                  </label>
+                  <label class="field">
+                    <span>投稿期刊</span>
+                    <input type="text" name="journalName2">
+                  </label>
+                  <label class="field">
+                    <span>投稿网址</span>
+                    <input type="url" name="submissionUrl2" placeholder="https://...">
+                  </label>
+                  <label class="field">
+                    <span>投稿账号</span>
+                    <input type="text" name="submissionAccount2">
+                  </label>
+                  <label class="field">
+                    <span>投稿密码</span>
+                    <input type="text" name="submissionPassword2">
+                  </label>
+                  <label class="field">
+                    <span>投稿时间</span>
+                    <input type="datetime-local" name="submittedAt2">
+                  </label>
+                </div>
+              </div>
+
+              <div class="submission-block" data-submission-index="3">
+                <h5>投稿信息 3</h5>
+                <div class="form-grid">
+                  <label class="field field-wide">
+                    <span>论文名称</span>
+                    <input type="text" name="paperTitle3">
+                  </label>
+                  <label class="field">
+                    <span>投稿期刊</span>
+                    <input type="text" name="journalName3">
+                  </label>
+                  <label class="field">
+                    <span>投稿网址</span>
+                    <input type="url" name="submissionUrl3" placeholder="https://...">
+                  </label>
+                  <label class="field">
+                    <span>投稿账号</span>
+                    <input type="text" name="submissionAccount3">
+                  </label>
+                  <label class="field">
+                    <span>投稿密码</span>
+                    <input type="text" name="submissionPassword3">
+                  </label>
+                  <label class="field">
+                    <span>投稿时间</span>
+                    <input type="datetime-local" name="submittedAt3">
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div class="form-section" id="sectionPeople">
+              <h4>人员与进度</h4>
+              <div class="form-grid">
+                <label class="field">
+                  <span>派单老师</span>
+                  <input type="text" name="responsibleTeacher">
+                </label>
+                <label class="field">
+                  <span>订单阶段</span>
+                  <select name="statusStage">
+                    <option value="销售建单">销售建单</option>
+                    <option value="待补资料">待补资料</option>
+                    <option value="待教务审核">待教务审核</option>
+                    <option value="待分配老师">待分配老师</option>
+                    <option value="老师已接单">老师已接单</option>
+                    <option value="写作中">写作中</option>
+                    <option value="待投稿">待投稿</option>
+                    <option value="已投稿">已投稿</option>
+                    <option value="审稿中">审稿中</option>
+                    <option value="返修中">返修中</option>
+                    <option value="已录用">已录用</option>
+                    <option value="待见刊">待见刊</option>
+                    <option value="已完成">已完成</option>
+                    <option value="异常处理中">异常处理中</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>论文进度</span>
+                  <select name="paperProgress">
+                    <option value="待分配">待分配</option>
+                    <option value="进行中">进行中</option>
+                    <option value="待投稿">待投稿</option>
+                    <option value="已投稿">已投稿</option>
+                    <option value="返修中">返修中</option>
+                    <option value="已录用">已录用</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>接单老师</span>
+                  <input type="text" name="assignedTeacher">
+                </label>
+                <label class="field">
+                  <span>备用老师</span>
+                  <input type="text" name="backupTeacher">
+                </label>
+                <label class="field">
+                  <span>老师电话</span>
+                  <input type="tel" name="teacherPhone">
+                </label>
+                <label class="field">
+                  <span>老师稳定性</span>
+                  <select name="teacherStability">
+                    <option value="新老师">新老师</option>
+                    <option value="稳定老师">稳定老师</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>创新点审核</span>
+                  <select name="innovationReviewStatus">
+                    <option value="未提交">未提交</option>
+                    <option value="待审核">待审核</option>
+                    <option value="已通过">已通过</option>
+                    <option value="需修改">需修改</option>
+                    <option value="稳定老师跳过">稳定老师跳过</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>创新点审核时间</span>
+                  <input type="datetime-local" name="innovationReviewAt">
+                </label>
+                <label class="field">
+                  <span>初稿审核</span>
+                  <select name="firstDraftReviewStatus">
+                    <option value="未提交">未提交</option>
+                    <option value="待审核">待审核</option>
+                    <option value="已通过">已通过</option>
+                    <option value="需修改">需修改</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>初稿审核时间</span>
+                  <input type="datetime-local" name="firstDraftReviewAt">
+                </label>
+                <label class="field">
+                  <span>编辑老师审查</span>
+                  <select name="editorReviewStatus">
+                    <option value="未提交">未提交</option>
+                    <option value="待审查">待审查</option>
+                    <option value="已通过">已通过</option>
+                    <option value="需修改">需修改</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>编辑审查时间</span>
+                  <input type="datetime-local" name="editorReviewAt">
+                </label>
+                <label class="field">
+                  <span>投稿前作者信息核对</span>
+                  <select name="authorInfoChecked">
+                    <option value="未核对">未核对</option>
+                    <option value="已核对无误">已核对无误</option>
+                    <option value="有问题待确认">有问题待确认</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>作者信息核对时间</span>
+                  <input type="datetime-local" name="authorInfoCheckedAt">
+                </label>
+                <label class="field">
+                  <span>对接销售</span>
+                  <input type="text" name="salesContact">
+                </label>
+                <label class="field">
+                  <span>负责教务</span>
+                  <input type="text" name="academicOwner">
+                </label>
+                <label class="field">
+                  <span>下次跟进时间</span>
+                  <input type="datetime-local" name="nextFollowUpAt">
+                </label>
+                <label class="field">
+                  <span>老师最近反馈</span>
+                  <input type="datetime-local" name="lastTeacherUpdateAt">
+                </label>
+                <label class="field">
+                  <span>风险等级</span>
+                  <select name="riskLevel">
+                    <option value="正常">正常</option>
+                    <option value="提醒">提醒</option>
+                    <option value="预警">预警</option>
+                    <option value="高风险">高风险</option>
+                    <option value="应急">应急</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>是否投诉</span>
+                  <select name="customerComplaint">
+                    <option value="否">否</option>
+                    <option value="是">是</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>主管关注</span>
+                  <select name="needsSupervisor">
+                    <option value="否">否</option>
+                    <option value="是">是</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>应急状态</span>
+                  <select name="emergencyStatus">
+                    <option value="正常">正常</option>
+                    <option value="待处理">待处理</option>
+                    <option value="处理中">处理中</option>
+                    <option value="已解决">已解决</option>
+                  </select>
+                </label>
+                <label class="field field-wide">
+                  <span>主管备注 / 风险说明</span>
+                  <textarea name="supervisorNote" rows="3" placeholder="记录异常原因、应急安排、客户投诉等"></textarea>
+                </label>
+              </div>
+            </div>
+
+            <div class="form-section" id="sectionStatus">
+              <h4>状态信息</h4>
+              <div class="status-stage-strip" id="statusStageStrip"></div>
+              <div class="form-grid">
+                <label class="field">
+                  <span>当前真实阶段</span>
+                  <select name="journalStatus">
+                    <option value="未投稿">未投稿</option>
+                    <option value="Submitted">Submitted</option>
+                    <option value="With Editor">With Editor</option>
+                    <option value="Under Review">Under Review</option>
+                    <option value="Revision">Revision</option>
+                    <option value="Accepted">Accepted</option>
+                    <option value="Proofing">Proofing</option>
+                    <option value="Online">Online</option>
+                    <option value="Indexed">Indexed</option>
+                    <option value="Rejected">Rejected</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>Submitted预计产出</span>
+                  <input type="datetime-local" name="submittedExpectedAt">
+                </label>
+                <label class="field">
+                  <span>With Editor预计产出</span>
+                  <input type="datetime-local" name="withEditorExpectedAt">
+                </label>
+                <label class="field">
+                  <span>Under Review预计产出</span>
+                  <input type="datetime-local" name="underReviewExpectedAt">
+                </label>
+                <label class="field">
+                  <span>Revision预计产出</span>
+                  <input type="datetime-local" name="revisionExpectedAt">
+                </label>
+                <label class="field">
+                  <span>Accepted预计产出</span>
+                  <input type="datetime-local" name="acceptedExpectedAt">
+                </label>
+                <label class="field">
+                  <span>Proofing预计产出</span>
+                  <input type="datetime-local" name="proofingExpectedAt">
+                </label>
+                <label class="field">
+                  <span>Online预计产出</span>
+                  <input type="datetime-local" name="onlineExpectedAt">
+                </label>
+                <label class="field">
+                  <span>Indexed预计产出</span>
+                  <input type="datetime-local" name="indexedExpectedAt">
+                </label>
+                <label class="field">
+                  <span>首周查稿时间</span>
+                  <input type="datetime-local" name="firstWeekCheckAt">
+                </label>
+                <label class="field">
+                  <span>下次查稿时间</span>
+                  <input type="datetime-local" name="nextJournalCheckAt">
+                </label>
+                <label class="field">
+                  <span>催稿信状态</span>
+                  <select name="reminderLetterStatus">
+                    <option value="不需要">不需要</option>
+                    <option value="需提醒老师发送">需提醒老师发送</option>
+                    <option value="老师已发送">老师已发送</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>返修状态</span>
+                  <select name="revisionStatus">
+                    <option value="无返修">无返修</option>
+                    <option value="待提醒老师">待提醒老师</option>
+                    <option value="老师返修中">老师返修中</option>
+                    <option value="已提交返修">已提交返修</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>返修截止时间</span>
+                  <input type="datetime-local" name="revisionDueAt">
+                </label>
+                <label class="field">
+                  <span>版面费状态</span>
+                  <select name="pageFeeStatus">
+                    <option value="未录用">未录用</option>
+                    <option value="待提醒客户缴纳">待提醒客户缴纳</option>
+                    <option value="已提醒客户">已提醒客户</option>
+                    <option value="客户已缴纳">客户已缴纳</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>校稿状态</span>
+                  <select name="proofingStatus">
+                    <option value="未到校稿">未到校稿</option>
+                    <option value="待客户确认">待客户确认</option>
+                    <option value="客户有修改需求">客户有修改需求</option>
+                    <option value="老师校稿中">老师校稿中</option>
+                    <option value="已提交校稿">已提交校稿</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>Online状态</span>
+                  <select name="onlineStatus">
+                    <option value="未online">未online</option>
+                    <option value="已online待提醒作者">已online待提醒作者</option>
+                    <option value="已提醒作者">已提醒作者</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>Online时间</span>
+                  <input type="datetime-local" name="onlineAt">
+                </label>
+                <label class="field">
+                  <span>检索状态</span>
+                  <select name="indexingStatus">
+                    <option value="未检索">未检索</option>
+                    <option value="已检索待开报告">已检索待开报告</option>
+                    <option value="已提醒开检索报告">已提醒开检索报告</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>检索时间</span>
+                  <input type="datetime-local" name="indexingAt">
+                </label>
+                <label class="field">
+                  <span>检索审查报告</span>
+                  <select name="reviewReportStatus">
+                    <option value="未开">未开</option>
+                    <option value="已提醒">已提醒</option>
+                    <option value="已完成">已完成</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+
+            <div class="form-section" id="sectionFinance">
+              <h4>财务信息</h4>
+              <div class="form-grid">
+                <label class="field">
+                  <span>订单额</span>
+                  <input type="number" min="0" step="0.01" name="orderAmount">
+                </label>
+                <label class="field">
+                  <span>订单已付款</span>
+                  <input type="number" min="0" step="0.01" name="customerPaid">
+                </label>
+                <label class="field">
+                  <span>订单待支付</span>
+                  <input type="number" min="0" step="0.01" name="customerPending" readonly>
+                </label>
+                <label class="field">
+                  <span>老师接单价格</span>
+                  <input type="number" min="0" step="0.01" name="teacherPrice">
+                </label>
+                <label class="field">
+                  <span>老师已付款</span>
+                  <input type="number" min="0" step="0.01" name="teacherPaid">
+                </label>
+                <label class="field">
+                  <span>老师待付款</span>
+                  <input type="number" min="0" step="0.01" name="teacherPending" readonly>
+                </label>
+              </div>
+            </div>
+
+            <div class="form-actions">
+              <button type="submit" class="primary-btn" id="submitBtn">保存订单</button>
+              <button type="button" class="ghost-btn" id="deleteBtn">删除订单</button>
+            </div>
+          </form>
+        </section>
+      </main>
+
+      <main class="dashboard-view hidden" id="listView">
+        <section class="panel list-panel single-panel">
+          <div class="panel-heading">
+            <div>
+              <p class="section-tag">订单列表</p>
+              <h3>全部订单</h3>
+            </div>
+            <div class="stat-chip" id="orderCount">0 条订单</div>
+          </div>
+
+          <div class="toolbar">
+            <label class="field">
+              <span>搜索</span>
+              <input type="text" id="searchInput" placeholder="订单编号 / 微信 / 昵称 / 论文名">
+            </label>
+            <label class="field">
+              <span>进度筛选</span>
+              <select id="progressFilter">
+                <option value="">全部</option>
+                <option value="待分配">待分配</option>
+                <option value="进行中">进行中</option>
+                <option value="待投稿">待投稿</option>
+                <option value="已投稿">已投稿</option>
+                <option value="返修中">返修中</option>
+                <option value="已录用">已录用</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="order-table">
+            <div class="order-row order-row-head">
+              <span>订单编号</span>
+              <span>客户信息</span>
+              <span>论文名称</span>
+              <span>进度</span>
+              <span>老师</span>
+              <span>快捷调整</span>
+              <span>跟进 / 操作</span>
+            </div>
+            <div id="orderList" class="order-list order-list-rows"></div>
+          </div>
+        </section>
+      </main>
+
+      <main class="dashboard-view hidden" id="teacherView">
+        <section class="panel single-panel">
+          <div class="panel-heading">
+            <div>
+              <p class="section-tag">Teacher Library</p>
+              <h3>稳定老师库</h3>
+            </div>
+            <div class="stat-chip" id="teacherCount">0 位老师</div>
+          </div>
+
+          <form id="teacherForm" class="order-form compact-form">
+            <input type="hidden" name="id">
+            <div class="form-grid">
+              <label class="field">
+                <span>老师姓名</span>
+                <input type="text" name="name" required>
+              </label>
+              <label class="field">
+                <span>电话 / 微信</span>
+                <input type="text" name="contact">
+              </label>
+              <label class="field">
+                <span>专业能力</span>
+                <input type="text" name="capability" placeholder="如：医学统计、教育管理、经管实证">
+              </label>
+              <label class="field">
+                <span>接单方向</span>
+                <input type="text" name="directions" placeholder="多个方向用逗号分隔">
+              </label>
+              <label class="field">
+                <span>稳定性</span>
+                <select name="stability">
+                  <option value="稳定老师">稳定老师</option>
+                  <option value="观察中">观察中</option>
+                  <option value="新老师">新老师</option>
+                  <option value="暂停合作">暂停合作</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>质量评分</span>
+                <select name="rating">
+                  <option value="A">A</option>
+                  <option value="B">B</option>
+                  <option value="C">C</option>
+                </select>
+              </label>
+              <label class="field field-wide">
+                <span>老师备注</span>
+                <textarea name="note" rows="2" placeholder="记录响应速度、返修配合度、擅长期刊、风险点等"></textarea>
+              </label>
+            </div>
+            <div class="form-actions">
+              <button class="primary-btn" type="submit">保存老师</button>
+              <button class="ghost-btn" type="button" id="resetTeacherFormBtn">清空老师表单</button>
+            </div>
+          </form>
+
+          <div id="teacherList" class="teacher-list"></div>
+        </section>
+      </main>
+
+      <main class="dashboard-view hidden" id="detailView">
+        <section class="panel single-panel">
+          <div class="panel-heading">
+            <div>
+              <p class="section-tag">订单详情</p>
+              <h3 id="detailTitle">请选择订单</h3>
+            </div>
+            <div class="detail-actions">
+              <button class="ghost-btn" id="backToListBtn" type="button">返回订单列表</button>
+              <button class="primary-btn" id="editOrderBtn" type="button">编辑当前订单</button>
+            </div>
+          </div>
+
+          <div id="detailEmpty" class="empty-state">请先从“全部订单”页面选择一个订单</div>
+          <div id="detailContent" class="detail-layout hidden"></div>
+        </section>
+      </main>
+    </section>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
