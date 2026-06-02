@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, LessThanOrEqual, Repository } from 'typeorm';
@@ -284,6 +284,18 @@ export class CollaborationTasksService {
     actor: CollaborationActor | string = {},
   ): Promise<CollaborationTask | null> {
     const handlerActor = this.normalizeActor(actor);
+    // S-P1-02 修复：handledNote 必填校验。
+    // 旧实现只 sanitize 不校验长度，空字符串 / 全空白 / null 都会被落库为
+    // `handled_note=''`，导致：
+    //   - 销售/主管回看时不知道运营具体处理结果（notice 标题/内容空）
+    //   - 状态机用例 TC-SM-041 / R-2 风险（fixture 中 handled_note 全 NULL）
+    //   - 通知正文 `您发起的协同任务已处理: ${cleanNote}` 退化成 `您发起的协同任务已处理: `，对销售无信息量
+    // 修复策略：trim 后长度必须 > 0，否则抛 BadRequestException。
+    // 由 controller 层 catch 后翻译为 400，行为与 status 校验一致。
+    const trimmedNote = (handledNote || '').trim();
+    if (!trimmedNote) {
+      throw new BadRequestException('handledNote is required');
+    }
     const task = await this.repo.findOne({ where: { id } });
     if (!task) return null;
     if (task.status !== 'handling' && task.status !== 'pending') {
@@ -291,7 +303,7 @@ export class CollaborationTasksService {
     }
     // PF-04 修复：去掉 hasBrokenEncoding 拦截
     await this.assertCanHandle(task, handlerActor);
-    const cleanNote = sanitizeText(handledNote);
+    const cleanNote = sanitizeText(trimmedNote);
     await this.repo.update(id, {
       status: 'handled',
       handlerId: task.handlerId || handlerActor.actorUserId || null,
