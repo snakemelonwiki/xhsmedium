@@ -24,4 +24,7 @@ ALTER TABLE lead_drafts ADD INDEX idx_drafts_user_type_updated (user_id, draft_t
 ALTER TABLE notifications ADD INDEX idx_notify_receiver_read_created (receiver_id, read_status, created_at DESC);
 
 -- 6. post_metrics 表优化索引（指标历史查询）
-ALTER TABLE post_metrics ADD INDEX idx_metrics_post_collected (post_id, collected_at DESC);
+-- 注意：post_metrics 表已由 migrations/M17__post_metrics_table.up.sql 创建，
+--       并包含 UNIQUE KEY idx_metrics_post_collected (post_id, date)。
+--       以下语句追加 idx_metrics_date(date)，覆盖今日榜单单日查询场景。
+ALTER TABLE post_metrics ADD INDEX idx_metrics_date (date);

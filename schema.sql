@@ -439,6 +439,32 @@ CREATE TABLE IF NOT EXISTS post_metrics_history (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='作品指标刷新历史表';
 
 -- ============================================================
+-- 16a. post_metrics
+-- backend/src/entities/post-metrics.entity.ts + migrations/M17
+-- 表来源：migrations/M17__post_metrics_table.up.sql
+-- 用途：作品指标按天聚合（学习榜单 / 流量榜 / 近期爆款基表）
+-- 采集任务按天 upsert；idx_metrics_post_collected(post_id, date) UNIQUE 防止重复
+-- ============================================================
+CREATE TABLE IF NOT EXISTS post_metrics (
+  id         VARCHAR(64)  NOT NULL                  COMMENT '主键（UUID）',
+  post_id    VARCHAR(64)  NOT NULL                  COMMENT '关联 posts.id',
+  date       DATE         NOT NULL                  COMMENT '指标收集日期（按天聚合）',
+  likes      BIGINT       NOT NULL DEFAULT 0         COMMENT '点赞数',
+  comments   BIGINT       NOT NULL DEFAULT 0         COMMENT '评论数',
+  favorites  BIGINT       NOT NULL DEFAULT 0         COMMENT '收藏数',
+  shares     BIGINT       NOT NULL DEFAULT 0         COMMENT '分享数',
+  traffic    BIGINT       NOT NULL DEFAULT 0         COMMENT '来源流量（仅获客贴/营销贴）',
+  views      BIGINT       NOT NULL DEFAULT 0         COMMENT '浏览数（可选）',
+  created_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '入库时间',
+  updated_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+
+  PRIMARY KEY (id),
+  UNIQUE KEY idx_metrics_post_collected (post_id, date),
+  KEY idx_metrics_date (date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  COMMENT='作品指标按天聚合表（学习榜单/流量榜/近期爆款基表）';
+
+-- ============================================================
 -- 17. order_abnormal_feedbacks
 -- backend/src/modules/orders/order-abnormal-feedback.service.ts + M13 迁移
 -- 订单异常反馈独立表（替换原"节点类型含异常"的字符串匹配判定）
