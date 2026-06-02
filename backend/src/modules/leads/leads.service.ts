@@ -1163,6 +1163,8 @@ export class LeadsService {
       status: row.status,
       dealAmount: row.dealAmount,
       note: row.note,
+      requirementNote: row.requirementNote,
+      supervisorNote: row.supervisorNote,
       captureImageUrl: row.captureImageUrl,
       salesFeedback: row.salesFeedback,
       salesUpdatedAt: row.salesUpdatedAt,

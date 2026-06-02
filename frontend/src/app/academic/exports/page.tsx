@@ -28,6 +28,7 @@ import {
   type ExportStatus,
   type ExportTask,
 } from '@/shared/api/exports';
+import { formatDateTime } from '@/shared/utils/date-format';
 
 const EXPORT_TYPE_LABEL: Record<string, string> = {
   orders: '订单',
@@ -61,10 +62,6 @@ const PAID_STATUS_OPTIONS = [
   { label: '部分付款', value: 'partial' },
   { label: '已付款', value: 'paid' },
 ];
-
-function formatDate(value?: string | null) {
-  return value ? new Date(value).toLocaleString() : '-';
-}
 
 function summarizeFilter(filter: Record<string, unknown> | undefined) {
   if (!filter || typeof filter !== 'object') return '-';
@@ -190,13 +187,13 @@ export default function AcademicExportsPage() {
       title: '创建时间',
       dataIndex: 'createdAt',
       width: 170,
-      render: formatDate,
+      render: formatDateTime,
     },
     {
       title: '完成时间',
       dataIndex: 'finishedAt',
       width: 170,
-      render: formatDate,
+      render: formatDateTime,
     },
     {
       title: '操作',
@@ -256,8 +253,6 @@ export default function AcademicExportsPage() {
           rowClassName={(record) => (highlightTaskId && record.id === highlightTaskId ? 'row-highlight' : '')}
           pagination={false}
           scroll={{ x: 920 }}
-          // N-P1-08 修复：从通知 deep link ?taskId=xxx 跳过来时，匹配该 id 的行高亮。
-          rowClassName={(record) => (highlightTaskId && record.id === highlightTaskId ? 'row-highlight' : '')}
           locale={{
             emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无导出记录" />,
           }}

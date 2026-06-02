@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 
 import { apiClient } from '@/shared/api/apiClient';
+import { formatDateTime } from '@/shared/utils/date-format';
 
 type ReminderRow = {
   id: string;
@@ -88,7 +89,7 @@ export default function AcademicRemindersPage() {
       width: 180,
       render: (value: string | null, record) => {
         if (!value) return '-';
-        const date = new Date(value).toLocaleString();
+        const date = formatDateTime(value);
         if (record.isOverdue) {
           return <Tag color="red">已到期 · {date}</Tag>;
         }

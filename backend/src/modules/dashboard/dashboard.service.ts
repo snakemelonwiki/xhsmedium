@@ -5,6 +5,7 @@ import { Post } from '../../entities/post.entity';
 import { Lead } from '../../entities/lead.entity';
 import { Employee } from '../../entities/employee.entity';
 import { Account } from '../../entities/account.entity';
+import { Order } from '../../entities/order.entity';
 import { normalizePostType } from '../../shared/utils/normalize';
 import { todayString } from '../../shared/utils/date-utils';
 import { CacheService } from '../../shared/cache.service';
@@ -19,6 +20,7 @@ export class DashboardService {
     @InjectRepository(Lead) private readonly leadRepo: Repository<Lead>,
     @InjectRepository(Employee) private readonly employeeRepo: Repository<Employee>,
     @InjectRepository(Account) private readonly accountRepo: Repository<Account>,
+    @InjectRepository(Order) private readonly orderRepo: Repository<Order>,
     private readonly cache: CacheService,
   ) {}
 
@@ -33,7 +35,7 @@ export class DashboardService {
   }
 
   private async computeSummary(today: string): Promise<any> {
-    const [updatedEmployees, updatedAccounts, xhsPosts, douyinPosts, xhsMetrics, douyinMetrics, leads, deals] = await Promise.all([
+    const [updatedEmployees, updatedAccounts, xhsPosts, douyinPosts, xhsMetrics, douyinMetrics, leads, deals, abnormalOrders] = await Promise.all([
       this.postRepo.createQueryBuilder('p').select('COUNT(DISTINCT p.employeeId)', 'count').where('p.publishedAt = :today', { today }).getRawOne(),
       this.postRepo.createQueryBuilder('p').select('COUNT(DISTINCT p.accountId)', 'count').where('p.publishedAt = :today', { today }).getRawOne(),
       this.postRepo.createQueryBuilder('p').select('COUNT(*)', 'count').where('p.publishedAt = :today AND p.platform = :platform', { today, platform: '小红书' }).getRawOne(),
@@ -52,6 +54,7 @@ export class DashboardService {
         .where('p.publishedAt = :today AND p.platform = :platform', { today, platform: '抖音' }).getRawOne(),
       this.leadRepo.createQueryBuilder('l').select('COUNT(*)', 'count').where('DATE(l.createdAt) = :today', { today }).getRawOne(),
       this.leadRepo.createQueryBuilder('l').select('COUNT(*)', 'count').where("DATE(l.createdAt) = :today AND l.status = '已成交'", { today }).getRawOne(),
+      this.orderRepo.createQueryBuilder('o').select('COUNT(*)', 'count').where("o.orderStatus = 'abnormal'").getRawOne(),
     ]);
 
     return {
@@ -69,6 +72,7 @@ export class DashboardService {
       xhsFavorites: Number(xhsMetrics?.favorites || 0),
       douyinTraffic: Number(douyinMetrics?.traffic || 0),
       xhsTraffic: Number(xhsMetrics?.traffic || 0),
+      abnormalOrders: Number(abnormalOrders?.count || 0),
     };
   }
 

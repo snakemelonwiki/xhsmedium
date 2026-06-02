@@ -13,6 +13,7 @@ import {
 } from '@/shared/api/notifications';
 import { StatusTag } from '@/shared/components/status';
 import type { NotificationItem } from '@/shared/types/notifications';
+import { formatDateTime } from '@/shared/utils/date-format';
 
 type NotificationListPageProps = {
   title: string;
@@ -145,7 +146,7 @@ export function NotificationListPage({ title, description }: NotificationListPag
                   description={(
                     <Space direction="vertical" size={4}>
                       {item.content ? <Typography.Text type="secondary">{item.content}</Typography.Text> : null}
-                      <Typography.Text type="secondary">{item.createdAt || '-'}</Typography.Text>
+                      <Typography.Text type="secondary">{formatDateTime(item.createdAt)}</Typography.Text>
                     </Space>
                   )}
                 />

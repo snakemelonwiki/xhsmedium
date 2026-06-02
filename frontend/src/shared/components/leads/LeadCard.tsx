@@ -6,6 +6,7 @@ import type { ReactNode } from 'react';
 
 import { StatusTag } from '@/shared/components/status';
 import type { SalesLead } from '@/shared/types/leads';
+import { formatDateTime } from '@/shared/utils/date-format';
 
 type LeadCardProps = {
   lead: SalesLead;
@@ -43,9 +44,13 @@ export function LeadCard({ lead, actions, onOpen, onCollaborate }: LeadCardProps
             {firstText(lead.source?.accountName, lead.source?.postTitle, lead.source?.platform)}
           </Descriptions.Item>
           <Descriptions.Item label={<><UserOutlined /> 运营</>}>{firstText(lead.operator?.name)}</Descriptions.Item>
-          <Descriptions.Item label={<><CalendarOutlined /> 分配时间</>}>{firstText(lead.assignedAt)}</Descriptions.Item>
+          <Descriptions.Item label={<><CalendarOutlined /> 分配时间</>}>{formatDateTime(lead.assignedAt)}</Descriptions.Item>
           <Descriptions.Item label={<><ClockCircleOutlined /> 最近跟进</>}>
-            {firstText(lead.latestFollowAt, lead.latestFollowNote ? '有跟进记录' : undefined)}
+            {lead.latestFollowAt
+              ? formatDateTime(lead.latestFollowAt)
+              : lead.latestFollowNote
+                ? '有跟进记录'
+                : '-'}
           </Descriptions.Item>
         </Descriptions>
 

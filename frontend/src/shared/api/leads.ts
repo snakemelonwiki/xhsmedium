@@ -111,6 +111,9 @@ function mapLead(raw: RawRecord): SalesLead {
     captureImageUrl: text(raw.captureImageUrl) ?? text(raw.capture_image_url),
     leadCode: text(raw.leadCode) ?? text(raw.lead_code),
     addMethod: text(raw.addMethod) ?? text(raw.add_method),
+    ip: text(raw.ip),
+    requirementNote: text(raw.requirementNote) ?? text(raw.requirement_note),
+    supervisorNote: text(raw.supervisorNote) ?? text(raw.supervisor_note),
   };
 }
 

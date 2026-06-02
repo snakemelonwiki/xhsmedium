@@ -10,10 +10,7 @@ import { createExport } from '@/shared/api/exports';
 import { readStoredUser } from '@/shared/auth/auth';
 import { handoverStatusMeta } from '@/shared/api/enums';
 import type { AbnormalTypeCode, ExpectedHelperCode, OrderAbnormalFeedback, OrderFollowRecord, OrderItem } from '@/shared/types/orders';
-
-function formatDate(value?: string | null) {
-  return value ? new Date(value).toLocaleString() : '-';
-}
+import { formatDateTime } from '@/shared/utils/date-format';
 
 function emptyText(value?: string | null) {
   return value || '-';
@@ -243,8 +240,8 @@ export default function AcademicOrderDetailPage() {
                 },
                 { key: 'sales', label: '销售', children: emptyText(order?.salesName ?? order?.salesUserId) },
                 { key: 'academic', label: '教务', children: emptyText(order?.academicName ?? order?.academicUserId) },
-                { key: 'createdAt', label: '创建时间', children: formatDate(order?.createdAt) },
-                { key: 'updatedAt', label: '更新时间', children: formatDate(order?.updatedAt) },
+                { key: 'createdAt', label: '创建时间', children: formatDateTime(order?.createdAt) },
+                { key: 'updatedAt', label: '更新时间', children: formatDateTime(order?.updatedAt) },
                 { key: 'remark', label: '备注', children: emptyText(order?.remark) },
               ]}
             />
@@ -343,7 +340,7 @@ export default function AcademicOrderDetailPage() {
                       dataIndex: 'createdAt',
                       key: 'createdAt',
                       width: 160,
-                      render: (value?: string) => formatDate(value),
+                      render: (value?: string) => formatDateTime(value),
                     },
                     {
                       title: '操作',
@@ -377,7 +374,7 @@ export default function AcademicOrderDetailPage() {
                 <Input placeholder="备注（选填）" style={{ width: 240 }} />
               </Form.Item>
               <Form.Item name="nextRemindAt">
-                <DatePicker showTime placeholder="下次提醒（选填）" />
+                <DatePicker showTime placeholder="下次提醒（选填）" format="YYYY年MM月DD日 HH:mm:ss" />
               </Form.Item>
               <Form.Item>
                 <Button type="primary" htmlType="submit" loading={submitting}>添加</Button>
@@ -396,8 +393,8 @@ export default function AcademicOrderDetailPage() {
                       <Typography.Text strong>{record.nodeType}</Typography.Text>
                       <Typography.Text>{emptyText(record.content)}</Typography.Text>
                       <Typography.Text type="secondary">
-                        {formatDate(record.createdAt)}
-                        {record.nextRemindAt ? ` | 下次提醒：${formatDate(record.nextRemindAt)}` : ''}
+                        {formatDateTime(record.createdAt)}
+                        {record.nextRemindAt ? ` | 下次提醒：${formatDateTime(record.nextRemindAt)}` : ''}
                       </Typography.Text>
                     </Space>
                   ),

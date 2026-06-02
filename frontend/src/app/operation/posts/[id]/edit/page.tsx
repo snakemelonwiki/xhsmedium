@@ -2,7 +2,7 @@
 
 import { Alert, Button, Card, Form, Input, InputNumber, Select, Space, Spin, Typography, message } from 'antd';
 import { useParams, useRouter } from 'next/navigation';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { getPostDetail, updatePost } from '@/shared/api/content';
 import { ImageUploadField } from '@/shared/components/forms';
@@ -17,6 +17,7 @@ type PostFormValues = {
   accountId?: string;
   copywriting?: string;
   coverImageUrl?: string;
+  coverThumbUrl?: string;
   traffic?: number;
   likes?: number;
   comments?: number;
@@ -35,6 +36,7 @@ export default function OperationPostEditPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const postId = useMemo(() => String(params.id || ''), [params.id]);
+  const latestThumbRef = useRef<string>('');
 
   useEffect(() => {
     async function load() {
@@ -51,6 +53,7 @@ export default function OperationPostEditPage() {
           accountId: detail.accountId,
           copywriting: detail.copywriting,
           coverImageUrl: detail.coverImageUrl,
+          coverThumbUrl: detail.coverThumbUrl,
           traffic: detail.metrics.traffic,
           likes: detail.metrics.likes,
           comments: detail.metrics.comments,
@@ -59,6 +62,7 @@ export default function OperationPostEditPage() {
           note: detail.note,
           supervisorSuggestion: detail.supervisorSuggestion,
         });
+        latestThumbRef.current = detail.coverThumbUrl || '';
       } catch (err) {
         setError(err instanceof Error ? err.message : '作品详情加载失败');
       } finally {
@@ -73,7 +77,11 @@ export default function OperationPostEditPage() {
 
   async function submit(values: PostFormValues) {
     await run(async () => {
-      await updatePost(postId, values);
+      const payload: PostFormValues = { ...values };
+      if (latestThumbRef.current) {
+        payload.coverThumbUrl = latestThumbRef.current;
+      }
+      await updatePost(postId, payload);
       message.success('作品已更新');
       router.push('/operation/posts');
     });
@@ -140,7 +148,11 @@ export default function OperationPostEditPage() {
                 <Input.TextArea rows={4} placeholder="作品文案" />
               </Form.Item>
               <Form.Item className="full-row" name="coverImageUrl" label="封面/截图">
-                <ImageUploadField bucket="post-covers" />
+                <ImageUploadField
+                  bucket="post-covers"
+                  thumbUrl={post?.coverThumbUrl}
+                  onThumbChange={(url) => { latestThumbRef.current = url; }}
+                />
               </Form.Item>
               <Form.Item className="full-row" name="note" label="备注">
                 <Input.TextArea rows={3} placeholder="内部备注" />

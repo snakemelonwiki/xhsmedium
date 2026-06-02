@@ -5,6 +5,7 @@ import { Empty, Timeline, Typography } from 'antd';
 
 import { StatusTag } from '@/shared/components/status';
 import type { LeadTimelineItem } from '@/shared/types/leads';
+import { formatDateTime } from '@/shared/utils/date-format';
 
 type LeadTimelineProps = {
   items: LeadTimelineItem[];
@@ -33,7 +34,7 @@ export function LeadTimeline({ items }: LeadTimelineProps) {
             {item.priority ? <Typography.Text type="secondary"> {priorityLabel(item.priority)}</Typography.Text> : null}
             <div className="timeline-meta">
               {item.actorName ? `${item.actorName} · ` : ''}
-              {item.occurredAt}
+              {formatDateTime(item.occurredAt)}
             </div>
             {item.content ? <Typography.Paragraph className="timeline-content">{item.content}</Typography.Paragraph> : null}
           </div>

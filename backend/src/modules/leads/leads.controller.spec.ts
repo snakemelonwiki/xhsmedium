@@ -10,7 +10,7 @@ describe('LeadsController', () => {
     const leadsService = {
       findFilteredPaged: jest.fn().mockResolvedValue({ total: 21, items: [{ id: 'lead-1' }], limit: 20, offset: 0 }),
     } as any;
-    const controller = new LeadsController(leadsService, {} as any, { log: jest.fn() } as any);
+    const controller = new LeadsController(leadsService, {} as any, { log: jest.fn() } as any, { create: jest.fn() } as any);
     const res = response();
 
     await controller.findAll(
@@ -39,7 +39,7 @@ describe('LeadsController', () => {
       canAccessLead: jest.fn().mockResolvedValue(true),
       updateSalesStatus: jest.fn().mockResolvedValue({ id: 'lead-1', addStatus: 'added', status: 'added_success' }),
     } as any;
-    const controller = new LeadsController(leadsService, {} as any, { log: jest.fn() } as any);
+    const controller = new LeadsController(leadsService, {} as any, { log: jest.fn() } as any, { create: jest.fn() } as any);
     const res = response();
 
     await controller.updateStatus(
@@ -67,7 +67,7 @@ describe('LeadsController', () => {
     const leadsService = {
       canAccessLead: jest.fn().mockResolvedValue(true),
     } as any;
-    const controller = new LeadsController(leadsService, collaborationTasksService, { log: jest.fn() } as any);
+    const controller = new LeadsController(leadsService, collaborationTasksService, { log: jest.fn() } as any, { create: jest.fn() } as any);
     const res = response();
 
     await controller.createCollaboration(

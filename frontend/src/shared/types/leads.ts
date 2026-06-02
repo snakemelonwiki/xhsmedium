@@ -47,6 +47,12 @@ export interface SalesLead {
   captureImageUrl?: string;
   leadCode?: string;
   addMethod?: string;
+  /** IP / 地区（运营端填写） */
+  ip?: string;
+  /** 需求备注（运营端填写） */
+  requirementNote?: string;
+  /** 主管备注（运营端填写） */
+  supervisorNote?: string;
 }
 
 export type LeadTimelineKind = 'follow' | 'collaboration';

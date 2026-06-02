@@ -31,12 +31,15 @@ import {
   updateLeadBoard,
   type CloseLeadDealPayload,
 } from '@/shared/api/leads';
+import { listOrders } from '@/shared/api/orders';
 import { LeadTimeline } from '@/shared/components/leads';
 import { StatusTag } from '@/shared/components/status';
 import { LeadStatus, LeadAddStatus, LeadProcessStatus, CollaborationStatus } from '@/shared/constants/lead-status-enums';
 import { getStatusMeta } from '@/shared/constants/status';
 import { useSubmitLock } from '@/shared/hooks/useSubmitLock';
+import { formatDateTime } from '@/shared/utils/date-format';
 import type { LeadTimelineItem, SalesLead } from '@/shared/types/leads';
+import type { OrderItem } from '@/shared/types/orders';
 
 const FOLLOW_TYPE_OPTIONS = [
   { label: '电话沟通', value: 'phone' },
@@ -62,6 +65,7 @@ export default function SalesLeadDetailPage() {
   const leadId = String(params.id);
   const [lead, setLead] = useState<SalesLead>();
   const [timeline, setTimeline] = useState<LeadTimelineItem[]>([]);
+  const [order, setOrder] = useState<OrderItem>();
   const [form] = Form.useForm();
   const [collaborationForm] = Form.useForm();
   const [closeDealForm] = Form.useForm();
@@ -77,6 +81,14 @@ export default function SalesLeadDetailPage() {
     ]);
     setLead(detail);
     setTimeline([...records, ...collaborations].sort(sortTimelineDesc));
+    // 加载该 lead 关联的最新订单，用于展示订单/教务交付进度
+    try {
+      const result = await listOrders({ scope: 'sales', pageSize: 20 });
+      const matched = result.items.filter((o) => String(o.leadId) === leadId);
+      setOrder(matched[0] ?? undefined);
+    } catch {
+      setOrder(undefined);
+    }
   }
 
   useEffect(() => {
@@ -199,10 +211,24 @@ export default function SalesLeadDetailPage() {
             { key: 'sourcePlatform', label: '来源平台', children: lead?.source?.platform ?? '-' },
             { key: 'sourceAccount', label: '来源账号', children: lead?.source?.accountName ?? lead?.source?.accountId ?? '-' },
             { key: 'sourcePost', label: '来源作品', children: lead?.source?.postTitle ?? lead?.source?.postId ?? '-' },
-            { key: 'ipRegion', label: 'IP / 地区', children: '-' },
-            { key: 'requirementNote', label: '需求备注', children: '-' },
-            { key: 'supervisorNote', label: '主管备注', children: '-' },
-            { key: 'orderInfo', label: '订单 / 教务交付进度', children: '-' },
+            { key: 'ipRegion', label: 'IP / 地区', children: lead?.ip ?? '-' },
+            { key: 'requirementNote', label: '需求备注', children: lead?.requirementNote ?? '-' },
+            { key: 'supervisorNote', label: '主管备注', children: lead?.supervisorNote ?? '-' },
+            {
+              key: 'orderInfo',
+              label: '订单 / 教务交付进度',
+              children: order
+                ? [
+                    order.serviceType ? `产品：${order.serviceType}` : null,
+                    order.amount ? `金额：${order.amount}元` : null,
+                    order.paidStatus ? `付款：${order.paidStatus}` : null,
+                    order.orderStatus ? `订单状态：${order.orderStatus}` : null,
+                    order.handoverStatus ? `交接：${order.handoverStatus}` : null,
+                  ]
+                    .filter(Boolean)
+                    .join(' | ')
+                : '暂无订单',
+            },
             { key: 'status', label: '客资状态', children: <StatusTag kind="leadStatus" code={lead?.status ?? LeadStatus.ASSIGNED} /> },
             { key: 'addStatus', label: '添加状态', children: <StatusTag kind="addStatus" code={lead?.addStatus ?? LeadAddStatus.NOT_ADDED} /> },
             { key: 'processStatus', label: '处理状态', children: <StatusTag kind="processStatus" code={lead?.processStatus ?? 'not_contacted'} /> },
@@ -214,7 +240,13 @@ export default function SalesLeadDetailPage() {
               label: '引流截图',
               children: lead?.captureImageUrl ? <Image src={lead.captureImageUrl} alt="引流截图" width={120} /> : '-',
             },
-            { key: 'latestFollow', label: '最近跟进', children: lead?.latestFollowAt ?? lead?.latestFollowNote ?? '-' },
+            {
+              key: 'latestFollow',
+              label: '最近跟进',
+              children: lead?.latestFollowAt
+                ? `${formatDateTime(lead.latestFollowAt)}${lead.latestFollowNote ? ` · ${lead.latestFollowNote}` : ''}`
+                : lead?.latestFollowNote ?? '-',
+            },
           ]}
         />
       </Card>
@@ -373,6 +405,7 @@ export default function SalesLeadDetailPage() {
             <Form.Item className="full-row" name="expectedHandleTime" label="期望处理时间">
               <DatePicker
                 showTime
+                format="YYYY年MM月DD日 HH:mm:ss"
                 style={{ width: '100%' }}
                 placeholder="选择期望处理时间"
               />

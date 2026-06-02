@@ -203,6 +203,25 @@ export class OrdersController {
     return res.json({ ok: true, ...result });
   }
 
+  /**
+   * 手动触发一次订单节点超时扫描（仅 admin/owner 可用）。
+   * 必须放在 `@Get('orders/:id')` 之前，避免 'scan-node-timeouts' 被路由参数 :id 抢占。
+   */
+  @Post('orders/scan-node-timeouts')
+  async triggerNodeTimeoutScan(@Req() req: Request, @Res() res: Response) {
+    const session = (req as any).session;
+    const role = session?.role || '';
+    if (role !== 'admin' && role !== 'owner') {
+      return res.status(403).json({ ok: false, message: 'forbidden' });
+    }
+    try {
+      const result = await this.remindersService.runOrderNodeTimeoutScan();
+      return res.json({ ok: true, ...result });
+    } catch (err: any) {
+      return res.status(500).json({ ok: false, message: err?.message || 'scan failed' });
+    }
+  }
+
   @Get('orders/:id')
   async findOne(@Param('id') id: string, @Req() req: Request, @Res() res: Response) {
     const session = (req as any).session;

@@ -35,9 +35,13 @@ export class PostsController {
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('sort') sort?: string,
+    @Query('search') search?: string,
+    @Query('keyword') keyword?: string,
+    @Query('q') q?: string,
   ) {
     const session = (req as any).session;
     const wantsPaging = limit !== undefined || offset !== undefined;
+    const nextSearch = (search || keyword || q || '').trim();
 
     if (wantsPaging) {
       if (session?.role === 'staff' && session?.employeeId) {
@@ -50,6 +54,7 @@ export class PostsController {
             from,
             to,
             sort,
+            search: nextSearch,
           },
           Number(limit) || 20,
           Number(offset) || 0,
@@ -65,6 +70,7 @@ export class PostsController {
           from,
           to,
           sort,
+          search: nextSearch,
         },
         Number(limit) || 20,
         Number(offset) || 0,

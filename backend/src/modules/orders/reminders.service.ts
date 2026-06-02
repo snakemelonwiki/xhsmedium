@@ -1,12 +1,19 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, LessThanOrEqual, Repository } from 'typeorm';
+import { IsNull, LessThanOrEqual, Repository, In } from 'typeorm';
 
 import { Order } from '../../entities/order.entity';
 import { OrderFollowRecord } from '../../entities/order-follow-record.entity';
+import { User } from '../../entities/user.entity';
 import { NotificationsService } from '../notifications/notifications.service';
+import { OperationLogsService } from '../operation-logs/operation-logs.service';
 import { NOTIFICATION_TYPES } from '../../shared/notifications';
+
+/** 订单节点超时阈值（毫秒），默认 7 天 */
+const NODE_TIMEOUT_MS = 7 * 24 * 3600 * 1000;
+/** 扫描单轮上限 */
+const SCAN_BATCH = 200;
 
 /**
  * 节点提醒扫描器：每分钟扫描 order_follow_records.next_remind_at <= NOW
@@ -17,13 +24,19 @@ import { NOTIFICATION_TYPES } from '../../shared/notifications';
 export class RemindersService {
   private readonly logger = new Logger(RemindersService.name);
   private running = false;
+  private nodeTimeoutRunning = false;
+  /** key=orderId, value=lastSentAt（内存缓存，7 天内不重复发） */
+  private readonly recentlyNotified = new Map<string, Date>();
 
   constructor(
     @InjectRepository(OrderFollowRecord)
     private readonly followRepo: Repository<OrderFollowRecord>,
     @InjectRepository(Order)
     private readonly orderRepo: Repository<Order>,
+    @InjectRepository(User)
+    private readonly userRepo: Repository<User>,
     private readonly notifications: NotificationsService,
+    private readonly operationLogs: OperationLogsService,
   ) {}
 
   @Cron(CronExpression.EVERY_MINUTE, { name: 'orderNodeReminderScan' })
@@ -167,5 +180,162 @@ export class RemindersService {
     const truncated = summary.length > 60 ? `${summary.slice(0, 60)}…` : summary;
     const prefix = `订单 ${record.orderId} 节点「${record.nodeType}」已到提醒时间`;
     return truncated ? `${prefix}：${truncated}` : prefix;
+  }
+
+  // =====================================================================
+  // 订单节点超时扫描器
+  // 每 30 分钟扫一次：in_progress / awaiting_client_info / awaiting_teacher / to_deliver
+  // 且最后一条 follow_record 距今超 7 天（或无 follow_record 且订单创建超 7 天）
+  // → 向所有 admin/owner 发 ORDER_NODE_OVERDUE 通知。
+  // =====================================================================
+
+  /**
+   * 定时调度入口（每 30 分钟）。
+   */
+  @Cron(CronExpression.EVERY_30_MINUTES, { name: 'orderNodeTimeoutScan' })
+  async scanOrderNodeTimeouts(): Promise<void> {
+    if (this.nodeTimeoutRunning) return;
+    this.nodeTimeoutRunning = true;
+    try {
+      await this.runOrderNodeTimeoutScan();
+    } catch (err: any) {
+      this.logger.error(`order node timeout scan failed: ${err?.message || err}`);
+    } finally {
+      this.nodeTimeoutRunning = false;
+    }
+  }
+
+  /**
+   * 单轮扫描（暴露 public 给 controller 手动 trigger）。
+   */
+  async runOrderNodeTimeoutScan(): Promise<{
+    scanned: number;
+    notified: number;
+    skipped: number;
+    failed: number;
+  }> {
+    const now = new Date();
+    const threshold = new Date(now.getTime() - NODE_TIMEOUT_MS);
+
+    // 主动清理超过 7 天的缓存记录
+    for (const [orderId, sentAt] of this.recentlyNotified.entries()) {
+      if (now.getTime() - sentAt.getTime() > NODE_TIMEOUT_MS) {
+        this.recentlyNotified.delete(orderId);
+      }
+    }
+
+    // 候选订单：处于活跃状态，且创建超过 7 天
+    const activeStatuses = ['in_progress', 'awaiting_client_info', 'awaiting_teacher', 'to_deliver'];
+    const candidateOrders = await this.orderRepo
+      .createQueryBuilder('o')
+      .where('o.orderStatus IN (:...statuses)', { statuses: activeStatuses })
+      .andWhere('o.createdAt < :threshold', { threshold })
+      .orderBy('o.createdAt', 'ASC')
+      .take(SCAN_BATCH)
+      .getMany();
+
+    if (!candidateOrders.length) {
+      return { scanned: 0, notified: 0, skipped: 0, failed: 0 };
+    }
+
+    const orderIds = candidateOrders.map((o) => o.id);
+
+    // 批量查出每单的最近一条 follow_record
+    const lastFollowMap = new Map<string, Date | null>();
+    const followRows = await this.orderRepo
+      .createQueryBuilder('o')
+      .leftJoin(OrderFollowRecord, 'fr', 'fr.order_id = o.id')
+      .select('o.id', 'orderId')
+      .addSelect('MAX(fr.created_at)', 'lastFollowAt')
+      .where('o.id IN (:...ids)', { ids: orderIds })
+      .groupBy('o.id')
+      .getRawMany();
+
+    for (const row of followRows) {
+      lastFollowMap.set(row.orderId, row.lastFollowAt ? new Date(row.lastFollowAt) : null);
+    }
+
+    // 收集所有 admin/owner 的 receiverIds
+    const admins = await this.userRepo.find({
+      where: { role: In(['admin', 'owner']) },
+      select: { id: true },
+    });
+    const receiverIds = admins.map((u) => u.id);
+    if (!receiverIds.length) {
+      return { scanned: 0, notified: 0, skipped: 0, failed: 0 };
+    }
+
+    let notified = 0;
+    let skipped = 0;
+    let failed = 0;
+
+    for (const order of candidateOrders) {
+      // 幂等：7 天内已发过，跳过
+      const lastSent = this.recentlyNotified.get(order.id);
+      if (lastSent && now.getTime() - lastSent.getTime() < NODE_TIMEOUT_MS) {
+        skipped += 1;
+        continue;
+      }
+
+      // 判断超时：最后跟进超过 7 天，或无跟进记录
+      const lastFollowAt = lastFollowMap.get(order.id);
+      const isOverdue =
+        (lastFollowAt === null && order.createdAt < threshold) ||
+        (lastFollowAt !== null && lastFollowAt < threshold);
+
+      if (!isOverdue) {
+        skipped += 1;
+        continue;
+      }
+
+      // 发通知
+      const daysSinceLastFollow = lastFollowAt
+        ? Math.floor((now.getTime() - lastFollowAt.getTime()) / (24 * 3600 * 1000))
+        : Math.floor((now.getTime() - new Date(order.createdAt).getTime()) / (24 * 3600 * 1000));
+
+      try {
+        await this.notifications.create({
+          receiverIds,
+          senderId: null,
+          portType: 'operations',
+          typeCode: NOTIFICATION_TYPES.ORDER_NODE_OVERDUE,
+          title: '订单节点超时',
+          content: `订单 ${order.id} 已 ${daysSinceLastFollow} 天无进展，请关注`,
+          relatedId: order.id,
+          relatedType: 'order',
+        });
+
+        // 记录已发送
+        this.recentlyNotified.set(order.id, now);
+        notified += 1;
+
+        // 写操作日志（system 触发）
+        try {
+          await this.operationLogs.log({
+            userId: 'system',
+            action: 'status_change',
+            targetType: 'order',
+            targetId: order.id,
+            detail: `节点超时通知 (${daysSinceLastFollow} 天无进展)`,
+          });
+        } catch (logErr: any) {
+          this.logger.warn(
+            `order node timeout log failed (order=${order.id}): ${logErr?.message || logErr}`,
+          );
+        }
+      } catch (err: any) {
+        failed += 1;
+        this.logger.error(
+          `order node overdue notify failed (order=${order.id}): ${err?.message || err}`,
+        );
+      }
+    }
+
+    if (notified > 0 || failed > 0) {
+      this.logger.log(
+        `order node timeout scan: scanned=${candidateOrders.length} notified=${notified} skipped=${skipped} failed=${failed}`,
+      );
+    }
+    return { scanned: candidateOrders.length, notified, skipped, failed };
   }
 }

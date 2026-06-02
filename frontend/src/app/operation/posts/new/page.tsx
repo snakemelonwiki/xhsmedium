@@ -2,21 +2,59 @@
 
 import { Button, Card, Form, Input, Select, Space, Typography, message } from 'antd';
 import { useRouter } from 'next/navigation';
+import { useEffect, useRef, useState } from 'react';
 
 import { apiClient } from '@/shared/api/apiClient';
 import { ImageUploadField } from '@/shared/components/forms';
 import { useSubmitLock } from '@/shared/hooks/useSubmitLock';
 
+interface AccountOption {
+  id: string;
+  name?: string;
+  platform?: string;
+}
+
 export default function OperationPostNewPage() {
   const [form] = Form.useForm();
   const { submitting, run } = useSubmitLock();
   const router = useRouter();
+  const latestThumbRef = useRef<string>('');
+  const [accountOptions, setAccountOptions] = useState<AccountOption[]>([]);
+
+  useEffect(() => {
+    // 拉当前运营可用的账号列表,渲染为下拉;空数组时回退到自由输入框
+    let cancelled = false;
+    apiClient
+      .get<unknown>('/accounts?limit=200')
+      .then((res: any) => {
+        if (cancelled) return;
+        const list: any[] = Array.isArray(res) ? res : res?.items || [];
+        setAccountOptions(
+          list.map((a) => ({ id: a.id, name: a.name || a.accountName, platform: a.platform })),
+        );
+      })
+      .catch(() => {
+        // 拉取失败不阻塞录入,继续走空回退
+        setAccountOptions([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function submit(values: Record<string, unknown>) {
+    // ImageUploadField 内部管 thumb 状态，submit 时把最新的 thumbUrl 合并到 body
+    const coverThumbUrl = latestThumbRef.current || undefined;
+    // accountId 留空 / undefined 表示未关联账号,后端落空串
+    const accountId =
+      typeof values.accountId === 'string' && values.accountId.trim()
+        ? values.accountId.trim()
+        : undefined;
     await run(async () => {
-      await apiClient.post('/posts', values);
+      await apiClient.post('/posts', { ...values, accountId, coverThumbUrl });
       message.success('作品已录入');
       form.resetFields();
+      latestThumbRef.current = '';
       const today = formatLocalDate(new Date());
       router.push(`/operation/posts?from=${today}&to=${today}`);
     });
@@ -54,14 +92,30 @@ export default function OperationPostNewPage() {
             <Form.Item name="title" label="标题">
               <Input placeholder="作品标题" />
             </Form.Item>
-            <Form.Item name="accountId" label="来源账号 ID">
-              <Input placeholder="后续可替换为账号下拉" />
+            <Form.Item name="accountId" label="来源账号">
+              {accountOptions.length > 0 ? (
+                <Select
+                  allowClear
+                  showSearch
+                  optionFilterProp="label"
+                  placeholder="可选:留空表示未关联账号"
+                  options={accountOptions.map((a) => ({
+                    value: a.id,
+                    label: a.name ? `${a.name} (${a.id})` : a.id,
+                  }))}
+                />
+              ) : (
+                <Input allowClear placeholder="可选:账号 ID(留空表示未关联账号)" />
+              )}
             </Form.Item>
             <Form.Item className="full-row" name="copywriting" label="文案">
               <Input.TextArea rows={4} placeholder="作品文案或备注" />
             </Form.Item>
             <Form.Item className="full-row" name="coverImageUrl" label="封面/截图">
-              <ImageUploadField bucket="post-covers" />
+              <ImageUploadField
+                bucket="post-covers"
+                onThumbChange={(url) => { latestThumbRef.current = url; }}
+              />
             </Form.Item>
           </div>
           <Button type="primary" htmlType="submit" loading={submitting}>提交作品</Button>

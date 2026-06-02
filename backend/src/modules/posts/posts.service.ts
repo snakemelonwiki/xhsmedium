@@ -15,6 +15,7 @@ interface PostListFilters {
   from?: string;
   to?: string;
   sort?: string;
+  search?: string;
 }
 
 interface PlazaFilters {
@@ -38,7 +39,7 @@ export class PostsService {
 
   async findAll(): Promise<any[]> {
     const rows = await this.postRepository.find({ order: { publishedAt: 'DESC', createdAt: 'DESC' } });
-    return rows.map(this.mapPost);
+    return this.attachJoinNames(rows.map(this.mapPost));
   }
 
   async findByEmployee(employeeId: string): Promise<any[]> {
@@ -46,7 +47,7 @@ export class PostsService {
       where: { employeeId },
       order: { publishedAt: 'DESC', createdAt: 'DESC' },
     });
-    return rows.map(this.mapPost);
+    return this.attachJoinNames(rows.map(this.mapPost));
   }
 
   async findAllPaged(limit: number, offset: number): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
@@ -64,6 +65,10 @@ export class PostsService {
     if (filters.postType) qb.andWhere('p.post_type = :postType', { postType: filters.postType });
     if (filters.from) qb.andWhere('p.published_at >= :from', { from: filters.from });
     if (filters.to) qb.andWhere('p.published_at <= :to', { to: filters.to });
+    if (filters.search) {
+      const kw = `%${filters.search}%`;
+      qb.andWhere('(p.title LIKE :kw OR p.copywriting LIKE :kw)', { kw });
+    }
 
     if (filters.sort === 'leads') {
       qb.addSelect((subQb) => {
@@ -80,7 +85,8 @@ export class PostsService {
     }
 
     const [rows, total] = await qb.take(safeLimit).skip(safeOffset).getManyAndCount();
-    return { items: rows.map(this.mapPost), total, limit: safeLimit, offset: safeOffset };
+    const items = await this.attachJoinNames(rows.map(this.mapPost));
+    return { items, total, limit: safeLimit, offset: safeOffset };
   }
 
   async findAllPagedLegacy(limit: number, offset: number): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
@@ -91,7 +97,8 @@ export class PostsService {
       take: safeLimit,
       skip: safeOffset,
     });
-    return { items: rows.map(this.mapPost), total, limit: safeLimit, offset: safeOffset };
+    const items = await this.attachJoinNames(rows.map(this.mapPost));
+    return { items, total, limit: safeLimit, offset: safeOffset };
   }
 
   /**
@@ -363,5 +370,48 @@ export class PostsService {
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };
+  }
+
+  /**
+   * 把 employeeName / accountName 注入到 mapPost 输出上，
+   * employeeId / accountId 保持不变，前端"员工"列优先显示姓名。
+   * 单次批量查询，避免 N+1。
+   */
+  private async attachJoinNames(items: any[]): Promise<any[]> {
+    if (!items.length) return items;
+
+    const employeeIds = Array.from(new Set(items.map((i) => i.employeeId).filter(Boolean)));
+    const accountIds = Array.from(new Set(items.map((i) => i.accountId).filter(Boolean)));
+
+    const employeeNameMap = new Map<string, string>();
+    if (employeeIds.length) {
+      const placeholders = employeeIds.map(() => '?').join(',');
+      const rows: Array<{ id: string; name: string | null; employee_code: string | null }> = await this.postRepository.manager.query(
+        `SELECT id, name, employee_code FROM employees WHERE id IN (${placeholders})`,
+        employeeIds,
+      );
+      for (const r of rows) {
+        // 姓名缺失时回退到员工编号（备注用途），仍然缺失则交给前端兜底显示 ID
+        employeeNameMap.set(r.id, (r.name || r.employee_code || '').trim());
+      }
+    }
+
+    const accountNameMap = new Map<string, string>();
+    if (accountIds.length) {
+      const placeholders = accountIds.map(() => '?').join(',');
+      const rows: Array<{ id: string; account_name: string | null }> = await this.postRepository.manager.query(
+        `SELECT id, account_name FROM accounts WHERE id IN (${placeholders})`,
+        accountIds,
+      );
+      for (const r of rows) {
+        accountNameMap.set(r.id, (r.account_name || '').trim());
+      }
+    }
+
+    return items.map((i) => ({
+      ...i,
+      employeeName: employeeNameMap.get(i.employeeId) || '',
+      accountName: accountNameMap.get(i.accountId) || '',
+    }));
   }
 }

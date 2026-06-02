@@ -143,6 +143,8 @@ CREATE TABLE IF NOT EXISTS leads (
   status                   VARCHAR(32)  NOT NULL DEFAULT 'new' COMMENT '客资状态: new/assigned/in_followup/in_collaboration/operation_handled/added_success/invalid',
   deal_amount              DECIMAL(12,2) NULL COMMENT '成交金额',
   note                     TEXT         NULL COMMENT '备注',
+  requirement_note         TEXT         NULL COMMENT '需求备注（销售端展示）',
+  supervisor_note          TEXT         NULL COMMENT '主管备注（销售端展示）',
   capture_image_url        VARCHAR(500) NULL COMMENT '引流截图URL',
   sales_feedback           TEXT         NULL COMMENT '销售反馈',
   sales_updated_at         DATETIME     NULL COMMENT '销售更新时间',

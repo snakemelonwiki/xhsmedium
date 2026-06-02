@@ -43,6 +43,12 @@ export class Lead {
   @Column({ type: 'text', nullable: true })
   note: string | null;
 
+  @Column({ name: 'requirement_note', type: 'text', nullable: true })
+  requirementNote: string | null;
+
+  @Column({ name: 'supervisor_note', type: 'text', nullable: true })
+  supervisorNote: string | null;
+
   @Column({ name: 'capture_image_url', length: 500, nullable: true })
   captureImageUrl: string | null;
 

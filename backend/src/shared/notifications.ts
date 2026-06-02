@@ -40,6 +40,8 @@ export const NOTIFICATION_TYPES = {
   /** 1.2 P1-02 补齐：订单状态/进度更新 → 通知销售 + 主管兜底 */
   ORDER_UPDATED: 'order_updated',
   ORDER_NODE_DUE: 'order_node_due',
+  /** 订单节点超时：跟进超过 7 天无进展 → 通知 admin/owner */
+  ORDER_NODE_OVERDUE: 'order_node_overdue',
   ORDER_ABNORMAL: 'order_abnormal',
 
   // ── 导入 / 导出 ─────────────────────────────────────────────────────
@@ -64,6 +66,7 @@ export const ACTIVE_NOTIFICATION_CODES: ReadonlySet<NotificationTypeCode> = new 
   NOTIFICATION_TYPES.ORDER_ACCEPTED,
   NOTIFICATION_TYPES.ORDER_UPDATED,
   NOTIFICATION_TYPES.ORDER_NODE_DUE,
+  NOTIFICATION_TYPES.ORDER_NODE_OVERDUE,
   NOTIFICATION_TYPES.ORDER_ABNORMAL,
   NOTIFICATION_TYPES.IMPORT_DONE,
   NOTIFICATION_TYPES.EXPORT_DONE,

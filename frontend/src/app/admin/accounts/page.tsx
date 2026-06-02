@@ -58,7 +58,7 @@ export default function AdminAccountsPage() {
   const columns: TableColumnsType<AdminAccount> = [
     { title: '账号名', dataIndex: 'accountName' },
     { title: '平台', dataIndex: 'platform', render: (value?: string) => value || '-' },
-    { title: '所属员工', dataIndex: 'employeeId', render: (value?: string) => value || '-' },
+    { title: '所属员工', dataIndex: 'employeeName', render: (value: string | undefined, record) => value || record.employeeId || '-' },
     { title: '定位', dataIndex: 'positioning', render: (value?: string) => value || '-' },
     { title: '状态', dataIndex: 'status', render: (value?: string) => value || 'active' },
     { title: '操作', render: (_value, record) => <Button onClick={() => startEdit(record)}>编辑</Button> },

@@ -12,6 +12,7 @@ import { createExport, type ExportFilter } from '@/shared/api/exports';
 import { readStoredUser } from '@/shared/auth/auth';
 import type { OrderItem, OrderScope, OrderStatusCode } from '@/shared/types/orders';
 import { HANDOVER_STATUS_OPTIONS, HandoverStatusCode, handoverStatusMeta } from '@/shared/api/enums';
+import { formatDateTime } from '@/shared/utils/date-format';
 
 const orderStatusOptions: { label: string; value: OrderStatusCode }[] = [
   { label: '待领取', value: 'to_receive' },
@@ -263,7 +264,7 @@ export function OrderTable({ title, description, scope, status, showStatusFilter
         title: '更新时间',
         dataIndex: 'updatedAt',
         key: 'updatedAt',
-        render: (value?: string) => (value ? new Date(value).toLocaleString() : '-'),
+        render: (value?: string) => formatDateTime(value),
       },
     ];
 

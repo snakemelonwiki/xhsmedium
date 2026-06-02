@@ -6,10 +6,7 @@ import { useEffect, useState } from 'react';
 
 import { getOrderDetail, listAbnormalFeedbacks, listOrderFollowRecords } from '@/shared/api/orders';
 import type { OrderAbnormalFeedback, OrderFollowRecord, OrderItem } from '@/shared/types/orders';
-
-function formatDate(value?: string | null) {
-  return value ? new Date(value).toLocaleString() : '-';
-}
+import { formatDateTime } from '@/shared/utils/date-format';
 
 function emptyText(value?: string | null) {
   return value || '-';
@@ -100,8 +97,8 @@ export default function SalesOrderDetailPage() {
                 { key: 'orderStatus', label: '订单状态', children: emptyText(order?.orderStatus) },
                 { key: 'sales', label: '销售', children: emptyText(order?.salesName ?? order?.salesUserId) },
                 { key: 'academic', label: '教务', children: emptyText(order?.academicName ?? order?.academicUserId) },
-                { key: 'createdAt', label: '创建时间', children: formatDate(order?.createdAt) },
-                { key: 'updatedAt', label: '更新时间', children: formatDate(order?.updatedAt) },
+                { key: 'createdAt', label: '创建时间', children: formatDateTime(order?.createdAt) },
+                { key: 'updatedAt', label: '更新时间', children: formatDateTime(order?.updatedAt) },
                 { key: 'remark', label: '备注', children: emptyText(order?.remark) },
               ]}
             />
@@ -150,14 +147,14 @@ export default function SalesOrderDetailPage() {
                     dataIndex: 'createdAt',
                     key: 'createdAt',
                     width: 180,
-                    render: (value?: string) => formatDate(value),
+                    render: (value?: string) => formatDateTime(value),
                   },
                   {
                     title: '关闭时间',
                     dataIndex: 'closedAt',
                     key: 'closedAt',
                     width: 180,
-                    render: (value?: string | null) => formatDate(value),
+                    render: (value?: string | null) => formatDateTime(value),
                   },
                 ]}
               />
@@ -176,8 +173,8 @@ export default function SalesOrderDetailPage() {
                       <Typography.Text strong>{record.nodeType}</Typography.Text>
                       <Typography.Text>{emptyText(record.content)}</Typography.Text>
                       <Typography.Text type="secondary">
-                        {formatDate(record.createdAt)}
-                        {record.nextRemindAt ? ` | 下次提醒：${formatDate(record.nextRemindAt)}` : ''}
+                        {formatDateTime(record.createdAt)}
+                        {record.nextRemindAt ? ` | 下次提醒：${formatDateTime(record.nextRemindAt)}` : ''}
                       </Typography.Text>
                     </Space>
                   ),

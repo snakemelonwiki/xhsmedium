@@ -145,11 +145,11 @@ export default function SalesCollaborationPage() {
               className="full-row"
               name="expectedHandleTime"
               label="期望处理时间"
-              extra="后端暂未消费（1.2 排期使用），不影响当前提交"
+              extra="用于提醒运营尽快处理；后端会在 1.2 后续版本落地"
             >
               <DatePicker
                 showTime={{ format: 'HH:mm' }}
-                format="YYYY-MM-DD HH:mm"
+                format="YYYY年MM月DD日 HH:mm"
                 placeholder="选择期望运营处理的时间点"
                 style={{ width: 280 }}
                 disabledDate={(current) => Boolean(current && current.isBefore(dayjs().startOf('day')))}
