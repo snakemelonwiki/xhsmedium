@@ -99,5 +99,15 @@ function fallbackRoute(item: NotificationItem) {
     if (normalizedPort === 'admin') return `/admin/orders?orderId=${targetId}`;
     return `/sales/orders/${targetId}`;
   }
+  // N-P1-08 修复：导出/导入通知补回路由。导出：当前只 /academic/exports 有页面，
+  // 全部端口统一跳过去。导入：admin 优先 /admin/imports，运营回落到 /operation/imports。
+  if (type.includes('export')) {
+    return `/academic/exports?taskId=${targetId}`;
+  }
+  if (type.includes('import')) {
+    return normalizedPort === 'admin'
+      ? `/admin/imports?taskId=${targetId}`
+      : `/operation/imports?taskId=${targetId}`;
+  }
   return undefined;
 }

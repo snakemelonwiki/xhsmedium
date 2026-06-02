@@ -44,8 +44,12 @@ function renderApp() {
   ];
 
   const academicViews = [
+    ["academic-dashboard", "教务首页"],
     ["academic-orders", "订单池"],
-    ["academic-abnormal", "异常订单"]
+    ["academic-reminders", "节点提醒"],
+    ["academic-abnormal", "异常反馈"],
+    ["academic-exports", "导出"],
+    ["academic-messages", "消息中心"]
   ];
 
   // 详情页（不在 nav 中显示，但属于合法 view）
@@ -247,7 +251,10 @@ function renderNotificationPanel() {
         <div class="notification-panel">
           <div class="notification-panel-head">
             <strong>消息提醒</strong>
-            <button class="ghost" id="notificationCloseBtn" type="button">关闭</button>
+            <div class="notification-panel-actions">
+              ${hasUnread ? `<button class="ghost js-notification-mark-all-read" id="notificationMarkAllReadBtn" type="button">全部已读</button>` : ""}
+              <button class="ghost" id="notificationCloseBtn" type="button">关闭</button>
+            </div>
           </div>
           <div class="notification-list">
             ${state.notifications.length
@@ -323,14 +330,22 @@ function renderCurrentView() {
 
   if (state.user.role === "academic") {
     switch (state.currentView) {
+      case "academic-dashboard":
+        return renderAcademicDashboard();
       case "academic-orders":
         return renderAcademicOrders();
       case "academic-order-detail":
         return renderAcademicOrderDetail();
+      case "academic-reminders":
+        return renderAcademicReminders();
       case "academic-abnormal":
         return renderAcademicAbnormal();
+      case "academic-exports":
+        return renderAcademicExports();
+      case "academic-messages":
+        return renderAcademicMessages();
       default:
-        return renderAcademicOrders();
+        return renderAcademicDashboard();
     }
   }
 
@@ -1011,7 +1026,20 @@ function bindViewEvents() {
     button.addEventListener("click", () => applyQuickTimeShortcut(button.dataset.scope, button.dataset.action));
   });
   document.querySelectorAll(".js-notification-item").forEach((button) => {
-    button.addEventListener("click", () => markNotificationRead(button.dataset.id));
+    button.addEventListener("click", () => {
+      const id = button.dataset.id;
+      const notif = (state.notifications || []).find((n) => n.id === id);
+      if (notif) {
+        if (typeof handleNotificationClick === "function") {
+          handleNotificationClick(notif);
+        } else {
+          markNotificationRead(id);
+        }
+      }
+    });
+  });
+  document.getElementById("notificationMarkAllReadBtn")?.addEventListener("click", () => {
+    if (typeof markAllNotificationsRead === "function") markAllNotificationsRead();
   });
   document.querySelectorAll(".js-toggle-learning-post").forEach((button) => {
     button.addEventListener("click", () => toggleStaffLearningPost(button.dataset.id));
@@ -1096,6 +1124,22 @@ function bindViewEvents() {
   if (typeof bindOrdersViewsEvents === "function") {
     bindOrdersViewsEvents();
   }
+
+  // §5.1 P0-D 教务端：dashboard 卡片点击、messages tab/全部已读
+  document.querySelectorAll(".js-academic-stat-card").forEach((el) =>
+    el.addEventListener("click", () => openAcademicPoolWithStatus(el.dataset.status || ""))
+  );
+  document.querySelector(".js-refresh-academic-stats")?.addEventListener("click", () => loadAcademicStats());
+  document.querySelectorAll(".js-academic-msg-tab").forEach((el) =>
+    el.addEventListener("click", () => {
+      state.academicMessagesTab = el.dataset.tab || "all";
+      renderApp();
+    })
+  );
+  document.querySelector(".js-academic-mark-all-read")?.addEventListener("click", () => academicMarkAllRead());
+  document.querySelectorAll(".js-academic-msg-item").forEach((el) =>
+    el.addEventListener("click", () => markNotificationRead(el.dataset.id || ""))
+  );
 }
 
 function bindDelegatedEvents() {

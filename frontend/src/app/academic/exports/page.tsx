@@ -90,6 +90,14 @@ export default function AcademicExportsPage() {
   const [exportStatus, setExportStatus] = useState<string>('');
   const [exportPaidStatus, setExportPaidStatus] = useState<string>('');
   const [exportRange, setExportRange] = useState<[Dayjs, Dayjs] | null>(null);
+  // N-P1-08 修复：从通知 deep link ?taskId=xxx 跳过来时，记录要高亮的行。
+  // 在 Table rowClassName 中按此 id 加 className，2s 后清空避免长留痕。
+  const [highlightTaskId, setHighlightTaskId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!highlightTaskId) return undefined;
+    const timer = window.setTimeout(() => setHighlightTaskId(null), 2000);
+    return () => window.clearTimeout(timer);
+  }, [highlightTaskId]);
 
   async function load(nextPage = page, nextPageSize = pageSize) {
     setLoading(true);
@@ -112,6 +120,12 @@ export default function AcademicExportsPage() {
 
   useEffect(() => {
     void load(1, pageSize);
+    // N-P1-08 修复：从通知 deep link 跳过来时（?taskId=xxx），
+    // 高亮对应行（用 rowClassName）。这里只挂一次，后续无副作用。
+    const taskId = new URLSearchParams(window.location.search).get('taskId');
+    if (taskId) {
+      setHighlightTaskId(taskId);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -238,8 +252,12 @@ export default function AcademicExportsPage() {
           columns={columns}
           dataSource={items}
           loading={loading}
+          // N-P1-08 修复：从通知 deep link ?taskId=xxx 跳过来时，匹配该 id 的行高亮。
+          rowClassName={(record) => (highlightTaskId && record.id === highlightTaskId ? 'row-highlight' : '')}
           pagination={false}
           scroll={{ x: 920 }}
+          // N-P1-08 修复：从通知 deep link ?taskId=xxx 跳过来时，匹配该 id 的行高亮。
+          rowClassName={(record) => (highlightTaskId && record.id === highlightTaskId ? 'row-highlight' : '')}
           locale={{
             emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无导出记录" />,
           }}

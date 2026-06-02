@@ -21,6 +21,14 @@ export default function OperationImportsPage() {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
+  // N-P1-08 修复：从通知 deep link ?taskId=xxx 跳过来时，记录要高亮的行。
+  // 在 Table rowClassName 中按此 id 加 className，2s 后清空避免长留痕。
+  const [highlightTaskId, setHighlightTaskId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!highlightTaskId) return undefined;
+    const timer = window.setTimeout(() => setHighlightTaskId(null), 2000);
+    return () => window.clearTimeout(timer);
+  }, [highlightTaskId]);
   const pageSize = 20;
 
   async function load(nextPage = page) {
@@ -42,6 +50,11 @@ export default function OperationImportsPage() {
 
   useEffect(() => {
     load(1);
+    // N-P1-08 修复：从通知 deep link 跳过来时（?taskId=xxx），高亮对应行。
+    const taskId = new URLSearchParams(window.location.search).get('taskId');
+    if (taskId) {
+      setHighlightTaskId(taskId);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -104,6 +117,8 @@ export default function OperationImportsPage() {
           loading={loading}
           columns={columns}
           dataSource={items}
+          // N-P1-08 修复：从通知 deep link ?taskId=xxx 跳过来时，匹配该 id 的行高亮。
+          rowClassName={(record) => (highlightTaskId && record.id === highlightTaskId ? 'row-highlight' : '')}
           pagination={false}
           locale={{ emptyText: <Empty description="暂无导入任务" /> }}
         />

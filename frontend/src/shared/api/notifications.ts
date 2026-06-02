@@ -78,6 +78,17 @@ function buildRouteHint(opts: {
     if (normalizedPort === 'admin') return `/admin/orders?orderId=${targetId}`;
     return `/sales/orders/${targetId}`;
   }
+  // N-P1-08 修复：导出/导入通知补回路由（与后端 buildRouteHint、NotificationBell
+  // fallbackRoute 三处保持一致）。导出：当前只 /academic/exports 有页面；
+  // 导入：admin 优先 /admin/imports，运营回落到 /operation/imports。
+  if (normalizedType.includes('export')) {
+    return `/academic/exports?taskId=${relatedId ?? targetId}`;
+  }
+  if (normalizedType.includes('import')) {
+    return normalizedPort === 'admin'
+      ? `/admin/imports?taskId=${relatedId ?? targetId}`
+      : `/operation/imports?taskId=${relatedId ?? targetId}`;
+  }
   return undefined;
 }
 

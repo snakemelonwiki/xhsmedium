@@ -40,13 +40,24 @@ function updateNotificationPanelDom() {
 
 function renderNotificationListItems() {
   return state.notifications.length
-    ? state.notifications.map((item) => `
+    ? state.notifications.map((item) => {
+        let messageHtml = item.message || "";
+        // 处理导出通知的下载链接
+        if (messageHtml.includes("点击下载：")) {
+          const urlMatch = messageHtml.match(/点击下载：(.+)$/);
+          if (urlMatch && urlMatch[1]) {
+            const fileUrl = urlMatch[1].trim();
+            messageHtml = `点击下载：<a href="${fileUrl}" class="notification-download-link" download onclick="event.stopPropagation()">${fileUrl}</a>`;
+          }
+        }
+        return `
         <button class="notification-item ${item.unread ? "unread" : ""} js-notification-item" data-id="${item.id}" type="button">
           <strong>${item.title || "系统消息"}</strong>
-          <p>${item.message || ""}</p>
+          <p>${messageHtml}</p>
           <span>${item.createdAt ? formatDate(item.createdAt) : ""}</span>
         </button>
-      `).join("")
+      `;
+      }).join("")
     : `<div class="notification-item"><strong>暂无消息</strong><p>当前还没有新的提醒。</p></div>`;
 }
 
@@ -147,6 +158,39 @@ function connectNotificationSocket() {
   notificationSocket.on("notification:error", (payload) => {
     updateNotificationSocketStatus("error", payload?.message || "消息通道异常");
   });
+
+  // 9 个领域事件 + supervisor.suggestion —— 与后端 NOTIFICATION_TO_EVENT 对齐。
+  // 这里挂在 connectNotificationSocket 内；真正生效的 listener 已在
+  // realtime.js initNotificationSocket 里同步注册（避免重复触发）。
+  const DOMAIN_EVENTS = [
+    "lead.assigned",
+    "collaboration.requested",
+    "lead.customer_not_passed",
+    "collaboration.handled",
+    "lead.added_success",
+    "order.created",
+    "order.updated",
+    "order.abnormal",
+    "export.finished",
+    "lead.deal_done",
+    "supervisor.suggestion"
+  ];
+  DOMAIN_EVENTS.forEach((evt) => {
+    notificationSocket.on(evt, (payload) => {
+      if (!payload) return;
+      // 主通道已在 realtime.js 同步注册；此处仅做兜底（仅当本文件是唯一激活的 socket 时生效）
+      if (window.notificationSocket && window.notificationSocket !== notificationSocket) return;
+      try {
+        if (typeof mergeIncomingNotification === "function") mergeIncomingNotification(payload);
+        state.unreadNotificationCount = Number(state.unreadNotificationCount || 0) + 1;
+        if (typeof handleDomainEvent === "function") handleDomainEvent(evt, payload);
+        if (typeof setFlash === "function") {
+          setFlash("info", payload.title || evt, payload.content || payload.message || "");
+        }
+        if (typeof updateNotificationPanelDom === "function") updateNotificationPanelDom();
+      } catch (_e) { /* 静默 */ }
+    });
+  });
 }
 
 function disconnectNotificationSocket() {
@@ -172,4 +216,142 @@ async function markNotificationRead(id) {
     item.readStatus = 1;
   }
   updateNotificationPanelDom();
+}
+
+// ===== P0-G 通知全部已读 =====
+// 调用后端 POST /api/notifications/read-all，本地同步把 state.notifications 标已读、清零红点。
+async function markAllNotificationsRead() {
+  if (!state.user?.id) return;
+  try {
+    const result = await api("/api/notifications/read-all", {
+      method: "POST",
+      body: JSON.stringify({ actorUserId: state.user.id })
+    });
+    const affected = Number(result?.affected ?? 0);
+    (state.notifications || []).forEach((n) => {
+      n.unread = false;
+      n.readStatus = 1;
+    });
+    state.unreadNotificationCount = 0;
+  } catch (err) {
+    // 即便后端失败，本地也尽量清零，避免红点卡住
+    (state.notifications || []).forEach((n) => {
+      n.unread = false;
+      n.readStatus = 1;
+    });
+    state.unreadNotificationCount = 0;
+    if (typeof setFlash === "function") {
+      setFlash("warn", "已本地清空未读", "后端同步失败，请稍后重试。");
+    }
+  }
+  if (typeof updateNotificationPanelDom === "function") updateNotificationPanelDom();
+  if (typeof refreshNotificationPanelDom === "function") refreshNotificationPanelDom();
+  if (typeof renderApp === "function") renderApp();
+}
+
+// ===== P0-C 9 个领域事件定向刷新 =====
+// 由 realtime.js / notifications.js 的 socket.on 回调调用。
+// refresh 函数存在就调、缺失就静默（按销售/运营/教务等角色按需实现）。
+async function handleDomainEvent(eventName, payload) {
+  if (!eventName) return;
+  const safeCall = (fn) => { if (typeof fn === "function") { try { fn(); } catch (_e) {} } };
+  switch (eventName) {
+    case "lead.assigned":
+      // 销售端刷新客资看板
+      safeCall(typeof loadSalesLeads === "function" ? loadSalesLeads : null);
+      safeCall(typeof loadSalesFollowups === "function" ? loadSalesFollowups : null);
+      // 运营端 / 主管端
+      safeCall(typeof loadLeadsMonitor === "function" ? loadLeadsMonitor : null);
+      safeCall(typeof loadLeadStats === "function" ? loadLeadStats : null);
+      break;
+    case "lead.customer_not_passed":
+    case "lead.added_success":
+    case "lead.deal_done":
+      safeCall(typeof loadLeadsMonitor === "function" ? loadLeadsMonitor : null);
+      safeCall(typeof loadLeadStats === "function" ? loadLeadStats : null);
+      safeCall(typeof loadSalesLeads === "function" ? loadSalesLeads : null);
+      break;
+    case "collaboration.requested":
+    case "collaboration.handled":
+      safeCall(typeof loadCollabTasks === "function" ? () => loadCollabTasks(state.collabTasksScope, state.collabTabFilter) : null);
+      safeCall(typeof loadSalesCollabs === "function" ? loadSalesCollabs : null);
+      break;
+    case "order.created":
+    case "order.updated":
+    case "order.abnormal":
+      safeCall(typeof loadSalesOrders === "function" ? loadSalesOrders : null);
+      safeCall(typeof loadAcademicOrders === "function" ? loadAcademicOrders : null);
+      safeCall(typeof loadAdminOrders === "function" ? loadAdminOrders : null);
+      break;
+    case "export.finished":
+      safeCall(typeof loadImportHistory === "function" ? loadImportHistory : null);
+      break;
+    case "supervisor.suggestion":
+    default:
+      // 仅提示，不做定向刷新
+      break;
+  }
+}
+
+// ===== P0-G 点击通知跳转详情 =====
+// 1) 标记已读；2) 按 targetType 跳到对应视图；3) 关闭通知面板。
+// 视图名按 app.js 实际命名映射：'leads' | 'sales-leads' | 'sales-lead-detail' 等。
+function handleNotificationClick(notif) {
+  if (!notif) return;
+  if (notif.unread) {
+    markNotificationRead(notif.id);
+  }
+  const role = state.user?.role;
+  const targetType = notif.targetType || notif.relatedType;
+  const targetId = notif.targetId || notif.relatedId;
+  const navigate = (view) => {
+    if (view && state.currentView !== view) {
+      state.currentView = view;
+    }
+    if (typeof renderApp === "function") renderApp();
+  };
+  const closePanel = () => {
+    state.notificationPanelOpen = false;
+    if (typeof updateNotificationPanelDom === "function") updateNotificationPanelDom();
+    if (typeof refreshNotificationPanelDom === "function") refreshNotificationPanelDom();
+  };
+
+  try {
+    if (targetType === "lead" && targetId) {
+      if (role === "sales" && typeof openSalesLeadDetail === "function") {
+        openSalesLeadDetail(targetId);
+      } else {
+        navigate(role === "sales" ? "sales-leads" : "leads");
+        if (typeof openLeadsMonitorWithContext === "function") {
+          openLeadsMonitorWithContext({ status: "" });
+        }
+      }
+    } else if (targetType === "order" && targetId) {
+      if (role === "sales" && typeof openSalesOrderDetail === "function") {
+        openSalesOrderDetail(targetId);
+      } else if (role === "academic" && typeof openAcademicOrderDetail === "function") {
+        openAcademicOrderDetail(targetId);
+      } else if (typeof openAdminOrderDetail === "function") {
+        openAdminOrderDetail(targetId);
+      } else {
+        navigate(role === "academic" ? "academic-orders" : (role === "sales" ? "sales-orders" : "orders"));
+      }
+    } else if (targetType === "collaboration_task" && targetId) {
+      if (typeof loadCollabTasks === "function") {
+        state.collabTasksScope = role === "sales" ? "mine" : "inbox";
+        state.collabTabFilter = "pending";
+        loadCollabTasks(state.collabTasksScope, state.collabTabFilter);
+      }
+      navigate(role === "sales" ? "sales-collabs" : "lead-collabs");
+    } else if (targetType === "export" && targetId) {
+      navigate("import-history");
+    } else {
+      // 未知类型：仅关闭面板，红点已减
+    }
+  } catch (err) {
+    // 静默：导航失败不影响红点逻辑
+    // eslint-disable-next-line no-console
+    console.error("[notification] navigation failed", err);
+  }
+  closePanel();
 }

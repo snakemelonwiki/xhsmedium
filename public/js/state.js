@@ -175,14 +175,27 @@ const state = {
   adminOrderDetailLoading: false,
   academicOrders: null,
   academicOrdersFilter: "",
-  academicOrdersScope: "mine",
+  academicOrderStatusFilter: "",
+  academicOrderScope: "mine",
+  academicOrderLimit: 20,
+  academicOrderOffset: 0,
+  academicOrdersTotal: 0,
   academicOrdersLoading: false,
   academicOrderDetailId: null,
   academicOrderDetail: null,
-  academicOrderFollowRecords: null,
+  academicOrderDetailLead: null,
+  academicOrderDetailTab: "info",
   academicOrderDetailLoading: false,
   academicAbnormalOrders: null,
-  academicAbnormalLoading: false
+  academicAbnormalLoading: false,
+  // §5.1 P0-D 教务端首页 dashboard + 新 sidebar 视图
+  academicStats: null,
+  academicStatsLoading: false,
+  academicReminders: null,
+  academicRemindersLoading: false,
+  academicExports: null,
+  academicExportsLoading: false,
+  academicMessagesTab: "all"
 };
 
 const POST_TYPES = ["素人贴", "话题贴", "获客贴"];
