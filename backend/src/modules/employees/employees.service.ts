@@ -38,7 +38,7 @@ export class EmployeesService {
    * 查询全部员工编号用于生成下一个编号。
    */
   async findAllCodes(): Promise<string[]> {
-    const rows = await this.employeeRepository.find({ select: ['employeeCode'] as any });
+    const rows = await this.employeeRepository.find({ select: { employeeCode: true } });
     return rows.map((e) => e.employeeCode);
   }
 
