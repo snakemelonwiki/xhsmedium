@@ -98,7 +98,19 @@ export class OrdersService {
         throw new NotFoundException('lead not found');
       }
       leadContact = lead.contactInfo || '';
-      await manager.update(Lead, { id: leadId }, { status: 'deal_closed' });
+      // S-P1-01 修复：closeDeal 旧实现写 `leads.status='deal_closed'`，但
+      //   - `leads.status` 的合法枚举（schema.sql §5）只有
+      //     new/assigned/in_followup/in_collaboration/operation_handled/added_success/invalid，
+      //     `deal_closed` 不在合法集合内，是"未定义值"（前端过滤不到、统计不到、SQL 兜底会丢失）。
+      //   - v1.2 文档 §10（客资状态机）期望把成交信号落在
+      //     `leads.process_status='deal_done'`，该值在 `leads.process_status` 合法枚举内
+      //     （not_contacted/waiting_pass/communicating/quoted/deal_pending/deal_done/invalid）。
+      //   - 同时让 `leads.status` 留在 `in_followup`（或保持原 status），保持状态机连续性；
+      //     不强行改 `leads.status='deal_done'`，因为该值不在 schema 的合法枚举里。
+      await manager.update(Lead, { id: leadId }, {
+        processStatus: 'deal_done',
+        status: 'in_followup',
+      });
       await manager.insert(Order, {
         id: orderId,
         leadId,
@@ -135,7 +147,7 @@ export class OrdersService {
       }
     } catch (err: any) {
       // eslint-disable-next-line no-console
-      console.error('[orders] notify deal_closed failed', err?.message || err);
+      console.error('[orders] notify deal closed failed', err?.message || err);
     }
 
     return orderId;
