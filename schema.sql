@@ -45,6 +45,8 @@ CREATE TABLE IF NOT EXISTS users (
   password     VARCHAR(255) NOT NULL                           COMMENT '登录密码：bcrypt hash 或历史明文',
   role         ENUM('admin','staff','owner','sales','academic') NOT NULL
                                                                 COMMENT '账号角色：admin主管端 | staff运营员工 | owner总后台 | sales销售 | academic教务',
+  failed_login_count INT NOT NULL DEFAULT 0 COMMENT '登录失败次数（>=5次触发账号锁定）',
+  last_failed_at    DATETIME NULL COMMENT '最近一次登录失败时间（UTC），成功登录后重置为NULL',
   employee_id  VARCHAR(64)  NULL                               COMMENT '关联员工ID（employees.id）；owner 等纯账号可为空',
   status       VARCHAR(32)  NOT NULL DEFAULT 'active'          COMMENT '账号状态：active正常 | inactive停用 | locked锁定',
   created_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '账号创建时间',
@@ -366,7 +368,7 @@ CREATE TABLE IF NOT EXISTS import_tasks (
 CREATE TABLE IF NOT EXISTS operation_logs (
   id          VARCHAR(64) PRIMARY KEY,
   user_id     VARCHAR(64) NOT NULL COMMENT '操作用户ID',
-  action      VARCHAR(64) NOT NULL COMMENT '操作动作',
+  action      VARCHAR(64) NOT NULL COMMENT '操作动作：login/logout/create/update/delete/disable/assign/reassign/status_change/export_create/export_download/view_sensitive/handover/abnormal_create/abnormal_close',
   target_type VARCHAR(32) NOT NULL COMMENT '目标类型',
   target_id   VARCHAR(64) NOT NULL COMMENT '目标ID',
   detail      TEXT        NULL COMMENT '详情',
@@ -397,7 +399,9 @@ CREATE TABLE IF NOT EXISTS exports (
 
   INDEX idx_exports_user       (user_id),
   INDEX idx_exports_status     (status),
-  INDEX idx_exports_created_at (created_at)
+  INDEX idx_exports_created_at (created_at),
+  INDEX idx_exports_user_created (user_id, created_at) COMMENT '导出中心列表 WHERE user_id=? ORDER BY created_at DESC',
+  INDEX idx_exports_user_type_created (user_id, export_type, created_at) COMMENT 'E-P1-03 1分钟防抖查询+导出类型筛选'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='导出任务表';
 
 -- ============================================================
