@@ -391,6 +391,28 @@ export class CollaborationTasksService {
     // 销售员之间不能互关协同任务，运营也不能关闭（非处理权限）。
     await this.assertCanClose(task, closeActor);
     await this.repo.update(id, { status: 'closed' as CollaborationTaskStatus });
+    // S-P1-04 修复：协同 close 成功后回退关联 lead.status。
+    // 旧实现 close 后 lead 仍卡在 in_collaboration（由 create() 写入），导致：
+    //   - 销售端 GET /api/leads?status=in_collaboration 永远看到这条 lead
+    //   - 状态机卡死，create 协同时若 lead 已经是 in_collaboration，create() 会无脑覆盖
+    //   - 销售端看不到 lead 已回到可继续跟进的状态
+    // 修复：close 成功后查 lead 当前 status；如果是 in_collaboration → 改为 in_followup
+    //   其它情况（in_followup / new / assigned / operation_handled / added_success / invalid）
+    //   不动，避免覆盖更下游的状态。
+    // 失败仅记日志，不阻断 close 主流程（lead 状态可后续由 updateBoard / addFollowRecord 修复）。
+    try {
+      const lead = await this.leadRepository.findOne({
+        where: { id: task.leadId },
+        select: { id: true, status: true },
+      });
+      if (lead && lead.status === 'in_collaboration') {
+        await this.leadRepository.update(task.leadId, { status: 'in_followup' });
+      }
+    } catch (err: any) {
+      this.logger.warn(
+        `collab close: lead status rollback failed (lead=${task.leadId}, task=${task.id}): ${err?.message || err}`,
+      );
+    }
     return this.repo.findOne({ where: { id } });
   }
 
