@@ -10,7 +10,7 @@ describe('PostsController refresh metrics', () => {
     const postsMetricsService = {
       fetchMetricsFromUrl: jest.fn().mockRejectedValue(new Error('登录已失效')),
     } as any;
-    const controller = new PostsController(postsService, postsMetricsService);
+    const controller = new PostsController(postsService, postsMetricsService, { log: jest.fn() } as any);
     const response = {
       status: jest.fn().mockReturnThis(),
       json: jest.fn().mockReturnThis(),

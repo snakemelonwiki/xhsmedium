@@ -6,9 +6,13 @@ import { PostMetricsHistory } from '../../entities/post-metrics-history.entity';
 import { PostsController } from './posts.controller';
 import { PostsService } from './posts.service';
 import { PostsMetricsService } from './posts-metrics.service';
+import { OperationLogsModule } from '../operation-logs/operation-logs.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Post, Lead, PostMetricsHistory])],
+  imports: [
+    TypeOrmModule.forFeature([Post, Lead, PostMetricsHistory]),
+    OperationLogsModule,
+  ],
   controllers: [PostsController],
   providers: [PostsService, PostsMetricsService],
   exports: [PostsService, PostsMetricsService],

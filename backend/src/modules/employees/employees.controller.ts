@@ -3,6 +3,7 @@ import { EmployeesService } from './employees.service';
 import { Request, Response } from 'express';
 import { OperationLogsService } from '../operation-logs/operation-logs.service';
 import { AuthGuard } from '../../common/auth.guard';
+import { getSessionUserId, getSessionRole } from '../../common/session.utils';
 import {
   OPERATION_LOG_ACTIONS,
   OPERATION_LOG_TARGET_TYPES,
@@ -14,15 +15,14 @@ import {
  * 检查当前 session 角色是否在白名单中。
  * 与 users.controller.ts 同款内联校验，保持 controllers 间风格一致。
  */
-function hasRole(session: any, allowed: string[]): boolean {
-  const role = String(session?.role || '').toLowerCase();
+function hasRole(role: string, allowed: string[]): boolean {
   return allowed.includes(role);
 }
 
 /** 员工资料变更（创建/更新/删除/启停）仅 admin/owner 可执行 */
 function ensureEmployeeAdmin(req: Request, res: Response): boolean {
-  const session = (req as any).session;
-  if (!hasRole(session, ['admin', 'owner'])) {
+  const role = getSessionRole(req);
+  if (!hasRole(role, ['admin', 'owner'])) {
     res.status(403).json({ ok: false, message: 'forbidden: 仅 admin/owner 可管理员工资料' });
     return false;
   }
@@ -74,8 +74,7 @@ export class EmployeesController {
   async create(@Body() body: any, @Req() req: Request, @Res() res: Response) {
     if (!ensureEmployeeAdmin(req, res)) return;
 
-    const session = (req as any).session;
-    const userId = session?.userId || session?.id || '';
+    const userId = getSessionUserId(req);
     const allCodes = await this.employeesService.findAllCodes();
     const maxNum = allCodes.length === 0 ? 0 : Math.max(...allCodes.map((c) => Number(String(c).replace('EMP', '')) || 0));
     const employeeCode = `EMP${String(maxNum + 1).padStart(4, '0')}`;
@@ -108,11 +107,35 @@ export class EmployeesController {
 
   /**
    * 更新员工启停状态。
+   * - 当目标 status 属于"离职/停用"语义时，写一条 DISABLE 操作日志；
+   * - 普通 status 变更（在职/试用期 等）按 UPDATE 记录。
    */
   @Patch(':id/status')
   async updateStatus(@Param('id') id: string, @Body() body: any, @Req() req: Request, @Res() res: Response) {
     if (!ensureEmployeeAdmin(req, res)) return;
+    const userId = getSessionUserId(req);
+    const before = await this.employeesService.findById(id);
     await this.employeesService.updateStatus(id, body.status);
+    // E/P1-01: 把"停用/离职"这类 status 变更归到 OPERATION_LOG_ACTIONS.DISABLE，
+    // 其余 status 变更（在职/试用期 等）按 UPDATE 记录。
+    const nextStatus = String(body.status || '').trim();
+    const isDisable = ['离职', '停用', 'inactive', 'disabled', '离职员工'].includes(nextStatus);
+    try {
+      await this.operationLogs.log({
+        userId,
+        action: isDisable ? OPERATION_LOG_ACTIONS.DISABLE : OPERATION_LOG_ACTIONS.UPDATE,
+        targetType: OPERATION_LOG_TARGET_TYPES.EMPLOYEE,
+        targetId: id,
+        detail: stringifyDetail({
+          from: before?.status || null,
+          to: nextStatus || null,
+        }),
+        ip: parseIp(req),
+      });
+    } catch (logErr) {
+      // eslint-disable-next-line no-console
+      console.error('[employees] operation log failed', (logErr as any)?.message || logErr);
+    }
     return res.json({ ok: true });
   }
 
@@ -134,11 +157,30 @@ export class EmployeesController {
 
   /**
    * 删除员工，保持现有服务删除策略。
+   * E/P1-01: 写一条 DELETE 操作日志（targetType=employee），与 accounts/leads 保持口径一致。
    */
   @Delete(':id')
   async remove(@Param('id') id: string, @Req() req: Request, @Res() res: Response) {
     if (!ensureEmployeeAdmin(req, res)) return;
+    const userId = getSessionUserId(req);
+    const before = await this.employeesService.findById(id);
     await this.employeesService.remove(id);
+    try {
+      await this.operationLogs.log({
+        userId,
+        action: OPERATION_LOG_ACTIONS.DELETE,
+        targetType: OPERATION_LOG_TARGET_TYPES.EMPLOYEE,
+        targetId: id,
+        detail: stringifyDetail({
+          employeeCode: before?.employeeCode || null,
+          name: before?.name || null,
+        }),
+        ip: parseIp(req),
+      });
+    } catch (logErr) {
+      // eslint-disable-next-line no-console
+      console.error('[employees] operation log failed', (logErr as any)?.message || logErr);
+    }
     return res.json({ ok: true });
   }
 
@@ -147,8 +189,7 @@ export class EmployeesController {
    */
   private async updateEmployee(id: string, body: any, req: Request, res: Response) {
     if (!ensureEmployeeAdmin(req, res)) return;
-    const session = (req as any).session;
-    const userId = session?.userId || session?.id || '';
+    const userId = getSessionUserId(req);
     await this.employeesService.update(id, {
       name: body.name,
       phone: body.phone || null,

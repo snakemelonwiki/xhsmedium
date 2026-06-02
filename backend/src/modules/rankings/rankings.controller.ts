@@ -2,6 +2,7 @@ import { Controller, Get, Query, Req, Res } from '@nestjs/common';
 import { RankingsService } from './rankings.service';
 import { Request, Response } from 'express';
 import { todayString, yesterdayString } from '../../shared/utils/date-utils';
+import { getSessionUserId } from '../../common/session.utils';
 
 @Controller('rankings')
 export class RankingsController {
@@ -63,8 +64,7 @@ export class RankingsController {
    */
   @Get('learning-posts')
   async getLearningPosts(@Query('days') days: string | undefined, @Req() req: Request, @Res() res: Response) {
-    const session = (req as any).session;
-    const userId: string = session?.userId || '';
+    const userId: string = getSessionUserId(req);
     const parsed = Number(days);
     const safeDays = Number.isFinite(parsed) && parsed > 0 ? parsed : 7;
     const rows = await this.rankingsService.getLearningPosts(safeDays, userId);

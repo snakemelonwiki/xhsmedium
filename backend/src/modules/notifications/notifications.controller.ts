@@ -2,6 +2,7 @@ import { Controller, Get, Post, Patch, Param, Req, Res, Query, Body, UseGuards }
 import { NotificationsService } from './notifications.service';
 import { Request, Response } from 'express';
 import { AuthGuard } from '../../common/auth.guard';
+import { getSessionUserId } from '../../common/session.utils';
 
 @Controller('notifications')
 @UseGuards(AuthGuard)
@@ -16,7 +17,7 @@ export class NotificationsController {
   ) {
     const session = (req as any).session;
     const user = (req as any).user;
-    const userId = session?.userId || session?.id || user?.sub || user?.id || actorUserId || '';
+    const userId = getSessionUserId(req) || actorUserId || '';
     const userRole = session?.role || user?.role || 'staff';
     const portType = this.resolvePortType(userRole);
     const unreadCount = await this.notificationsService.countUnread(userId, portType);
@@ -35,7 +36,7 @@ export class NotificationsController {
   ) {
     const session = (req as any).session;
     const user = (req as any).user;
-    const userId = session?.userId || session?.id || user?.sub || user?.id || actorUserId || '';
+    const userId = getSessionUserId(req) || actorUserId || '';
     const userRole = session?.role || user?.role || 'staff';
 
     const portType = this.resolvePortType(userRole);
@@ -65,7 +66,7 @@ export class NotificationsController {
     @Res() res: Response,
   ) {
     const session = (req as any).session;
-    const userId = session?.userId || session?.id || body?.actorUserId || '';
+    const userId = getSessionUserId(req) || body?.actorUserId || '';
     const ok = await this.notificationsService.markRead(id, userId);
     return res.json({ ok, changed: ok });
   }
@@ -78,7 +79,7 @@ export class NotificationsController {
     @Res() res: Response,
   ) {
     const session = (req as any).session;
-    const userId = session?.userId || session?.id || body?.actorUserId || '';
+    const userId = getSessionUserId(req) || body?.actorUserId || '';
     const ok = await this.notificationsService.markRead(id, userId);
     return res.json({ ok, changed: ok });
   }
@@ -90,7 +91,7 @@ export class NotificationsController {
     @Res() res: Response,
   ) {
     const session = (req as any).session;
-    const userId = session?.userId || session?.id || body?.actorUserId || '';
+    const userId = getSessionUserId(req) || body?.actorUserId || '';
     const affected = await this.notificationsService.markAllRead(userId);
     return res.json({ ok: true, affected });
   }
@@ -107,7 +108,7 @@ export class NotificationsController {
     @Res() res: Response,
   ) {
     const session = (req as any).session;
-    const userId = session?.userId || session?.id || body?.actorUserId || '';
+    const userId = getSessionUserId(req) || body?.actorUserId || '';
     const rawIds = Array.isArray(body?.ids) ? body.ids : [];
     const ids: string[] = rawIds
       .map((id: unknown) => (id == null ? '' : String(id).trim()))
@@ -128,7 +129,7 @@ export class NotificationsController {
     @Res() res: Response,
   ) {
     const session = (req as any).session;
-    const userId = session?.userId || session?.id || body?.actorUserId || '';
+    const userId = getSessionUserId(req) || body?.actorUserId || '';
     const typeCode = body?.typeCode ? String(body.typeCode).trim() : undefined;
     const affected = await this.notificationsService.markAllRead(userId, typeCode || undefined);
     return res.json({ ok: true, affected });

@@ -5,12 +5,21 @@ import { Request, Response } from 'express';
 import { makeId } from '../../shared/utils/id-generator';
 import { todayString } from '../../shared/utils/date-utils';
 import { DebounceGuard } from '../../common/debounce.guard';
+import { OperationLogsService } from '../operation-logs/operation-logs.service';
+import { getSessionUserId } from '../../common/session.utils';
+import {
+  OPERATION_LOG_ACTIONS,
+  OPERATION_LOG_TARGET_TYPES,
+  parseIp,
+  stringifyDetail,
+} from '../../shared/operation-logs.constants';
 
 @Controller('posts')
 export class PostsController {
   constructor(
     private readonly postsService: PostsService,
     private readonly postsMetricsService: PostsMetricsService,
+    private readonly operationLogs: OperationLogsService,
   ) {}
 
   @Get()
@@ -100,7 +109,7 @@ export class PostsController {
   ) {
     const session = (req as any).session;
     const role = session?.role || '';
-    const userId = session?.userId || session?.id || '';
+    const userId = getSessionUserId(req);
     const allowedViews = new Set(['all', 'excellent', 'favorites']);
     const requestedView = allowedViews.has(String(view || '').toLowerCase())
       ? String(view || '').toLowerCase()
@@ -322,7 +331,26 @@ export class PostsController {
         return res.status(403).json({ ok: false, message: '无权操作他人作品' });
       }
     }
+    // E/P1-01: 写一条 DELETE 操作日志（targetType=post）。
+    const before = await this.postsService.findById(id);
     await this.postsService.remove(id);
+    try {
+      await this.operationLogs.log({
+        userId: getSessionUserId(req),
+        action: OPERATION_LOG_ACTIONS.DELETE,
+        targetType: OPERATION_LOG_TARGET_TYPES.POST,
+        targetId: id,
+        detail: stringifyDetail({
+          title: before?.title || null,
+          platform: before?.platform || null,
+          employeeId: before?.employeeId || null,
+        }),
+        ip: parseIp(req),
+      });
+    } catch (logErr) {
+      // eslint-disable-next-line no-console
+      console.error('[posts] operation log failed', (logErr as any)?.message || logErr);
+    }
     return res.json({ ok: true });
   }
 }

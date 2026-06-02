@@ -66,6 +66,11 @@ describe('CollaborationTasksService', () => {
     expect(notifications.create).toHaveBeenCalledWith(expect.objectContaining({
       receiverIds: ['sales-1'],
       senderId: 'op-user-1',
+      // N-P1-06 修复：relatedId 指向 task.id（与 COLLAB_REQUESTED 行为一致），
+      // 让 routeHint /sales/collaboration?taskId=<id> 能定位到任务页。
+      // 旧实现 relatedId=task.leadId + relatedType='lead' 会跳到客资详情而非任务。
+      relatedId: 'task-1',
+      relatedType: 'collaboration_task',
     }));
   });
 

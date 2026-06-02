@@ -1,4 +1,5 @@
 import { Injectable, CanActivate, ExecutionContext, HttpException, HttpStatus } from '@nestjs/common';
+import { getSessionUserId } from './session.utils';
 
 @Injectable()
 export class DebounceGuard implements CanActivate {
@@ -29,7 +30,7 @@ export class DebounceGuard implements CanActivate {
   }
 
   private generateKey(request: any): string {
-    const userId = request.session?.userId || request.user?.sub || 'anonymous';
+    const userId = getSessionUserId(request) || 'anonymous';
     const method = request.method;
     const path = request.route?.path || request.url;
     return `${userId}:${method}:${path}`;

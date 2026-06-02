@@ -61,6 +61,39 @@ export class User {
   })
   status: string;
 
+  /**
+   * 连续登录失败次数。
+   * - 0     表示无失败记录
+   * - 1..4  表示最近失败次数（未到锁定阈值）
+   * - >= 5  触发锁定（同时 status='locked'）
+   *
+   * 登录成功后会重置为 0。设计上与 status='locked' 联动：一旦锁定，
+   * 后续登录请求会先检查 status，失败计数器仅用于"未锁定时累计"。
+   */
+  @Column({
+    name: 'failed_login_count',
+    type: 'int',
+    default: 0,
+    comment: '连续登录失败次数：>= 5 触发锁定并 status=locked',
+  })
+  failedLoginCount: number;
+
+  /**
+   * 最近一次登录失败的时间戳（UTC）。
+   * 用途：
+   * 1. 排查"用户被锁定但不知道何时锁"的问题（前端展示）
+   * 2. 为后续 v1.2.1 引入"失败计数 24h 窗口自动重置"预留字段
+   *
+   * 登录成功后会置 NULL。
+   */
+  @Column({
+    name: 'last_failed_at',
+    type: 'datetime',
+    nullable: true,
+    comment: '最近一次登录失败时间（UTC），成功登录后置 NULL',
+  })
+  lastFailedAt: Date | null;
+
   /** 账号创建时间 */
   @CreateDateColumn({ name: 'created_at', comment: '账号创建时间' })
   createdAt: Date;

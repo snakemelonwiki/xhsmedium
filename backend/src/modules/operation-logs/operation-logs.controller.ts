@@ -2,6 +2,7 @@ import { Controller, Get, Param, Req, Res, Query, UseGuards } from '@nestjs/comm
 import { Request, Response } from 'express';
 import { OperationLogsService } from './operation-logs.service';
 import { AuthGuard } from '../../common/auth.guard';
+import { getSessionUserId, getSessionRole } from '../../common/session.utils';
 
 /**
  * 操作日志只读接口的鉴权策略：
@@ -32,9 +33,8 @@ export class OperationLogsController {
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
   ) {
-    const session = (req as any).session;
-    const currentUserId: string = session?.userId || session?.id || '';
-    const sessionRole: string = session?.role || '';
+    const currentUserId: string = getSessionUserId(req);
+    const sessionRole: string = getSessionRole(req);
     const isAdminLike = sessionRole === 'admin' || sessionRole === 'owner';
 
     const limitNum = Number(limit) || 50;
@@ -63,9 +63,8 @@ export class OperationLogsController {
     @Req() req: Request,
     @Res() res: Response,
   ) {
-    const session = (req as any).session;
-    const currentUserId: string = session?.userId || session?.id || '';
-    const sessionRole: string = session?.role || '';
+    const currentUserId: string = getSessionUserId(req);
+    const sessionRole: string = getSessionRole(req);
     const isAdminLike = sessionRole === 'admin' || sessionRole === 'owner';
 
     const row = await this.service.findOne(id);

@@ -3,6 +3,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { Request, Response } from 'express';
 import * as path from 'path';
 import { StorageService } from '../../shared/storage/storage.service';
+import { getSessionUserId } from '../../common/session.utils';
 
 type UploadedMulterFile = {
   buffer: Buffer;
@@ -86,7 +87,7 @@ export class UploadsController {
       allowedMimeTypes: Array.from(ALLOWED_MIME),
       allowedExt: Array.from(ALLOWED_EXT),
       // 仅为前端诊断；token 解析不强制
-      session: (req as any)?.session?.userId ? 'authenticated' : 'anonymous',
+      session: getSessionUserId(req) ? 'authenticated' : 'anonymous',
     };
   }
 

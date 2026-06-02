@@ -7,7 +7,7 @@ describe('PostsController permissions', () => {
       update: jest.fn(),
       remove: jest.fn(),
     } as any;
-    const controller = new PostsController(postsService, {} as any);
+    const controller = new PostsController(postsService, {} as any, { log: jest.fn() } as any);
     const response = {
       status: jest.fn().mockReturnThis(),
       json: jest.fn().mockReturnThis(),
@@ -52,7 +52,7 @@ describe('PostsController pagination', () => {
     const postsService = {
       findPaged: jest.fn().mockResolvedValue({ total: 21, items: [{ id: 'post-1' }], limit: 20, offset: 0 }),
     } as any;
-    const controller = new PostsController(postsService, {} as any);
+    const controller = new PostsController(postsService, {} as any, { log: jest.fn() } as any);
     const res = response();
 
     await controller.findAll({ session: { role: 'admin', userId: '' } } as any, res, '20', '0');
@@ -69,7 +69,7 @@ describe('PostsController pagination', () => {
     const postsService = {
       findPaged: jest.fn().mockResolvedValue({ total: 30, items: [{ id: 'post-11' }], limit: 10, offset: 10 }),
     } as any;
-    const controller = new PostsController(postsService, {} as any);
+    const controller = new PostsController(postsService, {} as any, { log: jest.fn() } as any);
     const res = response();
 
     await controller.findAll({ session: { role: 'staff', employeeId: 'emp-1', userId: '' } } as any, res, '10', '10');
@@ -97,7 +97,7 @@ describe('PostsController A端契约补齐', () => {
         title: '小红书作品',
       }),
     } as any;
-    const controller = new PostsController(postsService, {} as any);
+    const controller = new PostsController(postsService, {} as any, { log: jest.fn() } as any);
     const res = response();
 
     await controller.parseLink({ postUrl: 'https://www.xiaohongshu.com/explore/abc' }, res);
@@ -118,7 +118,7 @@ describe('PostsController A端契约补齐', () => {
       findDuplicateByUrl: jest.fn().mockResolvedValue({ id: 'post-existing', title: '已存在作品' }),
       create: jest.fn(),
     } as any;
-    const controller = new PostsController(postsService, {} as any);
+    const controller = new PostsController(postsService, {} as any, { log: jest.fn() } as any);
     const res = response();
 
     await controller.create({ postUrl: 'https://example.com/post', title: '新作品' }, { session: { employeeId: 'emp-1' } } as any, res);
@@ -133,7 +133,7 @@ describe('PostsController A端契约补齐', () => {
       findDuplicateByUrl: jest.fn().mockResolvedValue(null),
       update: jest.fn(),
     } as any;
-    const controller = new PostsController(postsService, {} as any);
+    const controller = new PostsController(postsService, {} as any, { log: jest.fn() } as any);
     const res = response();
 
     await controller.patch('post-1', { title: '新标题' }, { session: { role: 'staff', employeeId: 'emp-1' } } as any, res);
@@ -148,7 +148,7 @@ describe('PostsController A端契约补齐', () => {
       updateMetrics: jest.fn(),
       recordMetricsHistory: jest.fn(),
     } as any;
-    const controller = new PostsController(postsService, {} as any);
+    const controller = new PostsController(postsService, {} as any, { log: jest.fn() } as any);
     const res = response();
 
     await controller.saveMetrics('post-1', { likes: 10, comments: 2, favorites: 3, shares: 4 }, res);
@@ -167,7 +167,7 @@ describe('PostsController A端契约补齐', () => {
     const postsService = {
       getMetricsHistory: jest.fn().mockResolvedValue([{ id: 'metric-1', likes: 12 }]),
     } as any;
-    const controller = new PostsController(postsService, {} as any);
+    const controller = new PostsController(postsService, {} as any, { log: jest.fn() } as any);
     const res = response();
 
     await controller.getMetrics('post-1', res);

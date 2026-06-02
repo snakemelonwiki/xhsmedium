@@ -7,6 +7,7 @@ import { RemindersService } from './reminders.service';
 import { OrderAbnormalFeedbackService } from './order-abnormal-feedback.service';
 import { OperationLogsService } from '../operation-logs/operation-logs.service';
 import { AuthGuard } from '../../common/auth.guard';
+import { getSessionUserId } from '../../common/session.utils';
 import {
   OPERATION_LOG_ACTIONS,
   OPERATION_LOG_TARGET_TYPES,
@@ -64,7 +65,7 @@ export class OrdersController {
     @Res() res: Response,
   ) {
     const session = (req as any).session;
-    const salesUserId = session?.userId || session?.id || body?.salesUserId || '';
+    const salesUserId = getSessionUserId(req) || body?.salesUserId || '';
     if (!salesUserId) {
       return res.status(401).json({ ok: false, message: 'unauthenticated' });
     }
@@ -118,7 +119,7 @@ export class OrdersController {
     @Query('offset') offset?: string,
   ) {
     const session = (req as any).session;
-    const currentUserId = session?.userId || session?.id || actorUserId || '';
+    const currentUserId = getSessionUserId(req) || actorUserId || '';
     const sessionRole = session?.role || actorRole;
     // 兼容多种搜索字段命名（keyword / q / search 任一即生效）。
     const mergedKeyword = (keyword || q || search || '').trim() || undefined;
@@ -176,7 +177,7 @@ export class OrdersController {
     @Query('limit') limit?: string,
   ) {
     const session = (req as any).session;
-    const userId = session?.userId || session?.id || '';
+    const userId = getSessionUserId(req) || '';
     if (!userId) {
       return res.status(401).json({ ok: false, message: 'unauthenticated' });
     }
@@ -207,7 +208,7 @@ export class OrdersController {
     const session = (req as any).session;
     try {
       const order = await this.ordersService.findOne(id, {
-        userId: session?.userId || session?.id || '',
+        userId: getSessionUserId(req) ||'',
         role: session?.role || '',
       });
       return res.json(order);
@@ -225,7 +226,7 @@ export class OrdersController {
     @Res() res: Response,
   ) {
     const session = (req as any).session;
-    const userId = session?.userId || session?.id || '';
+    const userId = getSessionUserId(req) || '';
     const role = session?.role || '';
     try {
       // P0 越权修复 (TC-PERM-023)：sales/academic 只能改自己经手 / 自己已认领 / 池单。
@@ -234,7 +235,7 @@ export class OrdersController {
       if (!canAccess) {
         return res.status(404).json({ ok: false, message: 'not found' });
       }
-      await this.ordersService.update(id, {
+      await this.ordersService.update(id, userId, {
         order_status: body?.order_status,
         paid_status: body?.paid_status,
         academic_user_id: body?.academic_user_id,
@@ -275,7 +276,7 @@ export class OrdersController {
     @Res() res: Response,
   ) {
     const session = (req as any).session;
-    const actorUserId = session?.userId || session?.id || body?.actorUserId || '';
+    const actorUserId = getSessionUserId(req) || body?.actorUserId || '';
     const role = session?.role || '';
     try {
       // P0 越权修复：跟进记录必须由有订单可见性的用户提交，否则返 404。
@@ -354,7 +355,7 @@ export class OrdersController {
     @Res() res: Response,
   ) {
     const session = (req as any).session;
-    const actorUserId = session?.userId || session?.id || '';
+    const actorUserId = getSessionUserId(req) || '';
     if (!actorUserId) {
       return res.status(401).json({ ok: false, message: 'unauthenticated' });
     }
@@ -383,7 +384,7 @@ export class OrdersController {
     @Res() res: Response,
   ) {
     const session = (req as any).session;
-    const actorUserId = session?.userId || session?.id || '';
+    const actorUserId = getSessionUserId(req) || '';
     if (!actorUserId) {
       return res.status(401).json({ ok: false, message: 'unauthenticated' });
     }
@@ -413,7 +414,7 @@ export class OrdersController {
     @Res() res: Response,
   ) {
     const session = (req as any).session;
-    const actorUserId = session?.userId || session?.id || '';
+    const actorUserId = getSessionUserId(req) || '';
     if (!actorUserId) {
       return res.status(401).json({ ok: false, message: 'unauthenticated' });
     }
@@ -448,7 +449,7 @@ export class OrdersController {
   ) {
     const session = (req as any).session;
     const actor = {
-      userId: session?.userId || session?.id || body?.actorUserId || '',
+      userId: getSessionUserId(req) ||body?.actorUserId || '',
       role: session?.role || body?.actorRole || '',
     };
     if (!actor.userId) {
@@ -498,7 +499,7 @@ export class OrdersController {
   ) {
     const session = (req as any).session;
     const actor = {
-      userId: session?.userId || session?.id || '',
+      userId: getSessionUserId(req) ||'',
       role: session?.role || '',
     };
     if (!actor.userId) {
@@ -527,7 +528,7 @@ export class OrdersController {
   ) {
     const session = (req as any).session;
     const actor = {
-      userId: session?.userId || session?.id || body?.actorUserId || '',
+      userId: getSessionUserId(req) ||body?.actorUserId || '',
       role: session?.role || body?.actorRole || '',
     };
     if (!actor.userId) {

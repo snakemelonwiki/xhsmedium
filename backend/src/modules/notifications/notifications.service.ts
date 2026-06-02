@@ -254,6 +254,19 @@ export class NotificationsService {
     if (targetType === 'order') {
       return portType === 'academic' ? `/academic/orders/${targetId}` : `/sales/orders/${targetId}`;
     }
+    // N-P1-08 修复：导出/导入通知此前无 routeHint 分支，用户点击只 markRead 不跳转。
+    // 导出：当前实现只有 /academic/exports 页面可消费（前端不存在 /operation/exports
+    //       /sales/exports /admin/exports），因此无论 portType 都跳到 academic 页。
+    //       未来新增其它端口的导出页时，再按 portType 分支细化。
+    // 导入：admin 与 operation 两个页面均可消费，admin 优先。
+    if (targetType === 'export') {
+      return `/academic/exports?taskId=${targetId}`;
+    }
+    if (targetType === 'import_task' || targetType === 'import') {
+      return portType === 'admin'
+        ? `/admin/imports?taskId=${targetId}`
+        : `/operation/imports?taskId=${targetId}`;
+    }
     return null;
   }
 }

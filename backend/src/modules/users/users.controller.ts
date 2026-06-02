@@ -4,6 +4,7 @@ import { Request, Response } from 'express';
 import { makeId } from '../../shared/utils/id-generator';
 import { OperationLogsService } from '../operation-logs/operation-logs.service';
 import { AuthGuard } from '../../common/auth.guard';
+import { getSessionUserId, getSessionRole } from '../../common/session.utils';
 import {
   OPERATION_LOG_ACTIONS,
   OPERATION_LOG_TARGET_TYPES,
@@ -16,15 +17,14 @@ import {
  * 用于 B/P0-05 修复：users/employees 控制器内部细粒度角色校验，
  * 避免引入未在仓库内使用过的 @Roles 装饰器（保持与 leads / exports / collab 一致的内联校验风格）。
  */
-function hasRole(session: any, allowed: string[]): boolean {
-  const role = String(session?.role || '').toLowerCase();
+function hasRole(role: string, allowed: string[]): boolean {
   return allowed.includes(role);
 }
 
 /** 仅 admin / owner 可访问用户账号管理。 */
 function ensureAccountManager(req: Request, res: Response): boolean {
-  const session = (req as any).session;
-  if (!hasRole(session, ['admin', 'owner'])) {
+  const role = getSessionRole(req);
+  if (!hasRole(role, ['admin', 'owner'])) {
     res.status(403).json({ ok: false, message: 'forbidden: 仅 admin/owner 可访问用户账号' });
     return false;
   }
@@ -90,8 +90,7 @@ export class UsersController {
     // B/P0-05: 创建账号属于高敏感操作，仅 admin/owner 可执行
     if (!ensureAccountManager(req, res)) return;
 
-    const session = (req as any).session;
-    const userId = session?.userId || session?.id || '';
+    const userId = getSessionUserId(req);
     const { username, password, employeeId, status } = body;
     const duplicated = await this.usersService.findByUsername(username);
     if (duplicated) {
@@ -121,6 +120,25 @@ export class UsersController {
     } catch (logErr) {
       // eslint-disable-next-line no-console
       console.error('[users] operation log failed', (logErr as any)?.message || logErr);
+    }
+    // E/P1-01: 账号创建过程中会接触到明文 password 字段，单独记一条 VIEW_SENSITIVE
+    // 便于审计追溯哪些管理员经手过明文凭证。仅记录"是否含密码"和操作人，不落密码本身。
+    try {
+      await this.operationLogs.log({
+        userId,
+        action: OPERATION_LOG_ACTIONS.VIEW_SENSITIVE,
+        targetType: OPERATION_LOG_TARGET_TYPES.USER,
+        targetId: '',
+        detail: stringifyDetail({
+          username,
+          hasPassword: Boolean(password),
+          employeeId,
+        }),
+        ip: parseIp(req),
+      });
+    } catch (logErr) {
+      // eslint-disable-next-line no-console
+      console.error('[users] view_sensitive log failed', (logErr as any)?.message || logErr);
     }
     return res.json({ ok: true });
   }

@@ -2,6 +2,7 @@ import { Body, Controller, Get, Param, Post, Query, Req, Res, UploadedFile, UseI
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Request, Response } from 'express';
 import { ImportsService } from './imports.service';
+import { getSessionUserId } from '../../common/session.utils';
 
 @Controller()
 export class ImportsController {
@@ -10,7 +11,7 @@ export class ImportsController {
   @Post('leads/import-paste')
   async importPaste(@Body() body: any, @Req() req: Request, @Res() res: Response) {
     const session = (req as any).session;
-    const actorUserId = session?.userId || session?.id || body?.actorUserId || 'anonymous';
+    const actorUserId = getSessionUserId(req) || body?.actorUserId || 'anonymous';
     const actorEmployeeId = session?.employeeId || body?.employeeId || '';
     const rows = Array.isArray(body?.rows) ? body.rows : [];
     if (rows.length === 0) {
@@ -24,7 +25,7 @@ export class ImportsController {
   @UseInterceptors(FileInterceptor('file'))
   async importExcel(@UploadedFile() file: any, @Body() body: any, @Req() req: Request, @Res() res: Response) {
     const session = (req as any).session;
-    const actorUserId = session?.userId || session?.id || body?.actorUserId || 'anonymous';
+    const actorUserId = getSessionUserId(req) || body?.actorUserId || 'anonymous';
     const actorEmployeeId = session?.employeeId || body?.employeeId || '';
     const rows = this.rowsFromUpload(file, body);
     if (rows.length === 0) {
@@ -39,7 +40,7 @@ export class ImportsController {
   @Post('posts/import-paste')
   async importPostsPaste(@Body() body: any, @Req() req: Request, @Res() res: Response) {
     const session = (req as any).session;
-    const actorUserId = session?.userId || session?.id || body?.actorUserId || 'anonymous';
+    const actorUserId = getSessionUserId(req) || body?.actorUserId || 'anonymous';
     const actorEmployeeId = session?.employeeId || body?.employeeId || '';
     const rows = Array.isArray(body?.rows) ? body.rows : [];
     if (rows.length === 0) {
@@ -53,7 +54,7 @@ export class ImportsController {
   @UseInterceptors(FileInterceptor('file'))
   async importPostsExcel(@UploadedFile() file: any, @Body() body: any, @Req() req: Request, @Res() res: Response) {
     const session = (req as any).session;
-    const actorUserId = session?.userId || session?.id || body?.actorUserId || 'anonymous';
+    const actorUserId = getSessionUserId(req) || body?.actorUserId || 'anonymous';
     const actorEmployeeId = session?.employeeId || body?.employeeId || '';
     const rows = this.rowsFromUpload(file, body);
     if (rows.length === 0) {
@@ -83,7 +84,7 @@ export class ImportsController {
     @Query('offset') offset?: string,
   ) {
     const session = (req as any).session;
-    const actorUserId = session?.userId || session?.id || 'anonymous';
+    const actorUserId = getSessionUserId(req) || 'anonymous';
     // 任一存在 → 走 paged → 返回对象；否则数组（兼容旧前端）
     if (limit !== undefined || offset !== undefined) {
       const paged = await this.importsService.listTasksPaged(

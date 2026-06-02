@@ -317,18 +317,26 @@ export class CollaborationTasksService {
     });
 
     // §11.1 collab_handled: 协同任务被处理完结，回写给原发起人。
+    // N-P1-06 修复：relatedId 统一指向 task.id（与 COLLAB_REQUESTED 同语义），
+    // 使 buildRouteHint 拼出的 URL `/sales/collaboration?taskId=<id>` 能正确定位任务。
+    // 旧实现 relatedId=task.leadId + relatedType='lead'，会让前端跳到客资详情而
+    // 看不到 task 状态，造成"协同处理完结通知"无法溯源。
+    // metadata 字段因约束"不改 DB schema"无法新增；leadId 留痕通过 content 嵌入
+    // 「关联客资: <id>」文本承载，前端展示但不影响路由跳转。
     if (task.requesterId) {
+      const leadRef = task.leadId ? `\n关联客资: ${task.leadId}` : '';
+      const baseContent = cleanNote
+        ? `您发起的协同任务已处理: ${cleanNote}`
+        : '您发起的协同任务已处理';
       await this.notificationsService.create({
         receiverIds: [task.requesterId],
         senderId: task.handlerId || handlerActor.actorUserId || null,
         portType: 'sales',
         typeCode: NOTIFICATION_TYPES.COLLAB_HANDLED,
         title: '协同任务已处理',
-        content: cleanNote
-          ? `您发起的协同任务已处理: ${cleanNote}`
-          : '您发起的协同任务已处理',
-        relatedId: task.leadId,
-        relatedType: 'lead',
+        content: `${baseContent}${leadRef}`,
+        relatedId: task.id,
+        relatedType: 'collaboration_task',
       });
     }
 

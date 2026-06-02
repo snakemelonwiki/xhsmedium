@@ -31,6 +31,20 @@ const ALLOWED_ORDER_STATUS: OrderStatus[] = [
 ];
 const ALLOWED_HANDOVER_STATUS: HandoverStatusCode[] = [...HANDOVER_STATUS_CODES];
 
+// N-P1-02: ORDER_UPDATED 通知去重窗口。
+// 同一 (orderId, 变化字段组合) 在窗口内只发一次，避免客户端 PATCH 重试
+// 或前端多次保存产生刷屏。30s 与典型用户的"再次点保存"操作间隔吻合。
+const ORDER_UPDATED_DEDUP_MS = 30_000;
+
+const ORDER_UPDATED_FIELD_LABELS: Record<string, string> = {
+  orderStatus: '订单状态',
+  paidStatus: '付款状态',
+  academicUserId: '教务归属',
+  serviceType: '服务类型',
+  amount: '订单金额',
+  remark: '备注',
+};
+
 interface CloseDealDto {
   serviceType?: string | null;
   amount?: number | string | null;
@@ -82,6 +96,13 @@ export class OrdersService {
     private readonly dataSource: DataSource,
     private readonly notificationsService: NotificationsService,
   ) {}
+
+  /**
+   * N-P1-02: ORDER_UPDATED 通知去重缓存。key = `orderId:changedFieldsSorted`，
+   * value = 上次发送时间戳。仅进程内有效，进程重启后清空。
+   * 用 Map 而非外部存储是为了避免引入新依赖 + 失败时宁可重复发也不漏发。
+   */
+  private readonly orderUpdatedDedup = new Map<string, number>();
 
   /**
    * Sales marks a lead as deal-closed and spawns a new order in a single transaction.
@@ -385,38 +406,133 @@ export class OrdersService {
     return Boolean(uid && (order.salesUserId === uid || order.academicUserId === uid));
   }
 
-  async update(id: string, dto: OrderPatchDto): Promise<void> {
+  async update(id: string, actorUserId: string, dto: OrderPatchDto): Promise<void> {
     const current = await this.orderRepository.findOne({ where: { id } });
     if (!current) {
       throw new NotFoundException('order not found');
     }
     const next: Partial<Order> = {};
+    const changedFields: string[] = [];
     if (dto.order_status !== undefined) {
       if (!ALLOWED_ORDER_STATUS.includes(dto.order_status)) {
         throw new BadRequestException('invalid order_status');
       }
-      next.orderStatus = dto.order_status;
+      if (dto.order_status !== current.orderStatus) {
+        changedFields.push('orderStatus');
+        next.orderStatus = dto.order_status;
+      }
     }
     if (dto.paid_status !== undefined) {
       if (!ALLOWED_PAID.includes(dto.paid_status)) {
         throw new BadRequestException('invalid paid_status');
       }
-      next.paidStatus = dto.paid_status;
+      if (dto.paid_status !== current.paidStatus) {
+        changedFields.push('paidStatus');
+        next.paidStatus = dto.paid_status;
+      }
     }
     if (dto.academic_user_id !== undefined) {
-      next.academicUserId = dto.academic_user_id || null;
+      const nextAcademic = dto.academic_user_id || null;
+      if (nextAcademic !== current.academicUserId) {
+        changedFields.push('academicUserId');
+        next.academicUserId = nextAcademic;
+      }
     }
     if (dto.service_type !== undefined) {
-      next.serviceType = dto.service_type || null;
+      const nextService = dto.service_type || null;
+      if (nextService !== current.serviceType) {
+        changedFields.push('serviceType');
+        next.serviceType = nextService;
+      }
     }
     if (dto.amount !== undefined) {
-      next.amount = dto.amount != null && dto.amount !== '' ? String(dto.amount) : null;
+      const nextAmount = dto.amount != null && dto.amount !== '' ? String(dto.amount) : null;
+      if (nextAmount !== current.amount) {
+        changedFields.push('amount');
+        next.amount = nextAmount;
+      }
     }
     if (dto.remark !== undefined) {
-      next.remark = dto.remark || null;
+      const nextRemark = dto.remark || null;
+      if (nextRemark !== current.remark) {
+        changedFields.push('remark');
+        next.remark = nextRemark;
+      }
     }
-    if (Object.keys(next).length === 0) return;
+    if (changedFields.length === 0) return;
     await this.orderRepository.update(id, next);
+
+    // N-P1-02: 订单状态/进度更新通知。
+    // 接收方：订单的销售（始终）+ 主管/admin 兜底；portType='sales'。
+    // 静默路径：通过 addFollowRecord 触发的更新可能很频繁——这里只覆盖显式
+    // PATCH 路由；addFollowRecord 自身已有 ORDER_ABNORMAL 通知，非异常节点
+    // 不重复发 ORDER_UPDATED 避免刷屏。
+    try {
+      await this.emitOrderUpdated(current, changedFields, actorUserId);
+    } catch (err: any) {
+      // eslint-disable-next-line no-console
+      console.error('[orders] notify order_updated failed', err?.message || err);
+    }
+  }
+
+  /**
+   * N-P1-02: 发送 ORDER_UPDATED 通知。包含：
+   * - 销售（order.salesUserId）—— 始终接收
+   * - admin/owner 兜底（避免销售离职/无销售时通知丢失）
+   * - 去重：同一 (orderId, changedFields 组合) 在 30s 内只发一次
+   */
+  private async emitOrderUpdated(
+    current: Order,
+    changedFields: string[],
+    actorUserId: string,
+  ): Promise<void> {
+    if (changedFields.length === 0) return;
+    const dedupKey = `${current.id}:${changedFields.slice().sort().join(',')}`;
+    const last = this.orderUpdatedDedup.get(dedupKey);
+    const now = Date.now();
+    if (last && now - last < ORDER_UPDATED_DEDUP_MS) {
+      return;
+    }
+    this.orderUpdatedDedup.set(dedupKey, now);
+    // 老条目回收，避免 Map 无限增长
+    if (this.orderUpdatedDedup.size > 256) {
+      const cutoff = now - ORDER_UPDATED_DEDUP_MS * 4;
+      for (const [k, ts] of this.orderUpdatedDedup) {
+        if (ts < cutoff) this.orderUpdatedDedup.delete(k);
+      }
+    }
+
+    const receivers = new Set<string>();
+    if (current.salesUserId && current.salesUserId !== actorUserId) {
+      receivers.add(current.salesUserId);
+    }
+    // 主管 / 总后台兜底
+    try {
+      const supervisors = await this.userRepository.find({
+        where: { role: In(['admin', 'owner']) as any },
+        select: { id: true },
+      });
+      for (const u of supervisors) {
+        if (u.id && u.id !== actorUserId) receivers.add(u.id);
+      }
+    } catch {
+      // 兜底查询失败不影响主流程
+    }
+    if (receivers.size === 0) return;
+
+    const fieldLabels = changedFields
+      .map((f) => ORDER_UPDATED_FIELD_LABELS[f] || f)
+      .join('、');
+    await this.notificationsService.create({
+      receiverIds: Array.from(receivers),
+      senderId: actorUserId || null,
+      portType: 'sales',
+      typeCode: NOTIFICATION_TYPES.ORDER_UPDATED,
+      title: '订单进度更新',
+      content: `订单 ${current.id} 更新了：${fieldLabels}`,
+      relatedId: current.id,
+      relatedType: 'order',
+    });
   }
 
   async addFollowRecord(

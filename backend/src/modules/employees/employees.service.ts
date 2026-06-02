@@ -43,6 +43,15 @@ export class EmployeesService {
   }
 
   /**
+   * 按 id 查单条员工，供 controller 写日志前取 before 快照。
+   * 不存在时返回 null，由 controller 自行决定要不要记日志。
+   */
+  async findById(id: string): Promise<Employee | null> {
+    if (!id) return null;
+    return this.employeeRepository.findOne({ where: { id } });
+  }
+
+  /**
    * 创建员工资料。
    */
   async create(dto: Partial<Employee>): Promise<any> {

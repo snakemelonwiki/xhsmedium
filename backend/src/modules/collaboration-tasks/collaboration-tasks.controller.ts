@@ -3,6 +3,7 @@ import { Request, Response } from 'express';
 import { CollaborationTasksService } from './collaboration-tasks.service';
 import { OperationLogsService } from '../operation-logs/operation-logs.service';
 import { AuthGuard } from '../../common/auth.guard';
+import { getSessionUserId } from '../../common/session.utils';
 import {
   OPERATION_LOG_ACTIONS,
   OPERATION_LOG_TARGET_TYPES,
@@ -43,7 +44,7 @@ export class CollaborationTasksController {
   @Post()
   async create(@Body() body: any, @Req() req: Request, @Res() res: Response) {
     const session = (req as any).session;
-    const requesterId = session?.userId || session?.id || body.actorUserId || '';
+    const requesterId = getSessionUserId(req) || body.actorUserId || '';
     if (!requesterId) {
       return res.status(401).json({ ok: false, message: 'no requester' });
     }
@@ -90,7 +91,7 @@ export class CollaborationTasksController {
     @Query('offset') offset?: string,
   ) {
     const session = (req as any).session;
-    const userId = session?.userId || session?.id || actorUserId || '';
+    const userId = getSessionUserId(req) || actorUserId || '';
     const role = session?.role || '';
     // 兼容多种搜索字段命名（keyword / q / search 任一即生效）。
     const mergedKeyword = (keyword || q || search || '').trim() || undefined;
@@ -132,7 +133,7 @@ export class CollaborationTasksController {
   @Put(':id/claim')
   async claim(@Param('id') id: string, @Body() body: any, @Req() req: Request, @Res() res: Response) {
     const session = (req as any).session;
-    const handlerId = session?.userId || session?.id || body.actorUserId || '';
+    const handlerId = getSessionUserId(req) || body.actorUserId || '';
     if (!handlerId) {
       return res.status(401).json({ ok: false, message: 'no handler' });
     }
@@ -169,7 +170,7 @@ export class CollaborationTasksController {
 
   private async runHandle(id: string, body: any, req: Request, res: Response) {
     const session = (req as any).session;
-    const actorUserId = session?.userId || session?.id || body.actorUserId || '';
+    const actorUserId = getSessionUserId(req) || body.actorUserId || '';
     try {
       const task = await this.service.handle(id, body.handledNote || body.result || '', {
         actorUserId,
@@ -211,7 +212,7 @@ export class CollaborationTasksController {
 
   private async runClose(id: string, req: Request, res: Response) {
     const session = (req as any).session;
-    const actorUserId = session?.userId || session?.id || '';
+    const actorUserId = getSessionUserId(req) || '';
     const actorRole = session?.role || '';
     try {
       const task = await this.service.close(id, {
@@ -276,7 +277,7 @@ export class CollaborationTasksController {
       return res.status(403).json({ ok: false, message: 'forbidden' });
     }
     const result = await this.service.listTimeouts({
-      userId: session?.userId || session?.id || '',
+      userId: getSessionUserId(req),
       role,
       limit: limit !== undefined ? Number(limit) : undefined,
       offset: offset !== undefined ? Number(offset) : undefined,

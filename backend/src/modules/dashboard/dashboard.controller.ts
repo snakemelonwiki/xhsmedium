@@ -2,6 +2,7 @@ import { Controller, Get, Param, Post, Query, Req, Res } from '@nestjs/common';
 import { DashboardService } from './dashboard.service';
 import { Request, Response } from 'express';
 import { todayString } from '../../shared/utils/date-utils';
+import { getSessionUserId } from '../../common/session.utils';
 
 @Controller('dashboard')
 export class DashboardController {
@@ -29,8 +30,7 @@ export class DashboardController {
     @Query('from') from?: string,
     @Query('to') to?: string,
   ) {
-    const session = (req as any).session;
-    const employeeId = session?.employeeId || session?.userId || '';
+    const employeeId = getSessionUserId(req) || '';
     const data = await this.dashboardService.getPersonalDashboard(employeeId, { from, to });
     return res.json(data);
   }

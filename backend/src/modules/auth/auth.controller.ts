@@ -2,6 +2,7 @@ import { Controller, Post, Get, Req, Res, HttpStatus } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { AuthService } from './auth.service';
 import { OperationLogsService } from '../operation-logs/operation-logs.service';
+import { getSessionUserId } from '../../common/session.utils';
 import {
   OPERATION_LOG_ACTIONS,
   OPERATION_LOG_TARGET_TYPES,
@@ -79,9 +80,7 @@ export class AuthController {
   logout(@Req() req: Request, @Res() res: Response) {
     const token = req.headers.authorization?.replace('Bearer ', '');
     // 用户 ID 优先从 session / 解析 token 拿
-    const userId = (req as any).session?.userId
-      || (req as any).user?.sub
-      || '';
+    const userId = getSessionUserId(req) || '';
     if (token) {
       this.authService.logout(token);
     }

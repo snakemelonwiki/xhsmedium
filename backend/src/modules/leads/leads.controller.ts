@@ -4,6 +4,7 @@ import { Request, Response } from 'express';
 import { makeId } from '../../shared/utils/id-generator';
 import { DebounceGuard } from '../../common/debounce.guard';
 import { AuthGuard, Public } from '../../common/auth.guard';
+import { getSessionUserId } from '../../common/session.utils';
 import { CollaborationTasksService } from '../collaboration-tasks/collaboration-tasks.service';
 import { OperationLogsService } from '../operation-logs/operation-logs.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -54,7 +55,7 @@ export class LeadsController {
       scope: effectiveScope,
       employeeId,
       actorEmployeeId: session?.employeeId || '',
-      actorUserId: session?.userId || session?.id || '',
+      actorUserId: getSessionUserId(req),
       actorRole: session?.role || '',
       accountId,
       platform,
@@ -104,7 +105,7 @@ export class LeadsController {
       from,
       to,
       actorEmployeeId: session?.employeeId || '',
-      actorUserId: session?.userId || session?.id || '',
+      actorUserId: getSessionUserId(req),
       actorRole: session?.role || '',
       accountId,
       platform,
@@ -144,7 +145,7 @@ export class LeadsController {
     @Query('offset') offset?: string,
   ) {
     const session = (req as any).session;
-    const salesUserId = session?.userId || session?.id || actorUserId || '';
+    const salesUserId = getSessionUserId(req) || actorUserId || '';
     const wantsPaging = limit !== undefined || offset !== undefined;
     if (wantsPaging) {
       const result = await this.leadsService.findTomorrowFollowupsPaged(
@@ -199,7 +200,7 @@ export class LeadsController {
   @Post('passive/bind')
   async passiveBind(@Body() body: any, @Req() req: Request, @Res() res: Response) {
     const session = (req as any).session;
-    const actorUserId = session?.userId || session?.id || body.actorUserId || '';
+    const actorUserId = getSessionUserId(req) || body.actorUserId || '';
     const actorUserName = session?.employeeName || session?.username || '';
     try {
       const result = await this.leadsService.bindPassive({
@@ -218,7 +219,7 @@ export class LeadsController {
   @Post('passive/new')
   async passiveNew(@Body() body: any, @Req() req: Request, @Res() res: Response) {
     const session = (req as any).session;
-    const actorUserId = session?.userId || session?.id || body.actorUserId || '';
+    const actorUserId = getSessionUserId(req) || body.actorUserId || '';
     const actorUserName = session?.employeeName || session?.username || '';
     try {
       const result = await this.leadsService.createPassive({
@@ -288,12 +289,30 @@ export class LeadsController {
   async findOne(@Param('id') id: string, @Req() req: Request, @Res() res: Response) {
     const session = (req as any).session;
     const row = await this.leadsService.findOne(id, {
-      actorUserId: session?.userId || session?.id || '',
+      actorUserId: getSessionUserId(req),
       actorEmployeeId: session?.employeeId || '',
       actorRole: session?.role || '',
     });
     if (!row) {
       return res.status(404).json({ ok: false, message: 'not found' });
+    }
+    // E/P1-01: 查看单条 lead 详情（包含 contactInfo 联系方式）记一条 VIEW_SENSITIVE。
+    // best-effort 写日志，失败不阻塞响应。
+    try {
+      await this.operationLogs.log({
+        userId: getSessionUserId(req),
+        action: OPERATION_LOG_ACTIONS.VIEW_SENSITIVE,
+        targetType: OPERATION_LOG_TARGET_TYPES.LEAD,
+        targetId: id,
+        detail: stringifyDetail({
+          leadCode: row.leadCode || null,
+          hasContact: Boolean(row.contactInfo),
+        }),
+        ip: parseIp(req),
+      });
+    } catch (logErr) {
+      // eslint-disable-next-line no-console
+      console.error('[leads] operation log failed', (logErr as any)?.message || logErr);
     }
     return res.json(row);
   }
@@ -302,7 +321,7 @@ export class LeadsController {
   @UseGuards(DebounceGuard)
   async update(@Param('id') id: string, @Body() body: any, @Req() req: Request, @Res() res: Response) {
     const session = (req as any).session;
-    const actorUserId = session?.userId || session?.id || '';
+    const actorUserId = getSessionUserId(req);
     const before = await this.leadsService.findOne(id, {
       actorUserId,
       actorEmployeeId: session?.employeeId || '',
@@ -378,7 +397,7 @@ export class LeadsController {
   @UseGuards(DebounceGuard)
   async updateBoard(@Param('id') id: string, @Body() body: any, @Req() req: Request, @Res() res: Response) {
     const session = (req as any).session;
-    const actorUserId = session?.userId || session?.id || body.actorUserId || '';
+    const actorUserId = getSessionUserId(req) || body.actorUserId || '';
     const canAccess = await this.leadsService.canAccessLead(id, {
       actorUserId,
       actorEmployeeId: session?.employeeId || '',
@@ -406,7 +425,7 @@ export class LeadsController {
   @UseGuards(DebounceGuard)
   async updateStatus(@Param('id') id: string, @Body() body: any, @Req() req: Request, @Res() res: Response) {
     const session = (req as any).session;
-    const actorUserId = session?.userId || session?.id || body.actorUserId || '';
+    const actorUserId = getSessionUserId(req) || body.actorUserId || '';
     const canAccess = await this.leadsService.canAccessLead(id, {
       actorUserId,
       actorEmployeeId: session?.employeeId || '',
@@ -444,7 +463,7 @@ export class LeadsController {
   ) {
     const session = (req as any).session;
     const canAccess = await this.leadsService.canAccessLead(id, {
-      actorUserId: session?.userId || session?.id || '',
+      actorUserId: getSessionUserId(req),
       actorEmployeeId: session?.employeeId || '',
       actorRole: session?.role || '',
     });
@@ -481,7 +500,7 @@ export class LeadsController {
     @Res() res: Response,
   ) {
     const session = (req as any).session;
-    const actorUserId = session?.userId || session?.id || body.actorUserId || '';
+    const actorUserId = getSessionUserId(req) || body.actorUserId || '';
     const canAccess = await this.leadsService.canAccessLead(id, {
       actorUserId,
       actorEmployeeId: session?.employeeId || '',
@@ -513,7 +532,7 @@ export class LeadsController {
     @Res() res: Response,
   ) {
     const session = (req as any).session;
-    const requesterId = session?.userId || session?.id || body.actorUserId || '';
+    const requesterId = getSessionUserId(req) || body.actorUserId || '';
     if (!requesterId) {
       return res.status(401).json({ ok: false, message: 'no requester' });
     }
@@ -555,7 +574,7 @@ export class LeadsController {
     @Res() res: Response,
   ) {
     const session = (req as any).session;
-    const actorUserId = session?.userId || session?.id || body.actorUserId || '';
+    const actorUserId = getSessionUserId(req) || body.actorUserId || '';
     try {
       const result = await this.leadsService.confirmSource({
         id,
@@ -570,8 +589,34 @@ export class LeadsController {
   }
 
   @Delete(':id')
-  async remove(@Param('id') id: string, @Res() res: Response) {
+  async remove(@Param('id') id: string, @Req() req: Request, @Res() res: Response) {
+    const session = (req as any).session;
+    const userId = getSessionUserId(req) || '';
+    // E/P1-01: 删除前取 before 快照用于审计 detail；操作日志写 DELETE action。
+    const before = await this.leadsService.findOne(id, {
+      actorUserId: userId,
+      actorEmployeeId: session?.employeeId || '',
+      actorRole: session?.role || '',
+    });
     await this.leadsService.remove(id);
+    try {
+      await this.operationLogs.log({
+        userId,
+        action: OPERATION_LOG_ACTIONS.DELETE,
+        targetType: OPERATION_LOG_TARGET_TYPES.LEAD,
+        targetId: id,
+        detail: stringifyDetail({
+          leadCode: before?.leadCode || null,
+          contactInfo: before?.contactInfo || null,
+          platform: before?.platform || null,
+          status: before?.status || null,
+        }),
+        ip: parseIp(req),
+      });
+    } catch (logErr) {
+      // eslint-disable-next-line no-console
+      console.error('[leads] operation log failed', (logErr as any)?.message || logErr);
+    }
     return res.json({ ok: true });
   }
 }

@@ -72,10 +72,16 @@ export class RemindersService {
     for (const record of dueList) {
       try {
         const order = orderMap.get(record.orderId);
-        // 接收者去重：跟进人 + 当前教务（若不同）+ 异常类节点抄送销售
+        // 接收者去重：跟进人 + 当前教务（若不同）+ 销售。
+        // N-P1-07 修复：销售（order.sales_user_id）也需要收到节点到期通知，
+        // 因为教务节点进度直接影响销售后续交接与回访，spec 明确"销售/主管都收"。
+        // 主管（role=admin/owner）暂不抄送：节点到期属例行提醒，主管看板已聚合
+        // 所有异常（order_abnormal / supervision_suggestion），无需实时推送避免噪音；
+        // 如未来需要再单独开 ORDER_NODE_DUE_SUPERVISOR 类型。
         const receivers = new Set<string>();
         if (record.userId) receivers.add(record.userId);
         if (order?.academicUserId) receivers.add(order.academicUserId);
+        if (order?.salesUserId) receivers.add(order.salesUserId);
 
         await this.notifications.create({
           receiverIds: Array.from(receivers),

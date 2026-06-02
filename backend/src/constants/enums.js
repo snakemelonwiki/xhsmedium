@@ -91,18 +91,30 @@ const UserRole = {
   ADMIN: { code: 'admin', label: '管理员', description: '系统管理员' }
 };
 
-// 通知类型
+// 通知类型（N-P1-01 修复）
+// 与 backend/src/shared/notifications.ts 的 NOTIFICATION_TYPES 严格对齐；
+// 1.2 拆分了 deal_closed，新增 order_created / order_handed_over / order_accepted
+// 与 order_updated。下线的 supervisor_suggestion / lead_deal_done 不再写入，
+// 但保留 label 占位以兼容历史数据展示。
 const NotificationType = {
   LEAD_ASSIGNED: { code: 'lead_assigned', label: '新客资分配', description: '销售收到新分配客资' },
   COLLABORATION_REQUESTED: { code: 'collaboration_requested', label: '协同申请', description: '运营收到协同申请' },
-  CUSTOMER_NOT_PASSED: { code: 'customer_not_passed', label: '客户未通过', description: '运营收到客户未通过通知' },
   COLLABORATION_HANDLED: { code: 'collaboration_handled', label: '协同已处理', description: '销售收到运营已处理通知' },
+  COLLABORATION_TIMEOUT: { code: 'collaboration_timeout', label: '协同超时', description: '协同超时未处理' },
+  CUSTOMER_NOT_PASSED: { code: 'customer_not_passed', label: '客户未通过', description: '运营收到客户未通过通知' },
   CUSTOMER_ADDED: { code: 'customer_added', label: '客户已添加', description: '运营收到销售已添加通知' },
-  ORDER_CREATED: { code: 'order_created', label: '新订单', description: '教务收到新订单' },
-  ORDER_UPDATED: { code: 'order_updated', label: '订单更新', description: '订单进度更新' },
+  LEAD_SOURCE_CONFIRMED: { code: 'lead_source_confirmed', label: '客资来源已确认', description: '客资来源已确认' },
+  DEAL_CLOSED: { code: 'deal_closed', label: '订单已成交（历史）', description: '1.2 之前共用 code，已拆分' },
+  ORDER_CREATED: { code: 'order_created', label: '新订单已成交', description: 'closeDeal 触发：销售成单通知教务/主管' },
+  ORDER_HANDED_OVER: { code: 'order_handed_over', label: '订单已交接', description: 'handOver 触发：销售主动交接通知教务/主管' },
+  ORDER_ACCEPTED: { code: 'order_accepted', label: '订单已被接收', description: 'acceptHandover 触发：教务接单通知销售' },
+  ORDER_UPDATED: { code: 'order_updated', label: '订单更新', description: '订单进度更新通知销售/主管' },
+  ORDER_NODE_DUE: { code: 'order_node_due', label: '订单节点到期', description: '订单节点即将到期' },
   ORDER_ABNORMAL: { code: 'order_abnormal', label: '订单异常', description: '订单异常通知' },
-  EXPORT_FINISHED: { code: 'export_finished', label: '导出完成', description: '导出任务完成' },
-  SUPERVISOR_SUGGESTION: { code: 'supervisor_suggestion', label: '主管建议', description: '主管建议通知' }
+  IMPORT_DONE: { code: 'import_done', label: '导入完成', description: '导入任务完成' },
+  EXPORT_DONE: { code: 'export_done', label: '导出完成', description: '导出任务完成' },
+  SUPERVISOR_SUGGESTION: { code: 'supervisor_suggestion', label: '主管建议（已下线）', description: '1.2 已下线，保留仅供历史展示' },
+  LEAD_DEAL_DONE: { code: 'lead_deal_done', label: '成交提醒（已下线）', description: '1.2 已下线，保留仅供历史展示' }
 };
 
 // 辅助函数：根据 code 获取状态对象

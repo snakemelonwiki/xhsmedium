@@ -2,10 +2,21 @@ import { Controller, Get, Put, Delete, Body, Param, Req, Res, Query } from '@nes
 import { LeadDraftsService } from './lead-drafts.service';
 import { Request, Response } from 'express';
 import { makeId } from '../../shared/utils/id-generator';
+import { OperationLogsService } from '../operation-logs/operation-logs.service';
+import { getSessionUserId } from '../../common/session.utils';
+import {
+  OPERATION_LOG_ACTIONS,
+  OPERATION_LOG_TARGET_TYPES,
+  parseIp,
+  stringifyDetail,
+} from '../../shared/operation-logs.constants';
 
 @Controller('lead-drafts')
 export class LeadDraftsController {
-  constructor(private readonly leadDraftsService: LeadDraftsService) {}
+  constructor(
+    private readonly leadDraftsService: LeadDraftsService,
+    private readonly operationLogs: OperationLogsService,
+  ) {}
 
   @Get()
   async findAll(
@@ -16,7 +27,7 @@ export class LeadDraftsController {
     @Query('offset') offset?: string,
   ) {
     const session = (req as any).session;
-    const actorUserId = session?.userId || session?.id || (req.query?.actorUserId as string) || '';
+    const actorUserId = getSessionUserId(req) || (req.query?.actorUserId as string) || '';
     const draftType = type || 'lead';
     if (!actorUserId) {
       // 无登录态：保持旧行为返回空数组；分页参数下也以空 paged 对象返回
@@ -47,7 +58,7 @@ export class LeadDraftsController {
     @Res() res: Response,
   ) {
     const session = (req as any).session;
-    const actorUserId = session?.userId || session?.id || body.actorUserId || '';
+    const actorUserId = getSessionUserId(req) || body.actorUserId || '';
     if (!actorUserId) {
       return res.status(401).json({ ok: false, message: 'unauthorized' });
     }
@@ -67,8 +78,25 @@ export class LeadDraftsController {
   }
 
   @Delete(':id')
-  async remove(@Param('id') id: string, @Res() res: Response) {
+  async remove(@Param('id') id: string, @Req() req: Request, @Res() res: Response) {
+    const session = (req as any).session;
+    const userId = getSessionUserId(req);
+    // E/P1-01: 写一条 DELETE 操作日志（targetType=lead，detail.source 标识来自草稿），
+    // 草稿删除属低敏感操作但仍按 delete 留痕便于审计追溯。
     await this.leadDraftsService.remove(id);
+    try {
+      await this.operationLogs.log({
+        userId,
+        action: OPERATION_LOG_ACTIONS.DELETE,
+        targetType: OPERATION_LOG_TARGET_TYPES.LEAD,
+        targetId: id,
+        detail: stringifyDetail({ source: 'lead-drafts' }),
+        ip: parseIp(req),
+      });
+    } catch (logErr) {
+      // eslint-disable-next-line no-console
+      console.error('[lead-drafts] operation log failed', (logErr as any)?.message || logErr);
+    }
     return res.json({ ok: true });
   }
 }
