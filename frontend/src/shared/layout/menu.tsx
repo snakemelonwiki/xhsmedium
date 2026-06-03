@@ -199,7 +199,7 @@ export const APP_MENU_ITEMS: AppMenuItem[] = [
   {
     key: 'admin-home',
     label: '总览',
-    path: '/admin',
+    path: '/admin/dashboard',
     icon: <TeamOutlined />,
     roles: ['admin', 'owner'],
   },

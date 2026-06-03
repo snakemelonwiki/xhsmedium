@@ -1,0 +1,287 @@
+'use client';
+
+import {
+  BellOutlined,
+  DashboardOutlined,
+  ExclamationCircleOutlined,
+  FileSearchOutlined,
+  IdcardOutlined,
+  OrderedListOutlined,
+  RightOutlined,
+  SafetyCertificateOutlined,
+  TeamOutlined,
+  UserSwitchOutlined,
+  WarningOutlined,
+} from '@ant-design/icons';
+import { Badge, Card, Col, Row, Segmented, Skeleton, Space, Statistic, Tag, Typography } from 'antd';
+import Link from 'next/link';
+import { useCallback, useEffect, useState } from 'react';
+
+import { getSupervisorOverview, type SupervisorOverview } from '@/shared/api/admin';
+import { readAuthenticatedUser } from '@/shared/auth/auth';
+import { useNotifications } from '@/shared/contexts/NotificationContext';
+
+type Period = 'today' | 'week' | 'month';
+
+const PERIOD_LABELS: Record<Period, string> = {
+  today: '今日',
+  week: '本周',
+  month: '本月',
+};
+
+type DataCard = {
+  key: keyof Pick<SupervisorOverview, 'postCount' | 'leadCount' | 'likes' | 'effectiveAccountCount'>;
+  title: string;
+  icon: React.ReactNode;
+  accent: string;
+  description: string;
+};
+
+const DATA_CARDS: DataCard[] = [
+  {
+    key: 'postCount',
+    title: '作品数',
+    icon: <OrderedListOutlined />,
+    accent: '#1677ff',
+    description: '统计周期内发布的作品总数',
+  },
+  {
+    key: 'leadCount',
+    title: '客资数',
+    icon: <UserSwitchOutlined />,
+    accent: '#13c2c2',
+    description: '统计周期内新增的客资数量',
+  },
+  {
+    key: 'likes',
+    title: '点赞数',
+    icon: <FileSearchOutlined />,
+    accent: '#722ed1',
+    description: '统计周期内作品获得的点赞总和',
+  },
+  {
+    key: 'effectiveAccountCount',
+    title: '有效账号数',
+    icon: <IdcardOutlined />,
+    accent: '#eb2f96',
+    description: '统计周期内有更新的账号数量',
+  },
+];
+
+type ExceptionCard = {
+  key: keyof SupervisorOverview['riskReminders'];
+  title: string;
+  icon: React.ReactNode;
+  accent: string;
+  href: string;
+  description: string;
+};
+
+const EXCEPTION_CARDS: ExceptionCard[] = [
+  {
+    key: 'collaborationTimeout',
+    title: '协同超时数',
+    icon: <WarningOutlined />,
+    accent: '#f5222d',
+    href: '/admin/collaboration',
+    description: '待处理协同任务中有超时风险的项',
+  },
+  {
+    key: 'leadBacklog',
+    title: '客资积压数',
+    icon: <UserSwitchOutlined />,
+    accent: '#fa8c16',
+    href: '/admin/leads',
+    description: '未成交客资中需要跟进的项',
+  },
+  {
+    key: 'lowUpdateEmployees',
+    title: '员工低更新数',
+    icon: <TeamOutlined />,
+    accent: '#faad14',
+    href: '/admin/employees',
+    description: '本周无作品更新的员工数量',
+  },
+  {
+    key: 'abnormalAccounts',
+    title: '账号异常数',
+    icon: <SafetyCertificateOutlined />,
+    accent: '#f5222d',
+    href: '/admin/accounts',
+    description: '账号状态异常需要处理的数量',
+  },
+];
+
+const QUICK_ENTRIES = [
+  {
+    title: '员工管理',
+    description: '维护员工资料、账号分配和在职状态。',
+    href: '/admin/employees',
+    icon: <TeamOutlined />,
+  },
+  {
+    title: '账号管理',
+    description: '管理运营账号、平台绑定与定位信息。',
+    href: '/admin/accounts',
+    icon: <IdcardOutlined />,
+  },
+  {
+    title: '导出中心',
+    description: '创建并下载作品、客资、排行榜和账号数据。',
+    href: '/admin/exports',
+    icon: <DashboardOutlined />,
+  },
+];
+
+export default function AdminDashboardPage() {
+  const [period, setPeriod] = useState<Period>('today');
+  const [overview, setOverview] = useState<SupervisorOverview | undefined>();
+  const [loading, setLoading] = useState(true);
+  const { unreadCount } = useNotifications();
+  const user = typeof window === 'undefined' ? undefined : readAuthenticatedUser();
+
+  const fetchOverview = useCallback((p: Period) => {
+    setLoading(true);
+    getSupervisorOverview(p)
+      .then(setOverview)
+      .catch(() => setOverview(undefined))
+      .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => {
+    fetchOverview(period);
+  }, [period, fetchOverview]);
+
+  return (
+    <Space direction="vertical" size={16} className="page-stack">
+      {/* Toolbar */}
+      <div className="toolbar-row">
+        <div>
+          <Typography.Title level={2}>主管总览</Typography.Title>
+          <Typography.Paragraph type="secondary">
+            从全局视角监控作品、客资、流量与运营风险。
+          </Typography.Paragraph>
+        </div>
+        <Space size={12} wrap align="center">
+          <Segmented
+            value={period}
+            onChange={(v) => setPeriod(v as Period)}
+            options={[
+              { label: '今日', value: 'today' },
+              { label: '本周', value: 'week' },
+              { label: '本月', value: 'month' },
+            ]}
+          />
+          <Tag color="purple" icon={<TeamOutlined />}>
+            {user?.name ?? '主管'}
+          </Tag>
+          <Link href="/admin/messages">
+            <Badge count={unreadCount} offset={[-2, 6]} overflowCount={99}>
+              <Tag color={unreadCount > 0 ? 'red' : 'default'} icon={<BellOutlined />}>
+                未读消息
+              </Tag>
+            </Badge>
+          </Link>
+        </Space>
+      </div>
+
+      {/* 4 Data Cards */}
+      <Skeleton loading={loading} active paragraph={{ rows: 3 }}>
+        <Row gutter={[16, 16]}>
+          {DATA_CARDS.map((card) => {
+            const value = overview ? overview[card.key] : 0;
+            return (
+              <Col xs={24} sm={12} lg={6} key={card.key}>
+                <Card>
+                  <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                    <Space size={8} align="center">
+                      <span style={{ color: card.accent, fontSize: 20 }}>{card.icon}</span>
+                      <Typography.Text strong>{card.title}</Typography.Text>
+                    </Space>
+                    <Statistic value={value} valueStyle={{ color: card.accent }} />
+                    <Typography.Paragraph type="secondary" style={{ marginBottom: 0, fontSize: 12 }}>
+                      {PERIOD_LABELS[period]}：{card.description}
+                    </Typography.Paragraph>
+                  </Space>
+                </Card>
+              </Col>
+            );
+          })}
+        </Row>
+      </Skeleton>
+
+      {/* 4 Exception Cards */}
+      <div>
+        <Typography.Title level={4}>
+          <ExclamationCircleOutlined style={{ color: '#f5222d', marginRight: 8 }} />
+          异常提醒
+        </Typography.Title>
+      </div>
+      <Row gutter={[16, 16]}>
+        {EXCEPTION_CARDS.map((card) => {
+          const value = overview?.riskReminders[card.key] ?? 0;
+          return (
+            <Col xs={24} sm={12} lg={6} key={card.key}>
+              <Link href={card.href}>
+                <Card
+                  hoverable
+                  styles={{ body: { padding: 16 } }}
+                  style={{
+                    borderColor: value > 0 ? card.accent : undefined,
+                    borderWidth: value > 0 ? 2 : 1,
+                  }}
+                >
+                  <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                    <Space size={8} align="center">
+                      <span style={{ color: card.accent, fontSize: 18 }}>{card.icon}</span>
+                      <Typography.Text strong>{card.title}</Typography.Text>
+                    </Space>
+                    <Statistic
+                      value={value}
+                      valueStyle={{ color: value > 0 ? card.accent : undefined }}
+                    />
+                    <Typography.Paragraph
+                      type="secondary"
+                      style={{ marginBottom: 0, fontSize: 12 }}
+                    >
+                      {card.description}
+                    </Typography.Paragraph>
+                  </Space>
+                </Card>
+              </Link>
+            </Col>
+          );
+        })}
+      </Row>
+
+      {/* 3 Quick Entries */}
+      <div>
+        <Typography.Title level={4}>快捷入口</Typography.Title>
+      </div>
+      <Row gutter={[16, 16]}>
+        {QUICK_ENTRIES.map((entry) => (
+          <Col xs={24} md={8} key={entry.href}>
+            <Link href={entry.href}>
+              <Card hoverable>
+                <Space direction="vertical" size={12} style={{ width: '100%' }}>
+                  <Space style={{ justifyContent: 'space-between', width: '100%' }}>
+                    <Typography.Title level={5} style={{ margin: 0 }}>
+                      <Space>
+                        {entry.icon}
+                        {entry.title}
+                      </Space>
+                    </Typography.Title>
+                    <RightOutlined />
+                  </Space>
+                  <Typography.Paragraph type="secondary" style={{ margin: 0 }}>
+                    {entry.description}
+                  </Typography.Paragraph>
+                </Space>
+              </Card>
+            </Link>
+          </Col>
+        ))}
+      </Row>
+    </Space>
+  );
+}

@@ -19,6 +19,30 @@ function hasRole(role: string, allowed: string[]): boolean {
   return allowed.includes(role);
 }
 
+/** 员工状态白名单：与前端表单 value / schema.sql 默认值对齐 */
+const EMPLOYEE_STATUS_VALUES = ['在职', '离职', '停用'] as const;
+/**
+ * 兼容历史 / 前端缓存：旧版表单可能用英文 code 提交
+ * （active/inactive/disabled/enabled），写库前统一翻译成中文。
+ * 不在白名单且未匹配英文别名的值回退到默认 '在职'。
+ */
+function normalizeEmployeeStatus(input: unknown): string {
+  const raw = String(input ?? '').trim();
+  if (!raw) return '在职';
+  if ((EMPLOYEE_STATUS_VALUES as readonly string[]).includes(raw)) return raw;
+  const alias: Record<string, string> = {
+    active: '在职',
+    enabled: '在职',
+    online: '在职',
+    inactive: '离职',
+    disabled: '停用',
+    leave: '离职',
+    resign: '离职',
+    stopped: '停用',
+  };
+  return alias[raw.toLowerCase()] ?? '在职';
+}
+
 /** 员工资料变更（创建/更新/删除/启停）仅 admin/owner 可执行 */
 function ensureEmployeeAdmin(req: Request, res: Response): boolean {
   const role = getSessionRole(req);
@@ -84,7 +108,7 @@ export class EmployeesController {
       name: body.name,
       phone: body.phone || null,
       hireDate: body.hireDate || null,
-      status: body.status || '在职',
+      status: normalizeEmployeeStatus(body.status),
     });
     // 写操作日志：员工创建
     try {
@@ -195,7 +219,7 @@ export class EmployeesController {
       name: body.name,
       phone: body.phone || null,
       hireDate: body.hireDate || null,
-      status: body.status,
+      status: normalizeEmployeeStatus(body.status),
     });
     // 写操作日志：员工更新
     try {
@@ -206,6 +230,8 @@ export class EmployeesController {
         targetId: id,
         detail: stringifyDetail({
           name: body.name,
+          // 日志保留原始提交值，便于审计 / 排查前端脏数据来源；
+          // 实际写入 employees.status 已通过 normalizeEmployeeStatus 规整。
           status: body.status,
         }),
         ip: parseIp(req),

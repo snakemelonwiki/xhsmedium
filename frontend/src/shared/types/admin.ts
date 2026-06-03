@@ -8,7 +8,27 @@ export interface AdminLead {
   status: string;
   addStatus?: string;
   processStatus?: string;
+  collaborationStatus?: string;
   createdAt?: string;
+  updatedAt?: string;
+  latestFollowNote?: string;
+  latestFollowAt?: string;
+  sourcePostTitle?: string;
+  sourceAccountName?: string;
+  accountId?: string;
+  postId?: string;
+  employeeId?: string;
+  assignedSalesUserId?: string;
+}
+
+export interface AdminLeadsStats {
+  total: number;
+  filteredTotal: number;
+  assigned: number;
+  pending: number;
+  byStatus: Record<string, number>;
+  byAddStatus: Record<string, number>;
+  byProcess: Record<string, number>;
 }
 
 export interface AdminEmployee {

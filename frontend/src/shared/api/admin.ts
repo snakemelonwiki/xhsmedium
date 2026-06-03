@@ -32,7 +32,17 @@ function mapLead(raw: RawRecord): AdminLead {
     status: text(raw.status) ?? 'new',
     addStatus: text(raw.addStatus),
     processStatus: text(raw.processStatus),
+    collaborationStatus: text(raw.collaborationStatus),
     createdAt: text(raw.createdAt),
+    updatedAt: text(raw.updatedAt),
+    latestFollowNote: text(raw.latestFollowNote) ?? text(raw.salesFeedback) ?? text(raw.note),
+    latestFollowAt: text(raw.latestFollowAt) ?? text(raw.followedAt),
+    sourcePostTitle: text(raw.sourcePostTitle) ?? text(raw.postTitle),
+    sourceAccountName: text(raw.sourceAccountName) ?? text(raw.accountName),
+    accountId: text(raw.accountId) ?? text(raw.sourceAccountId),
+    postId: text(raw.postId) ?? text(raw.sourcePostId),
+    employeeId: text(raw.employeeId),
+    assignedSalesUserId: text(raw.assignedSalesUserId),
   };
 }
 
@@ -78,6 +88,59 @@ function mapRankingRow(raw: RawRecord): AdminRankingRow {
     douyinPostCount: numberValue(raw.douyinPostCount),
     leadCount: numberValue(raw.leadCount),
   };
+}
+
+export interface AdminLeadsStats {
+  total: number;
+  filteredTotal: number;
+  assigned: number;
+  pending: number;
+  byStatus: Record<string, number>;
+  byAddStatus: Record<string, number>;
+  byProcess: Record<string, number>;
+}
+
+function mapStats(raw: RawRecord): AdminLeadsStats {
+  const byStatus: Record<string, number> = {};
+  const byAddStatus: Record<string, number> = {};
+  const byProcess: Record<string, number> = {};
+  const rawByStatus = raw.byStatus as RawRecord[] | undefined;
+  const rawByAddStatus = raw.byAddStatus as RawRecord[] | undefined;
+  const rawByProcess = raw.byProcess as RawRecord[] | undefined;
+  if (Array.isArray(rawByStatus)) {
+    rawByStatus.forEach((item) => {
+      const k = text(item.k) ?? '';
+      byStatus[k] = numberValue(item.n);
+    });
+  }
+  if (Array.isArray(rawByAddStatus)) {
+    rawByAddStatus.forEach((item) => {
+      const k = text(item.k) ?? '';
+      byAddStatus[k] = numberValue(item.n);
+    });
+  }
+  if (Array.isArray(rawByProcess)) {
+    rawByProcess.forEach((item) => {
+      const k = text(item.k) ?? '';
+      byProcess[k] = numberValue(item.n);
+    });
+  }
+  return {
+    total: numberValue(raw.total),
+    filteredTotal: numberValue(raw.filteredTotal),
+    assigned: numberValue(raw.assigned),
+    pending: numberValue(raw.pending),
+    byStatus,
+    byAddStatus,
+    byProcess,
+  };
+}
+
+export async function getAdminLeadsStats(query: PageQuery = {}): Promise<AdminLeadsStats> {
+  const payload = await apiClient.get<RawRecord>('/leads/stats', {
+    query: { scope: 'all', ...query },
+  });
+  return mapStats(payload);
 }
 
 export async function listAdminLeads(query: PageQuery = {}): Promise<PagedResult<AdminLead>> {
@@ -189,5 +252,65 @@ export async function listAdminRankings(query: PageQuery = {}): Promise<PagedRes
     page,
     pageSize: limit,
     items: paged.items.map(mapRankingRow),
+  };
+}
+
+export type SupervisorOverview = {
+  period: { from: string; to: string; code: string };
+  postCount: number;
+  leadCount: number;
+  likes: number;
+  interactions: number;
+  effectiveAccountCount: number;
+  dealCount: number;
+  pendingCollaborationCount: number;
+  riskReminders: {
+    collaborationTimeout: number;
+    leadBacklog: number;
+    lowUpdateEmployees: number;
+    abnormalAccounts: number;
+  };
+};
+
+export type SupervisorAnalysis = {
+  filters: { platform: string | null; employeeId: string };
+  platformTrend: Array<{ date: string; platform: string; postCount: number; likes: number }>;
+  postStructure: Array<{ type: string; count: number }>;
+  leadTrend: Array<{ date: string; platform: string; leadCount: number }>;
+};
+
+export async function getSupervisorOverview(period: string = 'today'): Promise<SupervisorOverview | undefined> {
+  const payload = await apiClient.get<RawRecord>('/dashboard/supervisor/overview', {
+    query: { period },
+  }).catch(() => undefined);
+  if (!payload) return undefined;
+  return {
+    period: payload.period as SupervisorOverview['period'] ?? { from: '', to: '', code: period },
+    postCount: numberValue(payload.postCount),
+    leadCount: numberValue(payload.leadCount),
+    likes: numberValue(payload.likes),
+    interactions: numberValue(payload.interactions),
+    effectiveAccountCount: numberValue(payload.effectiveAccountCount),
+    dealCount: numberValue(payload.dealCount),
+    pendingCollaborationCount: numberValue(payload.pendingCollaborationCount),
+    riskReminders: {
+      collaborationTimeout: numberValue((payload.riskReminders as RawRecord)?.collaborationTimeout),
+      leadBacklog: numberValue((payload.riskReminders as RawRecord)?.leadBacklog),
+      lowUpdateEmployees: numberValue((payload.riskReminders as RawRecord)?.lowUpdateEmployees),
+      abnormalAccounts: numberValue((payload.riskReminders as RawRecord)?.abnormalAccounts),
+    },
+  };
+}
+
+export async function getSupervisorAnalysis(filters: { platform?: string; employeeId?: string } = {}): Promise<SupervisorAnalysis | undefined> {
+  const payload = await apiClient.get<RawRecord>('/dashboard/supervisor/analysis', {
+    query: filters,
+  }).catch(() => undefined);
+  if (!payload) return undefined;
+  return {
+    filters: (payload.filters as SupervisorAnalysis['filters']) ?? { platform: null, employeeId: '' },
+    platformTrend: (payload.platformTrend as SupervisorAnalysis['platformTrend']) ?? [],
+    postStructure: (payload.postStructure as SupervisorAnalysis['postStructure']) ?? [],
+    leadTrend: (payload.leadTrend as SupervisorAnalysis['leadTrend']) ?? [],
   };
 }

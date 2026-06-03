@@ -1,7 +1,8 @@
 'use client';
 
 import { LinkOutlined } from '@ant-design/icons';
-import { Button, Card, Form, Input, Select, Space, Typography, message } from 'antd';
+import { Button, Card, DatePicker, Form, Input, Select, Space, Typography, message } from 'antd';
+import dayjs from 'dayjs';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 
@@ -21,6 +22,8 @@ export default function OperationPostNewPage() {
   const router = useRouter();
   const latestThumbRef = useRef<string>('');
   const [accountOptions, setAccountOptions] = useState<AccountOption[]>([]);
+  const [parsing, setParsing] = useState(false);
+  const [submittingCheck, setSubmittingCheck] = useState(false);
 
   useEffect(() => {
     // 拉当前运营可用的账号列表,渲染为下拉;空数组时回退到自由输入框
@@ -43,7 +46,77 @@ export default function OperationPostNewPage() {
     };
   }, []);
 
+  /**
+   * 调用后端 POST /api/posts/parse-link 解析作品链接
+   */
+  async function parsePostUrl() {
+    const rawUrl = String(form.getFieldValue('postUrl') || '').trim();
+    if (!rawUrl) {
+      message.warning('请先粘贴作品链接');
+      return;
+    }
+    setParsing(true);
+    try {
+      const payload = await apiClient.post<{ ok?: boolean; data?: { platform?: string; title?: string } }>(
+        '/posts/parse-link',
+        { postUrl: rawUrl },
+      );
+      const nextValues: Record<string, string> = {};
+      if (payload?.data?.platform) {
+        nextValues.platform = payload.data.platform;
+      }
+      if (payload?.data?.title && !form.getFieldValue('title')) {
+        nextValues.title = payload.data.title;
+      }
+      // 后端未识别时前端兜底
+      if (!nextValues.platform) {
+        if (/douyin\.com|iesdouyin\.com/i.test(rawUrl)) {
+          nextValues.platform = 'douyin';
+        } else if (/xiaohongshu\.com|xhslink\.com/i.test(rawUrl)) {
+          nextValues.platform = 'xiaohongshu';
+        }
+      }
+      if (!nextValues.title && !form.getFieldValue('title')) {
+        nextValues.title = inferTitleFromUrl(rawUrl);
+      }
+      form.setFieldsValue(nextValues);
+      message.success('已根据链接回填平台和标题');
+    } catch (err) {
+      // 后端解析失败时前端兜底
+      const nextValues: Record<string, string> = {};
+      if (/douyin\.com|iesdouyin\.com/i.test(rawUrl)) {
+        nextValues.platform = 'douyin';
+      } else if (/xiaohongshu\.com|xhslink\.com/i.test(rawUrl)) {
+        nextValues.platform = 'xiaohongshu';
+      }
+      if (!form.getFieldValue('title')) {
+        nextValues.title = inferTitleFromUrl(rawUrl);
+      }
+      form.setFieldsValue(nextValues);
+      message.warning('后端解析失败，已根据域名自动识别平台');
+    } finally {
+      setParsing(false);
+    }
+  }
+
+  /**
+   * 提交前检查链接是否重复
+   */
+  async function checkDuplicate(postUrl: string): Promise<boolean> {
+    if (!postUrl) return false;
+    try {
+      const result = await apiClient.get<{ items?: unknown[]; total?: number }>('/posts', {
+        query: { url: postUrl, limit: 1 },
+      });
+      const items = result?.items ?? [];
+      return items.length > 0;
+    } catch {
+      return false;
+    }
+  }
+
   async function submit(values: Record<string, unknown>) {
+    const postUrl = String(values.postUrl || '').trim();
     // ImageUploadField 内部管 thumb 状态，submit 时把最新的 thumbUrl 合并到 body
     const coverThumbUrl = latestThumbRef.current || undefined;
     // accountId 留空 / undefined 表示未关联账号,后端落空串
@@ -51,33 +124,39 @@ export default function OperationPostNewPage() {
       typeof values.accountId === 'string' && values.accountId.trim()
         ? values.accountId.trim()
         : undefined;
+    // publishedAt: DatePicker 选中的 dayjs 对象转字符串
+    const publishedAtRaw = values.publishedAt;
+    const publishedAt = dayjs.isDayjs(publishedAtRaw)
+      ? (publishedAtRaw as dayjs.Dayjs).format('YYYY-MM-DD')
+      : typeof publishedAtRaw === 'string'
+        ? publishedAtRaw
+        : undefined;
+
+    // 提交前检查重复
+    if (postUrl) {
+      setSubmittingCheck(true);
+      const isDuplicate = await checkDuplicate(postUrl);
+      if (isDuplicate) {
+        setSubmittingCheck(false);
+        message.error('该作品链接已录入，请勿重复提交');
+        return;
+      }
+      setSubmittingCheck(false);
+    }
+
     await run(async () => {
-      await apiClient.post('/posts', { ...values, accountId, coverThumbUrl });
+      await apiClient.post('/posts', {
+        ...values,
+        accountId,
+        coverThumbUrl,
+        publishedAt,
+      });
       message.success('作品已录入');
       form.resetFields();
       latestThumbRef.current = '';
       const today = formatLocalDate(new Date());
       router.push(`/operation/posts?from=${today}&to=${today}`);
     });
-  }
-
-  function parsePostUrl() {
-    const rawUrl = String(form.getFieldValue('postUrl') || '').trim();
-    if (!rawUrl) {
-      message.warning('请先粘贴作品链接');
-      return;
-    }
-    const nextValues: Record<string, string> = {};
-    if (/douyin\.com|iesdouyin\.com/i.test(rawUrl)) {
-      nextValues.platform = 'douyin';
-    } else if (/xiaohongshu\.com|xhslink\.com/i.test(rawUrl)) {
-      nextValues.platform = 'xiaohongshu';
-    }
-    if (!form.getFieldValue('title')) {
-      nextValues.title = inferTitleFromUrl(rawUrl);
-    }
-    form.setFieldsValue(nextValues);
-    message.success('已根据链接回填平台和标题');
   }
 
   return (
@@ -109,13 +188,16 @@ export default function OperationPostNewPage() {
             <Form.Item className="full-row" name="postUrl" label="作品链接" rules={[{ required: true, message: '请输入作品链接' }]}>
               <Space.Compact style={{ width: '100%' }}>
                 <Input id="postUrl" aria-label="作品链接" placeholder="粘贴小红书/抖音作品链接" />
-                <Button icon={<LinkOutlined />} onClick={parsePostUrl}>
+                <Button icon={<LinkOutlined />} onClick={parsePostUrl} loading={parsing}>
                   解析链接
                 </Button>
               </Space.Compact>
             </Form.Item>
-            <Form.Item name="title" label="标题">
+            <Form.Item name="title" label="标题" rules={[{ required: true, message: '请输入标题' }]}>
               <Input placeholder="作品标题" />
+            </Form.Item>
+            <Form.Item name="publishedAt" label="发布日期" rules={[{ required: true, message: '请选择发布日期' }]}>
+              <DatePicker style={{ width: '100%' }} />
             </Form.Item>
             <Form.Item name="accountId" label="来源账号 ID">
               {accountOptions.length > 0 ? (
@@ -143,7 +225,7 @@ export default function OperationPostNewPage() {
               />
             </Form.Item>
           </div>
-          <Button type="primary" htmlType="submit" loading={submitting}>提交作品</Button>
+          <Button type="primary" htmlType="submit" loading={submitting || submittingCheck}>提交作品</Button>
         </Form>
       </Card>
     </Space>

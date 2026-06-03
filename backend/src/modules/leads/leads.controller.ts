@@ -45,6 +45,10 @@ export class LeadsController {
     @Query('keyword') keyword?: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
+    // BUG-2: 新增筛选参数
+    @Query('assignedSalesUserId') assignedSalesUserId?: string,
+    @Query('postId') postId?: string,
+    @Query('dealStatus') dealStatus?: string,
   ) {
     const session = (req as any).session;
     // §9 / AC-10.2：传了 limit 或 offset 任一即视为分页请求，返回 { items, total, limit, offset }。
@@ -66,6 +70,10 @@ export class LeadsController {
       search: q || search || keyword,
       from,
       to,
+      // BUG-2: 新增筛选字段
+      assignedSalesUserId,
+      postId,
+      dealStatus,
     };
 
     if (wantsPaging) {

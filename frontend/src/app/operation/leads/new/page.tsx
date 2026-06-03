@@ -153,7 +153,7 @@ export default function OperationLeadNewPage() {
               <Form.Item name="ip" label="地区">
                 <Input placeholder="省市或客户 IP 属地" />
               </Form.Item>
-              <Form.Item className="full-row" name="majorContent" label="需求备注">
+              <Form.Item name="requirementNote" label="需求备注">
                 <Input.TextArea rows={4} placeholder="客户诉求、专业方向和其他备注" />
               </Form.Item>
               <Form.Item className="full-row" name="captureImageUrl" label="引流截图">
@@ -172,14 +172,19 @@ function parseLeadText(raw: string): Record<string, string> {
   const text = raw.trim();
   if (!text) return {};
   const result: Record<string, string> = {};
+  // 识别手机号（1开头的11位数字）
   const phone = text.match(/1[3-9]\d{9}/)?.[0];
+  // 识别微信号（wx/wechat开头或包含的数字字母组合）
   const wechat = text.match(/(?:微信|wx|wechat)[:：\s]*([a-zA-Z][-_a-zA-Z0-9]{5,19})/i)?.[1];
+  // 识别昵称
   const nickname = text.match(/(?:昵称|客户|姓名)[:：\s]*([^\s,，;；]+)/)?.[1];
 
   if (/抖音|douyin/i.test(text)) result.platform = 'douyin';
   if (/小红书|xiaohongshu|xhs/i.test(text)) result.platform = 'xiaohongshu';
+  if (/微信|wechat/i.test(text)) result.platform = 'xiaohongshu'; // 默认微信来源归属小红书
   if (phone || wechat) result.contactInfo = phone || wechat || '';
   if (nickname) result.nickname = nickname;
-  result.majorContent = text;
+  // 完整文本填入需求备注
+  result.requirementNote = text;
   return result;
 }

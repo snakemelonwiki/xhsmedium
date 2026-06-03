@@ -49,6 +49,10 @@ interface LeadFilterOptions {
   search?: string;
   from?: string;
   to?: string;
+  // BUG-2: 新增筛选字段
+  assignedSalesUserId?: string;
+  postId?: string;
+  dealStatus?: string;
 }
 
 const LEAD_STATUS_IN_COLLABORATION = 'in_collaboration';
@@ -182,7 +186,7 @@ export class LeadsService {
     const safeLimit = this.clampLimit(limit);
     const safeOffset = Math.max(Number(offset) || 0, 0);
 
-    // Step 1: 主查询 JOIN accounts/posts/employees（消除 N+1 中的 account/post 查询）
+    // Step 1+2: 合并主查询与 count —— 用 COUNT(*) OVER() window function 一次拿 items + total
     // 使用纯 raw select 避免 Entity 映射问题
     const dataQb = this.leadRepository.createQueryBuilder('l')
       .leftJoin(Account, 'a', 'a.id = l.account_id')
@@ -226,35 +230,34 @@ export class LeadsService {
         'p.title AS post_title',
         'p.post_url AS post_url',
         'e.name AS employee_name',
+        // 合并 count：window function 在 LIMIT/OFFSET 之前计算，返回全量行数
+        'COUNT(*) OVER() AS total_count',
       ])
       .where('1=1');
 
-    // 应用过滤条件（复制自 buildLeadFilterQuery）
+    // 应用过滤条件
     this.applyLeadScope(dataQb, filters);
     this.applyLeadFilters(dataQb, filters);
 
+    // 稳定排序 + 分页
     dataQb.orderBy('l.created_at', 'DESC')
-      .take(safeLimit)
-      .skip(safeOffset);
+      .addOrderBy('l.id', 'DESC')
+      .limit(safeLimit)
+      .offset(safeOffset);
 
-    // 先查数据
     const rows: any[] = await dataQb.getRawMany();
 
+    // 提取 total_count（所有行相同）
+    const total = rows[0]?.total_count ? Number(rows[0].total_count) : 0;
+
     // 如果没有数据，直接返回
-    if (!rows || rows.length === 0) {
+    if (!rows || rows.length === 0 || total === 0) {
       return { items: [], total: 0, limit: safeLimit, offset: safeOffset };
     }
 
     const leadIds = rows.map(r => r.l_id);
 
-    // Step 2: 单独查询总数
-    const countQb = this.leadRepository.createQueryBuilder('l');
-    this.applyLeadScope(countQb, filters);
-    this.applyLeadFilters(countQb, filters);
-    const countResult = await countQb.select('COUNT(*)', 'cnt').getRawOne<any>();
-    const total = Number(countResult?.cnt) || 0;
-
-    // Step 3: 并行查询 follow + collab 聚合（消除 N+1 中的串行查询）
+    // Step 3: 并行查询 follow + collab 聚合
     const [followRows, collabRows] = await Promise.all([
       // follow: 取每个 lead 最新一条
       this.followRepository.manager.query(`
@@ -318,6 +321,7 @@ export class LeadsService {
         ip: r.l_ip,
         status: r.l_status,
         dealAmount: r.l_deal_amount,
+        dealStatus: r.l_deal_status || null,
         note: r.l_note,
         requirementNote: r.l_requirement_note,
         supervisorNote: r.l_supervisor_note,
@@ -424,6 +428,10 @@ export class LeadsService {
     if (filters.status) qb.andWhere('l.status = :status', { status: filters.status });
     if (filters.addStatus) qb.andWhere('l.add_status = :addStatus', { addStatus: filters.addStatus });
     if (filters.processStatus) qb.andWhere('l.process_status = :processStatus', { processStatus: filters.processStatus });
+    // BUG-2: 新增筛选条件
+    if (filters.assignedSalesUserId) qb.andWhere('l.assigned_sales_user_id = :assignedSalesUserId', { assignedSalesUserId: filters.assignedSalesUserId });
+    if (filters.postId) qb.andWhere('l.post_id = :postId', { postId: filters.postId });
+    if (filters.dealStatus) qb.andWhere('l.deal_status = :dealStatus', { dealStatus: filters.dealStatus });
     if (filters.search && filters.search.trim()) {
       qb.andWhere(
         '(l.contact_info LIKE :search OR l.nickname LIKE :search OR l.lead_code LIKE :search OR l.note LIKE :search)',
