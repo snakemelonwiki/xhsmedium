@@ -1,9 +1,10 @@
-import { Controller, Get, Post, Put, Patch, Delete, Body, Param, Query, Req, Res } from '@nestjs/common';
+import { Controller, Get, Post, Put, Patch, Delete, Body, Param, Query, Req, Res, UseGuards } from '@nestjs/common';
 import { AccountsService } from './accounts.service';
 import { Request, Response } from 'express';
 import { makeId } from '../../shared/utils/id-generator';
 import { OperationLogsService } from '../operation-logs/operation-logs.service';
-import { getSessionUserId } from '../../common/session.utils';
+import { AuthGuard } from '../../common/auth.guard';
+import { getSessionUserId, getSessionRole } from '../../common/session.utils';
 import {
   OPERATION_LOG_ACTIONS,
   OPERATION_LOG_TARGET_TYPES,
@@ -11,12 +12,48 @@ import {
   stringifyDetail,
 } from '../../shared/operation-logs.constants';
 
+/**
+ * 检查当前 session 角色是否在白名单中。
+ * 主管（supervisor）与 admin 均可管理账号。
+ */
+function hasRole(role: string, allowed: string[]): boolean {
+  return allowed.includes(role);
+}
+
+/** 账号管理（创建/启停用）仅 admin/supervisor 可执行 */
+function ensureAccountManager(req: Request, res: Response): boolean {
+  const role = getSessionRole(req);
+  if (!hasRole(role, ['admin', 'owner', 'supervisor'])) {
+    res.status(403).json({ ok: false, message: 'forbidden: 仅 admin/supervisor 可管理账号' });
+    return false;
+  }
+  return true;
+}
+
 @Controller('accounts')
 export class AccountsController {
   constructor(
     private readonly accountsService: AccountsService,
     private readonly operationLogs: OperationLogsService,
   ) {}
+
+  /**
+   * 查询账号详情。
+   * 运营角色只能查看本人名下账号。
+   */
+  @Get(':id')
+  async findById(@Param('id') id: string, @Req() req: Request, @Res() res: Response) {
+    const scopedEmployeeId = this.resolveScopedEmployeeId(req);
+    const account = await this.accountsService.findById(id);
+    if (!account) {
+      return res.status(404).json({ ok: false, message: '账号不存在' });
+    }
+    // 运营角色只能查看本人名下账号
+    if (scopedEmployeeId !== undefined && account.employeeId !== scopedEmployeeId) {
+      return res.status(403).json({ ok: false, message: '无权查看该账号' });
+    }
+    return res.json(account);
+  }
 
   /**
    * 查询账号列表，运营角色仅返回本人名下账号，支持按平台过滤。
@@ -52,10 +89,11 @@ export class AccountsController {
   }
 
   /**
-   * 创建账号资料。
+   * 创建账号资料，仅主管可创建。
    */
   @Post()
   async create(@Body() body: any, @Req() req: Request, @Res() res: Response) {
+    if (!ensureAccountManager(req, res)) return;
     const userId = getSessionUserId(req);
     const account = await this.accountsService.create({
       id: makeId(),
@@ -90,12 +128,13 @@ export class AccountsController {
   }
 
   /**
-   * 更新账号启停状态，运营角色只能修改本人名下账号。
+   * 更新账号启停状态，仅主管可执行。
    * E/P1-01: 把"停用/异常/注销"类 status 变更归到 OPERATION_LOG_ACTIONS.DISABLE，
    * 其余 status 变更（正常/封禁 等）按 UPDATE 记录。
    */
   @Patch(':id/status')
   async updateStatus(@Param('id') id: string, @Body() body: any, @Req() req: Request, @Res() res: Response) {
+    if (!ensureAccountManager(req, res)) return;
     const denied = await this.ensureCanWriteAccount(id, body, req, res);
     if (denied) return denied;
     const userId = getSessionUserId(req);

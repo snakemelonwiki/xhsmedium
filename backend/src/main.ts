@@ -60,6 +60,12 @@ async function bootstrap() {
 	    exposedHeaders: ['X-New-Token'],
 	  });
 
+  // 全局字符集设置 - 确保 JSON 响应使用 UTF-8
+  app.use((req: any, res: any, next: any) => {
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    next();
+  });
+
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: false,
@@ -68,6 +74,11 @@ async function bootstrap() {
   );
 
   const expressApp = app.getHttpAdapter().getInstance();
+
+  // 显式配置 JSON 解析器支持 UTF-8 编码
+  const bodyParser = require('body-parser');
+  expressApp.use(bodyParser.json({ limit: '10mb', type: 'application/json' }));
+  expressApp.use(bodyParser.urlencoded({ extended: true, limit: '10mb' }));
 
   // Body size limits. Multipart uploads are parsed by Multer and must not be
   // read here, otherwise the request stream reaches Multer incomplete.

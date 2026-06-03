@@ -158,4 +158,22 @@ export class UsersService {
       });
     }
   }
+
+  async findById(id: string): Promise<User | null> {
+    return this.userRepository.findOne({ where: { id } });
+  }
+
+  async update(id: string, dto: Partial<User>): Promise<void> {
+    const updates: any = {};
+    if (dto.username !== undefined) updates.username = dto.username;
+    if (dto.password !== undefined) updates.password = normalizePasswordForStorage(dto.password);
+    if (dto.employeeId !== undefined) updates.employeeId = dto.employeeId;
+    if (dto.status !== undefined) updates.status = dto.status;
+    if (dto.role !== undefined) updates.role = dto.role;
+    await this.userRepository.update(id, updates);
+  }
+
+  async updateStatus(id: string, status: string): Promise<void> {
+    await this.userRepository.update(id, { status });
+  }
 }

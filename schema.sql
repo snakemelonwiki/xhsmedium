@@ -525,3 +525,28 @@ CREATE TABLE IF NOT EXISTS order_abnormal_feedbacks (
   KEY idx_oaf_created_at  (created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   COMMENT='订单异常反馈表：教务端可独立提交，状态机驱动 orders.orderStatus=abnormal，关闭后回退到进行中';
+
+-- ============================================================
+-- 18. supervisor_suggestions
+-- backend/src/entities/supervisor-suggestion.entity.ts + backend/migrations/add-supervisor-suggestions-table.sql
+-- 主管建议表：存储主管给运营的建议，支持关联账号、作品、员工
+-- 功能流程：创建建议 -> 通知对应运营 -> 已读状态
+-- target_type: post(account作品) / account(账号) / employee(员工)
+-- 迁移来源：add-supervisor-suggestions-table.sql（建表）
+-- ============================================================
+CREATE TABLE IF NOT EXISTS supervisor_suggestions (
+  id            VARCHAR(64)  PRIMARY KEY,
+  sender_id     VARCHAR(64)  NOT NULL COMMENT '发送者（主管）用户ID',
+  receiver_id   VARCHAR(64)  NOT NULL COMMENT '接收者（运营）用户ID',
+  employee_id   VARCHAR(64)  NULL COMMENT '关联员工ID（方便查询该员工的所有建议）',
+  target_type   VARCHAR(32)  NOT NULL COMMENT '建议对象类型：post/account/employee',
+  target_id     VARCHAR(64)  NOT NULL COMMENT '建议对象ID',
+  content       TEXT         NOT NULL COMMENT '建议内容',
+  read_status   TINYINT      NOT NULL DEFAULT 0 COMMENT '已读状态：0未读 1已读',
+  created_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+  INDEX idx_ss_employee_id (employee_id),
+  INDEX idx_ss_target      (target_type, target_id),
+  INDEX idx_ss_receiver    (receiver_id, read_status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='主管建议表：存储主管给运营的建议（关联账号/作品/员工）';

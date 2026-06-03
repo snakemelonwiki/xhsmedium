@@ -44,10 +44,11 @@ export class PostsController {
     const nextSearch = (search || keyword || q || '').trim();
 
     if (wantsPaging) {
+      // 漏洞1修复：staff 强制只用 session.employeeId 过滤，不能通过 query 参数绕过
       if (session?.role === 'staff' && session?.employeeId) {
         const result = await this.postsService.findPaged(
           {
-            employeeId: session.employeeId,
+            employeeId: session.employeeId, // 强制使用 session 的 employeeId
             accountId,
             platform,
             postType,
@@ -61,6 +62,7 @@ export class PostsController {
         );
         return res.json(result);
       }
+      // 非 staff：employeeId 参数由 query 决定（主管可查任意员工）
       const result = await this.postsService.findPaged(
         {
           employeeId,
@@ -209,11 +211,17 @@ export class PostsController {
 
   /**
    * 手动写入作品指标，并保存一条历史快照。
+   * 漏洞4修复：staff 角色需校验作品归属。
    */
   @Post(':id/metrics')
-  async saveMetrics(@Param('id') id: string, @Body() body: any, @Res() res: Response) {
+  async saveMetrics(@Param('id') id: string, @Body() body: any, @Req() req: Request, @Res() res: Response) {
+    const session = (req as any).session;
     const post = await this.postsService.findById(id);
     if (!post) return res.status(404).json({ message: '作品不存在' });
+    // 漏洞4修复：staff 角色只能操作自己的作品
+    if (session?.role === 'staff' && post.employeeId !== session?.employeeId) {
+      return res.status(403).json({ ok: false, message: '无权操作他人作品指标' });
+    }
     const metrics = {
       likes: Number(body?.likes || 0),
       comments: Number(body?.comments || 0),
@@ -232,6 +240,23 @@ export class PostsController {
   @Get(':id/metrics')
   async getMetrics(@Param('id') id: string, @Res() res: Response) {
     const items = await this.postsService.getMetricsHistory(id);
+    return res.json({ items });
+  }
+
+  /**
+   * 读取作品每日指标（从 post_metrics 表），用于图表展示和排行榜聚合。
+   * GET /api/posts/:id/metrics/daily?from=2026-01-01&to=2026-06-01
+   */
+  @Get(':id/metrics/daily')
+  async getDailyMetrics(
+    @Param('id') id: string,
+    @Res() res: Response,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    const post = await this.postsService.findById(id);
+    if (!post) return res.status(404).json({ message: '作品不存在' });
+    const items = await this.postsService.getDailyMetrics(id, from, to);
     return res.json({ items });
   }
 

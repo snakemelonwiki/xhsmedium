@@ -29,6 +29,13 @@ export type AppMenuItem = {
 
 export const APP_MENU_ITEMS: AppMenuItem[] = [
   {
+    key: 'operation-today-tasks',
+    label: '今日任务',
+    path: '/operation/today-tasks',
+    icon: <BarChartOutlined />,
+    roles: ['operation'],
+  },
+  {
     key: 'operation-home',
     label: '总览',
     path: '/operation',
@@ -37,15 +44,22 @@ export const APP_MENU_ITEMS: AppMenuItem[] = [
   },
   {
     key: 'operation-rankings',
-    label: '运营排行榜/学习榜单',
+    label: '运营排行榜',
     path: '/operation/rankings',
     icon: <FundOutlined />,
     roles: ['operation'],
   },
   {
+    key: 'operation-rankings-study',
+    label: '学习榜单',
+    path: '/operation/rankings/study',
+    icon: <BookOutlined />,
+    roles: ['operation'],
+  },
+  {
     key: 'operation-dashboard',
     label: '个人看板',
-    path: '/operation/dashboard',
+    path: '/operation/dashboard/personal',
     icon: <BarChartOutlined />,
     roles: ['operation'],
   },
@@ -88,7 +102,7 @@ export const APP_MENU_ITEMS: AppMenuItem[] = [
     key: 'operation-accounts',
     label: '账号管理',
     path: '/operation/accounts',
-    icon: <ShopOutlined />,
+    icon: <DatabaseOutlined />,
     roles: ['operation'],
   },
   {
@@ -102,7 +116,7 @@ export const APP_MENU_ITEMS: AppMenuItem[] = [
     key: 'operation-exports',
     label: '导出中心',
     path: '/operation/exports',
-    icon: <ImportOutlined />,
+    icon: <ExportOutlined />,
     roles: ['operation'],
   },
   {

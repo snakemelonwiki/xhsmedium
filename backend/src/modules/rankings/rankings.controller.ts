@@ -1,8 +1,14 @@
 import { Controller, Get, Query, Req, Res } from '@nestjs/common';
 import { RankingsService } from './rankings.service';
 import { Request, Response } from 'express';
-import { todayString, yesterdayString } from '../../shared/utils/date-utils';
+import { todayString } from '../../shared/utils/date-utils';
 import { getSessionUserId } from '../../common/session.utils';
+
+/** 支持的榜单类型 */
+const RANKING_TYPES = ['posts', 'leads', 'traffic', 'study'];
+
+/** 支持的榜单周期 */
+const RANKING_PERIODS = ['today', 'week', 'month', 'total', '7d', '14d', '30d'];
 
 @Controller('rankings')
 export class RankingsController {
@@ -19,25 +25,28 @@ export class RankingsController {
     @Query('platform') platform?: string,
     @Query('period') period?: string,
   ) {
-    const session = (req as any).session;
     const targetDate = date || todayString();
+    const normalizedType = RANKING_TYPES.includes(type || '') ? type : 'posts';
+    const normalizedPeriod = RANKING_PERIODS.includes(period || '') ? period : 'today';
     const wantsPaging = limit !== undefined || offset !== undefined;
     if (wantsPaging) {
       const result = await this.rankingsService.getRankingsPaged(
-        type || 'posts',
+        normalizedType,
         targetDate,
         Number(limit) || 20,
         Number(offset) || 0,
-        { platform, period },
+        { platform, period: normalizedPeriod },
       );
       return res.json(result);
     }
-    const rows = await this.rankingsService.getRankings(type || 'posts', targetDate, { platform, period });
+    const rows = await this.rankingsService.getRankings(normalizedType, targetDate, { platform, period: normalizedPeriod });
     return res.json(rows);
   }
 
   /**
    * A端运营排行榜契约别名，统一承载作品数、客资数、流量和学习榜入口。
+   * 支持的 type: posts / leads / traffic / study
+   * 支持的 period: today / week / month / total / 7d / 14d / 30d
    */
   @Get('operations')
   async getOperationRankings(
@@ -48,12 +57,14 @@ export class RankingsController {
     @Query('offset') offset?: string,
     @Query('platform') platform?: string,
   ) {
+    const normalizedType = RANKING_TYPES.includes(type || '') ? type : 'posts';
+    const normalizedPeriod = RANKING_PERIODS.includes(period || '') ? period : 'today';
     const result = await this.rankingsService.getRankingsPaged(
-      type || 'posts',
+      normalizedType,
       todayString(),
       Number(limit) || 20,
       Number(offset) || 0,
-      { platform, period },
+      { platform, period: normalizedPeriod },
     );
     return res.json(result);
   }

@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { Post } from '../../entities/post.entity';
 import { Lead } from '../../entities/lead.entity';
 import { PostMetricsHistory } from '../../entities/post-metrics-history.entity';
+import { PostMetrics } from '../../entities/post-metrics.entity';
 import { PostsController } from './posts.controller';
 import { PostsService } from './posts.service';
 import { PostsMetricsService } from './posts-metrics.service';
@@ -10,7 +11,7 @@ import { OperationLogsModule } from '../operation-logs/operation-logs.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Post, Lead, PostMetricsHistory]),
+    TypeOrmModule.forFeature([Post, Lead, PostMetricsHistory, PostMetrics]),
     OperationLogsModule,
   ],
   controllers: [PostsController],

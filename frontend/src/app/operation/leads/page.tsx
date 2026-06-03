@@ -1,54 +1,153 @@
 'use client';
 
+import { DownloadOutlined, EyeOutlined } from '@ant-design/icons';
 import { ProTable, type ProColumns } from '@ant-design/pro-components';
-import { DownloadOutlined } from '@ant-design/icons';
-import { Button, Card, Empty, Input, message, Select, Space, Typography } from 'antd';
+import { Button, Card, Empty, Input, Modal, Select, Segmented, Space, Spin, Typography } from 'antd';
 import type { TablePaginationConfig } from 'antd';
-import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
+import { useCallback, useEffect, useState } from 'react';
 
 import { createExport } from '@/shared/api/exports';
-import { listSalesLeads } from '@/shared/api/leads';
+import { getLeadDetail, listCollaborationTasks, listLeadFollowRecords, listSalesLeads } from '@/shared/api/leads';
+import { LeadTimeline } from '@/shared/components/leads';
 import { StatusTag } from '@/shared/components/status';
-import type { SalesLead } from '@/shared/types/leads';
+import { CollaborationStatus } from '@/shared/constants/lead-status-enums';
+import { formatDateTime } from '@/shared/utils/date-format';
+import type { LeadTimelineItem, SalesLead } from '@/shared/types/leads';
 
 import { buildOperationLeadsExportFilter } from './exportFilter';
 
+type Period = 'today' | 'week' | 'month' | 'all' | 'custom';
+
 type LeadFilters = {
+  period: Period;
+  from?: string;
+  to?: string;
   platform?: string;
-  status?: string;
-  search?: string;
+  sourceAccount?: string;
+  sourcePost?: string;
+  processStatus?: string;
+  addStatus?: string;
+  collaborationStatus?: string;
 };
 
+/** 手机号中间4位脱敏 */
+function maskPhone(phone?: string): string {
+  if (!phone) return '-';
+  if (/^\d{7,}$/.test(phone)) {
+    return phone.slice(0, 3) + '****' + phone.slice(-4);
+  }
+  return phone.slice(0, 2) + '****' + phone.slice(-2);
+}
+
+/** 微信号中间脱敏 */
+function maskWechat(wechat?: string): string {
+  if (!wechat) return '-';
+  if (wechat.length <= 4) return wechat;
+  return wechat.slice(0, 2) + '****' + wechat.slice(-2);
+}
+
 export default function OperationLeadsPage() {
+  const searchParams = useSearchParams();
   const [items, setItems] = useState<SalesLead[]>([]);
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
-  const [filters, setFilters] = useState<LeadFilters>({});
+  const [filters, setFilters] = useState<LeadFilters>({ period: 'all' });
   const [pagination, setPagination] = useState({ current: 1, pageSize: 20, total: 0 });
 
-  async function load(nextPage = pagination.current, nextPageSize = pagination.pageSize, nextFilters = filters) {
+  const [detailLead, setDetailLead] = useState<SalesLead | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailTimeline, setDetailTimeline] = useState<LeadTimelineItem[]>([]);
+  const [timelineLoading, setTimelineLoading] = useState(false);
+  const [detailOpen, setDetailOpen] = useState(false);
+
+  // 从 URL 参数初始化筛选条件
+  useEffect(() => {
+    const urlFrom = searchParams.get('from');
+    const urlTo = searchParams.get('to');
+    if (urlFrom && urlTo) {
+      setFilters({ period: 'custom', from: urlFrom, to: urlTo });
+    }
+  }, [searchParams]);
+
+  const loadLeadDetail = useCallback(async function loadLeadDetail(leadId: string) {
+    setDetailLoading(true);
+    setTimelineLoading(true);
+    setDetailOpen(true);
+    try {
+      const [lead, followRecords, collabsResult] = await Promise.all([
+        getLeadDetail(leadId).catch(() => undefined),
+        listLeadFollowRecords(leadId).catch(() => []),
+        listCollaborationTasks({ scope: 'requester', leadId, pageSize: 50 }).catch(() => ({ items: [] })),
+      ]);
+      setDetailLead(lead ?? null);
+      setDetailTimeline([...followRecords, ...(collabsResult.items ?? [])].sort((a, b) => {
+        const ta = new Date(a.occurredAt).getTime();
+        const tb = new Date(b.occurredAt).getTime();
+        return tb - ta;
+      }));
+    } finally {
+      setDetailLoading(false);
+      setTimelineLoading(false);
+    }
+  }, []);
+
+  const load = useCallback(async function load(
+    nextPage = pagination.current,
+    nextPageSize = pagination.pageSize,
+    nextFilters = filters,
+  ) {
     setLoading(true);
     try {
-      const result = await listSalesLeads({
+      const query: Record<string, unknown> = {
         scope: 'self',
         page: nextPage,
         pageSize: nextPageSize,
-        platform: nextFilters.platform,
-        status: nextFilters.status,
-        search: nextFilters.search,
-      });
+      };
+      if (nextFilters.platform) query.platform = nextFilters.platform;
+      if (nextFilters.processStatus) query.processStatus = nextFilters.processStatus;
+      if (nextFilters.addStatus) query.addStatus = nextFilters.addStatus;
+      if (nextFilters.collaborationStatus) query.collaborationStatus = nextFilters.collaborationStatus;
+      if (nextFilters.sourcePost) query.search = nextFilters.sourcePost;
+      if (nextFilters.sourceAccount) query.sourceAccountId = nextFilters.sourceAccount;
+
+      // 周期筛选映射到后端日期参数
+      const now = new Date();
+      if (nextFilters.period === 'today') {
+        const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        query.from = start.toISOString().slice(0, 10);
+        query.to = now.toISOString().slice(0, 10);
+      } else if (nextFilters.period === 'week') {
+        const start = new Date(now);
+        start.setDate(now.getDate() - 7);
+        query.from = start.toISOString().slice(0, 10);
+        query.to = now.toISOString().slice(0, 10);
+      } else if (nextFilters.period === 'month') {
+        const start = new Date(now.getFullYear(), now.getMonth(), 1);
+        query.from = start.toISOString().slice(0, 10);
+        query.to = now.toISOString().slice(0, 10);
+      } else if (nextFilters.period === 'custom' && nextFilters.from && nextFilters.to) {
+        // 自定义日期范围：从 URL 参数或手动选择
+        query.from = `${nextFilters.from} 00:00:00`;
+        query.to = `${nextFilters.to} 23:59:59`;
+      }
+
+      const result = await listSalesLeads(query as Parameters<typeof listSalesLeads>[0]);
       setItems(result.items);
       setPagination({ current: result.page, pageSize: result.pageSize, total: result.total });
     } finally {
       setLoading(false);
     }
-  }
+  }, [filters, pagination.current, pagination.pageSize]);
 
   useEffect(() => {
-    load(1).catch(() => setItems([]));
+    // 延迟加载，确保 URL 参数初始化完成
+    const timer = setTimeout(() => {
+      void load(1, pagination.pageSize, filters).catch(() => setItems([]));
+    }, 0);
+    return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [filters]);
 
   async function handleExport() {
     setExporting(true);
@@ -58,16 +157,78 @@ export default function OperationLeadsPage() {
         filter: buildOperationLeadsExportFilter({
           page: pagination.current,
           pageSize: pagination.pageSize,
-          ...filters,
+          platform: filters.platform,
+          status: filters.processStatus,
+          search: filters.sourcePost,
         }),
       });
-      message.success('已创建客资导出任务，可到导出中心下载');
-    } catch (err) {
-      message.error(err instanceof Error ? err.message : '客资导出创建失败');
     } finally {
       setExporting(false);
     }
   }
+
+  const columns: ProColumns<SalesLead>[] = [
+    {
+      title: '客户',
+      dataIndex: 'customerName',
+      width: 150,
+      render: (_, record) => (
+        <Space direction="vertical" size={2}>
+          <Typography.Text strong>{record.customerName || record.nickname || `客资 ${record.id}`}</Typography.Text>
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            {maskPhone(record.phone || record.contact)} / {maskWechat(record.wechat)}
+          </Typography.Text>
+        </Space>
+      ),
+    },
+    {
+      title: '来源作品',
+      width: 150,
+      render: (_, record) => record.source?.postTitle || record.source?.postId || '-',
+    },
+    {
+      title: '来源账号',
+      width: 120,
+      render: (_, record) => record.source?.accountName || record.source?.accountId || '-',
+    },
+    {
+      title: '分配销售',
+      width: 100,
+      render: (_, record) => record.sales?.name || record.sales?.id || '-',
+    },
+    {
+      title: '添加状态',
+      width: 100,
+      render: (_, record) => <StatusTag kind="addStatus" code={record.addStatus} />,
+    },
+    {
+      title: '协同状态',
+      width: 100,
+      render: (_, record) => <StatusTag kind="collaborationStatus" code={record.collaborationStatus} />,
+    },
+    {
+      title: '处理状态',
+      width: 100,
+      render: (_, record) => <StatusTag kind="processStatus" code={record.processStatus} />,
+    },
+    {
+      title: '最后更新',
+      dataIndex: 'updatedAt',
+      width: 160,
+      sorter: (a, b) => String(a.updatedAt || '').localeCompare(String(b.updatedAt || '')),
+      render: (_, record) => formatDateTime(record.updatedAt || record.latestFollowAt),
+    },
+    {
+      title: '操作',
+      width: 100,
+      fixed: 'right',
+      render: (_, record) => (
+        <Button size="small" icon={<EyeOutlined />} onClick={() => void loadLeadDetail(String(record.id))}>
+          详情
+        </Button>
+      ),
+    },
+  ];
 
   return (
     <Space direction="vertical" size={16} className="page-stack">
@@ -77,11 +238,25 @@ export default function OperationLeadsPage() {
           <Typography.Paragraph type="secondary">回看自己录入客资的分配、添加、跟进和协同状态。</Typography.Paragraph>
         </div>
         <Space wrap>
+          <Segmented
+            value={filters.period}
+            onChange={(value) => {
+              const next = { ...filters, period: value as Period };
+              setFilters(next);
+              void load(1, pagination.pageSize, next);
+            }}
+            options={[
+              { label: '今日', value: 'today' },
+              { label: '本周', value: 'week' },
+              { label: '本月', value: 'month' },
+              { label: '全部', value: 'all' },
+            ]}
+          />
           <Select
             allowClear
             aria-label="筛选平台"
             placeholder="全部平台"
-            style={{ width: 140 }}
+            style={{ width: 120 }}
             value={filters.platform}
             options={[
               { label: '小红书', value: 'xiaohongshu' },
@@ -90,44 +265,81 @@ export default function OperationLeadsPage() {
             onChange={(platform) => {
               const next = { ...filters, platform };
               setFilters(next);
-              load(1, pagination.pageSize, next);
+              void load(1, pagination.pageSize, next);
             }}
           />
           <Select
             allowClear
-            aria-label="筛选状态"
-            placeholder="全部状态"
-            style={{ width: 160 }}
-            value={filters.status}
+            aria-label="筛选处理状态"
+            placeholder="处理状态"
+            style={{ width: 120 }}
+            value={filters.processStatus}
             options={[
-              { label: '新客资', value: 'new' },
-              { label: '已分配', value: 'assigned' },
-              { label: '协同中', value: 'in_collaboration' },
-              { label: '运营已处理', value: 'operation_handled' },
-              { label: '已添加通过', value: 'added_success' },
-              { label: '无效客资', value: 'invalid' },
+              { label: '未联系', value: 'not_contacted' },
+              { label: '待通过', value: 'waiting_pass' },
+              { label: '沟通中', value: 'communicating' },
+              { label: '已报价', value: 'quoted' },
+              { label: '待成交', value: 'deal_pending' },
+              { label: '已成交', value: 'deal_done' },
+              { label: '无效', value: 'invalid' },
             ]}
-            onChange={(status) => {
-              const next = { ...filters, status };
+            onChange={(processStatus) => {
+              const next = { ...filters, processStatus };
               setFilters(next);
-              load(1, pagination.pageSize, next);
+              void load(1, pagination.pageSize, next);
+            }}
+          />
+          <Select
+            allowClear
+            aria-label="筛选添加状态"
+            placeholder="添加状态"
+            style={{ width: 130 }}
+            value={filters.addStatus}
+            options={[
+              { label: '未添加', value: 'not_added' },
+              { label: '已申请', value: 'applied' },
+              { label: '未通过', value: 'not_passed' },
+              { label: '运营已提醒', value: 'operation_reminded' },
+              { label: '已添加', value: 'added' },
+            ]}
+            onChange={(addStatus) => {
+              const next = { ...filters, addStatus };
+              setFilters(next);
+              void load(1, pagination.pageSize, next);
+            }}
+          />
+          <Select
+            allowClear
+            aria-label="筛选协同状态"
+            placeholder="协同状态"
+            style={{ width: 130 }}
+            value={filters.collaborationStatus}
+            options={[
+              { label: '无', value: 'none' },
+              { label: '协同中', value: 'pending' },
+              { label: '处理中', value: 'handling' },
+              { label: '已处理', value: 'handled' },
+            ]}
+            onChange={(collaborationStatus) => {
+              const next = { ...filters, collaborationStatus };
+              setFilters(next);
+              void load(1, pagination.pageSize, next);
             }}
           />
           <Input.Search
             allowClear
-            placeholder="搜索客户/联系方式"
-            style={{ width: 220 }}
-            onSearch={(search) => {
-              const next = { ...filters, search };
+            placeholder="搜索来源作品"
+            style={{ width: 160 }}
+            onSearch={(sourcePost) => {
+              const next = { ...filters, sourcePost };
               setFilters(next);
-              load(1, pagination.pageSize, next);
+              void load(1, pagination.pageSize, next);
             }}
           />
           <Button icon={<DownloadOutlined />} loading={exporting} onClick={handleExport}>
-            导出当前筛选
+            导出
           </Button>
-          <Button onClick={() => load()}>刷新</Button>
-          <Link href="/operation/leads/new"><Button type="primary">录入客资</Button></Link>
+          <Button onClick={() => void load()}>刷新</Button>
         </Space>
       </div>
       <Card>
@@ -137,55 +349,74 @@ export default function OperationLeadsPage() {
           dataSource={items}
           loading={loading}
           pagination={{ ...pagination, showSizeChanger: true }}
-          onChange={(next: TablePaginationConfig) => load(next.current ?? 1, next.pageSize ?? 20)}
+          onChange={(next: TablePaginationConfig) => void load(next.current ?? 1, next.pageSize ?? 20, filters)}
           locale={{ emptyText: <Empty description="暂无客资" /> }}
           search={false}
           options={false}
         />
       </Card>
+
+      {/* 客资详情弹窗 */}
+      <Modal
+        title={`客资详情 - ${detailLead?.customerName ?? ''}`}
+        open={detailOpen}
+        onCancel={() => {
+          setDetailOpen(false);
+          setDetailLead(null);
+          setDetailTimeline([]);
+        }}
+        footer={null}
+        width={720}
+      >
+        <Spin spinning={detailLoading}>
+          {detailLead ? (
+            <>
+              <Card size="small" style={{ marginBottom: 16 }}>
+                <Space wrap size={16}>
+                  <Typography.Text>
+                    添加状态：<StatusTag kind="addStatus" code={detailLead.addStatus} />
+                  </Typography.Text>
+                  <Typography.Text>
+                    协同状态：<StatusTag kind="collaborationStatus" code={detailLead.collaborationStatus} />
+                  </Typography.Text>
+                  <Typography.Text>
+                    处理状态：<StatusTag kind="processStatus" code={detailLead.processStatus} />
+                  </Typography.Text>
+                </Space>
+              </Card>
+              <Card size="small" title="基本信息" style={{ marginBottom: 16 }}>
+                <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                  <Typography.Text>客户昵称：{detailLead.customerName || detailLead.nickname || '-'}</Typography.Text>
+                  <Typography.Text>手机号：{maskPhone(detailLead.phone || detailLead.contact)}</Typography.Text>
+                  <Typography.Text>微信号：{maskWechat(detailLead.wechat)}</Typography.Text>
+                  <Typography.Text>IP/地区：{detailLead.ip || '-'}</Typography.Text>
+                  <Typography.Text>需求备注：{detailLead.requirementNote || '-'}</Typography.Text>
+                  <Typography.Text>来源平台：{detailLead.source?.platform || '-'}</Typography.Text>
+                  <Typography.Text>
+                    来源账号：{detailLead.source?.accountName || detailLead.source?.accountId || '-'}
+                  </Typography.Text>
+                  <Typography.Text>
+                    来源作品：{detailLead.source?.postTitle || detailLead.source?.postId || '-'}
+                  </Typography.Text>
+                  <Typography.Text>分配销售：{detailLead.sales?.name || detailLead.sales?.id || '-'}</Typography.Text>
+                  <Typography.Text>运营备注：{detailLead.note || '-'}</Typography.Text>
+                  <Typography.Text>主管备注：{detailLead.supervisorNote || '-'}</Typography.Text>
+                  <Typography.Text type="secondary">
+                    最后更新：{formatDateTime(detailLead.updatedAt || detailLead.latestFollowAt)}
+                  </Typography.Text>
+                </Space>
+              </Card>
+              <Card size="small" title="跟进/协同时间线">
+                <Spin spinning={timelineLoading}>
+                  <LeadTimeline items={detailTimeline} />
+                </Spin>
+              </Card>
+            </>
+          ) : (
+            <Empty description="加载失败" />
+          )}
+        </Spin>
+      </Modal>
     </Space>
   );
 }
-
-const columns: ProColumns<SalesLead>[] = [
-  {
-    title: '客户',
-    dataIndex: 'customerName',
-    sorter: (a, b) => String(a.customerName || '').localeCompare(String(b.customerName || '')),
-    render: (_, record) => (
-      <Space direction="vertical" size={2}>
-        <Typography.Text strong>{record.customerName || record.nickname || `客资 ${record.id}`}</Typography.Text>
-        <Typography.Text type="secondary">{record.contact || record.phone || record.wechat || '-'}</Typography.Text>
-      </Space>
-    ),
-  },
-  {
-    title: '来源账号',
-    render: (_, record) => record.source?.accountName || record.source?.accountId || '-',
-  },
-  {
-    title: '来源作品',
-    render: (_, record) => record.source?.postTitle || record.source?.postId || '-',
-  },
-  {
-    title: '分配销售',
-    render: (_, record) => record.sales?.name || record.sales?.id || '-',
-  },
-  {
-    title: '添加状态',
-    render: (_, record) => <StatusTag kind="addStatus" code={record.addStatus} />,
-  },
-  {
-    title: '协同状态',
-    render: (_, record) => <StatusTag kind="collaborationStatus" code={record.collaborationStatus} />,
-  },
-  {
-    title: '客资状态',
-    render: (_, record) => <StatusTag kind="leadStatus" code={record.status} />,
-  },
-  {
-    title: '最后更新',
-    sorter: (a, b) => String(a.updatedAt || '').localeCompare(String(b.updatedAt || '')),
-    render: (_, record) => record.updatedAt || record.latestFollowAt || record.assignedAt || '-',
-  },
-];

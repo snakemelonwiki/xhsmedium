@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Like, Repository } from 'typeorm';
 import { Employee } from '../../entities/employee.entity';
@@ -39,7 +39,7 @@ export class EmployeesService {
    */
   async findAllCodes(): Promise<string[]> {
     const rows = await this.employeeRepository.find({ select: { employeeCode: true } });
-    return rows.map((e) => e.employeeCode);
+    return rows.map((e) => String(e.employeeCode || ''));
   }
 
   /**
@@ -55,11 +55,35 @@ export class EmployeesService {
    * 创建员工资料。
    */
   async create(dto: Partial<Employee>): Promise<any> {
+    // 必填字段校验
+    if (!dto.name || !String(dto.name).trim()) {
+      throw new BadRequestException('name (姓名) 为必填字段');
+    }
+    if (!dto.employeeCode || !String(dto.employeeCode).trim()) {
+      throw new BadRequestException('employeeCode (员工编号) 为必填字段');
+    }
+
     const employee = this.employeeRepository.create({
       ...dto,
       id: makeId(),
     } as any);
-    return this.employeeRepository.save(employee);
+
+    try {
+      return await this.employeeRepository.save(employee);
+    } catch (err: any) {
+      // 唯一约束冲突 (employee_code 重复)
+      if (err.code === 'ER_DUP_ENTRY') {
+        throw new ConflictException(`员工编号 ${dto.employeeCode} 已存在`);
+      }
+      // 打印详细日志便于排查
+      console.error('[employees.create] save failed:', {
+        dto,
+        error: err.message,
+        code: err.code,
+        errno: err.errno,
+      });
+      throw err;
+    }
   }
 
   /**

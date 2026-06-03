@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { Post } from '../../entities/post.entity';
 import { Lead } from '../../entities/lead.entity';
 import { PostMetricsHistory } from '../../entities/post-metrics-history.entity';
+import { PostMetrics } from '../../entities/post-metrics.entity';
 import { makeId } from '../../shared/utils/id-generator';
 import { normalizePostType, normalizeTrafficByType, normalizeExternalUrl, normalizeMediaUrl } from '../../shared/utils/normalize';
 
@@ -35,6 +36,8 @@ export class PostsService {
     private readonly leadRepository: Repository<Lead>,
     @InjectRepository(PostMetricsHistory)
     private readonly metricsHistoryRepository: Repository<PostMetricsHistory>,
+    @InjectRepository(PostMetrics)
+    private readonly postMetricsRepository: Repository<PostMetrics>,
   ) {}
 
   async findAll(): Promise<any[]> {
@@ -322,6 +325,10 @@ export class PostsService {
     });
   }
 
+  /**
+   * 记录指标历史，同时按天聚合到 post_metrics 表。
+   * post_metrics 表按 (post_id, date) 去重。
+   */
   async recordMetricsHistory(id: string, metrics: { likes: number; comments: number; favorites: number; shares?: number }): Promise<void> {
     const leadsCount = await this.leadRepository.count({ where: { postId: id } });
     await this.metricsHistoryRepository.save(this.metricsHistoryRepository.create({
@@ -332,6 +339,75 @@ export class PostsService {
       favorites: Number(metrics.favorites || 0),
       shares: Number(metrics.shares || 0),
       leadsCount,
+    }));
+
+    // 同步到 post_metrics 按天聚合表（post_id + date 去重）
+    const today = new Date().toISOString().slice(0, 10);
+    await this.upsertDailyMetrics(id, today, {
+      likes: Number(metrics.likes || 0),
+      comments: Number(metrics.comments || 0),
+      favorites: Number(metrics.favorites || 0),
+      shares: Number(metrics.shares || 0),
+    });
+  }
+
+  /**
+   * 按 (post_id, date) 去重 upsert 到 post_metrics 表。
+   * 用于排行榜和看板聚合查询。
+   */
+  async upsertDailyMetrics(
+    postId: string,
+    date: string,
+    metrics: { likes?: number; comments?: number; favorites?: number; shares?: number; traffic?: number; views?: number },
+  ): Promise<void> {
+    const existing = await this.postMetricsRepository.findOne({
+      where: { postId, date: new Date(date) },
+    });
+    if (existing) {
+      await this.postMetricsRepository.update(existing.id, {
+        likes: metrics.likes ?? existing.likes,
+        comments: metrics.comments ?? existing.comments,
+        favorites: metrics.favorites ?? existing.favorites,
+        shares: metrics.shares ?? existing.shares,
+        traffic: metrics.traffic ?? existing.traffic,
+        views: metrics.views ?? existing.views,
+      });
+    } else {
+      await this.postMetricsRepository.save(this.postMetricsRepository.create({
+        id: makeId(),
+        postId,
+        date: new Date(date),
+        likes: metrics.likes ?? 0,
+        comments: metrics.comments ?? 0,
+        favorites: metrics.favorites ?? 0,
+        shares: metrics.shares ?? 0,
+        traffic: metrics.traffic ?? 0,
+        views: metrics.views ?? 0,
+      }));
+    }
+  }
+
+  /**
+   * 获取作品每日指标历史（用于图表展示）。
+   */
+  async getDailyMetrics(postId: string, fromDate?: string, toDate?: string): Promise<any[]> {
+    const qb = this.postMetricsRepository.createQueryBuilder('pm')
+      .where('pm.post_id = :postId', { postId })
+      .orderBy('pm.date', 'DESC');
+
+    if (fromDate) qb.andWhere('pm.date >= :fromDate', { fromDate });
+    if (toDate) qb.andWhere('pm.date <= :toDate', { toDate });
+
+    const rows = await qb.getMany();
+    return rows.map((r) => ({
+      postId: r.postId,
+      date: r.date,
+      likes: Number(r.likes || 0),
+      comments: Number(r.comments || 0),
+      favorites: Number(r.favorites || 0),
+      shares: Number(r.shares || 0),
+      traffic: Number(r.traffic || 0),
+      views: Number(r.views || 0),
     }));
   }
 

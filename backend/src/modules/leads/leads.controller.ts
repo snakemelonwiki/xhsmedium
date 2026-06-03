@@ -247,34 +247,42 @@ export class LeadsController {
   @Post()
   @UseGuards(DebounceGuard)
   async create(@Body() body: any, @Req() req: Request, @Res() res: Response) {
-    const session = (req as any).session;
-    await this.leadsService.create({
-      id: makeId(),
-      employeeId: session?.employeeId || '',
-      accountId: body.accountId,
-      postId: body.postId || null,
-      platform: body.platform,
-      contactInfo: body.contactInfo,
-      nickname: body.nickname || '',
-      budget: body.budget,
-      majorContent: body.majorContent,
-      ip: body.ip,
-      status: body.status || (body.assignedSalesUserId ? 'assigned' : 'new'),
-      dealAmount: body.dealAmount,
-      note: body.note,
-      requirementNote: body.requirementNote,
-      supervisorNote: body.supervisorNote,
-      captureImageUrl: body.captureImageUrl,
-      salesFeedback: body.salesFeedback || '',
-      salesUpdatedAt: body.salesUpdatedAt,
-      salesUserName: body.salesUserName || '',
-      assignedSalesUserId: body.assignedSalesUserId || null,
-      assignedSalesUserName: body.assignedSalesUserName || '',
-      processStatus: body.processStatus || 'not_contacted',
-      addStatus: body.addStatus || 'not_added',
-      intention: body.intention || null,
-    });
-    return res.json({ ok: true });
+    try {
+      const session = (req as any).session;
+      await this.leadsService.create({
+        id: makeId(),
+        employeeId: session?.employeeId || '',
+        accountId: body.accountId,
+        postId: body.postId || null,
+        platform: body.platform,
+        contactInfo: body.contactInfo,
+        nickname: body.nickname || '',
+        budget: body.budget,
+        majorContent: body.majorContent,
+        ip: body.ip,
+        status: body.status || (body.assignedSalesUserId ? 'assigned' : 'new'),
+        dealAmount: body.dealAmount,
+        note: body.note,
+        requirementNote: body.requirementNote,
+        supervisorNote: body.supervisorNote,
+        captureImageUrl: body.captureImageUrl,
+        salesFeedback: body.salesFeedback || '',
+        salesUpdatedAt: body.salesUpdatedAt,
+        salesUserName: body.salesUserName || '',
+        assignedSalesUserId: body.assignedSalesUserId || null,
+        assignedSalesUserName: body.assignedSalesUserName || '',
+        processStatus: body.processStatus || 'not_contacted',
+        addStatus: body.addStatus || 'not_added',
+        intention: body.intention || null,
+      });
+      return res.json({ ok: true });
+    } catch (err: any) {
+      // BadRequestException / ConflictException 等 NestJS 异常直接抛出让全局过滤器处理
+      if (err.status) throw err;
+      // 其他未预期错误
+      console.error('[leads.create] unexpected error:', err.message || err);
+      return res.status(500).json({ ok: false, message: 'Internal server error' });
+    }
   }
 
   // 注意：批量导入模板下载必须位于 `:id` 路由之前，否则 NestJS 会把

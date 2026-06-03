@@ -22,6 +22,7 @@ import { Favorite } from './entities/favorite.entity';
 import { PostMetricsHistory } from './entities/post-metrics-history.entity';
 import { ExportTask } from './entities/export-task.entity';
 import { OperationLog } from './entities/operation-log.entity';
+import { SupervisorSuggestion } from './entities/supervisor-suggestion.entity';
 import { AuthModule } from './modules/auth/auth.module';
 import { EmployeesModule } from './modules/employees/employees.module';
 import { UsersModule } from './modules/users/users.module';
@@ -43,6 +44,8 @@ import { ExportsModule } from './modules/exports/exports.module';
 import { OperationLogsModule } from './modules/operation-logs/operation-logs.module';
 import { SupervisorSuggestionsModule } from './modules/supervisor-suggestions/supervisor-suggestions.module';
 import { UploadsModule } from './modules/uploads/uploads.module';
+import { SalesModule } from './modules/sales/sales.module';
+import { EnumsModule } from './modules/enums/enums.module';
 import { StorageModule } from './shared/storage/storage.service';
 import { CacheModule } from './shared/cache.service';
 import { FormattedSqlLogger } from './common/sql-logger';
@@ -64,7 +67,7 @@ import { TokenRefreshInterceptor } from './common/token-refresh.interceptor';
         username: config.get('MYSQL_USER', 'root'),
         password: config.get('MYSQL_PASSWORD', ''),
         database: config.get('MYSQL_DATABASE', 'lan_dual_role_system'),
-        entities: [User, Employee, Account, Post, Lead, LeadFollowRecord, LeadDraft, CollaborationTask, Order, OrderFollowRecord, OrderAbnormalFeedback, ImportTask, Notification, Favorite, PostMetricsHistory, ExportTask, OperationLog],
+        entities: [User, Employee, Account, Post, Lead, LeadFollowRecord, LeadDraft, CollaborationTask, Order, OrderFollowRecord, OrderAbnormalFeedback, ImportTask, Notification, Favorite, PostMetricsHistory, ExportTask, OperationLog, SupervisorSuggestion],
         synchronize: false,
         charset: 'utf8mb4',
         logging: true,
@@ -74,6 +77,7 @@ import { TokenRefreshInterceptor } from './common/token-refresh.interceptor';
           waitForConnections: true,
           queueLimit: 0,
           connectTimeout: 10000,
+          charset: 'utf8mb4_unicode_ci',
         },
       }),
     }),
@@ -108,6 +112,8 @@ import { TokenRefreshInterceptor } from './common/token-refresh.interceptor';
     OperationLogsModule,
     SupervisorSuggestionsModule,
     UploadsModule,
+    SalesModule,
+    EnumsModule,
     StorageModule,
     CacheModule,
   ],

@@ -457,6 +457,15 @@ export class LeadsService {
   }
 
   async create(dto: Partial<Lead>): Promise<void> {
+    // 必填字段校验
+    const errors: string[] = [];
+    if (!dto.accountId) errors.push('accountId (来源账号)');
+    if (!dto.platform) errors.push('platform (平台)');
+    if (!dto.contactInfo) errors.push('contactInfo (联系方式)');
+    if (errors.length > 0) {
+      throw new BadRequestException(`缺少必填字段: ${errors.join(', ')}`);
+    }
+
     const leadId = (dto as any).id || makeId();
     const lead = this.leadRepository.create({
       ...dto,
@@ -467,17 +476,45 @@ export class LeadsService {
       processStatus: dto.processStatus || 'not_contacted',
       addStatus: dto.addStatus || 'not_added',
     } as any);
-    await this.leadRepository.save(lead);
+
+    try {
+      await this.leadRepository.save(lead);
+    } catch (err: any) {
+      // 外键约束失败 (如 account_id 不存在)
+      if (err.code === 'ER_NO_REFERENCED_ROW_2' || err.code === 'ER_ROW_IS_REFERENCED_2') {
+        throw new BadRequestException(`关联数据不存在: ${err.message}`);
+      }
+      // 唯一约束冲突
+      if (err.code === 'ER_DUP_ENTRY') {
+        throw new ConflictException(`数据重复: ${err.message}`);
+      }
+      // 打印详细日志便于排查
+      console.error('[leads.create] save failed:', {
+        dto,
+        error: err.message,
+        code: err.code,
+        errno: err.errno,
+      });
+      throw err;
+    }
 
     // §11.1 lead_assigned: 客资被直接分配给销售时通知销售。
     if (dto.assignedSalesUserId) {
+      const customerName = dto.nickname || dto.contactInfo || '未知客户';
+      // 构造来源信息：优先用作品名，其次账号名
+      const sourceInfo = [
+        dto.postId ? `作品ID: ${dto.postId}` : null,
+        dto.accountId ? `账号ID: ${dto.accountId}` : null,
+        dto.platform ? `平台: ${dto.platform}` : null,
+        dto.ip ? `IP: ${dto.ip}` : null,
+      ].filter(Boolean).join(' | ');
       await this.notificationsService.create({
         receiverIds: [dto.assignedSalesUserId],
         senderId: null,
         portType: 'sales',
         typeCode: NOTIFICATION_TYPES.LEAD_ASSIGNED,
-        title: '新客资已分配',
-        content: `客资 ${dto.contactInfo || ''} 已分配给您，请尽快跟进`,
+        title: `新分配客资: ${customerName}`,
+        content: sourceInfo || `客资 ${customerName} 已分配给您，请尽快跟进`,
         relatedId: leadId,
         relatedType: 'lead',
       });

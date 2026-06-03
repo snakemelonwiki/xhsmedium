@@ -140,6 +140,21 @@ export default function AdminPostsPage() {
   const [suggestionDraft, setSuggestionDraft] = useState('');
   const [leadRecords, setLeadRecords] = useState<Array<{ id: string; customerName: string; platform?: string; createdAt?: string }>>([]);
   const [leadRecordsLoading, setLeadRecordsLoading] = useState(false);
+  const [exportConfirmOpen, setExportConfirmOpen] = useState(false);
+  const [exportCountdown, setExportCountdown] = useState(5);
+
+  // 导出确认弹窗倒计时
+  useEffect(() => {
+    if (!exportConfirmOpen) {
+      setExportCountdown(5);
+      return;
+    }
+    if (exportCountdown <= 0) return;
+    const timer = setTimeout(() => {
+      setExportCountdown((c) => c - 1);
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [exportConfirmOpen, exportCountdown]);
 
   async function loadEmployees() {
     try {
@@ -337,14 +352,23 @@ export default function AdminPostsPage() {
       if (filters.employeeId) filter.employeeId = filters.employeeId;
       if (filters.accountId) filter.accountId = filters.accountId;
       if (filters.postType) filter.postType = filters.postType;
+      if (filters.isLeadPost) filter.isLeadPost = filters.isLeadPost;
+      if (filters.startDate) filter.from = filters.startDate;
+      if (filters.endDate) filter.to = filters.endDate;
       if (filters.keyword) filter.search = filters.keyword;
       await createExport({ exportType: 'posts', filter });
-      message.success('已创建作品导出任务，可到导出中心下载');
+      setExportConfirmOpen(false);
+      message.success('导出任务已创建，请到导出中心下载');
     } catch (err) {
       message.error(err instanceof Error ? err.message : '作品导出创建失败');
     } finally {
       setExporting(false);
     }
+  }
+
+  function openExportConfirm() {
+    setExportConfirmOpen(true);
+    setExportCountdown(5);
   }
 
   async function saveSuggestion() {
@@ -516,7 +540,7 @@ export default function AdminPostsPage() {
           <Typography.Paragraph type="secondary">查看全量作品数据，分析获客效果。</Typography.Paragraph>
         </div>
         <Space wrap>
-          <Button icon={<DownloadOutlined />} loading={exporting} onClick={handleExport}>
+          <Button icon={<DownloadOutlined />} loading={exporting} onClick={openExportConfirm}>
             导出
           </Button>
           <Button
@@ -756,6 +780,81 @@ export default function AdminPostsPage() {
             </Space>
           )}
         </Spin>
+      </Modal>
+
+      {/* 导出确认弹窗 */}
+      <Modal
+        title="确认导出作品"
+        open={exportConfirmOpen}
+        onCancel={() => setExportConfirmOpen(false)}
+        footer={[
+          <Button key="cancel" onClick={() => setExportConfirmOpen(false)} disabled={exporting}>
+            取消
+          </Button>,
+          <Button
+            key="confirm"
+            type="primary"
+            loading={exporting}
+            disabled={exportCountdown > 0}
+            onClick={() => void handleExport()}
+          >
+            {exportCountdown > 0 ? `${exportCountdown} 秒后可导出` : '确认导出'}
+          </Button>,
+        ]}
+        width={500}
+      >
+        <Space direction="vertical" size={16} style={{ width: '100%' }}>
+          <Typography.Text>确认导出当前筛选条件下的作品数据？</Typography.Text>
+
+          {/* 当前筛选条件 */}
+          <Card size="small">
+            <Typography.Text strong>当前筛选条件</Typography.Text>
+            <Space direction="vertical" size={8} style={{ marginTop: 8 }}>
+              {[
+                filters.keyword ? { label: '关键词', value: filters.keyword } : null,
+                filters.platform
+                  ? { label: '平台', value: filters.platform === 'xiaohongshu' ? '小红书' : filters.platform === 'douyin' ? '抖音' : filters.platform }
+                  : null,
+                filters.employeeId
+                  ? { label: '员工', value: employees.find((e) => e.id === filters.employeeId)?.name || filters.employeeId }
+                  : null,
+                filters.accountId
+                  ? { label: '账号', value: accounts.find((a) => a.id === filters.accountId)?.name || filters.accountId }
+                  : null,
+                filters.postType ? { label: '作品类型', value: filters.postType } : null,
+                filters.isLeadPost
+                  ? { label: '获客贴', value: filters.isLeadPost === 'yes' ? '获客贴(≥5)' : '普通贴(<5)' }
+                  : null,
+                (filters.startDate || filters.endDate)
+                  ? { label: '日期范围', value: `${filters.startDate || '-'} 至 ${filters.endDate || '-'}` }
+                  : null,
+              ]
+                .filter((item): item is { label: string; value: string } => item !== null)
+                .map((item) => (
+                  <Space key={item.label}>
+                    <Typography.Text type="secondary">{item.label}:</Typography.Text>
+                    <Typography.Text>{item.value}</Typography.Text>
+                  </Space>
+                ))}
+              {![
+                filters.keyword,
+                filters.platform,
+                filters.employeeId,
+                filters.accountId,
+                filters.postType,
+                filters.isLeadPost,
+                filters.startDate,
+                filters.endDate,
+              ].filter(Boolean).length && (
+                <Typography.Text type="secondary">无筛选条件（将导出全部作品）</Typography.Text>
+              )}
+            </Space>
+          </Card>
+
+          <Typography.Text type="secondary">
+            导出任务创建后可到「导出中心」下载文件。
+          </Typography.Text>
+        </Space>
       </Modal>
     </Space>
   );

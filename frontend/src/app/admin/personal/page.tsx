@@ -1,109 +1,93 @@
 'use client';
 
-import { Card, Empty, Select, Space, Statistic, Typography } from 'antd';
-import { useEffect, useState } from 'react';
+import { Select, Space, Spin, Tag, Typography } from 'antd';
+import { useCallback, useEffect, useState } from 'react';
 
 import { apiClient } from '@/shared/api/apiClient';
+import { PersonalDashboardBoard } from '@/shared/components/dashboard/PersonalDashboardBoard';
 
-type Employee = { id: string; name: string; employeeCode?: string };
-
-type EmployeeSnapshot = {
-  postCount: number;
-  leadCount: number;
-  recentPostTitle?: string;
-  recentLeadContact?: string;
+type Employee = {
+  id: string;
+  name: string;
+  employeeCode?: string;
 };
 
 /**
- * 主管端"个人看板选择器"：先选员工，再呈现其作品 / 客资聚合。
- * 当前只读基础数据，里程碑 1.2 后续可扩展跟进时间线 / 排行榜对比。
+ * 主管个人看板
+ * 1. 顶部员工选择器
+ * 2. 选择后复用 PersonalDashboardBoard（传入 employeeId）
+ * 3. 主管可在看板内查看员工账号日历、获客榜、效率榜、流量榜、非获客贴榜
  */
 export default function AdminPersonalPage() {
   const [employees, setEmployees] = useState<Employee[]>([]);
-  const [selected, setSelected] = useState<string>();
-  const [snapshot, setSnapshot] = useState<EmployeeSnapshot>();
-  const [loading, setLoading] = useState(false);
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | undefined>(undefined);
+  const [loadingEmployees, setLoadingEmployees] = useState(false);
 
-  useEffect(() => {
-    apiClient
-      .get<any>('/employees')
-      .then((payload) => {
-        const data = payload?.items ?? payload ?? [];
-        setEmployees(Array.isArray(data) ? data : []);
-      })
-      .catch(() => setEmployees([]));
+  const loadEmployees = useCallback(async () => {
+    setLoadingEmployees(true);
+    try {
+      const payload = await apiClient.get<any>('/employees', { query: { limit: 500, offset: 0 } });
+      const data = payload?.items ?? payload ?? [];
+      setEmployees(Array.isArray(data) ? data : []);
+    } catch {
+      setEmployees([]);
+    } finally {
+      setLoadingEmployees(false);
+    }
   }, []);
 
   useEffect(() => {
-    if (!selected) {
-      setSnapshot(undefined);
-      return;
-    }
-    setLoading(true);
-    Promise.all([
-      apiClient.get<any>('/posts', { query: { employeeId: selected, limit: 1, offset: 0 } }),
-      apiClient.get<any>('/leads', { query: { employeeId: selected, scope: 'employee', limit: 1, offset: 0 } }),
-    ])
-      .then(([postsPayload, leadsPayload]) => {
-        const postItems = postsPayload?.items ?? postsPayload ?? [];
-        const leadItems = leadsPayload?.items ?? leadsPayload ?? [];
-        setSnapshot({
-          postCount: postsPayload?.total ?? postItems.length,
-          leadCount: leadsPayload?.total ?? leadItems.length,
-          recentPostTitle: postItems[0]?.title,
-          recentLeadContact: leadItems[0]?.contactInfo,
-        });
-      })
-      .catch(() => setSnapshot(undefined))
-      .finally(() => setLoading(false));
-  }, [selected]);
+    void loadEmployees();
+  }, [loadEmployees]);
 
-  const employee = employees.find((e) => e.id === selected);
+  const selectedEmployee = employees.find((e) => e.id === selectedEmployeeId);
 
   return (
-    <Space direction="vertical" size={16} className="page-stack">
-      <div>
-        <Typography.Title level={2}>个人看板</Typography.Title>
-        <Typography.Paragraph type="secondary">挑选员工后查看其作品、客资基础聚合。</Typography.Paragraph>
+    <div className="page-stack">
+      <div className="toolbar-row">
+        <div>
+          <Typography.Title level={2}>个人看板</Typography.Title>
+          <Typography.Paragraph type="secondary">
+            选择员工后查看其个人看板数据（作品、客资、点赞数、榜单和账号日历）。
+          </Typography.Paragraph>
+        </div>
+        <Space>
+          <Tag color="purple">主管</Tag>
+          <Select
+            showSearch
+            allowClear
+            placeholder="选择员工查看其个人看板"
+            style={{ width: 280 }}
+            value={selectedEmployeeId}
+            onChange={setSelectedEmployeeId}
+            optionFilterProp="label"
+            loading={loadingEmployees}
+            options={employees.map((e) => ({
+              label: `${e.name || e.id}${e.employeeCode ? `（${e.employeeCode}）` : ''}`,
+              value: e.id,
+            }))}
+            notFoundContent={loadingEmployees ? <Spin size="small" /> : '暂无员工'}
+          />
+        </Space>
       </div>
-      <Card>
-        <Select
-          showSearch
-          allowClear
-          placeholder="选择员工"
-          style={{ width: 280 }}
-          value={selected}
-          onChange={setSelected}
-          optionFilterProp="label"
-          options={employees.map((e) => ({
-            label: `${e.name || e.id}${e.employeeCode ? `（${e.employeeCode}）` : ''}`,
-            value: e.id,
-          }))}
-        />
-      </Card>
-      {!selected ? (
-        <Card>
-          <Empty description="请先选择员工" />
-        </Card>
-      ) : (
+
+      {selectedEmployeeId && selectedEmployee ? (
         <>
-          <Typography.Title level={4}>{employee?.name || selected}</Typography.Title>
-          <div className="metric-grid">
-            <Card loading={loading}>
-              <Statistic title="累计作品" value={snapshot?.postCount ?? 0} />
-            </Card>
-            <Card loading={loading}>
-              <Statistic title="累计客资" value={snapshot?.leadCount ?? 0} />
-            </Card>
-            <Card loading={loading}>
-              <Statistic title="最近作品" value={snapshot?.recentPostTitle || '-'} />
-            </Card>
-            <Card loading={loading}>
-              <Statistic title="最近客资" value={snapshot?.recentLeadContact || '-'} />
-            </Card>
+          <div style={{ marginBottom: 8 }}>
+            <Typography.Text type="secondary">
+              当前查看：<Typography.Text strong>{selectedEmployee.name || selectedEmployee.id}</Typography.Text>
+            </Typography.Text>
           </div>
+          <PersonalDashboardBoard
+            employeeId={selectedEmployeeId}
+            showRefreshButton
+          />
         </>
+      ) : (
+        <Typography.Text type="secondary" style={{ padding: 24, display: 'block', textAlign: 'center' }}>
+          请从上方选择员工以查看其个人看板
+        </Typography.Text>
       )}
-    </Space>
+    </div>
   );
 }

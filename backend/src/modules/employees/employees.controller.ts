@@ -43,11 +43,11 @@ function normalizeEmployeeStatus(input: unknown): string {
   return alias[raw.toLowerCase()] ?? '在职';
 }
 
-/** 员工资料变更（创建/更新/删除/启停）仅 admin/owner 可执行 */
+/** 员工资料变更（创建/更新/删除/启停）仅 admin/owner/supervisor 可执行 */
 function ensureEmployeeAdmin(req: Request, res: Response): boolean {
   const role = getSessionRole(req);
-  if (!hasRole(role, ['admin', 'owner'])) {
-    res.status(403).json({ ok: false, message: 'forbidden: 仅 admin/owner 可管理员工资料' });
+  if (!hasRole(role, ['admin', 'owner', 'supervisor'])) {
+    res.status(403).json({ ok: false, message: 'forbidden: 仅 admin/supervisor 可管理员工资料' });
     return false;
   }
   return true;
@@ -62,6 +62,20 @@ export class EmployeesController {
     private readonly employeesService: EmployeesService,
     private readonly operationLogs: OperationLogsService,
   ) {}
+
+  /**
+   * 查询员工详情。
+   * 仅 admin/supervisor/owner 可访问。
+   */
+  @Get(':id')
+  async findById(@Param('id') id: string, @Req() req: Request, @Res() res: Response) {
+    if (!ensureEmployeeAdmin(req, res)) return;
+    const employee = await this.employeesService.findById(id);
+    if (!employee) {
+      return res.status(404).json({ ok: false, message: '员工不存在' });
+    }
+    return res.json(employee);
+  }
 
   /**
    * 查询员工列表，支持分页和关键字过滤。
@@ -99,35 +113,43 @@ export class EmployeesController {
   async create(@Body() body: any, @Req() req: Request, @Res() res: Response) {
     if (!ensureEmployeeAdmin(req, res)) return;
 
-    const userId = getSessionUserId(req);
-    const allCodes = await this.employeesService.findAllCodes();
-    const maxNum = allCodes.length === 0 ? 0 : Math.max(...allCodes.map((c) => Number(String(c).replace('EMP', '')) || 0));
-    const employeeCode = `EMP${String(maxNum + 1).padStart(4, '0')}`;
-    const employee = await this.employeesService.create({
-      employeeCode,
-      name: body.name,
-      phone: body.phone || null,
-      hireDate: body.hireDate || null,
-      status: normalizeEmployeeStatus(body.status),
-    });
-    // 写操作日志：员工创建
     try {
-      await this.operationLogs.log({
-        userId,
-        action: OPERATION_LOG_ACTIONS.CREATE,
-        targetType: OPERATION_LOG_TARGET_TYPES.EMPLOYEE,
-        targetId: (employee as any)?.id || '',
-        detail: stringifyDetail({
-          employeeCode,
-          name: body.name,
-        }),
-        ip: parseIp(req),
+      const userId = getSessionUserId(req);
+      const allCodes = await this.employeesService.findAllCodes();
+      const maxNum = allCodes.length === 0 ? 0 : Math.max(...allCodes.map((c) => Number(String(c).replace('EMP', '')) || 0));
+      const employeeCode = `EMP${String(maxNum + 1).padStart(4, '0')}`;
+      const employee = await this.employeesService.create({
+        employeeCode,
+        name: body.name,
+        phone: body.phone || null,
+        hireDate: body.hireDate || null,
+        status: normalizeEmployeeStatus(body.status),
       });
-    } catch (logErr) {
-      // eslint-disable-next-line no-console
-      console.error('[employees] operation log failed', (logErr as any)?.message || logErr);
+      // 写操作日志：员工创建
+      try {
+        await this.operationLogs.log({
+          userId,
+          action: OPERATION_LOG_ACTIONS.CREATE,
+          targetType: OPERATION_LOG_TARGET_TYPES.EMPLOYEE,
+          targetId: (employee as any)?.id || '',
+          detail: stringifyDetail({
+            employeeCode,
+            name: body.name,
+          }),
+          ip: parseIp(req),
+        });
+      } catch (logErr) {
+        // eslint-disable-next-line no-console
+        console.error('[employees] operation log failed', (logErr as any)?.message || logErr);
+      }
+      return res.json({ ok: true });
+    } catch (err: any) {
+      // BadRequestException / ConflictException 等 NestJS 异常直接抛出让全局过滤器处理
+      if (err.status) throw err;
+      // 其他未预期错误
+      console.error('[employees.create] unexpected error:', err.message || err);
+      return res.status(500).json({ ok: false, message: 'Internal server error' });
     }
-    return res.json({ ok: true });
   }
 
   /**
