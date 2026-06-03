@@ -314,7 +314,8 @@ CREATE TABLE IF NOT EXISTS orders (
 -- 迁移来源：M3（替换早期 ddl/04 BIGINT 旧表为 VARCHAR(64) 风格）、
 --          M11（追加 reminder_sent_at 节点提醒幂等字段）、
 --          M16（追加 idx_order_follow_created_at）、
---          M21（追加 idx_order_follow_remind_due）
+--          M21（追加 idx_order_follow_remind_due）、
+--          M22（追加 attachment_url / attachment_name 上传交付附件字段）
 -- ============================================================
 CREATE TABLE IF NOT EXISTS order_follow_records (
   id             VARCHAR(64) PRIMARY KEY,
@@ -324,6 +325,8 @@ CREATE TABLE IF NOT EXISTS order_follow_records (
   content        TEXT        NULL COMMENT '跟进内容',
   next_remind_at DATETIME    NULL COMMENT '下次提醒时间',
   reminder_sent_at DATETIME  NULL COMMENT '节点提醒已发送时间(NULL=未发送)',
+  attachment_url   VARCHAR(512) NULL COMMENT '附件 URL（M22 新增）',
+  attachment_name  VARCHAR(255) NULL COMMENT '附件原始文件名（M22 新增）',
   created_at     DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
   INDEX idx_order_follow_order_id     (order_id),
@@ -361,7 +364,8 @@ CREATE TABLE IF NOT EXISTS notifications (
 -- 12. import_tasks
 -- backend/src/entities/import-task.entity.ts + imports service.
 -- 迁移来源：M3（按方案 §8.1 补全字段建表）、
---          M8（idempotent 兜底补 created_at/finished_at/error_file_url/status 兼容列）
+--          M8（idempotent 兜底补 created_at/finished_at/error_file_url/status 兼容列）、
+--          M23（追加 payload_json / result_json / error_message / updated_at 异步队列 4 列）
 -- ============================================================
 CREATE TABLE IF NOT EXISTS import_tasks (
   id             VARCHAR(64)  PRIMARY KEY,
@@ -371,8 +375,12 @@ CREATE TABLE IF NOT EXISTS import_tasks (
   success_count  INT          NOT NULL DEFAULT 0 COMMENT '成功数',
   fail_count     INT          NOT NULL DEFAULT 0 COMMENT '失败数',
   status         VARCHAR(32)  NOT NULL DEFAULT 'processing' COMMENT 'processing/done/failed',
+  payload_json   JSON         NULL COMMENT '上传文件URL或粘贴原始数据（M23 新增，异步队列模式用）',
+  result_json    JSON         NULL COMMENT '成功/失败明细（M23 新增）',
+  error_message  TEXT         NULL COMMENT '最终错误信息（M23 新增）',
   error_file_url VARCHAR(500) NULL COMMENT '错误文件URL',
   created_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at     DATETIME(3)  NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3) COMMENT '更新时间（M23 新增，TypeORM @UpdateDateColumn 必需）',
   finished_at    DATETIME     NULL COMMENT '完成时间',
 
   INDEX idx_import_user_id (user_id),
