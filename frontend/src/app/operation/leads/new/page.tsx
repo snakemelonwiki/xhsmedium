@@ -1,6 +1,6 @@
 'use client';
 
-import { Button, Card, Form, Input, Select, Space, Typography, message } from 'antd';
+import { Button, Card, Form, Input, message, Modal, Select, Space, Typography } from 'antd';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
@@ -22,6 +22,16 @@ export default function OperationLeadNewPage() {
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [pasteText, setPasteText] = useState('');
+  const [todayCount, setTodayCount] = useState(0);
+
+  // 计算今日日期字符串
+  const todayStr = (() => {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    const d = String(now.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  })();
 
   useEffect(() => {
     setCatalogLoading(true);
@@ -55,15 +65,36 @@ export default function OperationLeadNewPage() {
           addStatus: 'not_added',
           processStatus: 'not_contacted',
         });
-        setSubmitted(true);
         clearDraft(DRAFT_KEY);
+
+        // 获取今日录入数量
+        try {
+          const todayFrom = `${todayStr} 00:00:00`;
+          const todayTo = `${todayStr} 23:59:59`;
+          const resp = await apiClient.get<{ total?: number }>('/leads', {
+            query: { scope: 'self', from: todayFrom, to: todayTo, limit: 1, page: 1 },
+          });
+          setTodayCount((resp as any).total || 1);
+        } catch {
+          setTodayCount(1);
+        }
+
+        setSubmitted(true);
         message.success('客资已录入');
-        form.resetFields();
-        router.push('/operation/leads');
       });
     } catch (err) {
       message.error(err instanceof Error ? err.message : '客资提交失败，已保留当前填写内容');
     }
+  }
+
+  function handleContinueEntry() {
+    setSubmitted(false);
+    form.resetFields();
+  }
+
+  function handleViewToday() {
+    setSubmitted(false);
+    router.push(`/operation/leads?from=${todayStr}&to=${todayStr}`);
   }
 
   function parsePastedLead() {
@@ -153,7 +184,7 @@ export default function OperationLeadNewPage() {
               <Form.Item name="ip" label="地区">
                 <Input placeholder="省市或客户 IP 属地" />
               </Form.Item>
-              <Form.Item className="full-row" name="majorContent" label="需求备注">
+              <Form.Item name="requirementNote" label="需求备注">
                 <Input.TextArea rows={4} placeholder="客户诉求、专业方向和其他备注" />
               </Form.Item>
               <Form.Item className="full-row" name="captureImageUrl" label="引流截图">
@@ -164,6 +195,19 @@ export default function OperationLeadNewPage() {
           </Form>
         </DraftFormShell>
       </Card>
+      <Modal
+        open={submitted}
+        title="客资录入成功"
+        closable={false}
+        footer={
+          <Space>
+            <Button onClick={handleContinueEntry}>继续录入</Button>
+            <Button type="primary" onClick={handleViewToday}>查看今日记录</Button>
+          </Space>
+        }
+      >
+        <Typography.Paragraph>今日已录入 <Typography.Text strong>{todayCount}</Typography.Text> 条客资</Typography.Paragraph>
+      </Modal>
     </Space>
   );
 }
@@ -172,14 +216,19 @@ function parseLeadText(raw: string): Record<string, string> {
   const text = raw.trim();
   if (!text) return {};
   const result: Record<string, string> = {};
+  // 识别手机号（1开头的11位数字）
   const phone = text.match(/1[3-9]\d{9}/)?.[0];
+  // 识别微信号（wx/wechat开头或包含的数字字母组合）
   const wechat = text.match(/(?:微信|wx|wechat)[:：\s]*([a-zA-Z][-_a-zA-Z0-9]{5,19})/i)?.[1];
+  // 识别昵称
   const nickname = text.match(/(?:昵称|客户|姓名)[:：\s]*([^\s,，;；]+)/)?.[1];
 
   if (/抖音|douyin/i.test(text)) result.platform = 'douyin';
   if (/小红书|xiaohongshu|xhs/i.test(text)) result.platform = 'xiaohongshu';
+  if (/微信|wechat/i.test(text)) result.platform = 'xiaohongshu'; // 默认微信来源归属小红书
   if (phone || wechat) result.contactInfo = phone || wechat || '';
   if (nickname) result.nickname = nickname;
-  result.majorContent = text;
+  // 完整文本填入需求备注
+  result.requirementNote = text;
   return result;
 }

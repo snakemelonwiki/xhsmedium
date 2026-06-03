@@ -104,6 +104,7 @@ export function OrderTable({ title, description, scope, status, showStatusFilter
     nextPageSize = pageSize,
     nextStatus = statusFilter,
     nextHandover = handoverFilter,
+    nextAbnormal = abnormalOnly,
   ) {
     setLoading(true);
     setError('');
@@ -114,6 +115,7 @@ export function OrderTable({ title, description, scope, status, showStatusFilter
         pageSize: nextPageSize,
         status: nextStatus || undefined,
         handoverStatus: nextHandover || undefined,
+        abnormal: nextAbnormal || undefined,
       });
       setItems(result.items);
       setTotal(result.total);
@@ -196,9 +198,9 @@ export function OrderTable({ title, description, scope, status, showStatusFilter
   }
 
   useEffect(() => {
-    loadOrders(1, pageSize, statusFilter, handoverFilter);
+    loadOrders(1, pageSize, statusFilter, handoverFilter, abnormalOnly);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scope, statusFilter, handoverFilter]);
+  }, [scope, statusFilter, handoverFilter, abnormalOnly]);
 
   const columns = useMemo<TableColumnsType<OrderItem>>(() => {
     const baseColumns: TableColumnsType<OrderItem> = [
@@ -349,7 +351,7 @@ export function OrderTable({ title, description, scope, status, showStatusFilter
             options={HANDOVER_STATUS_OPTIONS}
             placeholder="交接状态"
           />
-          {actionMode === 'sales' ? (
+          {actionMode === 'sales' || actionMode === 'academic' ? (
             <Select
               value={abnormalOnly ? 'abnormal' : 'all'}
               style={{ width: 132 }}

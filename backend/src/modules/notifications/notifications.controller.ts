@@ -65,8 +65,12 @@ export class NotificationsController {
     @Req() req: Request,
     @Res() res: Response,
   ) {
-    const session = (req as any).session;
     const userId = getSessionUserId(req) || body?.actorUserId || '';
+    // 越权检查：验证当前用户是否为通知接收者
+    const notification = await this.notificationsService.findById(id);
+    if (!notification || notification.receiverId !== userId) {
+      return res.status(404).json({ ok: false, message: '通知不存在' });
+    }
     const ok = await this.notificationsService.markRead(id, userId);
     return res.json({ ok, changed: ok });
   }
@@ -78,8 +82,12 @@ export class NotificationsController {
     @Req() req: Request,
     @Res() res: Response,
   ) {
-    const session = (req as any).session;
     const userId = getSessionUserId(req) || body?.actorUserId || '';
+    // 越权检查：验证当前用户是否为通知接收者
+    const notification = await this.notificationsService.findById(id);
+    if (!notification || notification.receiverId !== userId) {
+      return res.status(404).json({ ok: false, message: '通知不存在' });
+    }
     const ok = await this.notificationsService.markRead(id, userId);
     return res.json({ ok, changed: ok });
   }

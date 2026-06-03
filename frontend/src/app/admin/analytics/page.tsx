@@ -1,55 +1,197 @@
 'use client';
 
-import { Card, Space, Statistic, Table, Typography } from 'antd';
-import type { TableColumnsType } from 'antd';
-import { useEffect, useState } from 'react';
+import { FundOutlined, SelectOutlined, TeamOutlined } from '@ant-design/icons';
+import { Card, Col, Row, Select, Skeleton, Space, Typography } from 'antd';
+import { useEffect, useRef, useState } from 'react';
 
-import { getAdminDashboardSummary, listAdminPostTypeDistribution, listAdminRankings } from '@/shared/api/admin';
-import type { AdminDashboardSummary, AdminPostTypeDistribution, AdminRankingRow } from '@/shared/types/admin';
+import { getSupervisorAnalysis, type SupervisorAnalysis } from '@/shared/api/admin';
 
-export default function AdminAnalyticsPage() {
-  const [summary, setSummary] = useState<AdminDashboardSummary>();
-  const [distribution, setDistribution] = useState<AdminPostTypeDistribution[]>([]);
-  const [rankings, setRankings] = useState<AdminRankingRow[]>([]);
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+declare const echarts: any;
+
+type PlatformFilter = '' | '小红书' | '抖音';
+
+const PLATFORM_OPTIONS = [
+  { label: '全部平台', value: '' },
+  { label: '小红书', value: '小红书' },
+  { label: '抖音', value: '抖音' },
+];
+
+function buildLineOption(title: string, dates: string[], series: { name: string; data: number[] }[]): any {
+  return {
+    title: { text: title, textStyle: { fontSize: 14, fontWeight: 'normal' }, left: 'center' },
+    tooltip: { trigger: 'axis' },
+    legend: { data: series.map((s) => s.name), bottom: 0 },
+    grid: { left: 48, right: 16, top: 36, bottom: 56 },
+    xAxis: { type: 'category', data: dates, boundaryGap: false },
+    yAxis: { type: 'value' },
+    series: series.map((s) => ({
+      name: s.name,
+      type: 'line',
+      data: s.data,
+      smooth: true,
+      showSymbol: false,
+    })),
+  };
+}
+
+function buildPieOption(title: string, data: { name: string; value: number }[]): any {
+  return {
+    title: { text: title, textStyle: { fontSize: 14, fontWeight: 'normal' }, left: 'center' },
+    tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
+    legend: { bottom: 0 },
+    series: [
+      {
+        type: 'pie',
+        radius: ['40%', '70%'],
+        data: data.map((d) => ({ name: d.name, value: d.value })),
+        label: { show: true, formatter: '{b}: {c}' },
+      },
+    ],
+  };
+}
+
+function PlatformTrendChart({ analysis, loading }: { analysis?: SupervisorAnalysis; loading: boolean }) {
+  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    getAdminDashboardSummary().then(setSummary).catch(() => setSummary(undefined));
-    listAdminPostTypeDistribution().then(setDistribution).catch(() => setDistribution([]));
-    listAdminRankings({ pageSize: 20 }).then((result) => setRankings(result.items)).catch(() => setRankings([]));
-  }, []);
+    if (loading || !containerRef.current) return;
+    if (!analysis?.platformTrend?.length) {
+      containerRef.current.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#999;">暂无数据</div>';
+      return;
+    }
+    const dates = [...new Set(analysis.platformTrend.map((r) => r.date))].sort();
+    const xhsData = dates.map((d) => {
+      const row = analysis.platformTrend.find((r) => r.date === d && r.platform === '小红书');
+      return row?.postCount ?? 0;
+    });
+    const dyData = dates.map((d) => {
+      const row = analysis.platformTrend.find((r) => r.date === d && r.platform === '抖音');
+      return row?.postCount ?? 0;
+    });
+    const chart = echarts.init(containerRef.current, null, { renderer: 'canvas' });
+    chart.setOption(buildLineOption('平台趋势（作品数）', dates, [
+      { name: '小红书', data: xhsData },
+      { name: '抖音', data: dyData },
+    ]));
+    return () => { chart.dispose(); };
+  }, [loading, analysis]);
 
-  const distributionColumns: TableColumnsType<AdminPostTypeDistribution> = [
-    { title: '作品类型', dataIndex: 'type' },
-    { title: '数量', dataIndex: 'count' },
-    { title: '占比', dataIndex: 'ratio', render: (value?: string) => value || '-' },
-  ];
+  return (
+    <Card title={<><FundOutlined /> 平台趋势</>} styles={{ body: { padding: '12px 12px 0' } }}>
+      <Skeleton loading={loading} active>
+        <div ref={containerRef} style={{ width: '100%', height: 280 }} />
+      </Skeleton>
+    </Card>
+  );
+}
 
-  const rankingColumns: TableColumnsType<AdminRankingRow> = [
-    { title: '员工', dataIndex: 'name' },
-    { title: '账号数', dataIndex: 'accountCount' },
-    { title: '今日作品', dataIndex: 'todayPosts' },
-    { title: '今日客资', dataIndex: 'todayLeads' },
-    { title: '今日流量', dataIndex: 'todayTraffic' },
-  ];
+function PostStructureChart({ analysis, loading }: { analysis?: SupervisorAnalysis; loading: boolean }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (loading || !containerRef.current) return;
+    if (!analysis?.postStructure?.length) {
+      containerRef.current.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#999;">暂无数据</div>';
+      return;
+    }
+    const data = analysis.postStructure.map((r) => ({ name: r.type, value: r.count }));
+    const chart = echarts.init(containerRef.current, null, { renderer: 'canvas' });
+    chart.setOption(buildPieOption('作品结构', data));
+    return () => { chart.dispose(); };
+  }, [loading, analysis]);
+
+  return (
+    <Card title={<><TeamOutlined /> 作品结构</>} styles={{ body: { padding: '12px 12px 0' } }}>
+      <Skeleton loading={loading} active>
+        <div ref={containerRef} style={{ width: '100%', height: 280 }} />
+      </Skeleton>
+    </Card>
+  );
+}
+
+function LeadTrendChart({ analysis, loading }: { analysis?: SupervisorAnalysis; loading: boolean }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (loading || !containerRef.current) return;
+    if (!analysis?.leadTrend?.length) {
+      containerRef.current.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#999;">暂无数据</div>';
+      return;
+    }
+    const dates = [...new Set(analysis.leadTrend.map((r) => r.date))].sort();
+    const xhsData = dates.map((d) => {
+      const row = analysis.leadTrend.find((r) => r.date === d && r.platform === '小红书');
+      return row?.leadCount ?? 0;
+    });
+    const dyData = dates.map((d) => {
+      const row = analysis.leadTrend.find((r) => r.date === d && r.platform === '抖音');
+      return row?.leadCount ?? 0;
+    });
+    const chart = echarts.init(containerRef.current, null, { renderer: 'canvas' });
+    chart.setOption(buildLineOption('客资趋势（新增客资数）', dates, [
+      { name: '小红书', data: xhsData },
+      { name: '抖音', data: dyData },
+    ]));
+    return () => { chart.dispose(); };
+  }, [loading, analysis]);
+
+  return (
+    <Card title={<><FundOutlined /> 客资趋势</>} styles={{ body: { padding: '12px 12px 0' } }}>
+      <Skeleton loading={loading} active>
+        <div ref={containerRef} style={{ width: '100%', height: 280 }} />
+      </Skeleton>
+    </Card>
+  );
+}
+
+export default function AdminAnalyticsPage() {
+  const [analysis, setAnalysis] = useState<SupervisorAnalysis | undefined>();
+  const [loading, setLoading] = useState(true);
+  const [platform, setPlatform] = useState<PlatformFilter>('');
+
+  useEffect(() => {
+    setLoading(true);
+    getSupervisorAnalysis({ platform: platform || undefined })
+      .then(setAnalysis)
+      .catch(() => setAnalysis(undefined))
+      .finally(() => setLoading(false));
+  }, [platform]);
 
   return (
     <Space direction="vertical" size={16} className="page-stack">
-      <div>
-        <Typography.Title level={2}>分析看板</Typography.Title>
-        <Typography.Paragraph type="secondary">查看主管视角核心指标、作品类型分布和员工榜单。</Typography.Paragraph>
+      <div className="toolbar-row">
+        <div>
+          <Typography.Title level={2}>分析看板</Typography.Title>
+          <Typography.Paragraph type="secondary">
+            主管视角核心指标趋势、作品结构与客资走势分析。
+          </Typography.Paragraph>
+        </div>
+        <Space size={12} wrap align="center">
+          <Select
+            value={platform}
+            onChange={(v) => setPlatform(v as PlatformFilter)}
+            options={PLATFORM_OPTIONS}
+            style={{ width: 140 }}
+            suffixIcon={<SelectOutlined />}
+          />
+        </Space>
       </div>
-      <div className="metric-grid">
-        <Card><Statistic title="今日客资" value={summary?.todayLeads ?? 0} /></Card>
-        <Card><Statistic title="今日成交" value={summary?.todayDeals ?? 0} /></Card>
-        <Card><Statistic title="小红书流量" value={summary?.xhsTraffic ?? 0} /></Card>
-        <Card><Statistic title="抖音流量" value={summary?.douyinTraffic ?? 0} /></Card>
-      </div>
-      <Card title="作品类型分布">
-        <Table rowKey="type" columns={distributionColumns} dataSource={distribution} pagination={false} />
-      </Card>
-      <Card title="员工表现">
-        <Table rowKey="employeeId" columns={rankingColumns} dataSource={rankings} pagination={false} />
-      </Card>
+
+      <Row gutter={[16, 16]}>
+        <Col xs={24} lg={16}>
+          <PlatformTrendChart analysis={analysis} loading={loading} />
+        </Col>
+        <Col xs={24} lg={8}>
+          <PostStructureChart analysis={analysis} loading={loading} />
+        </Col>
+      </Row>
+
+      <Row gutter={[16, 16]}>
+        <Col xs={24}>
+          <LeadTrendChart analysis={analysis} loading={loading} />
+        </Col>
+      </Row>
     </Space>
   );
 }

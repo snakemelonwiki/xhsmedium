@@ -1,171 +1,194 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { SupervisorSuggestion } from '../../entities/supervisor-suggestion.entity';
-import { makeId } from '../../shared/utils/id-generator';
-import { sanitizeText } from '../../shared/sanitize';
+import { Post } from '../../entities/post.entity';
+import { Account } from '../../entities/account.entity';
+import { Employee } from '../../entities/employee.entity';
+import { User } from '../../entities/user.entity';
 import { NotificationsService } from '../notifications/notifications.service';
-import { NOTIFICATION_TYPES } from '../../shared/notifications';
-import {
-  SUPERVISOR_SUGGESTION_CONTENT_MAX,
-  CreateSupervisorSuggestionDto,
-} from './dto/create-supervisor-suggestion.dto';
+import { makeId } from '../../shared/utils/id-generator';
 
-export interface ListSupervisorSuggestionFilter {
-  operatorId?: string;
-  supervisorId?: string;
-  isRead?: 0 | 1 | boolean;
-  limit?: number;
-  offset?: number;
+interface CreateSuggestionDto {
+  senderId: string;
+  targetType: string;
+  targetId: string;
+  content: string;
+}
+
+interface SuggestionQuery {
+  targetType?: string;
+  employeeId?: string;
+  receiverId?: string;
+  readStatus?: number;
 }
 
 @Injectable()
 export class SupervisorSuggestionsService {
-  private readonly logger = new Logger(SupervisorSuggestionsService.name);
-
   constructor(
     @InjectRepository(SupervisorSuggestion)
-    private readonly repo: Repository<SupervisorSuggestion>,
+    private readonly suggestionRepo: Repository<SupervisorSuggestion>,
+    @InjectRepository(Post)
+    private readonly postRepo: Repository<Post>,
+    @InjectRepository(Account)
+    private readonly accountRepo: Repository<Account>,
+    @InjectRepository(Employee)
+    private readonly employeeRepo: Repository<Employee>,
+    @InjectRepository(User)
+    private readonly userRepo: Repository<User>,
     private readonly notificationsService: NotificationsService,
   ) {}
 
   /**
-   * 创建一条主管建议，并触发 supervisor_suggestion 通知给目标运营。
-   * supervisorId 取自 session 注入的当前登录主管；operatorId 由调用方提供。
+   * 创建主管建议并通知对应运营。
+   * 支持关联账号、作品、员工。
    */
-  async create(
-    supervisorId: string,
-    dto: CreateSupervisorSuggestionDto,
-  ): Promise<SupervisorSuggestion> {
-    if (!supervisorId) {
-      throw new BadRequestException('supervisorId required');
-    }
-    if (!dto.operatorId) {
-      throw new BadRequestException('operatorId required');
-    }
-    if (!dto.content || !dto.content.trim()) {
-      throw new BadRequestException('content required');
-    }
-    const cleanContent = sanitizeText(dto.content.trim());
-    if (cleanContent.length > SUPERVISOR_SUGGESTION_CONTENT_MAX) {
-      throw new BadRequestException(
-        `content too long (max ${SUPERVISOR_SUGGESTION_CONTENT_MAX})`,
-      );
+  async create(dto: CreateSuggestionDto): Promise<SupervisorSuggestion> {
+    const { senderId, targetType, targetId, content } = dto;
+
+    if (!targetType || !targetId || !content) {
+      throw new Error('targetType、targetId、content 不能为空');
     }
 
-    const entity = this.repo.create({
+    if (!['post', 'account', 'employee'].includes(targetType)) {
+      throw new Error('targetType 仅支持 post、account、employee');
+    }
+
+    // 验证目标对象存在
+    const employeeId = await this.resolveEmployeeId(targetType, targetId);
+    if (!employeeId) {
+      throw new Error('关联对象不存在');
+    }
+
+    // 查找运营用户
+    const user = await this.userRepo.findOne({
+      where: { employeeId, role: 'staff' },
+    });
+    const receiverId = user?.id;
+    if (!receiverId) {
+      throw new Error('关联员工没有登录账号，无法发送建议');
+    }
+
+    // 创建建议
+    const suggestion = this.suggestionRepo.create({
       id: makeId(),
-      supervisorId,
-      operatorId: dto.operatorId,
-      postId: dto.postId || null,
-      accountId: dto.accountId || null,
-      content: cleanContent,
-      isRead: 0,
-    } as Partial<SupervisorSuggestion>);
-    const saved = await this.repo.save(entity);
+      senderId,
+      receiverId,
+      employeeId,
+      targetType,
+      targetId,
+      content,
+      readStatus: 0,
+    });
+    const saved = await this.suggestionRepo.save(suggestion);
 
-    // 通知目标运营（portType=operations，前端运营端收）
+    // 通知对应运营
     try {
       await this.notificationsService.create({
-        receiverIds: [dto.operatorId],
-        senderId: supervisorId,
+        receiverIds: [receiverId],
+        senderId,
         portType: 'operations',
-        typeCode: NOTIFICATION_TYPES.SUPERVISOR_SUGGESTION,
+        typeCode: 'supervisor_suggestion',
         title: '主管建议',
-        content: cleanContent.length > 80 ? `${cleanContent.slice(0, 80)}…` : cleanContent,
+        content: `您收到一条主管建议：${content.substring(0, 50)}${content.length > 50 ? '...' : ''}`,
         relatedId: saved.id,
         relatedType: 'supervisor_suggestion',
       });
     } catch (notifErr) {
-      // 通知失败不阻断主流程
-      this.logger.warn(
-        `supervisor_suggestion notify failed (id=${saved.id}): ${(notifErr as any)?.message || notifErr}`,
-      );
+      // 通知失败不影响主流程
+      console.error('[supervisor-suggestions] notification failed', (notifErr as any)?.message || notifErr);
     }
 
     return saved;
   }
 
   /**
-   * 列表查询 + 可见性过滤：
-   *   - admin / owner / supervisor 可看全表（默认 scope=all）
-   *   - operation / staff 只能看 operatorId = actorUserId 的建议
+   * 查询主管建议列表。
    */
-  async listPaged(
-    filter: ListSupervisorSuggestionFilter & { actorUserId?: string; actorRole?: string },
-  ): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
-    const safeLimit = this.clampLimit(filter.limit);
-    const safeOffset = Math.max(Number(filter.offset) || 0, 0);
+  async list(query: SuggestionQuery = {}): Promise<SupervisorSuggestion[]> {
+    const qb = this.suggestionRepo.createQueryBuilder('s')
+      .orderBy('s.created_at', 'DESC')
+      .limit(200);
 
-    const role = (filter.actorRole || '').toLowerCase();
-    const isAdminLike = role === 'admin' || role === 'owner' || role === 'supervisor';
-
-    const where: any = {};
-    if (!isAdminLike) {
-      // 非主管视角：只看发给自己
-      where.operatorId = filter.actorUserId || '';
-    } else if (filter.operatorId) {
-      where.operatorId = filter.operatorId;
+    if (query.targetType) {
+      qb.andWhere('s.target_type = :targetType', { targetType: query.targetType });
     }
-    if (filter.supervisorId) {
-      where.supervisorId = filter.supervisorId;
+    if (query.employeeId) {
+      qb.andWhere('s.employee_id = :employeeId', { employeeId: query.employeeId });
     }
-    if (filter.isRead !== undefined && filter.isRead !== null) {
-      where.isRead = filter.isRead ? 1 : 0;
+    if (query.receiverId) {
+      qb.andWhere('s.receiver_id = :receiverId', { receiverId: query.receiverId });
+    }
+    if (query.readStatus !== undefined) {
+      qb.andWhere('s.read_status = :readStatus', { readStatus: query.readStatus });
     }
 
-    const [rows, total] = await this.repo.findAndCount({
-      where,
-      order: { createdAt: 'DESC' },
-      take: safeLimit,
-      skip: safeOffset,
-    });
-
-    return {
-      items: rows.map((r) => this.map(r)),
-      total,
-      limit: safeLimit,
-      offset: safeOffset,
-    };
+    return qb.getMany();
   }
 
-  async markRead(id: string, actorUserId: string, actorRole: string): Promise<boolean> {
-    if (!id) return false;
-    const role = (actorRole || '').toLowerCase();
-    const isAdminLike = role === 'admin' || role === 'owner' || role === 'supervisor';
-    const qb = this.repo
+  /**
+   * 获取单个建议详情。
+   */
+  async findById(id: string): Promise<SupervisorSuggestion | null> {
+    return this.suggestionRepo.findOne({ where: { id } });
+  }
+
+  /**
+   * 标记建议为已读。
+   */
+  async markAsRead(id: string, userId: string): Promise<boolean> {
+    const result = await this.suggestionRepo
       .createQueryBuilder()
       .update(SupervisorSuggestion)
-      .set({ isRead: 1 });
-    if (isAdminLike) {
-      qb.where('id = :id', { id });
-    } else {
-      qb.where('id = :id AND operator_id = :uid', {
+      .set({ readStatus: 1 })
+      .where('id = :id AND receiver_id = :uid AND read_status = 0', {
         id,
-        uid: actorUserId || '',
-      });
-    }
-    const result = await qb.execute();
+        uid: userId,
+      })
+      .execute();
     return (result.affected || 0) > 0;
   }
 
-  private clampLimit(limit?: number): number {
-    const n = Number(limit) || 20;
-    if (n <= 0) return 20;
-    return Math.min(n, 200);
+  /**
+   * 批量标记建议为已读。
+   */
+  async markAllAsRead(userId: string): Promise<number> {
+    const result = await this.suggestionRepo
+      .createQueryBuilder()
+      .update(SupervisorSuggestion)
+      .set({ readStatus: 1 })
+      .where('receiver_id = :uid AND read_status = 0', { uid: userId })
+      .execute();
+    return result.affected || 0;
   }
 
-  private map(row: SupervisorSuggestion): any {
-    return {
-      id: row.id,
-      supervisorId: row.supervisorId,
-      operatorId: row.operatorId,
-      postId: row.postId,
-      accountId: row.accountId,
-      content: row.content,
-      isRead: row.isRead,
-      createdAt: row.createdAt,
-      updatedAt: row.updatedAt,
-    };
+  /**
+   * 获取未读建议数量。
+   */
+  async getUnreadCount(userId: string): Promise<number> {
+    return this.suggestionRepo.count({
+      where: { receiverId: userId, readStatus: 0 },
+    });
+  }
+
+  /**
+   * 根据目标类型和ID解析对应的员工ID。
+   */
+  private async resolveEmployeeId(targetType: string, targetId: string): Promise<string | null> {
+    switch (targetType) {
+      case 'post': {
+        const post = await this.postRepo.findOne({ where: { id: targetId } });
+        return post?.employeeId || null;
+      }
+      case 'account': {
+        const account = await this.accountRepo.findOne({ where: { id: targetId } });
+        return account?.employeeId || null;
+      }
+      case 'employee': {
+        return targetId;
+      }
+      default:
+        return null;
+    }
   }
 }

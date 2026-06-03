@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Req, Res, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Body, Param, Req, Res, Query, UseGuards } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { Request, Response } from 'express';
 import { makeId } from '../../shared/utils/id-generator';
@@ -21,11 +21,11 @@ function hasRole(role: string, allowed: string[]): boolean {
   return allowed.includes(role);
 }
 
-/** 仅 admin / owner 可访问用户账号管理。 */
+/** 仅 admin / owner / supervisor 可访问用户账号管理。 */
 function ensureAccountManager(req: Request, res: Response): boolean {
   const role = getSessionRole(req);
-  if (!hasRole(role, ['admin', 'owner'])) {
-    res.status(403).json({ ok: false, message: 'forbidden: 仅 admin/owner 可访问用户账号' });
+  if (!hasRole(role, ['admin', 'owner', 'supervisor'])) {
+    res.status(403).json({ ok: false, message: 'forbidden: 仅 admin/supervisor 可访问用户账号' });
     return false;
   }
   return true;
@@ -40,6 +40,68 @@ export class UsersController {
     private readonly usersService: UsersService,
     private readonly operationLogs: OperationLogsService,
   ) {}
+
+  /**
+   * 查询用户详情。
+   */
+  @Get(':id')
+  async findById(@Param('id') id: string, @Req() req: Request, @Res() res: Response) {
+    if (!ensureAccountManager(req, res)) return;
+    const user = await this.usersService.findById(id);
+    if (!user) {
+      return res.status(404).json({ ok: false, message: '用户不存在' });
+    }
+    // 过滤敏感字段后返回
+    return res.json({
+      id: user.id,
+      username: user.username,
+      role: user.role,
+      employeeId: user.employeeId,
+      status: user.status,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
+    });
+  }
+
+  /**
+   * 创建用户账号（通用创建接口）。
+   * 仅 admin/owner/supervisor 可执行。
+   */
+  @Post()
+  async create(@Body() body: any, @Req() req: Request, @Res() res: Response) {
+    if (!ensureAccountManager(req, res)) return;
+    const userId = getSessionUserId(req);
+    const { username, password, employeeId, status, role } = body;
+    if (!username || !password) {
+      return res.status(400).json({ message: '用户名和密码不能为空' });
+    }
+    const duplicated = await this.usersService.findByUsername(username);
+    if (duplicated) {
+      return res.status(400).json({ message: '用户名已存在' });
+    }
+    await this.usersService.create({
+      username,
+      password,
+      employeeId: employeeId || null,
+      status: status || 'active',
+      role: role || 'staff',
+    });
+    // 写操作日志
+    try {
+      await this.operationLogs.log({
+        userId,
+        action: OPERATION_LOG_ACTIONS.CREATE,
+        targetType: OPERATION_LOG_TARGET_TYPES.USER,
+        targetId: '',
+        detail: stringifyDetail({ username, employeeId, status: status || 'active', role: role || 'staff' }),
+        ip: parseIp(req),
+      });
+    } catch (logErr) {
+      // eslint-disable-next-line no-console
+      console.error('[users] operation log failed', (logErr as any)?.message || logErr);
+    }
+    return res.json({ ok: true });
+  }
 
   @Get()
   async findAll(
@@ -148,6 +210,80 @@ export class UsersController {
     } catch (logErr) {
       // eslint-disable-next-line no-console
       console.error('[users] view_sensitive log failed', (logErr as any)?.message || logErr);
+    }
+    return res.json({ ok: true });
+  }
+
+  /**
+   * 更新用户账号资料。
+   */
+  @Patch(':id')
+  async update(@Param('id') id: string, @Body() body: any, @Req() req: Request, @Res() res: Response) {
+    if (!ensureAccountManager(req, res)) return;
+    const userId = getSessionUserId(req);
+    const before = await this.usersService.findById(id);
+    if (!before) {
+      return res.status(404).json({ message: '用户不存在' });
+    }
+    await this.usersService.update(id, {
+      username: body.username,
+      password: body.password,
+      employeeId: body.employeeId,
+      status: body.status,
+      role: body.role,
+    });
+    // 写操作日志：用户更新
+    try {
+      await this.operationLogs.log({
+        userId,
+        action: OPERATION_LOG_ACTIONS.UPDATE,
+        targetType: OPERATION_LOG_TARGET_TYPES.USER,
+        targetId: id,
+        detail: stringifyDetail({
+          username: body.username,
+          employeeId: body.employeeId,
+          status: body.status,
+        }),
+        ip: parseIp(req),
+      });
+    } catch (logErr) {
+      // eslint-disable-next-line no-console
+      console.error('[users] operation log failed', (logErr as any)?.message || logErr);
+    }
+    return res.json({ ok: true });
+  }
+
+  /**
+   * 更新用户账号启停状态，停用时写操作日志。
+   */
+  @Patch(':id/status')
+  async updateStatus(@Param('id') id: string, @Body() body: any, @Req() req: Request, @Res() res: Response) {
+    if (!ensureAccountManager(req, res)) return;
+    const userId = getSessionUserId(req);
+    const before = await this.usersService.findById(id);
+    if (!before) {
+      return res.status(404).json({ message: '用户不存在' });
+    }
+    const nextStatus = String(body.status || '').trim();
+    await this.usersService.updateStatus(id, nextStatus);
+    // E/P1-01: 停用/锁定类 status 变更归到 DISABLE，其余按 UPDATE 记录
+    const isDisable = ['inactive', 'disabled', 'locked', '停用', '锁定'].includes(nextStatus);
+    try {
+      await this.operationLogs.log({
+        userId,
+        action: isDisable ? OPERATION_LOG_ACTIONS.DISABLE : OPERATION_LOG_ACTIONS.UPDATE,
+        targetType: OPERATION_LOG_TARGET_TYPES.USER,
+        targetId: id,
+        detail: stringifyDetail({
+          from: before?.status || null,
+          to: nextStatus || null,
+          username: before?.username || null,
+        }),
+        ip: parseIp(req),
+      });
+    } catch (logErr) {
+      // eslint-disable-next-line no-console
+      console.error('[users] operation log failed', (logErr as any)?.message || logErr);
     }
     return res.json({ ok: true });
   }

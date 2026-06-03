@@ -125,6 +125,13 @@ export class NotificationsService {
   }
 
   /**
+   * Find notification by id.
+   */
+  async findById(id: string): Promise<Notification | null> {
+    return this.repo.findOne({ where: { id } });
+  }
+
+  /**
    * Mark every unread notification of the user as read. Returns affected count.
    * When typeCode is provided, the update is scoped to that notification type.
    */

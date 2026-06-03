@@ -1,18 +1,25 @@
 import { DashboardController } from './dashboard.controller';
+import { User } from '../../entities/user.entity';
+import { Repository } from 'typeorm';
 
 describe('DashboardController A端看板契约', () => {
   const response = () => ({
     json: jest.fn().mockReturnThis(),
+    status: jest.fn().mockReturnThis(),
   }) as any;
 
   it('返回运营个人看板数据', async () => {
     const service = {
       getPersonalDashboard: jest.fn().mockResolvedValue({ overview: { postCount: 3 } }),
     } as any;
-    const controller = new DashboardController(service);
+    const userRepo = {
+      findOne: jest.fn().mockResolvedValue({ id: 'user-1', employeeId: 'emp-1' }),
+    } as any;
+    const controller = new DashboardController(service, userRepo as Repository<User>);
     const res = response();
+    const req = { session: { userId: 'user-1' } } as any;
 
-    await controller.getPersonal({ session: { userId: 'emp-1' } } as any, res, undefined, undefined);
+    await controller.getPersonal(req, res, undefined, undefined);
 
     expect(service.getPersonalDashboard).toHaveBeenCalledWith('emp-1', expect.objectContaining({}));
     expect(res.json).toHaveBeenCalledWith({ overview: { postCount: 3 } });
@@ -22,10 +29,12 @@ describe('DashboardController A端看板契约', () => {
     const service = {
       getPersonalDashboard: jest.fn().mockResolvedValue({ overview: { postCount: 5 } }),
     } as any;
-    const controller = new DashboardController(service);
+    const userRepo = {} as any;
+    const controller = new DashboardController(service, userRepo as Repository<User>);
     const res = response();
+    const req = { session: { role: 'admin' } } as any;
 
-    await controller.getSupervisorEmployee('emp-2', res, '2026-06-01', '2026-06-30');
+    await controller.getSupervisorEmployee('emp-2', req, res, '2026-06-01', '2026-06-30');
 
     expect(service.getPersonalDashboard).toHaveBeenCalledWith('emp-2', { from: '2026-06-01', to: '2026-06-30' });
     expect(res.json).toHaveBeenCalledWith({ overview: { postCount: 5 } });
@@ -36,7 +45,8 @@ describe('DashboardController A端看板契约', () => {
       getSupervisorOverview: jest.fn().mockResolvedValue({ postCount: 10 }),
       getSupervisorAnalysis: jest.fn().mockResolvedValue({ platformTrend: [] }),
     } as any;
-    const controller = new DashboardController(service);
+    const userRepo = {} as any;
+    const controller = new DashboardController(service, userRepo as Repository<User>);
     const overviewRes = response();
     const analysisRes = response();
 

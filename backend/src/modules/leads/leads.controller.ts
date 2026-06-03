@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Patch, Delete, Body, Param, Req, Res, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Put, Patch, Delete, Body, Param, Req, Res, Query, UseGuards, Headers } from '@nestjs/common';
 import { LeadsService } from './leads.service';
 import { Request, Response } from 'express';
 import { makeId } from '../../shared/utils/id-generator';
@@ -45,6 +45,10 @@ export class LeadsController {
     @Query('keyword') keyword?: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
+    // BUG-2: 新增筛选参数
+    @Query('assignedSalesUserId') assignedSalesUserId?: string,
+    @Query('postId') postId?: string,
+    @Query('dealStatus') dealStatus?: string,
   ) {
     const session = (req as any).session;
     // §9 / AC-10.2：传了 limit 或 offset 任一即视为分页请求，返回 { items, total, limit, offset }。
@@ -66,6 +70,10 @@ export class LeadsController {
       search: q || search || keyword,
       from,
       to,
+      // BUG-2: 新增筛选字段
+      assignedSalesUserId,
+      postId,
+      dealStatus,
     };
 
     if (wantsPaging) {
@@ -239,34 +247,42 @@ export class LeadsController {
   @Post()
   @UseGuards(DebounceGuard)
   async create(@Body() body: any, @Req() req: Request, @Res() res: Response) {
-    const session = (req as any).session;
-    await this.leadsService.create({
-      id: makeId(),
-      employeeId: session?.employeeId || '',
-      accountId: body.accountId,
-      postId: body.postId || null,
-      platform: body.platform,
-      contactInfo: body.contactInfo,
-      nickname: body.nickname || '',
-      budget: body.budget,
-      majorContent: body.majorContent,
-      ip: body.ip,
-      status: body.status || (body.assignedSalesUserId ? 'assigned' : 'new'),
-      dealAmount: body.dealAmount,
-      note: body.note,
-      requirementNote: body.requirementNote,
-      supervisorNote: body.supervisorNote,
-      captureImageUrl: body.captureImageUrl,
-      salesFeedback: body.salesFeedback || '',
-      salesUpdatedAt: body.salesUpdatedAt,
-      salesUserName: body.salesUserName || '',
-      assignedSalesUserId: body.assignedSalesUserId || null,
-      assignedSalesUserName: body.assignedSalesUserName || '',
-      processStatus: body.processStatus || 'not_contacted',
-      addStatus: body.addStatus || 'not_added',
-      intention: body.intention || null,
-    });
-    return res.json({ ok: true });
+    try {
+      const session = (req as any).session;
+      await this.leadsService.create({
+        id: makeId(),
+        employeeId: session?.employeeId || '',
+        accountId: body.accountId,
+        postId: body.postId || null,
+        platform: body.platform,
+        contactInfo: body.contactInfo,
+        nickname: body.nickname || '',
+        budget: body.budget,
+        majorContent: body.majorContent,
+        ip: body.ip,
+        status: body.status || (body.assignedSalesUserId ? 'assigned' : 'new'),
+        dealAmount: body.dealAmount,
+        note: body.note,
+        requirementNote: body.requirementNote,
+        supervisorNote: body.supervisorNote,
+        captureImageUrl: body.captureImageUrl,
+        salesFeedback: body.salesFeedback || '',
+        salesUpdatedAt: body.salesUpdatedAt,
+        salesUserName: body.salesUserName || '',
+        assignedSalesUserId: body.assignedSalesUserId || null,
+        assignedSalesUserName: body.assignedSalesUserName || '',
+        processStatus: body.processStatus || 'not_contacted',
+        addStatus: body.addStatus || 'not_added',
+        intention: body.intention || null,
+      });
+      return res.json({ ok: true });
+    } catch (err: any) {
+      // BadRequestException / ConflictException 等 NestJS 异常直接抛出让全局过滤器处理
+      if (err.status) throw err;
+      // 其他未预期错误
+      console.error('[leads.create] unexpected error:', err.message || err);
+      return res.status(500).json({ ok: false, message: 'Internal server error' });
+    }
   }
 
   // 注意：批量导入模板下载必须位于 `:id` 路由之前，否则 NestJS 会把
@@ -399,7 +415,7 @@ export class LeadsController {
 
   @Put(':id/board')
   @UseGuards(DebounceGuard)
-  async updateBoard(@Param('id') id: string, @Body() body: any, @Req() req: Request, @Res() res: Response) {
+  async updateBoard(@Param('id') id: string, @Body() body: any, @Headers('if-match') ifMatch: string, @Req() req: Request, @Res() res: Response) {
     const session = (req as any).session;
     const actorUserId = getSessionUserId(req) || body.actorUserId || '';
     const canAccess = await this.leadsService.canAccessLead(id, {
@@ -410,6 +426,8 @@ export class LeadsController {
     if (!canAccess) {
       return res.status(404).json({ ok: false, message: 'not found' });
     }
+    // 解析 If-Match header 为 expectedUpdatedAt（可选，向后兼容）
+    const expectedUpdatedAt = ifMatch ? new Date(ifMatch) : undefined;
     try {
       await this.leadsService.updateBoard(id, {
         status: body.status,
@@ -422,7 +440,7 @@ export class LeadsController {
         nextFollowTime: body.nextFollowTime,
         followNote: body.followNote,
         followType: body.followType,
-      }, actorUserId);
+      }, actorUserId, expectedUpdatedAt);
       return res.json({ ok: true });
     } catch (err: any) {
       return res.status(422).json({ ok: false, message: err.message || 'invalid' });

@@ -71,6 +71,7 @@ describe('LeadsController', () => {
     await controller.updateBoard(
       'lead-1',
       { addStatus: 'bad' },
+      undefined,
       { session: { role: 'sales', userId: 'sales-1' } } as any,
       res,
     );

@@ -1,38 +1,51 @@
 import {
-  Entity, PrimaryColumn, Column, CreateDateColumn, UpdateDateColumn, Index,
+  Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, Index,
 } from 'typeorm';
 
-/**
- * 主管建议（supervisor → operation）
- *
- * - 由 admin / supervisor / owner 角色在 A 端主管端创建；
- * - 创建后通过 `notifications.type_code = 'supervisor_suggestion'` 通知目标运营；
- * - 运营可在运营端查看 / 标记已读（前端 P2-A）。
- */
 @Entity('supervisor_suggestions')
-@Index('idx_sugg_operator', ['operatorId', 'isRead', 'createdAt'])
-@Index('idx_sugg_supervisor', ['supervisorId', 'createdAt'])
+@Index('idx_ss_employee_id', ['employeeId'])
+@Index('idx_ss_target', ['targetType', 'targetId'])
+@Index('idx_ss_receiver', ['receiverId', 'readStatus'])
 export class SupervisorSuggestion {
-  @PrimaryColumn({ length: 64 })
+  @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column({ name: 'supervisor_id', length: 64 })
-  supervisorId: string;
+  /** 发送者（主管）用户ID */
+  @Column({ name: 'sender_id', length: 64 })
+  senderId: string;
 
-  @Column({ name: 'operator_id', length: 64 })
-  operatorId: string;
+  /** 接收者（运营）用户ID */
+  @Column({ name: 'receiver_id', length: 64 })
+  receiverId: string;
 
-  @Column({ name: 'post_id', length: 64, nullable: true })
-  postId: string | null;
+  /** 关联员工ID（方便查询该员工的所有建议） */
+  @Column({ name: 'employee_id', length: 64, nullable: true })
+  employeeId: string | null;
 
-  @Column({ name: 'account_id', length: 64, nullable: true })
-  accountId: string | null;
+  /**
+   * 建议对象类型：
+   * - post     作品
+   * - account  账号
+   * - employee 员工
+   */
+  @Column({ name: 'target_type', length: 32 })
+  targetType: string;
 
+  /** 建议对象ID */
+  @Column({ name: 'target_id', length: 64 })
+  targetId: string;
+
+  /** 建议内容 */
   @Column({ type: 'text' })
   content: string;
 
-  @Column({ name: 'is_read', type: 'tinyint', default: 0 })
-  isRead: number;
+  /**
+   * 已读状态：
+   * - 0  未读
+   * - 1  已读
+   */
+  @Column({ name: 'read_status', type: 'tinyint', default: 0 })
+  readStatus: number;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;

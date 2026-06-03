@@ -1,12 +1,14 @@
 'use client';
 
 import { DownloadOutlined, ExclamationCircleOutlined } from '@ant-design/icons';
-import { Button, Card, DatePicker, Descriptions, Empty, Form, Input, Modal, Select, Space, Spin, Table, Tag, Timeline, Tooltip, Typography, message } from 'antd';
+import { Button, Card, DatePicker, Descriptions, Empty, Form, Input, Modal, Select, Space, Spin, Table, Tag, Timeline, Tooltip, Typography, Upload, message } from 'antd';
+import type { UploadProps } from 'antd';
 import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
 import { createAbnormalFeedback, closeAbnormalFeedback, createOrderFollowRecord, getOrderDetail, listAbnormalFeedbacks, listOrderFollowRecords } from '@/shared/api/orders';
 import { createExport } from '@/shared/api/exports';
+import { uploadFile } from '@/shared/api/uploads';
 import { readStoredUser } from '@/shared/auth/auth';
 import { handoverStatusMeta } from '@/shared/api/enums';
 import type { AbnormalTypeCode, ExpectedHelperCode, OrderAbnormalFeedback, OrderFollowRecord, OrderItem } from '@/shared/types/orders';
@@ -77,6 +79,8 @@ export default function AcademicOrderDetailPage() {
   const [abnormalSubmitting, setAbnormalSubmitting] = useState(false);
   const [closingId, setClosingId] = useState('');
   const [exporting, setExporting] = useState(false);
+  const [attachmentUrl, setAttachmentUrl] = useState('');
+  const [attachmentName, setAttachmentName] = useState('');
   const [abnormalForm] = Form.useForm();
   const [form] = Form.useForm();
 
@@ -117,9 +121,13 @@ export default function AcademicOrderDetailPage() {
         nodeType: values.nodeType.trim(),
         content: values.content?.trim() || undefined,
         nextRemindAt: values.nextRemindAt?.toISOString?.() || null,
+        attachmentUrl: attachmentUrl || undefined,
+        attachmentName: attachmentName || undefined,
       });
       message.success('跟进节点已添加');
       form.resetFields();
+      setAttachmentUrl('');
+      setAttachmentName('');
       await loadDetail();
     } catch (err) {
       message.error(err instanceof Error ? err.message : '添加失败');
@@ -376,6 +384,34 @@ export default function AcademicOrderDetailPage() {
               <Form.Item name="nextRemindAt">
                 <DatePicker showTime placeholder="下次提醒（选填）" format="YYYY年MM月DD日 HH:mm:ss" />
               </Form.Item>
+              <Form.Item>
+                <Upload
+                  accept="*"
+                  showUploadList={false}
+                  customRequest={async ({ file, onSuccess, onError }) => {
+                    try {
+                      const f = file as File;
+                      const result = await uploadFile(f, 'order-attachments');
+                      setAttachmentUrl(result.url);
+                      setAttachmentName(f.name);
+                      onSuccess?.(result);
+                      message.success('附件上传成功');
+                    } catch (err) {
+                      onError?.(err as Error);
+                      message.error('附件上传失败');
+                    }
+                  }}
+                >
+                  <Button>{attachmentUrl ? '重新上传附件' : '上传附件'}</Button>
+                </Upload>
+              </Form.Item>
+              {attachmentUrl && (
+                <Form.Item>
+                  <Typography.Text delete type="secondary" style={{ maxWidth: 200 }}>
+                    {attachmentName}
+                  </Typography.Text>
+                </Form.Item>
+              )}
               <Form.Item>
                 <Button type="primary" htmlType="submit" loading={submitting}>添加</Button>
               </Form.Item>

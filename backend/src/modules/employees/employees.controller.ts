@@ -19,11 +19,35 @@ function hasRole(role: string, allowed: string[]): boolean {
   return allowed.includes(role);
 }
 
-/** 员工资料变更（创建/更新/删除/启停）仅 admin/owner 可执行 */
+/** 员工状态白名单：与前端表单 value / schema.sql 默认值对齐 */
+const EMPLOYEE_STATUS_VALUES = ['在职', '离职', '停用'] as const;
+/**
+ * 兼容历史 / 前端缓存：旧版表单可能用英文 code 提交
+ * （active/inactive/disabled/enabled），写库前统一翻译成中文。
+ * 不在白名单且未匹配英文别名的值回退到默认 '在职'。
+ */
+function normalizeEmployeeStatus(input: unknown): string {
+  const raw = String(input ?? '').trim();
+  if (!raw) return '在职';
+  if ((EMPLOYEE_STATUS_VALUES as readonly string[]).includes(raw)) return raw;
+  const alias: Record<string, string> = {
+    active: '在职',
+    enabled: '在职',
+    online: '在职',
+    inactive: '离职',
+    disabled: '停用',
+    leave: '离职',
+    resign: '离职',
+    stopped: '停用',
+  };
+  return alias[raw.toLowerCase()] ?? '在职';
+}
+
+/** 员工资料变更（创建/更新/删除/启停）仅 admin/owner/supervisor 可执行 */
 function ensureEmployeeAdmin(req: Request, res: Response): boolean {
   const role = getSessionRole(req);
-  if (!hasRole(role, ['admin', 'owner'])) {
-    res.status(403).json({ ok: false, message: 'forbidden: 仅 admin/owner 可管理员工资料' });
+  if (!hasRole(role, ['admin', 'owner', 'supervisor'])) {
+    res.status(403).json({ ok: false, message: 'forbidden: 仅 admin/supervisor 可管理员工资料' });
     return false;
   }
   return true;
@@ -38,6 +62,20 @@ export class EmployeesController {
     private readonly employeesService: EmployeesService,
     private readonly operationLogs: OperationLogsService,
   ) {}
+
+  /**
+   * 查询员工详情。
+   * 仅 admin/supervisor/owner 可访问。
+   */
+  @Get(':id')
+  async findById(@Param('id') id: string, @Req() req: Request, @Res() res: Response) {
+    if (!ensureEmployeeAdmin(req, res)) return;
+    const employee = await this.employeesService.findById(id);
+    if (!employee) {
+      return res.status(404).json({ ok: false, message: '员工不存在' });
+    }
+    return res.json(employee);
+  }
 
   /**
    * 查询员工列表，支持分页和关键字过滤。
@@ -75,35 +113,43 @@ export class EmployeesController {
   async create(@Body() body: any, @Req() req: Request, @Res() res: Response) {
     if (!ensureEmployeeAdmin(req, res)) return;
 
-    const userId = getSessionUserId(req);
-    const allCodes = await this.employeesService.findAllCodes();
-    const maxNum = allCodes.length === 0 ? 0 : Math.max(...allCodes.map((c) => Number(String(c).replace('EMP', '')) || 0));
-    const employeeCode = `EMP${String(maxNum + 1).padStart(4, '0')}`;
-    const employee = await this.employeesService.create({
-      employeeCode,
-      name: body.name,
-      phone: body.phone || null,
-      hireDate: body.hireDate || null,
-      status: body.status || '在职',
-    });
-    // 写操作日志：员工创建
     try {
-      await this.operationLogs.log({
-        userId,
-        action: OPERATION_LOG_ACTIONS.CREATE,
-        targetType: OPERATION_LOG_TARGET_TYPES.EMPLOYEE,
-        targetId: (employee as any)?.id || '',
-        detail: stringifyDetail({
-          employeeCode,
-          name: body.name,
-        }),
-        ip: parseIp(req),
+      const userId = getSessionUserId(req);
+      const allCodes = await this.employeesService.findAllCodes();
+      const maxNum = allCodes.length === 0 ? 0 : Math.max(...allCodes.map((c) => Number(String(c).replace('EMP', '')) || 0));
+      const employeeCode = `EMP${String(maxNum + 1).padStart(4, '0')}`;
+      const employee = await this.employeesService.create({
+        employeeCode,
+        name: body.name,
+        phone: body.phone || null,
+        hireDate: body.hireDate || null,
+        status: normalizeEmployeeStatus(body.status),
       });
-    } catch (logErr) {
-      // eslint-disable-next-line no-console
-      console.error('[employees] operation log failed', (logErr as any)?.message || logErr);
+      // 写操作日志：员工创建
+      try {
+        await this.operationLogs.log({
+          userId,
+          action: OPERATION_LOG_ACTIONS.CREATE,
+          targetType: OPERATION_LOG_TARGET_TYPES.EMPLOYEE,
+          targetId: (employee as any)?.id || '',
+          detail: stringifyDetail({
+            employeeCode,
+            name: body.name,
+          }),
+          ip: parseIp(req),
+        });
+      } catch (logErr) {
+        // eslint-disable-next-line no-console
+        console.error('[employees] operation log failed', (logErr as any)?.message || logErr);
+      }
+      return res.json({ ok: true });
+    } catch (err: any) {
+      // BadRequestException / ConflictException 等 NestJS 异常直接抛出让全局过滤器处理
+      if (err.status) throw err;
+      // 其他未预期错误
+      console.error('[employees.create] unexpected error:', err.message || err);
+      return res.status(500).json({ ok: false, message: 'Internal server error' });
     }
-    return res.json({ ok: true });
   }
 
   /**
@@ -195,7 +241,7 @@ export class EmployeesController {
       name: body.name,
       phone: body.phone || null,
       hireDate: body.hireDate || null,
-      status: body.status,
+      status: normalizeEmployeeStatus(body.status),
     });
     // 写操作日志：员工更新
     try {
@@ -206,6 +252,8 @@ export class EmployeesController {
         targetId: id,
         detail: stringifyDetail({
           name: body.name,
+          // 日志保留原始提交值，便于审计 / 排查前端脏数据来源；
+          // 实际写入 employees.status 已通过 normalizeEmployeeStatus 规整。
           status: body.status,
         }),
         ip: parseIp(req),

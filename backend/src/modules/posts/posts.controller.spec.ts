@@ -151,7 +151,7 @@ describe('PostsController A端契约补齐', () => {
     const controller = new PostsController(postsService, {} as any, { log: jest.fn() } as any);
     const res = response();
 
-    await controller.saveMetrics('post-1', { likes: 10, comments: 2, favorites: 3, shares: 4 }, res);
+    await controller.saveMetrics('post-1', { likes: 10, comments: 2, favorites: 3, shares: 4 }, {} as any, res);
 
     expect(postsService.updateMetrics).toHaveBeenCalledWith('post-1', expect.objectContaining({
       likes: 10,

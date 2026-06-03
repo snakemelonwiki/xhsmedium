@@ -135,6 +135,7 @@ export class OrdersController {
     @Query('serviceType') serviceType?: string,
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
+    @Query('abnormal') abnormal?: string,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
   ) {
@@ -143,6 +144,8 @@ export class OrdersController {
     const sessionRole = session?.role || actorRole;
     // 兼容多种搜索字段命名（keyword / q / search 任一即生效）。
     const mergedKeyword = (keyword || q || search || '').trim() || undefined;
+    // 解析 abnormal 参数
+    const abnormalFlag = abnormal === 'true' || abnormal === '1';
     // §9 / AC-10.2：传了 limit 或 offset 任一即视为分页请求，返回 { items, total, limit, offset }；
     //   不传任何分页参数 → 兼容旧前端：返回纯数组。
     const wantsPaging = limit !== undefined || offset !== undefined;
@@ -161,6 +164,7 @@ export class OrdersController {
         serviceType,
         startDate,
         endDate,
+        abnormal: abnormalFlag,
         limit: Number(limit) || 20,
         offset: Number(offset) || 0,
       });
@@ -180,6 +184,7 @@ export class OrdersController {
       serviceType,
       startDate,
       endDate,
+      abnormal: abnormalFlag,
     });
     return res.json(rows);
   }
@@ -330,6 +335,8 @@ export class OrdersController {
         nodeType: body?.nodeType,
         content: body?.content,
         nextRemindAt: body?.nextRemindAt,
+        attachmentUrl: body?.attachmentUrl,
+        attachmentName: body?.attachmentName,
       });
       // 写操作日志：订单跟进节点
       await this.logSafe({

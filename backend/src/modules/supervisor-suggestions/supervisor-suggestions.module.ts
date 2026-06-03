@@ -1,16 +1,18 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { SupervisorSuggestion } from '../../entities/supervisor-suggestion.entity';
-import { SupervisorSuggestionsService } from './supervisor-suggestions.service';
+import { Post } from '../../entities/post.entity';
+import { Account } from '../../entities/account.entity';
+import { Employee } from '../../entities/employee.entity';
+import { User } from '../../entities/user.entity';
 import { SupervisorSuggestionsController } from './supervisor-suggestions.controller';
+import { SupervisorSuggestionsService } from './supervisor-suggestions.service';
 import { NotificationsModule } from '../notifications/notifications.module';
-import { OperationLogsModule } from '../operation-logs/operation-logs.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([SupervisorSuggestion]),
+    TypeOrmModule.forFeature([SupervisorSuggestion, Post, Account, Employee, User]),
     NotificationsModule,
-    OperationLogsModule,
   ],
   controllers: [SupervisorSuggestionsController],
   providers: [SupervisorSuggestionsService],

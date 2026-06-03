@@ -1,213 +1,310 @@
 'use client';
 
-import { Alert, Card, Empty, Pagination, Radio, Space, Table, Typography } from 'antd';
+import { DownloadOutlined, StarOutlined } from '@ant-design/icons';
+import {
+  Alert,
+  Button,
+  Card,
+  Empty,
+  message,
+  Pagination,
+  Segmented,
+  Space,
+  Table,
+  Tag,
+  Typography,
+} from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
+import { createExport } from '@/shared/api/exports';
 import { apiClient } from '@/shared/api/apiClient';
-import { listRankings } from '@/shared/api/content';
-import type { ContentPost, RankingRow } from '@/shared/types/content';
+import type { ContentPost } from '@/shared/types/content';
 
-type RankingType = 'posts' | 'leads' | 'traffic' | 'learning';
-type Period = '7d' | '14d' | '30d';
+type RankingType = 'posts' | 'leads' | 'traffic';
+type Period = 'today' | 'week' | 'month' | 'total';
 
-function text(value: unknown): string | undefined {
-  if (value === undefined || value === null || value === '') return undefined;
-  return String(value);
+interface RankingRow {
+  id: string;
+  employeeId?: string;
+  name: string;
+  postCount: number;
+  leadCount: number;
+  sourcePostCount?: number;
+  validRate?: number;
+  likes?: number;
+  traffic?: number;
+  avatar?: string;
+  employeeNo?: string;
+  todayPosts?: number;
+  todayLeads?: number;
+  todayTraffic?: number;
 }
+
+const PERIOD_OPTIONS = [
+  { label: '今日', value: 'today' },
+  { label: '本周', value: 'week' },
+  { label: '本月', value: 'month' },
+  { label: '累计', value: 'total' },
+];
+
+const TYPE_OPTIONS = [
+  { label: '作品数榜', value: 'posts' },
+  { label: '客资榜', value: 'leads' },
+  { label: '流量榜', value: 'traffic' },
+];
 
 function numberValue(value: unknown): number {
   const parsed = Number(value ?? 0);
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function mapLearningPost(raw: Record<string, unknown>): ContentPost {
-  const leadsCount = numberValue(raw.leadsCount ?? raw.leadCount ?? raw.leads_count);
-  return {
-    id: text(raw.id) ?? '',
-    platform: text(raw.platform) ?? '未知平台',
-    title: text(raw.title) ?? '未命名作品',
-    copywriting: text(raw.copywriting),
-    accountId: text(raw.accountId ?? raw.account_id),
-    employeeId: text(raw.employeeId ?? raw.employee_id),
-    postType: text(raw.postType ?? raw.post_type),
-    postUrl: text(raw.postUrl ?? raw.post_url),
-    coverImageUrl: text(raw.coverImageUrl ?? raw.cover_image_url),
-    publishedAt: text(raw.publishedAt ?? raw.published_at),
-    metricsUpdatedAt: text(raw.metricsUpdatedAt ?? raw.metrics_updated_at),
-    metrics: {
-      traffic: numberValue(raw.traffic),
-      likes: numberValue(raw.likes),
-      comments: numberValue(raw.comments),
-      favorites: numberValue(raw.favorites),
-      shares: numberValue(raw.shares),
-      leadsCount,
-    },
-  };
-}
-
 export default function OperationRankingsPage() {
+  const router = useRouter();
   const [items, setItems] = useState<RankingRow[]>([]);
-  const [learningItems, setLearningItems] = useState<ContentPost[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [type, setType] = useState<RankingType>('posts');
-  const [period, setPeriod] = useState<Period>('7d');
+  const [period, setPeriod] = useState<Period>('today');
   const [loading, setLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string>();
   const pageSize = 20;
 
-  async function load(nextPage = page, nextType = type, nextPeriod = period) {
+  const load = useCallback(async (nextPage = page, nextType = type, nextPeriod = period) => {
     setLoading(true);
     setError(undefined);
     try {
-      if (nextType === 'learning') {
-        const payload = await apiClient.get<unknown[]>('/rankings/learning-posts', {
-          query: { days: Number(nextPeriod.replace('d', '')) },
-        });
-        const rows = Array.isArray(payload) ? payload : [];
-        setItems([]);
-        setLearningItems(rows.map((item) => mapLearningPost(item as Record<string, unknown>)));
-        setTotal(rows.length);
-        setPage(1);
-      } else {
-        const result = await listRankings(nextType, { page: nextPage, pageSize, period: nextPeriod });
-        setItems(result.items);
-        setLearningItems([]);
-        setTotal(result.total);
-        setPage(result.page);
-      }
+      const limit = pageSize;
+      const offset = (nextPage - 1) * limit;
+      const payload = await apiClient.get<{ items?: RankingRow[]; total?: number }>('/rankings/operations', {
+        query: { type: nextType, period: nextPeriod, limit, offset },
+      });
+      const rows = payload?.items ?? [];
+      const totalCount = payload?.total ?? rows.length;
+      setItems(Array.isArray(rows) ? rows : []);
+      setTotal(totalCount);
+      setPage(nextPage);
     } catch (err) {
       setItems([]);
-      setLearningItems([]);
       setTotal(0);
       setError(err instanceof Error ? err.message : '排行榜加载失败');
     } finally {
       setLoading(false);
     }
-  }
+  }, [page, type, period]);
 
   useEffect(() => {
-    load(1);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    void load(1, type, period);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function changeType(nextType: RankingType) {
     setType(nextType);
-    load(1, nextType, period);
+    void load(1, nextType, period);
   }
 
   function changePeriod(nextPeriod: Period) {
     setPeriod(nextPeriod);
-    load(1, type, nextPeriod);
+    void load(1, type, nextPeriod);
   }
 
-  const columns: ColumnsType<RankingRow> = [
-    {
-      title: '排名',
-      width: 80,
-      render: (_, __, index) => (page - 1) * pageSize + index + 1,
-    },
-    {
-      title: '员工',
-      dataIndex: 'name',
-      render: (name: string) => <Typography.Text strong>{name}</Typography.Text>,
-    },
-    {
-      title: '作品数',
-      dataIndex: type === 'posts' ? 'postCount' : 'todayPosts',
-      sorter: (a, b) => (a.postCount || a.todayPosts) - (b.postCount || b.todayPosts),
-    },
-    {
-      title: '获客数',
-      dataIndex: type === 'leads' ? 'leadCount' : 'todayLeads',
-      sorter: (a, b) => (a.leadCount || a.todayLeads) - (b.leadCount || b.todayLeads),
-    },
-    {
-      title: '今日流量',
-      dataIndex: 'todayTraffic',
-    },
-    {
-      title: '今日成交',
-      dataIndex: 'todayDeals',
-    },
-  ];
+  async function handleExport() {
+    setExporting(true);
+    try {
+      await createExport({ exportType: 'rankings', filter: { type, period } });
+      message.success('已创建排行榜导出任务，可到导出中心下载');
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '排行榜导出创建失败');
+    } finally {
+      setExporting(false);
+    }
+  }
 
-  const learningColumns: ColumnsType<ContentPost> = [
-    {
-      title: '排名',
-      width: 80,
-      render: (_, __, index) => index + 1,
-    },
-    {
-      title: '作品',
-      render: (_, record) => (
-        <Space direction="vertical" size={2}>
-          <Typography.Text strong>{record.title}</Typography.Text>
-          <Typography.Text type="secondary">{record.platform} · {record.postType || '未分类'}</Typography.Text>
-        </Space>
-      ),
-    },
-    {
-      title: '获客数',
-      render: (_, record) => record.metrics.leadsCount,
-    },
-    {
-      title: '流量',
-      render: (_, record) => record.metrics.traffic,
-    },
-    {
-      title: '发布时间',
-      dataIndex: 'publishedAt',
-      render: (value?: string) => value || '-',
-    },
-  ];
+  function goToStudy() {
+    router.push('/operation/rankings/study');
+  }
+
+  // 计算与上一名的差距
+  const itemsWithGap = useMemo(() => {
+    if (items.length === 0) return [];
+    const getValue = (item: RankingRow) => {
+      if (type === 'leads') return item.leadCount;
+      if (type === 'traffic') return item.likes ?? item.traffic ?? 0;
+      return item.postCount;
+    };
+    return items.map((item, index) => {
+      const currentValue = getValue(item);
+      let gap = 0;
+      if (index > 0) {
+        const prevValue = getValue(items[index - 1]);
+        gap = prevValue - currentValue;
+      }
+      return { ...item, gap };
+    });
+  }, [items, type]);
+
+  // 根据类型生成列配置
+  const columns: ColumnsType<RankingRow> = useMemo(() => {
+    const baseColumns: ColumnsType<RankingRow> = [
+      {
+        title: '排名',
+        width: 80,
+        render: (_, __, index) => (page - 1) * pageSize + index + 1,
+      },
+      {
+        title: '运营员工',
+        dataIndex: 'name',
+        width: 150,
+        render: (name: string, record) => (
+          <Space direction="vertical" size={0}>
+            <Typography.Text strong>{name}</Typography.Text>
+            {record.employeeNo && (
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                工号: {record.employeeNo}
+              </Typography.Text>
+            )}
+          </Space>
+        ),
+      },
+    ];
+
+    if (type === 'posts') {
+      return [
+        ...baseColumns,
+        {
+          title: '本期作品数',
+          dataIndex: 'postCount',
+          sorter: (a, b) => a.postCount - b.postCount,
+          render: (val: number) => <Typography.Text strong>{val}</Typography.Text>,
+        },
+        {
+          title: '与上一名差距',
+          dataIndex: 'gap',
+          render: (gap: number) => {
+            if (gap === 0) return '-';
+            return <Tag color="orange">-{gap}</Tag>;
+          },
+        },
+      ];
+    }
+
+    if (type === 'leads') {
+      return [
+        ...baseColumns,
+        {
+          title: '客资数',
+          dataIndex: 'leadCount',
+          sorter: (a, b) => a.leadCount - b.leadCount,
+          render: (val: number) => <Typography.Text strong>{val}</Typography.Text>,
+        },
+        {
+          title: '来源作品数',
+          dataIndex: 'sourcePostCount',
+          render: (val?: number) => val ?? '-',
+        },
+        {
+          title: '有效率',
+          dataIndex: 'validRate',
+          render: (val?: number) => {
+            if (val === undefined || val === null) return '-';
+            return `${(val * 100).toFixed(1)}%`;
+          },
+        },
+        {
+          title: '与上一名差距',
+          dataIndex: 'gap',
+          render: (gap: number) => {
+            if (gap === 0) return '-';
+            return <Tag color="orange">-{gap}</Tag>;
+          },
+        },
+      ];
+    }
+
+    // traffic
+    return [
+      ...baseColumns,
+      {
+        title: '点赞数',
+        dataIndex: 'likes',
+        sorter: (a, b) => (a.likes ?? 0) - (b.likes ?? 0),
+        render: (val?: number) => <Typography.Text strong>{val ?? 0}</Typography.Text>,
+      },
+      {
+        title: '流量',
+        dataIndex: 'traffic',
+        render: (val?: number) => val ?? '-',
+      },
+      {
+        title: '与上一名差距',
+        dataIndex: 'gap',
+        render: (gap: number) => {
+          if (gap === 0) return '-';
+          return <Tag color="orange">-{gap}</Tag>;
+        },
+      },
+    ];
+  }, [type, page, pageSize]);
 
   return (
     <Space direction="vertical" size={16} className="page-stack">
       <div className="toolbar-row">
         <div>
           <Typography.Title level={2}>排行榜</Typography.Title>
-          <Typography.Paragraph type="secondary">查看员工、作品和获客表现榜单。</Typography.Paragraph>
+          <Typography.Paragraph type="secondary">
+            查看员工作品数、客资和流量榜单，支持按周期筛选。
+          </Typography.Paragraph>
         </div>
         <Space wrap>
-          <Radio.Group value={type} onChange={(event) => changeType(event.target.value)}>
-            <Radio.Button value="posts">作品榜</Radio.Button>
-            <Radio.Button value="leads">获客榜</Radio.Button>
-            <Radio.Button value="traffic">流量榜</Radio.Button>
-            <Radio.Button value="learning">学习榜单</Radio.Button>
-          </Radio.Group>
-          <Radio.Group value={period} onChange={(event) => changePeriod(event.target.value)}>
-            <Radio.Button value="7d">近 7 天</Radio.Button>
-            <Radio.Button value="14d">近 14 天</Radio.Button>
-            <Radio.Button value="30d">近 30 天</Radio.Button>
-          </Radio.Group>
+          <Segmented
+            options={TYPE_OPTIONS}
+            value={type}
+            onChange={(val) => changeType(val as RankingType)}
+          />
+          <Segmented
+            options={PERIOD_OPTIONS}
+            value={period}
+            onChange={(val) => changePeriod(val as Period)}
+          />
+          <Button
+            type="link"
+            icon={<StarOutlined />}
+            onClick={goToStudy}
+          >
+            学习榜单
+          </Button>
         </Space>
       </div>
-      {error ? <Alert type="warning" showIcon message="排行榜暂不可用" description={error} /> : null}
+      {error ? (
+        <Alert type="warning" showIcon message="排行榜暂不可用" description={error} />
+      ) : null}
       <Card>
-        {type === 'learning' ? (
-          <Table
-            rowKey="id"
-            loading={loading}
-            columns={learningColumns}
-            dataSource={learningItems}
-            pagination={false}
-            locale={{ emptyText: <Empty description="暂无学习榜单数据" /> }}
-          />
-        ) : (
-          <>
-            <Table
-              rowKey="id"
-              loading={loading}
-              columns={columns}
-              dataSource={items}
-              pagination={false}
-              locale={{ emptyText: <Empty description="暂无榜单数据" /> }}
-            />
-            <Pagination current={page} pageSize={pageSize} total={total} onChange={(nextPage) => load(nextPage)} style={{ marginTop: 16, textAlign: 'right' }} />
-          </>
-        )}
+        <Space style={{ marginBottom: 16 }}>
+          <Button
+            icon={<DownloadOutlined />}
+            loading={exporting}
+            onClick={handleExport}
+          >
+            导出
+          </Button>
+        </Space>
+        <Table
+          rowKey="id"
+          loading={loading}
+          columns={columns}
+          dataSource={itemsWithGap}
+          pagination={false}
+          locale={{ emptyText: <Empty description="暂无榜单数据" /> }}
+        />
+        <Pagination
+          current={page}
+          pageSize={pageSize}
+          total={total}
+          onChange={(nextPage) => load(nextPage)}
+          style={{ marginTop: 16, textAlign: 'right' }}
+        />
       </Card>
     </Space>
   );

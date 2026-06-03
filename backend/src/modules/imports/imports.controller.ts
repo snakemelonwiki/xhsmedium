@@ -17,8 +17,14 @@ export class ImportsController {
     if (rows.length === 0) {
       return res.status(400).json({ ok: false, message: 'rows required' });
     }
-    const result = await this.importsService.importLeadsPaste(rows, actorUserId, actorEmployeeId);
-    return res.json(result);
+    // 异步入口：创建任务 + 入队，返回 taskId
+    const { taskId, status } = await this.importsService.enqueueImport({
+      type: 'leads-paste',
+      userId: actorUserId,
+      employeeId: actorEmployeeId,
+      rows,
+    });
+    return res.json({ ok: true, taskId, status });
   }
 
   @Post('leads/import')
@@ -31,8 +37,15 @@ export class ImportsController {
     if (rows.length === 0) {
       return res.status(400).json({ ok: false, message: 'file or rows required' });
     }
-    const result = await this.importsService.importLeadsPaste(rows, actorUserId, actorEmployeeId);
-    return res.json(result);
+    // 异步入口：创建任务 + 入队，返回 taskId
+    const { taskId, status } = await this.importsService.enqueueImport({
+      type: 'leads-import',
+      userId: actorUserId,
+      employeeId: actorEmployeeId,
+      rows,
+      fileBuffer: file?.buffer,
+    });
+    return res.json({ ok: true, taskId, status });
   }
 
   // leads/import-template.xlsx 已挪到 LeadsController（避免被 leads/:id 路由抢占）。
@@ -46,8 +59,14 @@ export class ImportsController {
     if (rows.length === 0) {
       return res.status(400).json({ ok: false, message: 'rows required' });
     }
-    const result = await this.importsService.importPostsPaste(rows, actorUserId, actorEmployeeId);
-    return res.json(result);
+    // 异步入口：创建任务 + 入队，返回 taskId
+    const { taskId, status } = await this.importsService.enqueueImport({
+      type: 'posts-paste',
+      userId: actorUserId,
+      employeeId: actorEmployeeId,
+      rows,
+    });
+    return res.json({ ok: true, taskId, status });
   }
 
   @Post('posts/import')
@@ -60,8 +79,15 @@ export class ImportsController {
     if (rows.length === 0) {
       return res.status(400).json({ ok: false, message: 'file or rows required' });
     }
-    const result = await this.importsService.importPostsPaste(rows, actorUserId, actorEmployeeId);
-    return res.json(result);
+    // 异步入口：创建任务 + 入队，返回 taskId
+    const { taskId, status } = await this.importsService.enqueueImport({
+      type: 'posts-import',
+      userId: actorUserId,
+      employeeId: actorEmployeeId,
+      rows,
+      fileBuffer: file?.buffer,
+    });
+    return res.json({ ok: true, taskId, status });
   }
 
   // posts/import-template.xlsx 已挪到 PostsController（避免被 posts/:id 路由抢占）。
