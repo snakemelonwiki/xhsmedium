@@ -70,6 +70,7 @@ interface ListOrdersOptions {
   serviceType?: string;
   startDate?: string;
   endDate?: string;
+  abnormal?: boolean;
 }
 
 interface OrderPatchDto {
@@ -85,6 +86,8 @@ interface OrderFollowDto {
   nodeType: string;
   content?: string | null;
   nextRemindAt?: string | Date | null;
+  attachmentUrl?: string | null;
+  attachmentName?: string | null;
 }
 
 @Injectable()
@@ -265,6 +268,13 @@ export class OrdersService {
       qb.andWhere(
         `(o.id LIKE :kw OR EXISTS (SELECT 1 FROM leads l WHERE l.id = o.lead_id AND (l.contact_info LIKE :kw OR l.nickname LIKE :kw)))`,
         { kw: like },
+      );
+    }
+
+    // 异常筛选：关联 order_abnormal_feedbacks 表，过滤存在未关闭异常的订单。
+    if (options.abnormal) {
+      qb.andWhere(
+        `EXISTS (SELECT 1 FROM order_abnormal_feedbacks f WHERE f.order_id = o.id AND f.status != 'closed')`,
       );
     }
   }
@@ -639,6 +649,8 @@ export class OrdersService {
       nodeType,
       content: dto.content ? String(dto.content).trim() : null,
       nextRemindAt: dto.nextRemindAt ? new Date(dto.nextRemindAt) : null,
+      attachmentUrl: dto.attachmentUrl || null,
+      attachmentName: dto.attachmentName || null,
     });
 
     // §11.1 order_abnormal: 订单跟进出现异常节点，回写给销售。

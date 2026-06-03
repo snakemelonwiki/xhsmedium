@@ -137,7 +137,11 @@ export class PostsService {
     return this.findPaged({ employeeId }, limit, offset);
   }
 
-  async findPlaza(filters: PlazaFilters): Promise<any[]> {
+  async findPlaza(
+    filters: PlazaFilters,
+    page: number = 1,
+    pageSize: number = 20,
+  ): Promise<{ items: any[]; total: number }> {
     const params: any[] = [filters.userId || ''];
     const whereParts = ['1=1'];
 
@@ -165,7 +169,34 @@ export class PostsService {
       params.push(filters.userId || '');
     }
 
-    const havingClause = filters.view === 'excellent' ? 'HAVING leads_count >= 5' : '';
+    const havingClause = filters.view === 'excellent' ? 'HAVING lc.cnt >= 5' : '';
+
+    // Count query for total
+    // 优化：使用预聚合子表替代相关子查询，消除 N+1 问题
+    const countSql = `
+      SELECT COUNT(DISTINCT p.id) AS total
+      FROM posts p
+      LEFT JOIN employees e ON e.id = p.employee_id
+      LEFT JOIN accounts a ON a.id = p.account_id
+      LEFT JOIN (
+        SELECT post_id, COUNT(*) AS cnt
+        FROM leads
+        WHERE post_id IS NOT NULL
+        GROUP BY post_id
+      ) lc ON lc.post_id = p.id
+      ${favoriteJoin}
+      WHERE ${whereParts.join(' AND ')}
+      ${havingClause}
+    `;
+    const countParams = [...params];
+    const countResult = await this.postRepository.query(countSql, countParams);
+    const total = Number((countResult[0] as any)?.total || 0);
+
+    // Data query with pagination
+    const safePageSize = Math.min(Math.max(Number(pageSize) || 20, 1), 200);
+    const safePage = Math.max(Number(page) || 1, 1);
+    const offset = (safePage - 1) * safePageSize;
+
     const sql = `
       SELECT
         p.id, p.employee_id, p.account_id, p.platform, p.title, p.copywriting,
@@ -175,28 +206,41 @@ export class PostsService {
         p.created_at, p.updated_at,
         e.name AS employee_name,
         a.account_name,
-        (SELECT COUNT(*) FROM leads l WHERE l.post_id = p.id) AS leads_count,
-        (SELECT COUNT(*) FROM favorites fav_total
-          WHERE fav_total.target_type = 'post'
-            AND fav_total.target_id = p.id COLLATE utf8mb4_unicode_ci
-        ) AS favorite_count,
-        EXISTS(
-          SELECT 1 FROM favorites fav
-          WHERE fav.target_type = 'post'
-            AND fav.target_id = p.id COLLATE utf8mb4_unicode_ci
-            AND fav.user_id = ?
-        ) AS is_favorited
+        COALESCE(lc.cnt, 0) AS leads_count,
+        COALESCE(fc.cnt, 0) AS favorite_count,
+        CASE WHEN fav_user.target_id IS NOT NULL THEN 1 ELSE 0 END AS is_favorited
       FROM posts p
       LEFT JOIN employees e ON e.id = p.employee_id
       LEFT JOIN accounts a ON a.id = p.account_id
+      LEFT JOIN (
+        SELECT post_id, COUNT(*) AS cnt
+        FROM leads
+        WHERE post_id IS NOT NULL
+        GROUP BY post_id
+      ) lc ON lc.post_id = p.id
+      LEFT JOIN (
+        SELECT target_id, COUNT(*) AS cnt
+        FROM favorites
+        WHERE target_type = 'post'
+        GROUP BY target_id
+      ) fc ON fc.target_id = p.id
+      LEFT JOIN (
+        SELECT target_id
+        FROM favorites
+        WHERE target_type = 'post' AND user_id = ?
+      ) fav_user ON fav_user.target_id = p.id
       ${favoriteJoin}
       WHERE ${whereParts.join(' AND ')}
       ${havingClause}
-      ORDER BY leads_count DESC, p.likes DESC, p.published_at DESC, p.created_at DESC
+      ORDER BY COALESCE(lc.cnt, 0) DESC, p.likes DESC, p.published_at DESC, p.created_at DESC
+      LIMIT ? OFFSET ?
     `;
 
-    const rows = await this.postRepository.query(sql, params);
-    return (rows as any[]).map((row) => this.mapPostRow(row));
+    // dataParams: params 已经包含 userId（首元素）和过滤条件；末尾追加 pageSize 和 offset
+    // 注意：不要再追加 filters.userId，否则会重复（之前导致 LIMIT 收到 userId 字符串而非数字）
+    const dataParams = [...params, safePageSize, offset];
+    const rows = await this.postRepository.query(sql, dataParams);
+    return { items: (rows as any[]).map((row) => this.mapPostRow(row)), total };
   }
 
   private clampLimit(limit: number): number {

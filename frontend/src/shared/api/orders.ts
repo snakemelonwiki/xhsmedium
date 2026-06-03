@@ -87,7 +87,13 @@ export async function updateOrder(id: string, body: Record<string, unknown>) {
  */
 export async function createOrderFollowRecord(
   id: string,
-  body: { nodeType: string; content?: string; nextRemindAt?: string | null },
+  body: {
+    nodeType: string;
+    content?: string;
+    nextRemindAt?: string | null;
+    attachmentUrl?: string;
+    attachmentName?: string;
+  },
 ) {
   return apiClient.post(`/orders/${id}/follow-records`, body);
 }

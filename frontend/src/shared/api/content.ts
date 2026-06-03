@@ -174,11 +174,14 @@ export async function listGalleryPosts(query: PageQuery = {}): Promise<PagedResu
     const paged = normalizePagedResult<RawRecord>(payload);
     return { ...paged, page, pageSize, items: paged.items.map(mapPost) };
   } catch {
+    // Fallback to /posts/plaza endpoint which now supports server-side pagination
     const payload = await apiClient.get<unknown>('/posts/plaza', {
-      query: { view: 'all', ...query },
+      query: { view: 'all', page, pageSize },
     });
-    const items = rawItems(payload).slice(offset, offset + limit).map(mapPost);
-    return { items, total: rawItems(payload).length, page, pageSize };
+    const data = payload as { items?: unknown[]; rows?: unknown[]; total?: number };
+    const items = rawItems(data).map(mapPost);
+    const total = Number(data?.total ?? items.length);
+    return { items, total, page, pageSize };
   }
 }
 

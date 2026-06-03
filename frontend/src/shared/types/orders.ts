@@ -51,6 +51,7 @@ export interface OrderListQuery extends PageQuery {
   scope: OrderScope;
   status?: string;
   handoverStatus?: string;
+  abnormal?: boolean;
 }
 
 // ─── 订单异常反馈 ──────────────────────────────────────────────────────────

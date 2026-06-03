@@ -112,6 +112,8 @@ export class PostsController {
     @Query('platform') platform?: string,
     @Query('postType') postType?: string,
     @Query('employeeId') employeeId?: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
   ) {
     const session = (req as any).session;
     const role = session?.role || '';
@@ -122,14 +124,18 @@ export class PostsController {
       : 'all';
     const effectiveView = role === 'staff' ? 'excellent' : requestedView;
 
-    const rows = await this.postsService.findPlaza({
-      view: effectiveView as 'all' | 'excellent' | 'favorites',
-      platform: platform || undefined,
-      postType: postType || undefined,
-      employeeId: employeeId || undefined,
-      userId,
-    });
-    return res.json({ ok: true, view: effectiveView, rows });
+    const result = await this.postsService.findPlaza(
+      {
+        view: effectiveView as 'all' | 'excellent' | 'favorites',
+        platform: platform || undefined,
+        postType: postType || undefined,
+        employeeId: employeeId || undefined,
+        userId,
+      },
+      Number(page) || 1,
+      Number(pageSize) || 20,
+    );
+    return res.json({ ok: true, view: effectiveView, ...result });
   }
 
   @Post()

@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Patch, Delete, Body, Param, Req, Res, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Put, Patch, Delete, Body, Param, Req, Res, Query, UseGuards, Headers } from '@nestjs/common';
 import { LeadsService } from './leads.service';
 import { Request, Response } from 'express';
 import { makeId } from '../../shared/utils/id-generator';
@@ -399,7 +399,7 @@ export class LeadsController {
 
   @Put(':id/board')
   @UseGuards(DebounceGuard)
-  async updateBoard(@Param('id') id: string, @Body() body: any, @Req() req: Request, @Res() res: Response) {
+  async updateBoard(@Param('id') id: string, @Body() body: any, @Headers('if-match') ifMatch: string, @Req() req: Request, @Res() res: Response) {
     const session = (req as any).session;
     const actorUserId = getSessionUserId(req) || body.actorUserId || '';
     const canAccess = await this.leadsService.canAccessLead(id, {
@@ -410,6 +410,8 @@ export class LeadsController {
     if (!canAccess) {
       return res.status(404).json({ ok: false, message: 'not found' });
     }
+    // 解析 If-Match header 为 expectedUpdatedAt（可选，向后兼容）
+    const expectedUpdatedAt = ifMatch ? new Date(ifMatch) : undefined;
     try {
       await this.leadsService.updateBoard(id, {
         status: body.status,
@@ -422,7 +424,7 @@ export class LeadsController {
         nextFollowTime: body.nextFollowTime,
         followNote: body.followNote,
         followType: body.followType,
-      }, actorUserId);
+      }, actorUserId, expectedUpdatedAt);
       return res.json({ ok: true });
     } catch (err: any) {
       return res.status(422).json({ ok: false, message: err.message || 'invalid' });

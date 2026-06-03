@@ -1,6 +1,7 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, OnModuleDestroy, OnModuleInit, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { Queue } from 'bullmq';
 import { ImportTask } from '../../entities/import-task.entity';
 import { Lead } from '../../entities/lead.entity';
 import { Post } from '../../entities/post.entity';
@@ -8,6 +9,7 @@ import { makeId } from '../../shared/utils/id-generator';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NOTIFICATION_TYPES } from '../../shared/notifications';
 import { StorageService } from '../../shared/storage/storage.service';
+import { IMPORT_QUEUE_NAME, ImportJobData } from './imports.constants';
 
 export interface ImportRowError {
   row: number;
@@ -34,7 +36,11 @@ interface ParsedLeadRow {
 }
 
 @Injectable()
-export class ImportsService {
+export class ImportsService implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(ImportsService.name);
+  private importQueue: Queue | null = null;
+  private readonly redisUrl: string | null = (process.env.REDIS_URL || '').trim() || null;
+
   constructor(
     @InjectRepository(ImportTask)
     private readonly importTaskRepository: Repository<ImportTask>,
@@ -45,6 +51,169 @@ export class ImportsService {
     private readonly notificationsService: NotificationsService,
     private readonly storage: StorageService,
   ) {}
+
+  /**
+   * 启动时按需建 bullmq Queue。
+   * - REDIS_URL 未配置 → 不建 Queue，导入走 in-process setImmediate（与异步化前行为一致）
+   * - REDIS_URL 已配置但连接失败 → 静默回退，记录 warn，不影响主流程
+   */
+  async onModuleInit(): Promise<void> {
+    if (!this.redisUrl) {
+      this.logger.log('REDIS_URL not set, imports use in-process setImmediate (fallback)');
+      return;
+    }
+    try {
+      this.importQueue = new Queue(IMPORT_QUEUE_NAME, {
+        connection: { url: this.redisUrl },
+        defaultJobOptions: {
+          removeOnComplete: 100,
+          removeOnFail: 200,
+          attempts: 1,
+        },
+      });
+      this.importQueue.on('error', (err) => {
+        // eslint-disable-next-line no-console
+        console.warn('[imports] queue error:', err?.message || err);
+      });
+      this.logger.log(`imports queue initialized (redis: ${this.redisUrl})`);
+    } catch (err: any) {
+      this.importQueue = null;
+      // eslint-disable-next-line no-console
+      console.warn('[imports] failed to init bullmq queue, falling back to in-process:', err?.message || err);
+    }
+  }
+
+  async onModuleDestroy(): Promise<void> {
+    if (this.importQueue) {
+      try {
+        await this.importQueue.close();
+      } catch (err: any) {
+        // eslint-disable-next-line no-console
+        console.warn('[imports] queue close failed:', err?.message || err);
+      }
+    }
+  }
+
+  /**
+   * 创建导入任务并入队（异步入口）。
+   * 返回 taskId，前端轮询 GET /import-tasks/:id 获取状态。
+   */
+  async enqueueImport(params: {
+    type: 'leads-import' | 'posts-import' | 'leads-paste' | 'posts-paste';
+    userId: string;
+    employeeId: string;
+    rows?: string[];
+    fileBuffer?: Buffer;
+  }): Promise<{ taskId: string; status: string }> {
+    const taskId = makeId();
+    const { type, userId, employeeId, rows, fileBuffer } = params;
+
+    // 存储原始数据到 payload_json
+    const payload: Record<string, any> = {
+      type,
+      rows: rows || [],
+    };
+    if (fileBuffer) {
+      // 文件模式：存储文件内容
+      payload.fileContent = fileBuffer.toString('utf8');
+    }
+
+    // 创建任务记录
+    await this.importTaskRepository.save(this.importTaskRepository.create({
+      id: taskId,
+      importType: type.replace('-paste', '').replace('-import', ''),
+      userId: userId || 'anonymous',
+      totalCount: 0,
+      successCount: 0,
+      failCount: 0,
+      status: 'pending',
+      payloadJson: payload,
+    } as Partial<ImportTask>));
+
+    const jobData: ImportJobData = {
+      taskId,
+      type,
+      userId,
+      employeeId,
+      payload,
+    };
+
+    if (this.importQueue) {
+      try {
+        await this.importQueue.add(type, jobData);
+        // 更新状态为 processing
+        await this.importTaskRepository.update(taskId, { status: 'processing' });
+        return { taskId, status: 'processing' };
+      } catch (err: any) {
+        // eslint-disable-next-line no-console
+        console.warn('[imports] queue.add failed, fallback to setImmediate:', err?.message || err);
+      }
+    }
+
+    // 后台执行（fallback 路径）
+    await this.importTaskRepository.update(taskId, { status: 'processing' });
+    setImmediate(() => {
+      this.executeFromQueue(jobData).catch(async (e: any) => {
+        // eslint-disable-next-line no-console
+        console.error('[imports] executeFromQueue failed', e?.message || e);
+        try {
+          await this.markTaskFailed(taskId, e?.message || String(e));
+        } catch (_e) {
+          // 忽略二次失败
+        }
+      });
+    });
+    return { taskId, status: 'processing' };
+  }
+
+  /**
+   * Processor 调用入口：消费队列里的导入 job。
+   */
+  async executeFromQueue(jobData: ImportJobData): Promise<void> {
+    const { taskId, type, userId, employeeId, payload } = jobData;
+    try {
+      switch (type) {
+        case 'leads-paste':
+          await this._doImportLeadsPaste(taskId, userId, employeeId, payload.rows || []);
+          break;
+        case 'posts-paste':
+          await this._doImportPostsPaste(taskId, userId, employeeId, payload.rows || []);
+          break;
+        case 'leads-import':
+          await this._doImportLeadsPaste(taskId, userId, employeeId, (payload.fileContent || '').split(/\r?\n/).filter(Boolean));
+          break;
+        case 'posts-import':
+          await this._doImportPostsPaste(taskId, userId, employeeId, (payload.fileContent || '').split(/\r?\n/).filter(Boolean));
+          break;
+        default:
+          throw new Error(`unknown import type: ${type}`);
+      }
+    } catch (err: any) {
+      // eslint-disable-next-line no-console
+      console.error('[imports] _doImport failed', err?.message || err);
+      await this.markTaskFailed(taskId, err?.message || String(err));
+    }
+  }
+
+  /**
+   * 显式标记任务失败（processor / setImmediate 兜底共用）。
+   */
+  async markTaskFailed(taskId: string, reason?: string): Promise<void> {
+    try {
+      await this.importTaskRepository.update(taskId, {
+        status: 'failed',
+        errorMessage: reason || null,
+        finishedAt: new Date(),
+      });
+      if (reason) {
+        // eslint-disable-next-line no-console
+        console.warn(`[imports] task ${taskId} failed: ${reason}`);
+      }
+    } catch (err: any) {
+      // eslint-disable-next-line no-console
+      console.warn('[imports] markTaskFailed update failed:', err?.message || err);
+    }
+  }
 
   /**
    * Split a raw text row into columns. Order: Tab > Pipe > Comma.
@@ -116,13 +285,25 @@ export class ImportsService {
     failCount: number;
     status: string;
     errorFileUrl?: string | null;
+    errors?: ImportRowError[];
   }): Promise<void> {
+    // 构建 result_json
+    const resultJson: Record<string, any> = {
+      total: patch.totalCount,
+      success: patch.successCount,
+      fail: patch.failCount,
+    };
+    if (patch.errors) {
+      resultJson.errors = patch.errors;
+    }
+
     await this.importTaskRepository.update(id, {
       totalCount: patch.totalCount,
       successCount: patch.successCount,
       failCount: patch.failCount,
       status: patch.status,
       errorFileUrl: patch.errorFileUrl ?? null,
+      resultJson,
       finishedAt: new Date(),
     });
   }
@@ -178,11 +359,10 @@ export class ImportsService {
   }
 
   /**
-   * Synchronous batch import of pasted lead rows.
-   * Each line is parsed, validated, dup-checked, then inserted via lead repository.
+   * 私有方法：实际执行客资导入（processor 调用或 setImmediate 兜底）。
+   * 任务记录已在 enqueueImport 中创建，taskId 由调用方传入。
    */
-  async importLeadsPaste(rows: string[], actorUserId: string, actorEmployeeId = ''): Promise<ImportPasteResult> {
-    const task = await this.createTask('leads', actorUserId);
+  async _doImportLeadsPaste(taskId: string, actorUserId: string, actorEmployeeId: string, rows: string[]): Promise<void> {
     const errors: ImportRowError[] = [];
     let success = 0;
     let fail = 0;
@@ -262,15 +442,17 @@ export class ImportsService {
     // §8 错误文件下载：fail > 0 时写一份 CSV 到对象存储 (T-22 走 StorageService)。
     let errorFileUrl: string | null = null;
     if (fail > 0 && errors.length > 0) {
-      errorFileUrl = await this.writeErrorCsv(task.id, errors);
+      errorFileUrl = await this.writeErrorCsv(taskId, errors);
     }
 
-    await this.finishTask(task.id, {
+    // 写入 result_json 和完成状态
+    await this.finishTask(taskId, {
       totalCount: total,
       successCount: success,
       failCount: fail,
       status: 'done',
       errorFileUrl,
+      errors,
     });
 
     // §11.1 import_done: 批量导入任务结束，通知发起人。
@@ -282,24 +464,16 @@ export class ImportsService {
         typeCode: NOTIFICATION_TYPES.IMPORT_DONE,
         title: '客资批量导入完成',
         content: `共 ${total} 行，成功 ${success}，失败 ${fail}`,
-        relatedId: task.id,
+        relatedId: taskId,
         relatedType: 'import_task',
       });
     }
-
-    return {
-      ok: true,
-      importTaskId: task.id,
-      total,
-      success,
-      fail,
-      errors,
-      errorFileUrl,
-    };
   }
 
-  async importPostsPaste(rows: string[], actorUserId: string, actorEmployeeId = ''): Promise<ImportPasteResult> {
-    const task = await this.createTask('posts', actorUserId);
+  /**
+   * 私有方法：实际执行作品导入（processor 调用或 setImmediate 兜底）。
+   */
+  async _doImportPostsPaste(taskId: string, actorUserId: string, actorEmployeeId: string, rows: string[]): Promise<void> {
     const errors: ImportRowError[] = [];
     let success = 0;
     let fail = 0;
@@ -355,13 +529,14 @@ export class ImportsService {
       }
     }
 
-    const errorFileUrl = fail > 0 && errors.length > 0 ? await this.writeErrorCsv(task.id, errors) : null;
-    await this.finishTask(task.id, {
+    const errorFileUrl = fail > 0 && errors.length > 0 ? await this.writeErrorCsv(taskId, errors) : null;
+    await this.finishTask(taskId, {
       totalCount: total,
       successCount: success,
       failCount: fail,
       status: 'done',
       errorFileUrl,
+      errors,
     });
 
     if (actorUserId && actorUserId !== 'anonymous') {
@@ -372,12 +547,10 @@ export class ImportsService {
         typeCode: NOTIFICATION_TYPES.IMPORT_DONE,
         title: '作品批量导入完成',
         content: `共 ${total} 行，成功 ${success}，失败 ${fail}`,
-        relatedId: task.id,
+        relatedId: taskId,
         relatedType: 'import_task',
       });
     }
-
-    return { ok: true, importTaskId: task.id, total, success, fail, errors, errorFileUrl };
   }
 
   private mapTask(row: ImportTask): any {
@@ -389,8 +562,11 @@ export class ImportsService {
       successCount: row.successCount,
       failCount: row.failCount,
       errorFileUrl: row.errorFileUrl,
+      errorMessage: row.errorMessage,
+      resultJson: row.resultJson,
       status: row.status,
       createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
       finishedAt: row.finishedAt,
     };
   }

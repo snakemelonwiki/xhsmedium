@@ -181,12 +181,180 @@ export class LeadsService {
   async findFilteredPaged(filters: LeadFilterOptions, limit: number, offset: number): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
     const safeLimit = this.clampLimit(limit);
     const safeOffset = Math.max(Number(offset) || 0, 0);
-    const qb = this.buildLeadFilterQuery(filters)
-      .orderBy('l.created_at', 'DESC')
+
+    // Step 1: 主查询 JOIN accounts/posts/employees（消除 N+1 中的 account/post 查询）
+    // 使用纯 raw select 避免 Entity 映射问题
+    const dataQb = this.leadRepository.createQueryBuilder('l')
+      .leftJoin(Account, 'a', 'a.id = l.account_id')
+      .leftJoin(Post, 'p', 'p.id = l.post_id')
+      .leftJoin('employees', 'e', 'e.id = l.employee_id')
+      .select([
+        'l.id AS l_id',
+        'l.employee_id AS l_employee_id',
+        'l.account_id AS l_account_id',
+        'l.post_id AS l_post_id',
+        'l.platform AS l_platform',
+        'l.contact_info AS l_contact_info',
+        'l.nickname AS l_nickname',
+        'l.budget AS l_budget',
+        'l.major_content AS l_major_content',
+        'l.ip AS l_ip',
+        'l.status AS l_status',
+        'l.deal_amount AS l_deal_amount',
+        'l.note AS l_note',
+        'l.capture_image_url AS l_capture_image_url',
+        'l.sales_feedback AS l_sales_feedback',
+        'l.sales_updated_at AS l_sales_updated_at',
+        'l.sales_user_name AS l_sales_user_name',
+        'l.assigned_sales_user_id AS l_assigned_sales_user_id',
+        'l.assigned_sales_user_name AS l_assigned_sales_user_name',
+        'l.process_status AS l_process_status',
+        'l.add_status AS l_add_status',
+        'l.intention AS l_intention',
+        'l.lead_code AS l_lead_code',
+        'l.intention_level AS l_intention_level',
+        'l.add_method AS l_add_method',
+        'l.next_follow_time AS l_next_follow_time',
+        'l.matched_post_id AS l_matched_post_id',
+        'l.source_unknown AS l_source_unknown',
+        'l.created_at AS l_created_at',
+        'l.updated_at AS l_updated_at',
+        'l.deal_status AS l_deal_status',
+        'l.requirement_note AS l_requirement_note',
+        'l.supervisor_note AS l_supervisor_note',
+        'a.account_name AS account_name',
+        'p.title AS post_title',
+        'p.post_url AS post_url',
+        'e.name AS employee_name',
+      ])
+      .where('1=1');
+
+    // 应用过滤条件（复制自 buildLeadFilterQuery）
+    this.applyLeadScope(dataQb, filters);
+    this.applyLeadFilters(dataQb, filters);
+
+    dataQb.orderBy('l.created_at', 'DESC')
       .take(safeLimit)
       .skip(safeOffset);
-    const [rows, total] = await qb.getManyAndCount();
-    return { items: await this.mapLeads(rows), total, limit: safeLimit, offset: safeOffset };
+
+    // 先查数据
+    const rows: any[] = await dataQb.getRawMany();
+
+    // 如果没有数据，直接返回
+    if (!rows || rows.length === 0) {
+      return { items: [], total: 0, limit: safeLimit, offset: safeOffset };
+    }
+
+    const leadIds = rows.map(r => r.l_id);
+
+    // Step 2: 单独查询总数
+    const countQb = this.leadRepository.createQueryBuilder('l');
+    this.applyLeadScope(countQb, filters);
+    this.applyLeadFilters(countQb, filters);
+    const countResult = await countQb.select('COUNT(*)', 'cnt').getRawOne<any>();
+    const total = Number(countResult?.cnt) || 0;
+
+    // Step 3: 并行查询 follow + collab 聚合（消除 N+1 中的串行查询）
+    const [followRows, collabRows] = await Promise.all([
+      // follow: 取每个 lead 最新一条
+      this.followRepository.manager.query(`
+        SELECT f.*
+        FROM lead_follow_records f
+        INNER JOIN (
+          SELECT lead_id, MAX(created_at) as max_created
+          FROM lead_follow_records
+          WHERE lead_id IN (${leadIds.map(() => '?').join(',')})
+          GROUP BY lead_id
+        ) latest ON f.lead_id = latest.lead_id AND f.created_at = latest.max_created
+      `, leadIds) as Promise<any[]>,
+      // collab: 取每个 lead 最新一条
+      this.collaborationRepository.manager.query(`
+        SELECT c.*
+        FROM collaboration_tasks c
+        INNER JOIN (
+          SELECT lead_id, MAX(created_at) as max_created
+          FROM collaboration_tasks
+          WHERE lead_id IN (${leadIds.map(() => '?').join(',')})
+          GROUP BY lead_id
+        ) latest ON c.lead_id = latest.lead_id AND c.created_at = latest.max_created
+      `, leadIds) as Promise<any[]>,
+    ]);
+
+    // Step 4: 内存中合并到 lead 对象
+    const followMap = new Map(followRows.map(f => [f.lead_id, f]));
+    const collabMap = new Map<string, any>();
+    for (const c of collabRows) {
+      if (!collabMap.has(c.lead_id)) {
+        collabMap.set(c.lead_id, c);
+      }
+    }
+
+    const items = rows.map(r => {
+      const follow = followMap.get(r.l_id);
+      const collab = collabMap.get(r.l_id);
+      const collabStatus = collab?.status || 'none';
+
+      return {
+        id: r.l_id,
+        employeeId: r.l_employee_id,
+        employeeName: r.employee_name || null,
+        operatorId: r.l_employee_id,
+        operatorName: r.l_sales_user_name || r.l_assigned_sales_user_name || null,
+        accountId: r.l_account_id,
+        accountName: r.account_name || null,
+        sourceAccountId: r.l_account_id,
+        sourceAccountName: r.account_name || null,
+        postId: r.l_post_id,
+        postTitle: r.post_title || null,
+        postUrl: r.post_url || null,
+        sourcePostId: r.l_post_id,
+        sourcePostTitle: r.post_title || null,
+        sourcePostUrl: r.post_url || null,
+        platform: r.l_platform,
+        contactInfo: r.l_contact_info,
+        nickname: r.l_nickname,
+        budget: r.l_budget,
+        majorContent: r.l_major_content,
+        ip: r.l_ip,
+        status: r.l_status,
+        dealAmount: r.l_deal_amount,
+        note: r.l_note,
+        requirementNote: r.l_requirement_note,
+        supervisorNote: r.l_supervisor_note,
+        captureImageUrl: r.l_capture_image_url,
+        salesFeedback: r.l_sales_feedback,
+        salesUpdatedAt: r.l_sales_updated_at,
+        salesUserName: r.l_sales_user_name,
+        assignedSalesUserId: r.l_assigned_sales_user_id,
+        assignedSalesUserName: r.l_assigned_sales_user_name,
+        processStatus: r.l_process_status,
+        collaborationStatus: collabStatus,
+        addStatus: r.l_add_status,
+        intention: r.l_intention,
+        leadCode: r.l_lead_code,
+        intentionLevel: r.l_intention_level,
+        addMethod: r.l_add_method,
+        nextFollowTime: r.l_next_follow_time,
+        nextFollowAt: r.l_next_follow_time,
+        matchedPostId: r.l_matched_post_id,
+        sourceUnknown: !!r.l_source_unknown,
+        latestFollowNote: follow?.content || r.l_sales_feedback || r.l_note || null,
+        latestFollowAt: follow?.created_at || r.l_sales_updated_at || r.l_updated_at,
+        createdAt: r.l_created_at,
+        updatedAt: r.l_updated_at,
+        // followSummary 兼容旧结构
+        followSummary: follow ? {
+          id: follow.id,
+          content: follow.content,
+          createdAt: follow.created_at,
+          count: 1,
+        } : null,
+        // collabStatus 兼容旧结构（已有 collaborationStatus）
+        collabStatus: collabStatus,
+      };
+    });
+
+    return { items, total, limit: safeLimit, offset: safeOffset };
   }
 
   async findTomorrowFollowups(salesUserId: string): Promise<any[]> {
@@ -327,9 +495,18 @@ export class LeadsService {
     return this.mapLead(row, undefined, latestCollaboration.get(row.id));
   }
 
-  async updateBoard(id: string, dto: BoardPatchDto, actorUserId: string): Promise<void> {
+  async updateBoard(id: string, dto: BoardPatchDto, actorUserId: string, expectedUpdatedAt?: Date): Promise<void> {
     const current = await this.leadRepository.findOne({ where: { id } });
     if (!current) return;
+
+    // 乐观锁校验: 校验 updatedAt 是否匹配
+    if (expectedUpdatedAt) {
+      const currentUpdatedAt = current.updatedAt ? new Date(current.updatedAt).getTime() : 0;
+      const expectedUpdatedAtMs = new Date(expectedUpdatedAt).getTime();
+      if (currentUpdatedAt !== expectedUpdatedAtMs) {
+        throw new ConflictException('客资已被他人更新，请刷新后重试');
+      }
+    }
 
     const next: Partial<Lead> = {};
     const normalized = this.normalizeBoardPatch(dto);
