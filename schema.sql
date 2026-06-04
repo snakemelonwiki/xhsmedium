@@ -84,7 +84,8 @@ CREATE TABLE IF NOT EXISTS accounts (
 -- 4. posts
 -- backend/src/entities/post.entity.ts + posts/rankings/imports services.
 -- 迁移来源：M10（追加 cover_thumb_url 封面缩略图URL字段）、
---          M21（追加 idx_posts_platform_type_published）
+--          M21（追加 idx_posts_platform_type_published）、
+--          M27（SUP-1：is_supervisor_picked 主管手动标记优秀作品 + 标记人/时间字段）
 -- ============================================================
 CREATE TABLE IF NOT EXISTS posts (
   id                    VARCHAR(64)  PRIMARY KEY,
@@ -106,6 +107,10 @@ CREATE TABLE IF NOT EXISTS posts (
   published_at          DATE         NOT NULL COMMENT '发布日期',
   note                  TEXT         NULL COMMENT '备注',
   supervisor_suggestion TEXT         NULL COMMENT '主管建议',
+  -- v1.3 增量（SUP-1）：主管手动标记优秀作品（学习榜单主管推荐栏目使用）
+  is_supervisor_picked  TINYINT      NOT NULL DEFAULT 0 COMMENT '是否被主管标记为优秀作品（学习榜单主管推荐用）',
+  supervisor_picked_by  VARCHAR(64)  NULL COMMENT '标记人（主管）ID',
+  supervisor_picked_at  DATETIME     NULL COMMENT '标记时间',
   created_at            DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at            DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 
@@ -116,13 +121,15 @@ CREATE TABLE IF NOT EXISTS posts (
   INDEX idx_posts_published_at       (published_at),
   INDEX idx_posts_employee_published (employee_id, published_at DESC, created_at DESC),
   INDEX idx_posts_account_published  (account_id, published_at DESC),
-  INDEX idx_posts_platform_type_published (platform, post_type, published_at)
+  INDEX idx_posts_platform_type_published (platform, post_type, published_at),
+  INDEX idx_posts_supervisor_picked  (is_supervisor_picked)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='作品帖子表';
 
 -- ============================================================
 -- 5. leads
 -- backend/src/entities/lead.entity.ts + leads/exports/orders services.
 -- v1.2 增量：M18 新增 deal_status 字段；M16 增量：requirement_note/supervisor_note（已就位）
+-- v1.3 增量：M26 新增 is_dispatched 分流字段 + 销售跟进 6 字段（CROSS-1 / CROSS-2）
 -- 状态字段用 VARCHAR，避免旧中文值、迁移枚举值、前端过滤值互相卡死。
 -- 当前 B 端状态机 code：
 --   status: new / assigned / in_followup / in_collaboration /
@@ -131,7 +138,8 @@ CREATE TABLE IF NOT EXISTS posts (
 --                   quoted / deal_pending / deal_done / invalid
 --   add_status: not_added / applied / not_passed / operation_reminded / added
 -- 迁移来源：M1（6 列扩展 + process_status ENUM）→ M6（add_status/status ENUM）→ M9（VARCHAR 终态）、
---          M18（deal_status）、M21（列表筛选复合索引）
+--          M18（deal_status）、M21（列表筛选复合索引）、
+--          M26（is_dispatched + 销售跟进 6 字段）
 -- ============================================================
 CREATE TABLE IF NOT EXISTS leads (
   id                       VARCHAR(64)  PRIMARY KEY,
@@ -165,6 +173,15 @@ CREATE TABLE IF NOT EXISTS leads (
   next_follow_time         DATETIME     NULL COMMENT '下次跟进时间',
   matched_post_id          VARCHAR(64)  NULL COMMENT '匹配作品ID',
   source_unknown           TINYINT      NOT NULL DEFAULT 0 COMMENT '来源未知',
+  -- v1.3 增量（M26 / CROSS-1 客资分流）
+  is_dispatched            TINYINT      NOT NULL DEFAULT 0 COMMENT '客资分流：0未分流(进销售看板) / 1已分流(不进销售看板)',
+  -- v1.3 增量（M26 / CROSS-2 销售跟进字段扩展；客户需求走 requirement_note，意向走 intention_level，不重复）
+  client_degree            VARCHAR(32)  NULL COMMENT '客户学历',
+  client_major_research    VARCHAR(255) NULL COMMENT '客户专业/研究方向',
+  client_time_requirement  VARCHAR(255) NULL COMMENT '时间要求',
+  objection_point          TEXT         NULL COMMENT '异议点',
+  follow_action            TEXT         NULL COMMENT '具体跟进措施',
+  follow_action_at         DATETIME     NULL COMMENT '具体跟进时间',
   created_at               DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at               DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 
@@ -188,7 +205,9 @@ CREATE TABLE IF NOT EXISTS leads (
   INDEX idx_leads_status_created              (status, created_at),
   INDEX idx_leads_add_status_created          (add_status, created_at),
   INDEX idx_leads_process_status_created      (process_status, created_at),
-  INDEX idx_leads_platform_created            (platform, created_at)
+  INDEX idx_leads_platform_created            (platform, created_at),
+  INDEX idx_leads_is_dispatched               (is_dispatched),
+  INDEX idx_leads_follow_action_at            (follow_action_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='客资线索表';
 
 -- ============================================================
@@ -281,32 +300,124 @@ CREATE TABLE IF NOT EXISTS collaboration_tasks (
 -- 迁移来源：M3（替换早期 ddl/04 BIGINT 旧表为 VARCHAR(64) 风格）、
 --          M14（追加 handover_status 交接状态字段）、
 --          M16（追加 idx_orders_paid_status）、
---          M19（状态列统一为 VARCHAR）、M21（状态列表复合索引）
+--          M19（状态列统一为 VARCHAR）、M21（状态列表复合索引）、
+--          M26（order_code 订单编号 + orders_order_code_seq 序列表）、
+--          M28（SA-8/AC-1：product_type 产品类型 / guarantee_type 保障类型 / payment_stage 付款阶段）
+-- 教务端字段扩展：见 17.4 节
+--   - 客户/作者/投稿相关：education_level / major / area / article_purpose /
+--     submit_email / submit_email_password / fund_info / registration_status /
+--     handover_to_teacher_at / checked_duplicate
+--   - 派单/审核/进度：dispatched_teacher_id / teacher_id / teacher_phone /
+--     teacher_stability / innovation_review_status / innovation_review_at /
+--     draft_review_status / draft_review_at / editor_review_status /
+--     editor_review_at / author_verify_status / author_verify_at / paper_progress
+--   - 阶段/查稿/状态：current_stage / first_week_check_at / next_check_at /
+--     urge_letter_status / revision_status / page_fee_status / proof_status /
+--     online_status / indexed_status / index_review_report / risk_level
+--   - 订单编号：order_code（v1.3 / CROSS-4，按 ORD-YYYYMMDD-XXXXX 规则生成）
+--   详细字段映射至 order_authors / order_submissions / order_status_history /
+--   order_reminders / order_finance / teachers 子表与扩展字段。
 -- ============================================================
 CREATE TABLE IF NOT EXISTS orders (
-  id                VARCHAR(64) PRIMARY KEY,
-  lead_id           VARCHAR(64) NOT NULL COMMENT '关联客资ID',
-  sales_user_id     VARCHAR(64) NOT NULL COMMENT '销售用户ID',
-  academic_user_id  VARCHAR(64) NULL COMMENT '教务用户ID',
-  service_type      VARCHAR(64) NULL COMMENT '服务类型',
-  amount            DECIMAL(12,2) NULL COMMENT '成交金额',
-  paid_status       VARCHAR(32) NOT NULL DEFAULT 'unpaid' COMMENT '付款状态：unpaid/partial/paid/refunded',
-  order_status      VARCHAR(32) NOT NULL DEFAULT 'to_receive' COMMENT '订单状态：pending_accept/to_receive/in_progress/awaiting_client_info/awaiting_teacher/to_deliver/completed/abnormal/closed',
-  handover_status   VARCHAR(16) NOT NULL DEFAULT 'pending' COMMENT '交接状态: pending待交接 | handed_over已交接 | accepted已接收 | rejected已拒收(由 M14 迁移追加;销售成交时默认 handed_over,教务可 accept/reject)',
-  remark            TEXT        NULL COMMENT '备注',
-  created_at        DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at        DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  id                       VARCHAR(64)  PRIMARY KEY,
+  lead_id                  VARCHAR(64)  NOT NULL COMMENT '关联客资ID',
+  sales_user_id            VARCHAR(64)  NOT NULL COMMENT '销售用户ID',
+  academic_user_id         VARCHAR(64)  NULL COMMENT '教务用户ID',
+  service_type             VARCHAR(64)  NULL COMMENT '服务类型',
+  -- v1.3 增量（M28 / SA-8 成交录入 + AC-1 教务端我的成交）
+  product_type             VARCHAR(32)  NULL COMMENT '产品类型：专利/期刊论文/硕士毕业论文/博士毕业论文/基金/EI会议/普刊/国际会议',
+  guarantee_type           VARCHAR(16)  NULL COMMENT '保障类型：保录/保盲审/不保',
+  payment_stage            VARCHAR(64)  NULL COMMENT '付款阶段：定金/中期/尾款 等自由文本',
+  amount                   DECIMAL(12,2) NULL COMMENT '成交金额',
+  paid_status              VARCHAR(32) NOT NULL DEFAULT 'unpaid' COMMENT '付款状态：unpaid/partial/paid/refunded',
+  order_status             VARCHAR(32) NOT NULL DEFAULT 'to_receive' COMMENT '订单状态：pending_accept/to_receive/in_progress/awaiting_client_info/awaiting_teacher/to_deliver/completed/abnormal/closed',
+  handover_status          VARCHAR(16) NOT NULL DEFAULT 'pending' COMMENT '交接状态: pending待交接 | handed_over已交接 | accepted已接收 | rejected已拒收(由 M14 迁移追加;销售成交时默认 handed_over,教务可 accept/reject)',
+  remark                   TEXT        NULL COMMENT '备注',
+  -- v1.3 增量（M26 / CROSS-4 订单编号，ORD-YYYYMMDD-XXXXX；历史数据 NULL）
+  order_code               VARCHAR(32) NULL COMMENT '订单编号（ORD-YYYYMMDD-XXXXX；唯一）',
+  -- 客户基础信息扩展（教务端录入）
+  education_level          VARCHAR(32)  NULL COMMENT '学历层级：本科/硕士/博士/其他',
+  major                    VARCHAR(128) NULL COMMENT '专业方向',
+  area                     VARCHAR(128) NULL COMMENT '所需区位',
+  article_purpose          VARCHAR(128) NULL COMMENT '文章用途',
+  -- 作者/投稿邮箱/基金/登记表相关
+  submit_email             VARCHAR(128) NULL COMMENT '投稿邮箱',
+  submit_email_password    VARCHAR(128) NULL COMMENT '投稿邮箱密码',
+  fund_info                TEXT         NULL COMMENT '基金信息',
+  registration_status      VARCHAR(32)  NOT NULL DEFAULT 'pending' COMMENT '个人信息登记表状态：pending待收齐/partial部分收齐/collected已收齐',
+  handover_to_teacher_at   DATETIME     NULL COMMENT '传递给老师时间',
+  checked_duplicate        TINYINT      NOT NULL DEFAULT 0 COMMENT '是否查重：0否 1是',
+  -- 派单/接单/审核/进度
+  dispatched_teacher_id    VARCHAR(64)  NULL COMMENT '派单老师ID（teachers.id）',
+  teacher_id               VARCHAR(64)  NULL COMMENT '接单老师ID（teachers.id）',
+  teacher_phone            VARCHAR(64)  NULL COMMENT '老师电话',
+  teacher_stability        VARCHAR(16)  NULL COMMENT '老师稳定性：stable稳定/new新老师/probation试合作',
+  innovation_review_status VARCHAR(16)  NOT NULL DEFAULT 'pending' COMMENT '新老师创新点审核：pending待审核/passed通过/rejected驳回/skipped跳过(稳定老师)',
+  innovation_review_at     DATETIME     NULL COMMENT '创新点审核时间',
+  draft_review_status      VARCHAR(16)  NOT NULL DEFAULT 'pending' COMMENT '初稿审核：pending待审核/passed通过/rejected驳回',
+  draft_review_at          DATETIME     NULL COMMENT '初稿审核时间',
+  editor_review_status     VARCHAR(16)  NOT NULL DEFAULT 'pending' COMMENT '编辑老师审查：pending待审查/passed通过/rejected驳回',
+  editor_review_at         DATETIME     NULL COMMENT '编辑审查时间',
+  author_verify_status     VARCHAR(16)  NOT NULL DEFAULT 'pending' COMMENT '投稿前作者信息核对：pending待核对/passed通过/rejected驳回',
+  author_verify_at         DATETIME     NULL COMMENT '作者信息核对时间',
+  paper_progress           VARCHAR(32)  NULL COMMENT '论文进度（运营/教务维护的业务进度，与 order_status 区分）',
+  -- 阶段/查稿/状态
+  current_stage            VARCHAR(32)  NULL COMMENT '当前真实阶段：Submitted/WithEditor/UnderReview/Revision/Accepted/Proofing/Online/Indexed/Rejected',
+  first_week_check_at      DATETIME     NULL COMMENT '首周查稿时间',
+  next_check_at            DATETIME     NULL COMMENT '下次查稿时间',
+  urge_letter_status       VARCHAR(16)  NOT NULL DEFAULT 'not_sent' COMMENT '催稿信状态：not_sent未发/sent已发/replied已回复',
+  revision_status          VARCHAR(16)  NOT NULL DEFAULT 'none' COMMENT '返修状态：none无/required需返修/in_progress返修中/completed已完成',
+  page_fee_status          VARCHAR(16)  NOT NULL DEFAULT 'none' COMMENT '版面费状态：none无/required待付/paid已付',
+  proof_status             VARCHAR(16)  NOT NULL DEFAULT 'none' COMMENT '校稿状态：none无/in_progress进行中/completed已完成',
+  online_status            VARCHAR(16)  NOT NULL DEFAULT 'none' COMMENT 'Online 状态：none无/in_progress进行中/published已上线',
+  indexed_status           VARCHAR(16)  NOT NULL DEFAULT 'none' COMMENT '检索状态：none无/in_progress检索中/indexed已检索/failed检索失败',
+  index_review_report      VARCHAR(500) NULL COMMENT '检索审查报告附件URL',
+  risk_level               VARCHAR(16)  NOT NULL DEFAULT 'low' COMMENT '风险等级：low低/mid中/high高',
+  -- 订单阶段/下次跟进时间
+  order_stage              VARCHAR(64)  NULL COMMENT '订单阶段（业务侧对当前所处交付环节的描述）',
+  next_follow_at           DATETIME     NULL COMMENT '下次跟进时间',
+  created_at               DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at               DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 
-  INDEX idx_orders_lead_id          (lead_id),
-  INDEX idx_orders_sales_user_id    (sales_user_id),
-  INDEX idx_orders_academic_user_id (academic_user_id),
-  INDEX idx_orders_order_status     (order_status),
-  INDEX idx_orders_paid_status      (paid_status),
-  INDEX idx_orders_handover_status  (handover_status),
-  INDEX idx_orders_created_at       (created_at),
-  INDEX idx_orders_order_status_created (order_status, created_at),
-  INDEX idx_orders_paid_status_created  (paid_status, created_at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='订单表';
+  INDEX idx_orders_lead_id                (lead_id),
+  INDEX idx_orders_sales_user_id          (sales_user_id),
+  INDEX idx_orders_academic_user_id       (academic_user_id),
+  INDEX idx_orders_teacher_id             (teacher_id),
+  INDEX idx_orders_dispatched_teacher_id  (dispatched_teacher_id),
+  INDEX idx_orders_order_status           (order_status),
+  INDEX idx_orders_paid_status            (paid_status),
+  INDEX idx_orders_handover_status        (handover_status),
+  INDEX idx_orders_current_stage          (current_stage),
+  INDEX idx_orders_paper_progress         (paper_progress),
+  INDEX idx_orders_risk_level             (risk_level),
+  INDEX idx_orders_next_check_at          (next_check_at),
+  INDEX idx_orders_next_follow_at         (next_follow_at),
+  INDEX idx_orders_created_at             (created_at),
+  INDEX idx_orders_order_status_created   (order_status, created_at),
+  INDEX idx_orders_paid_status_created    (paid_status, created_at),
+  -- v1.3 增量（M26 / CROSS-4）：订单号唯一索引
+  UNIQUE INDEX uk_orders_order_code        (order_code),
+  -- v1.3 增量（M28）：产品类型 / 保障类型筛选索引
+  INDEX idx_orders_product_type            (product_type),
+  INDEX idx_orders_guarantee_type          (guarantee_type)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='订单表（v1.3 增量：M26 订单编号 + M28 产品/保障/付款阶段 业务字段；教务端字段扩展：客户基础/作者邮箱/老师派单/审核/阶段/查稿/风险）';
+
+-- ============================================================
+-- 9b. orders_order_code_seq（v1.3 / CROSS-4 订单号序列表）
+-- backend 端：orders.service.ts#generateOrderCode
+--   - 按日单行（uk_orders_order_code_seq_date 唯一）
+--   - SELECT ... FOR UPDATE 行锁保证并发安全
+--   - 业务统一用 UTC+8 作为日期分界，避免跨时区部署日期错位
+-- ============================================================
+CREATE TABLE IF NOT EXISTS orders_order_code_seq (
+  id          INT          NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  seq_date    DATE         NOT NULL COMMENT '序号日期（YYYY-MM-DD，按 UTC+8 分界）',
+  current_seq INT          NOT NULL DEFAULT 0 COMMENT '当日已用最大序号（0 = 尚未使用）',
+  created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+  UNIQUE INDEX uk_orders_order_code_seq_date (seq_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='订单号序列表（按日自增）';
 
 -- ============================================================
 -- 10. order_follow_records
@@ -550,3 +661,172 @@ CREATE TABLE IF NOT EXISTS supervisor_suggestions (
   INDEX idx_ss_target      (target_type, target_id),
   INDEX idx_ss_receiver    (receiver_id, read_status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='主管建议表：存储主管给运营的建议（关联账号/作品/员工）';
+
+-- ============================================================
+-- 19. teachers（教务端 v1.3 业务参考新增：稳定老师库）
+-- 业务来源：完整项目源码包 v1 原型「稳定老师库」页面
+-- 业务字段：老师姓名、电话/微信、专业能力、接单方向、稳定性、质量评分、备注
+-- 自动统计：接单状态（空闲/接单中/满载）、当前接单数、累计接单数
+-- 关系：与 orders.teacher_id / orders.dispatched_teacher_id 关联
+-- 与 v1 原型兼容：v1 原型 localStorage 数据不导入，新版本独立建表
+-- ============================================================
+CREATE TABLE IF NOT EXISTS teachers (
+  id              VARCHAR(64)  PRIMARY KEY,
+  name            VARCHAR(64)  NOT NULL COMMENT '老师姓名',
+  phone           VARCHAR(64)  NULL COMMENT '电话',
+  wechat          VARCHAR(64)  NULL COMMENT '微信',
+  specialty       VARCHAR(255) NULL COMMENT '专业能力',
+  direction       VARCHAR(255) NULL COMMENT '接单方向',
+  stability       VARCHAR(16)  NOT NULL DEFAULT 'new' COMMENT '稳定性：stable稳定/new新老师/probation试合作',
+  quality_score   DECIMAL(3,1) NULL COMMENT '质量评分(0-10)',
+  remark          TEXT         NULL COMMENT '备注',
+  status          VARCHAR(16)  NOT NULL DEFAULT 'idle' COMMENT '接单状态：idle空闲/working接单中/full满载',
+  current_orders  INT          NOT NULL DEFAULT 0 COMMENT '当前接单数（实时统计缓存）',
+  total_orders    INT          NOT NULL DEFAULT 0 COMMENT '累计接单数（实时统计缓存）',
+  created_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+  INDEX idx_teachers_status    (status),
+  INDEX idx_teachers_stability (stability),
+  INDEX idx_teachers_name      (name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='稳定老师库：教务端老师档案与派单关系';
+
+-- ============================================================
+-- 20. order_authors（教务端：订单多作者信息）
+-- 业务来源：v1 原型订单录入「作者信息」板块
+-- 业务规则：每位订单支持 1..N 位作者，author_order 表示作者位次
+--   1 = 第一作者 / 2 = 第二作者 / N = 第 N 作者
+-- 字段对应 v1：作者姓名/邮箱/学历/学校/邮编/英文作者信息
+-- ============================================================
+CREATE TABLE IF NOT EXISTS order_authors (
+  id           VARCHAR(64)  PRIMARY KEY,
+  order_id     VARCHAR(64)  NOT NULL COMMENT '所属订单ID（orders.id）',
+  author_order INT          NOT NULL DEFAULT 1 COMMENT '作者位次：1=第一作者, 2=第二作者, ...',
+  name         VARCHAR(64)  NOT NULL COMMENT '作者姓名',
+  email        VARCHAR(128) NULL COMMENT '作者邮箱',
+  degree       VARCHAR(32)  NULL COMMENT '作者学历',
+  school       VARCHAR(128) NULL COMMENT '作者学校',
+  zip_code     VARCHAR(16)  NULL COMMENT '邮编',
+  name_en      VARCHAR(255) NULL COMMENT '英文作者信息',
+  created_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+  UNIQUE INDEX uk_order_authors_order_seq (order_id, author_order),
+  INDEX idx_order_authors_order           (order_id),
+  INDEX idx_order_authors_email           (email),
+  INDEX idx_order_authors_school          (school)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='订单多作者信息表';
+
+-- ============================================================
+-- 21. order_submissions（教务端：1-3 组投稿信息）
+-- 业务来源：v1 原型订单录入「投稿信息」板块
+-- 业务规则：操作方式决定投稿组数
+--   一稿一投 → submission_no=1
+--   两稿两投 → submission_no=1,2
+--   三稿三投 → submission_no=1,2,3
+-- 字段对应 v1：论文名称/投稿期刊/投稿网址/投稿账号/投稿密码/投稿时间
+-- ============================================================
+CREATE TABLE IF NOT EXISTS order_submissions (
+  id            VARCHAR(64)  PRIMARY KEY,
+  order_id      VARCHAR(64)  NOT NULL COMMENT '所属订单ID（orders.id）',
+  submission_no INT          NOT NULL DEFAULT 1 COMMENT '投稿序号：1/2/3，对应一稿一投/两稿两投/三稿三投',
+  paper_title   VARCHAR(255) NOT NULL COMMENT '论文名称',
+  journal_name  VARCHAR(255) NULL COMMENT '投稿期刊',
+  journal_url   VARCHAR(500) NULL COMMENT '投稿网址',
+  account       VARCHAR(128) NULL COMMENT '投稿账号',
+  password      VARCHAR(128) NULL COMMENT '投稿密码',
+  submit_time   DATETIME     NULL COMMENT '投稿时间',
+  created_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+  UNIQUE INDEX uk_order_submissions_order_no (order_id, submission_no),
+  INDEX idx_order_submissions_order         (order_id),
+  INDEX idx_order_submissions_submit_time   (submit_time)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='订单投稿信息表（一稿一投/两稿两投/三稿三投）';
+
+-- ============================================================
+-- 22. order_status_history（教务端：9 阶段状态机轨迹）
+-- 业务来源：v1 原型订单录入「状态信息」板块 + doc/运营中台四端口 十七.4
+- 9 个阶段：Submitted / WithEditor / UnderReview / Revision / Accepted / Proofing / Online / Indexed / Rejected
+-- 业务规则：
+--   - 每次进入新阶段写一行 entered_at=left_at=NULL 表示进行中
+--   - 离开阶段时回填 left_at
+--   - 触发提醒/规则时按 stage 维度查表
+-- 与 order_node_remind_log 关系：提醒幂等按规则；本表按阶段轨迹全量留存
+-- ============================================================
+CREATE TABLE IF NOT EXISTS order_status_history (
+  id           VARCHAR(64)  PRIMARY KEY,
+  order_id     VARCHAR(64)  NOT NULL COMMENT '所属订单ID（orders.id）',
+  stage        VARCHAR(32)  NOT NULL COMMENT '阶段：Submitted/WithEditor/UnderReview/Revision/Accepted/Proofing/Online/Indexed/Rejected',
+  entered_at   DATETIME     NOT NULL COMMENT '进入该阶段时间',
+  left_at      DATETIME     NULL COMMENT '离开该阶段时间（NULL=当前阶段）',
+  expected_at  DATETIME     NULL COMMENT '该阶段预计产出时间（用于超时提醒）',
+  operator_id  VARCHAR(64)  NULL COMMENT '操作人（教务）ID（users.id）',
+  note         TEXT         NULL COMMENT '备注',
+  created_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+  INDEX idx_osh_order              (order_id),
+  INDEX idx_osh_order_entered      (order_id, entered_at DESC),
+  INDEX idx_osh_order_left         (order_id, left_at),
+  INDEX idx_osh_stage              (stage),
+  INDEX idx_osh_stage_expected     (stage, expected_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='订单阶段状态机轨迹表';
+
+-- ============================================================
+-- 23. order_reminders（教务端：节点提醒实例表）
+-- 业务来源：v1 原型订单录入「状态信息」板块 + doc/运营中台四端口 8.4 教务提醒
+- 提醒类型：
+--   first_week_check   首周查稿
+--   weekly_check       每周查稿
+--   under_review       投稿后一周入 Under Review 提醒
+--   urge_letter        催稿信
+--   revision           返修
+--   page_fee           版面费
+--   proof              校稿
+--   online             Online
+--   indexed            检索
+--   index_report       检索审查报告
+-- 业务规则：
+--   - due_at 到期时由 RemindersService 扫描
+--   - 同一 (order_id, reminder_type) 在同一天仅发一次
+--   - 与 order_node_remind_log 互补：log 负责幂等，reminders 负责业务实例
+-- ============================================================
+CREATE TABLE IF NOT EXISTS order_reminders (
+  id            VARCHAR(64)  PRIMARY KEY,
+  order_id      VARCHAR(64)  NOT NULL COMMENT '所属订单ID（orders.id）',
+  reminder_type VARCHAR(32)  NOT NULL COMMENT '提醒类型：first_week_check/weekly_check/under_review/urge_letter/revision/page_fee/proof/online/indexed/index_report',
+  status        VARCHAR(16)  NOT NULL DEFAULT 'pending' COMMENT '状态：pending待发送/sent已发送/dismissed已忽略',
+  due_at        DATETIME     NOT NULL COMMENT '到期时间',
+  sent_at       DATETIME     NULL COMMENT '实际发送时间',
+  receiver_id   VARCHAR(64)  NULL COMMENT '接收人ID（users.id）',
+  note          TEXT         NULL COMMENT '提醒备注',
+  created_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+  INDEX idx_or_order              (order_id),
+  INDEX idx_or_due_status         (status, due_at),
+  INDEX idx_or_type               (reminder_type),
+  INDEX idx_or_order_type         (order_id, reminder_type),
+  INDEX idx_or_receiver_status    (receiver_id, status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='订单节点提醒实例表';
+
+-- ============================================================
+-- 24. order_finance（教务端：订单财务扩展）
+-- 业务来源：v1 原型订单录入「财务信息」板块
+-- 业务规则：
+--   - orders.amount 存订单额冗余
+--   - order_finance 拆 6 字段：订单额/已付/待付 + 老师接单价/已付/待付
+--   - 1:1 关系（UNIQUE order_id），便于单独权限管理
+-- ============================================================
+CREATE TABLE IF NOT EXISTS order_finance (
+  id              VARCHAR(64)   PRIMARY KEY,
+  order_id        VARCHAR(64)   NOT NULL UNIQUE COMMENT '所属订单ID（orders.id，1:1）',
+  order_amount    DECIMAL(12,2) NULL COMMENT '订单额（冗余存一份）',
+  client_paid     DECIMAL(12,2) NULL COMMENT '订单已付款',
+  client_pending  DECIMAL(12,2) NULL COMMENT '订单待支付',
+  teacher_price   DECIMAL(12,2) NULL COMMENT '老师接单价格',
+  teacher_paid    DECIMAL(12,2) NULL COMMENT '老师已付款',
+  teacher_pending DECIMAL(12,2) NULL COMMENT '老师待付款',
+  created_at      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='订单财务扩展表（订单额/已付/待付 + 老师接单价/已付/待付）';
