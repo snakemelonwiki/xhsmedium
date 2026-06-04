@@ -452,6 +452,9 @@ export class LeadsService {
       }
     } else if (scope === 'employee') {
       qb.andWhere('l.employee_id = :employeeId', { employeeId: filters.employeeId || '' });
+      // 标记 employeeId 已被 scope 层处理,避免 applyLeadFilters 重复 andWhere
+      // 同名字段(TypeORM QueryBuilder 会报"duplicate parameter"或 AND 条件重复)。
+      (filters as any)._employeeIdHandled = true;
     }
     // v1.3 / CROSS-1: 销售端任何列表/统计查询必须 WHERE is_dispatched = 0，
     // 主管端 admin/owner 不限制（与文档 §10 销售端约束一致）。
@@ -470,6 +473,14 @@ export class LeadsService {
     if (filters.assignedSalesUserId) qb.andWhere('l.assigned_sales_user_id = :assignedSalesUserId', { assignedSalesUserId: filters.assignedSalesUserId });
     if (filters.postId) qb.andWhere('l.post_id = :postId', { postId: filters.postId });
     if (filters.dealStatus) qb.andWhere('l.deal_status = :dealStatus', { dealStatus: filters.dealStatus });
+    // BUG-SUPERVISOR-KANBAN 修复 (2026-06-04)：主管客资看板点击不同运营时数据应按
+    //   该运营过滤。applyLeadScope 仅在 scope=employee 时使用 employeeId，scope=all
+    //   时直接忽略，导致主管端(admin/owner)的"按运营"筛选完全失效（数据不变化）。
+    //   修复：把 employeeId 作为通用筛选条件移到 applyLeadFilters，scope=all
+    //   也会按运营过滤。scope=employee 已被 applyLeadScope 处理过,跳过避免重复。
+    if (filters.employeeId && !(filters as any)._employeeIdHandled) {
+      qb.andWhere('l.employee_id = :employeeId', { employeeId: filters.employeeId });
+    }
     if (filters.search && filters.search.trim()) {
       qb.andWhere(
         '(l.contact_info LIKE :search OR l.nickname LIKE :search OR l.lead_code LIKE :search OR l.note LIKE :search)',
@@ -1166,10 +1177,20 @@ export class LeadsService {
     // qbBase: 只受 scope（employee_id）+ period（created_at）约束 → 用于 total（"本月/本周/今天 全量"）
     // qb: 在 qbBase 基础上叠加账号/平台/作品类型/status/addStatus 等列表筛选维度 → 用于 filteredTotal
     // §6 / AC-3.1 vs AC-3.2: total 与 filteredTotal 必须可拆开，分别给"汇总卡片"和"筛选条数"
+    //
+    // BUG-SUPERVISOR-KANBAN 修复 (2026-06-04)：主管端(stats)点不同运营时顶部 8 个汇总卡
+    //   也应只统计该运营的客资。applyLeadScope 只在 scope=employee 时加 employeeId，
+    //   默认 scope=all 时忽略 → 顶部 total 永远等于全量 162，运营筛选完全失效。
+    //   修复：把 employeeId 作为"业务筛选"显式叠加到 qbBase 与 qb，让汇总卡和列表
+    //   同步按运营过滤。scope=employee 已被 applyLeadScope 用 _employeeIdHandled
+    //   标记,这里仍叠加但 OR 语义不变(同条件不会重复加 by 字段)。
     const qbBase = this.leadRepository.createQueryBuilder('l');
     this.applyLeadScope(qbBase, scopeFilters);
     if (from) qbBase.andWhere('l.created_at >= :from', { from });
     if (to) qbBase.andWhere('l.created_at < :to', { to });
+    if (opts.employeeId && scope !== 'employee') {
+      qbBase.andWhere('l.employee_id = :employeeId', { employeeId: opts.employeeId });
+    }
 
     const qb = qbBase.clone();
     this.applyLeadFilters(qb, {
@@ -1179,6 +1200,9 @@ export class LeadsService {
       status: opts.status,
       addStatus: opts.addStatus,
       processStatus: opts.processStatus,
+      // BUG-SUPERVISOR-KANBAN 修复 (2026-06-04)：stats 也需要按运营过滤，
+      // 与列表 applyLeadFilters 保持口径一致（AC-3.2）。
+      employeeId: opts.employeeId,
     });
 
     const total = await qbBase.getCount();

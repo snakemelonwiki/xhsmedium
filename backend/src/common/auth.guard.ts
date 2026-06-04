@@ -1,16 +1,39 @@
-import { CanActivate, ExecutionContext, Injectable, SetMetadata, UnauthorizedException } from '@nestjs/common';
+import {
+  CanActivate, ExecutionContext, ForbiddenException, Injectable, SetMetadata, UnauthorizedException,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Reflector } from '@nestjs/core';
 import { Request } from 'express';
+import { ConfigService } from '@nestjs/config';
+import * as crypto from 'crypto';
 
 export const IS_PUBLIC_KEY = 'isPublic';
 export const Public = () => SetMetadata(IS_PUBLIC_KEY, true);
+
+// B7 端口隔离（修复于 2026-06-03）：
+//   - 3001 端口（OWNER_PORT）仅允许 owner / admin / supervisor
+//   - 3000 端口（PORT）禁止 owner 角色
+// server.js 在反代之前已经做了一层 O(1) 拦截，这里在路由级做最后防线。
+const ALLOWED_OWNER_PORT_ROLES = ['owner', 'admin', 'supervisor'];
+
+// PF-05（修复于 2026-06-04）：
+//   撤销 token 缓存：AuthGuard 每请求要查 revoked_tokens 表，
+//   为避免对 DB 的高频访问，用 5min in-memory cache 缓存「SHA256(token) → 是否撤销」。
+//   5min 窗口足以覆盖一个用户连续操作（即便登出后再次发起请求也会在 5min 内被拦截）；
+//   真正关键的「登出立即失效」由 logout() 同步写表 + invalidateRevokedCache() 主动失效缓存保证。
+const REVOKED_CACHE_TTL_MS = 5 * 60 * 1000;
+
+interface RevokedCheckFn {
+  (token: string): Promise<boolean>;
+}
 
 /**
  * 业务接口鉴权守卫：要求请求必须带有效的 Bearer token。
  * 公开路由（/api/auth/login、import-template 等）由各自的 controller 方法标注 @Public()。
  * 与 SessionMiddleware 不同：本守卫不会 catch 静默放行，
  * 任何 token 缺失或 verify 失败都会直接 401。
+ *
+ * PF-05（2026-06-04）：canActivate 改为 async 以支持查 revoked_tokens 表。
  */
 @Injectable()
 export class AuthGuard implements CanActivate {
@@ -19,13 +42,22 @@ export class AuthGuard implements CanActivate {
   // 用 module-level singleton 即可解决。
   private static jwtService: JwtService;
   private static reflector: Reflector;
+  private static configService: ConfigService;
 
-  static configure(jwt: JwtService, reflector: Reflector) {
+  // PF-05：撤销表查询函数（由 main.ts configure 阶段注入）
+  private static revokedCheckFn: RevokedCheckFn | null = null;
+  // PF-05：撤销状态 5min 内存缓存
+  private static revokedCache: Map<string, { revoked: boolean; expiresAt: number }> = new Map();
+
+  static configure(jwt: JwtService, reflector: Reflector, config?: ConfigService, revokedCheck?: RevokedCheckFn) {
     AuthGuard.jwtService = jwt;
     AuthGuard.reflector = reflector;
+    AuthGuard.configService = config as any;
+    AuthGuard.revokedCheckFn = revokedCheck || null;
+    AuthGuard.revokedCache = new Map();
   }
 
-  canActivate(context: ExecutionContext): boolean {
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     const reflector = AuthGuard.reflector;
     if (!reflector) {
       // 没有 configure 过（极端情况），按放行处理以免阻塞启动
@@ -35,26 +67,36 @@ export class AuthGuard implements CanActivate {
       context.getHandler(),
       context.getClass(),
     ]);
+    const req = context.switchToHttp().getRequest<Request>();
     if (isPublic) {
-      this.tryAttachSession(context.switchToHttp().getRequest<Request>());
+      this.tryAttachSession(req);
       return true;
     }
-    const req = context.switchToHttp().getRequest<Request>();
     const authHeader = req.headers.authorization || '';
-    if (!authHeader.startsWith('Bearer ')) {
+    if (!authHeader.startsWith('Bearer ') && !authHeader.startsWith('bearer ')) {
       throw new UnauthorizedException('missing bearer token');
     }
     const token = authHeader.substring(7).trim();
     if (!token) {
       throw new UnauthorizedException('empty bearer token');
     }
+    // PF-05：撤销表检查必须在 JWT verify 通过后做（避免无效 token 也打 DB）
     this.attachSession(req, token);
+    // PF-05：异步查撤销表，命中即 401
+    if (await AuthGuard.isTokenRevoked(token)) {
+      throw new UnauthorizedException({
+        message: 'token 已撤销（已登出）',
+        error: 'token_revoked',
+      });
+    }
+    // B7：路由级端口-角色二次校验
+    this.assertRolePortMatch(req);
     return true;
   }
 
   private tryAttachSession(req: Request) {
     const authHeader = req.headers.authorization || '';
-    if (!authHeader.startsWith('Bearer ')) return;
+    if (!authHeader.startsWith('Bearer ') && !authHeader.startsWith('bearer ')) return;
     const token = authHeader.substring(7).trim();
     if (!token) return;
     try {
@@ -85,5 +127,116 @@ export class AuthGuard implements CanActivate {
       role: payload.role,
       employeeId: payload.employeeId ?? null,
     };
+  }
+
+  /**
+   * B7 路由级端口-角色校验（v1.3 扩展 ALL_ROLES_PORT 3003 分支）：
+   *   - x-server-port 头由 server.js proxy 透传（实际访问的端口：3000 / 3001 / 3003）
+   *   - 3001（owner 端口）→ role 必须在 ALLOWED_OWNER_PORT_ROLES 内
+   *   - 3003（统一登录入口）→ role !== 'owner'（owner 仍必须走 3001）
+   *   - 3000（主入口）/ 其它非 owner 端口 → role !== 'owner'（与 B7 行为一致）
+   * 缺 x-server-port 头（如本地 8089 直连测试）时放行，避免影响开发体验
+   */
+  private assertRolePortMatch(req: Request) {
+    const headerVal = req.headers['x-server-port'];
+    if (!headerVal) return; // 本地直连 / 测试环境不强制
+    const port = Number(Array.isArray(headerVal) ? headerVal[0] : headerVal);
+    if (!port || Number.isNaN(port)) return;
+
+    const session = (req as any).session;
+    const role: string = session?.role || '';
+    if (!role) return;
+
+    // 默认端口（如果 configService 没注入，按 CLAUDE.md 默认值 3000/3001/3003）
+    const cfg = AuthGuard.configService;
+    const ownerPort = Number(cfg?.get?.('OWNER_PORT') ?? 3001);
+    const allRolesPort = Number(cfg?.get?.('ALL_ROLES_PORT') ?? 3003);
+
+    if (port === ownerPort) {
+      // 命中 owner 端口：必须角色在白名单
+      if (!ALLOWED_OWNER_PORT_ROLES.includes(role)) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[B7][GUARD] 拒绝角色 ${role} 访问 owner 端口 (port=${port}, path=${req.path})`,
+        );
+        throw new ForbiddenException({
+          message: '该接口仅 owner / admin / supervisor 可访问',
+          error: 'forbidden_owner_port_only',
+          port,
+          role,
+        });
+      }
+    } else if (port === allRolesPort) {
+      // v1.3：3003 统一登录入口；除 owner 外都放行，owner 仍走 3001
+      if (role === 'owner') {
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[v1.3][GUARD] 拒绝 owner 角色访问统一登录入口 (port=${port}, expected=${ownerPort}, path=${req.path})`,
+        );
+        throw new ForbiddenException({
+          message: 'owner 账号必须从 3001 端口（总后台）访问',
+          error: 'forbidden_owner_use_3001',
+          port,
+          role,
+        });
+      }
+    } else {
+      // 任何非 owner / 3003 端口（含 3000 主入口、8089 NestJS 直连）：禁止 owner 角色
+      // 修复说明：原方案只在「port === mainPort」时拦截，但 NestJS 实际 PORT=8089，
+      // 攻击者只需把 x-server-port 改成 8089 之外的任意值就能绕过。
+      // 改进：非 owner 端口一律拒绝 owner 角色，符合「owner 必须从 OWNER_PORT 入口」
+      // 的端口隔离原则。
+      if (role === 'owner') {
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[B7][GUARD] 拒绝 owner 角色访问非 owner 端口 (port=${port}, expected=${ownerPort}, path=${req.path})`,
+        );
+        throw new ForbiddenException({
+          message: 'owner 账号必须从 3001 端口（总后台）访问',
+          error: 'forbidden_owner_use_3001',
+          port,
+          role,
+        });
+      }
+    }
+    // 其它端口（如 8089 直连）不强制
+  }
+
+  /**
+   * PF-05：查询 token 是否被撤销（带 5min 缓存）。
+   * 必须在 JWT verify 通过后调用（本方法不重复 verify）。
+   * @param token 原始 Bearer token
+   * @returns true 表示已撤销
+   */
+  static async isTokenRevoked(token: string): Promise<boolean> {
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+    const cached = AuthGuard.revokedCache.get(tokenHash);
+    const now = Date.now();
+    if (cached && cached.expiresAt > now) {
+      return cached.revoked;
+    }
+    // 缓存未命中：调注入的 check 函数
+    let revoked = false;
+    if (AuthGuard.revokedCheckFn) {
+      try {
+        revoked = await AuthGuard.revokedCheckFn(token);
+      } catch (err) {
+        // 查撤销表失败：保守按「未撤销」放行（避免单点故障阻塞全站）
+        // eslint-disable-next-line no-console
+        console.warn('[PF-05] revoked check fn failed, fail-open:', (err as any)?.message || err);
+        revoked = false;
+      }
+    }
+    AuthGuard.revokedCache.set(tokenHash, { revoked, expiresAt: now + REVOKED_CACHE_TTL_MS });
+    return revoked;
+  }
+
+  /**
+   * PF-05：登出/撤销时主动失效缓存，保证下一次请求立即拒绝。
+   * 注意：这里同时把 cache 标记为 revoked=true 覆盖任何旧值，确保后续 5min 内不需要再查 DB。
+   */
+  static invalidateRevokedCache(token: string): void {
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+    AuthGuard.revokedCache.set(tokenHash, { revoked: true, expiresAt: Date.now() + REVOKED_CACHE_TTL_MS });
   }
 }

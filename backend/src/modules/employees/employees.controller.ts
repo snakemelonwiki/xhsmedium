@@ -27,7 +27,7 @@ const EMPLOYEE_STATUS_VALUES = ['在职', '离职', '停用'] as const;
  * 不在白名单且未匹配英文别名的值回退到默认 '在职'。
  */
 function normalizeEmployeeStatus(input: unknown): string {
-  const raw = String(input ?? '').trim();
+  const raw = String(input ?? '').trim().normalize('NFC');
   if (!raw) return '在职';
   if ((EMPLOYEE_STATUS_VALUES as readonly string[]).includes(raw)) return raw;
   const alias: Record<string, string> = {
@@ -52,6 +52,9 @@ function ensureEmployeeAdmin(req: Request, res: Response): boolean {
   }
   return true;
 }
+
+/** 登录角色白名单：与 user.entity.ts enum 对齐 */
+const LOGIN_ROLE_VALUES = ['operation', 'sales', 'academic', 'admin', 'supervisor', 'staff', 'owner'] as const;
 
 @Controller('employees')
 // B/P0-05: 整个 employees 控制器在未带 Bearer token 时必须直接 401，
@@ -107,7 +110,26 @@ export class EmployeesController {
   }
 
   /**
-   * 创建员工并自动生成员工编号。
+   * 创建员工 + 自动生成登录账号（B 端 1.2 P0-A5 修复）。
+   *
+   * Body 字段：
+   *   - name             必填
+   *   - phone            可选
+   *   - hireDate         可选 (YYYY-MM-DD)
+   *   - status           可选，默认 '在职'
+   *   - loginUsername    可选；缺省时自动生成 (name_手机号后4位)
+   *   - loginPassword    可选；缺省时自动生成 (8~12 位大小写+数字)
+   *   - loginRole        可选；缺省 'operation'
+   *   - createLoginAccount 可选 boolean；缺省 true
+   *
+   * 响应：
+   *   {
+   *     ok: true,
+   *     employee: {...},
+   *     loginAccount: { userId, username, role, initialPassword } | null
+   *   }
+   *
+   * initialPassword 仅在创建时返回一次（不落库明文）。
    */
   @Post()
   async create(@Body() body: any, @Req() req: Request, @Res() res: Response) {
@@ -118,23 +140,43 @@ export class EmployeesController {
       const allCodes = await this.employeesService.findAllCodes();
       const maxNum = allCodes.length === 0 ? 0 : Math.max(...allCodes.map((c) => Number(String(c).replace('EMP', '')) || 0));
       const employeeCode = `EMP${String(maxNum + 1).padStart(4, '0')}`;
-      const employee = await this.employeesService.create({
-        employeeCode,
+
+      // 校验 loginRole（若提供）
+      const nextRole = body.loginRole !== undefined && body.loginRole !== null
+        ? String(body.loginRole).trim()
+        : undefined;
+      if (nextRole && !(LOGIN_ROLE_VALUES as readonly string[]).includes(nextRole)) {
+        return res.status(400).json({ ok: false, message: `loginRole 不合法: ${nextRole}` });
+      }
+
+      // createLoginAccount 默认 true（除非显式 false）
+      const createLoginAccount = body.createLoginAccount === false ? false : true;
+
+      const result = await this.employeesService.createWithLogin(employeeCode, {
         name: body.name,
         phone: body.phone || null,
         hireDate: body.hireDate || null,
         status: normalizeEmployeeStatus(body.status),
+        loginUsername: body.loginUsername || null,
+        loginPassword: body.loginPassword || null,
+        loginRole: nextRole,
+        createLoginAccount,
+        actorUserId: userId,
       });
+
       // 写操作日志：员工创建
       try {
         await this.operationLogs.log({
           userId,
           action: OPERATION_LOG_ACTIONS.CREATE,
           targetType: OPERATION_LOG_TARGET_TYPES.EMPLOYEE,
-          targetId: (employee as any)?.id || '',
+          targetId: (result.employee as any)?.id || '',
           detail: stringifyDetail({
             employeeCode,
             name: body.name,
+            createdLoginAccount: !!result.loginAccount,
+            username: result.loginAccount?.username,
+            role: result.loginAccount?.role,
           }),
           ip: parseIp(req),
         });
@@ -142,11 +184,13 @@ export class EmployeesController {
         // eslint-disable-next-line no-console
         console.error('[employees] operation log failed', (logErr as any)?.message || logErr);
       }
-      return res.json({ ok: true });
+      return res.json({
+        ok: true,
+        employee: result.employee,
+        loginAccount: result.loginAccount,
+      });
     } catch (err: any) {
-      // BadRequestException / ConflictException 等 NestJS 异常直接抛出让全局过滤器处理
       if (err.status) throw err;
-      // 其他未预期错误
       console.error('[employees.create] unexpected error:', err.message || err);
       return res.status(500).json({ ok: false, message: 'Internal server error' });
     }
@@ -156,17 +200,27 @@ export class EmployeesController {
    * 更新员工启停状态。
    * - 当目标 status 属于"离职/停用"语义时，写一条 DISABLE 操作日志；
    * - 普通 status 变更（在职/试用期 等）按 UPDATE 记录。
+   * - E/P1-01+A5: 离职/停用时同步停用关联 user.status='inactive'。
    */
   @Patch(':id/status')
   async updateStatus(@Param('id') id: string, @Body() body: any, @Req() req: Request, @Res() res: Response) {
     if (!ensureEmployeeAdmin(req, res)) return;
     const userId = getSessionUserId(req);
     const before = await this.employeesService.findById(id);
-    await this.employeesService.updateStatus(id, body.status);
-    // E/P1-01: 把"停用/离职"这类 status 变更归到 OPERATION_LOG_ACTIONS.DISABLE，
-    // 其余 status 变更（在职/试用期 等）按 UPDATE 记录。
-    const nextStatus = String(body.status || '').trim();
+    const nextStatus = normalizeEmployeeStatus(body.status);
     const isDisable = ['离职', '停用', 'inactive', 'disabled', '离职员工'].includes(nextStatus);
+    try {
+      if (isDisable) {
+        await this.employeesService.softDelete(id);
+      } else {
+        await this.employeesService.updateStatus(id, nextStatus);
+      }
+    } catch (err: any) {
+      if (err.status === 404) {
+        return res.status(404).json({ ok: false, message: '员工不存在' });
+      }
+      throw err;
+    }
     try {
       await this.operationLogs.log({
         userId,
@@ -204,14 +258,25 @@ export class EmployeesController {
 
   /**
    * 删除员工，保持现有服务删除策略。
-   * E/P1-01: 写一条 DELETE 操作日志（targetType=employee），与 accounts/leads 保持口径一致。
+   * E/P1-01+A5: 删除等同软删除（停用员工 + 同步停用关联 user），
+   * 不物理删除 employee。
    */
   @Delete(':id')
   async remove(@Param('id') id: string, @Req() req: Request, @Res() res: Response) {
     if (!ensureEmployeeAdmin(req, res)) return;
     const userId = getSessionUserId(req);
     const before = await this.employeesService.findById(id);
-    await this.employeesService.remove(id);
+    if (!before) {
+      return res.status(404).json({ ok: false, message: '员工不存在' });
+    }
+    try {
+      await this.employeesService.softDelete(id);
+    } catch (err: any) {
+      if (err.status === 404) {
+        return res.status(404).json({ ok: false, message: '员工不存在' });
+      }
+      throw err;
+    }
     try {
       await this.operationLogs.log({
         userId,
@@ -221,6 +286,7 @@ export class EmployeesController {
         detail: stringifyDetail({
           employeeCode: before?.employeeCode || null,
           name: before?.name || null,
+          softDelete: true,
         }),
         ip: parseIp(req),
       });
@@ -233,16 +299,35 @@ export class EmployeesController {
 
   /**
    * 执行员工资料更新，供 PUT/PATCH 复用。
+   * B 端 1.2 P0-A5 修复：若 body 含 loginPassword / loginRole，则同步更新关联 user。
    */
   private async updateEmployee(id: string, body: any, req: Request, res: Response) {
     if (!ensureEmployeeAdmin(req, res)) return;
     const userId = getSessionUserId(req);
-    await this.employeesService.update(id, {
-      name: body.name,
-      phone: body.phone || null,
-      hireDate: body.hireDate || null,
-      status: normalizeEmployeeStatus(body.status),
-    });
+
+    // loginRole 校验
+    if (body.loginRole !== undefined && body.loginRole !== null && String(body.loginRole).length > 0) {
+      const nextRole = String(body.loginRole).trim();
+      if (!(LOGIN_ROLE_VALUES as readonly string[]).includes(nextRole)) {
+        return res.status(400).json({ ok: false, message: `loginRole 不合法: ${nextRole}` });
+      }
+    }
+
+    try {
+      await this.employeesService.updateWithLogin(id, {
+        name: body.name,
+        phone: body.phone || null,
+        hireDate: body.hireDate || null,
+        status: normalizeEmployeeStatus(body.status),
+        loginPassword: body.loginPassword || null,
+        loginRole: body.loginRole || null,
+      });
+    } catch (err: any) {
+      if (err.status === 404) {
+        return res.status(404).json({ ok: false, message: '员工不存在' });
+      }
+      throw err;
+    }
     // 写操作日志：员工更新
     try {
       await this.operationLogs.log({
@@ -255,6 +340,8 @@ export class EmployeesController {
           // 日志保留原始提交值，便于审计 / 排查前端脏数据来源；
           // 实际写入 employees.status 已通过 normalizeEmployeeStatus 规整。
           status: body.status,
+          loginPasswordChanged: !!body.loginPassword,
+          loginRoleChanged: !!body.loginRole,
         }),
         ip: parseIp(req),
       });

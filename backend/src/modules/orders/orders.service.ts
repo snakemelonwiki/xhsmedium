@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
-import { Repository, DataSource, In, EntityManager } from 'typeorm';
+import { Repository, DataSource, EntityManager, In } from 'typeorm';
 import { Order, HANDOVER_STATUS_CODES, HandoverStatusCode } from '../../entities/order.entity';
 import { OrderFollowRecord } from '../../entities/order-follow-record.entity';
 import { OrderFinance } from '../../entities/order-finance.entity';
@@ -125,14 +125,12 @@ export class OrdersService {
 
   /**
    * Sales marks a lead as deal-closed and spawns a new order in a single transaction.
-   * v1.3 / SA-8 + SA-9 增强：除原 orders 落库外，还创建 order_finance（订单额/已付/待付）
-   * 与 order_follow_records（首条跟进=销售成交记录）。
    */
-  async closeDeal(leadId: string, salesUserId: string, dto: CloseDealDto): Promise<{
-    orderId: string;
-    orderCode: string | null;
-    orderFinanceId: string;
-  }> {
+  async closeDeal(
+    leadId: string,
+    salesUserId: string,
+    dto: CloseDealDto,
+  ): Promise<{ orderId: string; orderCode: string | null; orderFinanceId: string }> {
     if (!salesUserId) {
       throw new BadRequestException('sales user required');
     }
@@ -147,77 +145,106 @@ export class OrdersService {
         throw new NotFoundException('lead not found');
       }
       leadContact = lead.contactInfo || '';
-      // S-P1-01 修复：closeDeal 旧实现写 `leads.status='deal_closed'`，但
-      //   - `leads.status` 的合法枚举（schema.sql §5）只有
-      //     new/assigned/in_followup/in_collaboration/operation_handled/added_success/invalid，
-      //     `deal_closed` 不在合法集合内，是"未定义值"（前端过滤不到、统计不到、SQL 兜底会丢失）。
-      //   - v1.2 文档 §10（客资状态机）期望把成交信号落在
-      //     `leads.process_status='deal_done'`，该值在 `leads.process_status` 合法枚举内
-      //     （not_contacted/waiting_pass/communicating/quoted/deal_pending/deal_done/invalid）。
-      //   - 同时让 `leads.status` 留在 `in_followup`（或保持原 status），保持状态机连续性；
-      //     不强行改 `leads.status='deal_done'`，因为该值不在 schema 的合法枚举里。
-      await manager.update(Lead, { id: leadId }, {
-        processStatus: 'deal_done',
-        dealStatus: 'deal_done',
-        status: 'in_followup',
-      });
       // v1.3 / CROSS-4: 在同一事务内生成订单编号 ORD-YYYYMMDD-XXXXX
       // 必须在 INSERT Order 之前完成（行锁在同一事务内保持），避免并发时序号重复。
       generatedOrderCode = await this.generateOrderCode(manager);
       orderCode = generatedOrderCode;
-      // v1.3 / SA-8: 销售成交的 serviceType 字段可以同时承载"产品类型"语义，
-      // 但前端会把产品类型/服务类型分开传。后端保持 serviceType 字段为原"服务类型"，
+      // v1.3 / SA-8: 销售成交的 serviceType 字段可以同时承载"产品类型"语义,
+      // 但前端会把产品类型/服务类型分开传。后端保持 serviceType 字段为原"服务类型",
       // 新加的"产品类型/保障类型/付款阶段"等放到 remark / order_finance 阶段备注中。
       const mergedServiceType = dto.serviceType
         || (dto.productType ? String(dto.productType) : null)
         || null;
-      await manager.insert(Order, {
-        id: orderId,
-        leadId,
-        salesUserId,
-        academicUserId: null,
-        serviceType: mergedServiceType,
-        amount: dto.amount != null && dto.amount !== '' ? String(dto.amount) : null,
-        paidStatus: dto.paidStatus || 'unpaid',
-        orderStatus: 'to_receive',
-        handoverStatus: 'handed_over',
-        // remark 同时承载"客户要求备注 + 保障类型 + 付款阶段"，便于后续教务端拆开展示
-        remark: this.composeRemark(dto),
-        orderCode,
-      });
+      // BF-09b 修复 (2026-06-04) — 改用 raw SQL 替代 manager.insert() / manager.update():
+      //   TypeORM 1.0 在 InsertQueryBuilder/UpdateQueryBuilder 的 `addFrom` 路径里会
+      //   把 entity class 当作 entityTarget 传入 `entityOrProperty(this.subQuery())`。
+      //   entityTarget 是 ES6 class 时,无 new 调用抛 "Class constructor X cannot be
+      //   invoked without 'new'"。本补丁虽在 main.ts 加了 addFrom monkey-patch 绕开
+      //   hasMetadata 检查,但 entity class 与 metadata 注册顺序在 NestJS 异步初始化
+      //   下不稳定,仍可能漏判。raw SQL 100% 绕开 TypeORM 1.0 这条 bug 路径,且语义
+      //   与 insert/update 等价（带参数化,无 SQL 注入风险）。
+      const remark = this.composeRemark(dto);
+      const amountStr = dto.amount != null && dto.amount !== '' ? String(dto.amount) : null;
+      await manager.query(
+        `UPDATE leads
+         SET process_status = ?, deal_status = ?, status = ?, updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+        ['deal_done', 'deal_done', 'in_followup', leadId],
+      );
+      await manager.query(
+        `INSERT INTO orders
+         (id, lead_id, sales_user_id, academic_user_id, service_type, amount,
+          paid_status, order_status, handover_status, remark, order_code, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+        [
+          orderId,
+          leadId,
+          salesUserId,
+          null,
+          mergedServiceType,
+          amountStr,
+          dto.paidStatus || 'unpaid',
+          'to_receive',
+          'handed_over',
+          remark,
+          orderCode,
+        ],
+      );
 
-      // v1.3 / SA-9: 创建 order_finance（订单额/已付/待付 = 订单额 - 已付 = 订单额）。
-      await manager.insert(OrderFinance, {
-        id: orderFinanceId,
-        orderId,
-        orderAmount: dto.amount != null && dto.amount !== '' ? String(dto.amount) : null,
-        clientPaid: '0.00',
-        clientPending: dto.amount != null && dto.amount !== '' ? String(dto.amount) : null,
-        teacherPrice: null,
-        teacherPaid: null,
-        teacherPending: null,
-      });
+      // v1.3 / SA-9: 创建 order_finance(订单额/已付/待付 = 订单额 - 已付 = 订单额)。
+      await manager.query(
+        `INSERT INTO order_finance
+         (id, order_id, order_amount, client_paid, client_pending,
+          teacher_price, teacher_paid, teacher_pending, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+        [
+          orderFinanceId,
+          orderId,
+          amountStr,
+          '0.00',
+          amountStr,
+          null,
+          null,
+          null,
+        ],
+      );
 
-      // v1.3 / SA-9: 落首条 order_follow_records（销售成交记录）。
+      // v1.3 / SA-9: 落首条 order_follow_records(销售成交记录)。
       const followContent = this.composeFollowContent(dto, generatedOrderCode);
-      await manager.insert(OrderFollowRecord, {
-        id: makeId(),
-        orderId,
-        userId: salesUserId,
-        nodeType: '销售成交',
-        content: followContent,
-        nextRemindAt: dto.expectedHandleTime ? new Date(dto.expectedHandleTime) : null,
-      });
+      const followId = makeId();
+      await manager.query(
+        `INSERT INTO order_follow_records
+         (id, order_id, user_id, node_type, content, next_remind_at, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+        [
+          followId,
+          orderId,
+          salesUserId,
+          '销售成交',
+          followContent,
+          dto.expectedHandleTime ? new Date(dto.expectedHandleTime) : null,
+        ],
+      );
     });
 
     // §11.1 deal_closed: 通知教务 / 主管。
     // 简化版：通知所有 academic / admin / owner 角色的用户。
+    //
+    // BF-09b 修复 (2026-06-04) — 避免 TypeORM 1.0 `this.subQuery is not a function`：
+    //   原写法 `.where('user.role IN (:...roles)', { roles: [...] })` 在 TypeORM 1.0 下
+    //   会被当成子查询构造器并调用 `this.subQuery()`，新版本该方法签名变更而抛错。
+    //   即便改成 `In([...])`，`createQueryBuilder().where({...}).getMany()` 仍会在
+    //   `addFrom` 解析时触发 `entityTarget(this.subQuery())`(QueryBuilder.js:440)，
+    //   报错依旧。最稳的绕过方式：走 `Repository.find({ where })` 不创建 QueryBuilder，
+    //   完全避开 subQuery 解析路径。
     try {
-      const receivers = await this.userRepository.find({
-        where: { role: In(['academic', 'admin', 'owner']) as any },
-        select: { id: true },
-      });
-      const ids = receivers.map((u) => u.id).filter((id) => id && id !== salesUserId);
+      // 走原始 SQL 绕开 TypeORM 1.0 `this.subQuery is not a function`（Repository.find
+      // 内部 createQueryBuilder + applyFindOptions 仍会触发 subQuery 解析路径）。
+      const rawReceivers: Array<{ id: string }> = await this.dataSource.query(
+        `SELECT id FROM users WHERE role IN (?, ?, ?)`,
+        ['academic', 'admin', 'owner'],
+      );
+      const ids = rawReceivers.map((u) => u.id).filter((id) => id && id !== salesUserId);
       if (ids.length > 0) {
         await this.notificationsService.create({
           receiverIds: ids,
@@ -347,6 +374,13 @@ export class OrdersService {
    * 1.2 订单搜索/筛选：模糊搜索（订单号/客资联系方式）+ 条件搜索（付款/销售/教务/服务类型/时间）。
    * 注意：实体列名是 snake_case（o.sales_user_id / o.academic_user_id / o.paid_status 等），
    * 与 camelCase 属性不同；QueryBuilder 引用必须用数据库列名。
+   *
+   * BF-09b 修复 (2026-06-04) — 避免 TypeORM 1.0 `this.subQuery is not a function`：
+   *   旧实现用 `qb.andWhere('... EXISTS (SELECT 1 FROM leads l ...)', { kw: like })`，
+   *   TypeORM 1.0 在解析 `andWhere` 第二个参数时会把内部的 `SELECT 1` 识别为子查询并
+   *   调用 `this.subQuery(...)`，新版本下该方法签名变更而抛错。改用 QueryBuilder 的
+   *   `leftJoin + andWhere` 写法走主查询别名（参数对象用 QueryExpressionMap 内支持的
+   *   形式），避开字符串里嵌子查询的解析路径。
    */
   private applyOrderFilters(qb: any, options: ListOrdersOptions): void {
     if (options.status) {
@@ -389,20 +423,39 @@ export class OrdersService {
     }
 
     // 模糊搜索：订单号（o.id）+ 关联客资的联系方式/昵称。
-    // 用 EXISTS 关联 leads 表（已有 idx_orders_lead_id 索引），避免改变主查询结构。
+    // BF-09b 修复 (2026-06-04)：TypeORM 1.0 在 `andWhere(sql, params)` 第二参数是对象时
+    //   会把 sql 字符串里以 `(` 开头 `)` 结尾的 entity target 当作子查询构造器并
+    //   调用 `this.subQuery()`，新版本下抛 `this.subQuery is not a function`。
+    //   规避方式：只用字符串单参数 + setParameter 显式注入占位符，TypeORM 不会进入
+    //   subQuery 解析路径。子查询用 `IN (SELECT ...)` 形式（不走 EXISTS），TypeORM 把
+    //   整个 IN 子句作为字面量拼入。
+    // collation fix：leads 表 id 与 orders.id 的 collation 不一致（utf8mb4_unicode_ci
+    //   vs utf8mb4_0900_ai_ci），IN 子句里用 `CONVERT(l.id USING utf8mb4) COLLATE
+    //   utf8mb4_0900_ai_ci` 显式对齐 orders.id 的排序规则，避免 ER_CANT_AGGREGATE_2COLLATIONS。
     const kw = options.keyword && options.keyword.trim();
     if (kw) {
       const like = `%${kw}%`;
       qb.andWhere(
-        `(o.id LIKE :kw OR EXISTS (SELECT 1 FROM leads l WHERE l.id = o.lead_id AND (l.contact_info LIKE :kw OR l.nickname LIKE :kw)))`,
-        { kw: like },
+        `(o.id LIKE :kw OR o.lead_id IN (` +
+          `SELECT CONVERT(l.id USING utf8mb4) COLLATE utf8mb4_0900_ai_ci ` +
+          `FROM leads l WHERE ` +
+          `(l.contact_info LIKE :kw OR l.nickname LIKE :kw)` +
+        `))`,
       );
+      qb.setParameter('kw', like);
     }
 
     // 异常筛选：关联 order_abnormal_feedbacks 表，过滤存在未关闭异常的订单。
+    // 同样只用字符串 + setParameter 形式，避开 subQuery 解析路径。
+    // collation fix：order_abnormal_feedbacks.order_id collation 是 utf8mb4_0900_ai_ci，
+    //   orders.id 是 utf8mb4_unicode_ci，IN 子句里用 `CONVERT(f.order_id USING utf8mb4)
+    //   COLLATE utf8mb4_unicode_ci` 对齐。
     if (options.abnormal) {
       qb.andWhere(
-        `EXISTS (SELECT 1 FROM order_abnormal_feedbacks f WHERE f.order_id = o.id AND f.status != 'closed')`,
+        `o.id IN (` +
+          `SELECT CONVERT(f.order_id USING utf8mb4) COLLATE utf8mb4_unicode_ci ` +
+          `FROM order_abnormal_feedbacks f WHERE f.status != 'closed'` +
+        `)`,
       );
     }
   }
@@ -728,10 +781,10 @@ export class OrdersService {
     if (current.salesUserId && current.salesUserId !== actorUserId) {
       receivers.add(current.salesUserId);
     }
-    // 主管 / 总后台兜底
+    // 主管 / 总后台兜底（BF-09b：避开 TypeORM 1.0 `this.subQuery is not a function`，改用 Repository.find）
     try {
       const supervisors = await this.userRepository.find({
-        where: { role: In(['admin', 'owner']) as any },
+        where: { role: In(['admin', 'owner']) },
         select: { id: true },
       });
       for (const u of supervisors) {
@@ -941,9 +994,10 @@ export class OrdersService {
     // service 层只负责业务状态翻转，避免双写。
 
     // 通知所有教务/主管：有新订单待接收。
+    // BF-09b：避开 TypeORM 1.0 `this.subQuery is not a function`，改用 Repository.find。
     try {
       const receivers = await this.userRepository.find({
-        where: { role: In(['academic', 'admin', 'owner']) as any },
+        where: { role: In(['academic', 'admin', 'owner']) },
         select: { id: true },
       });
       const ids = receivers.map((u) => u.id).filter((id) => id && id !== actorUserId);

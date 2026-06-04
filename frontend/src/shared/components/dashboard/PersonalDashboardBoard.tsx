@@ -41,6 +41,7 @@ import {
   type PersonalOverviewResponse,
   type PersonalPeriod,
   type PersonalPlatform,
+  type PersonalRankingSort,
   type PersonalRankingsResponse,
 } from '@/shared/api/content';
 import type { PlatformDistributionItem, PlatformTrend, PlatformTrendPoint } from '@/shared/types/content';
@@ -57,6 +58,14 @@ const METRIC_OPTIONS: { label: string; value: PersonalMetric; description: strin
   { label: '总获客', value: 'totalLeads', description: '所有作品关联的客资数' },
   { label: '获客效率', value: 'efficiency', description: '客资数 / 作品数' },
   { label: '获客贴效率', value: 'leadEfficiency', description: '客资数 / 获客贴数（is_lead_post=1）' },
+];
+
+const RANKING_SORT_OPTIONS: { label: string; value: PersonalRankingSort }[] = [
+  { label: '按获客数', value: 'leadCount' },
+  { label: '按作品数', value: 'postCount' },
+  { label: '按流量', value: 'traffic' },
+  { label: '按获客效率', value: 'efficiency' },
+  { label: '按获客贴效率', value: 'leadEfficiency' },
 ];
 
 const PLATFORM_OPTIONS: { label: string; value: PersonalPlatform }[] = [
@@ -124,6 +133,8 @@ export function PersonalDashboardBoard({ employeeId, showRefreshButton = true }:
   const [period, setPeriod] = useState<PersonalPeriod>('month');
   // OP-19 趋势周期：日/周/月（独立于上面 period）
   const [trendPeriod, setTrendPeriod] = useState<'day' | 'week' | 'month'>('day');
+  // 三大效率榜排序字段：默认按获客数降序
+  const [rankingSort, setRankingSort] = useState<PersonalRankingSort>('leadCount');
 
   const [overview, setOverview] = useState<PersonalOverviewResponse | undefined>();
   const [rankings, setRankings] = useState<PersonalRankingsResponse | undefined>();
@@ -152,7 +163,7 @@ export function PersonalDashboardBoard({ employeeId, showRefreshButton = true }:
   const loadRankings = useCallback(async () => {
     setLoadingRankings(true);
     try {
-      const data = await getPersonalRankings({ platform, period, employeeId });
+      const data = await getPersonalRankings({ platform, period, employeeId, sort: rankingSort });
       setRankings(data);
     } catch (err) {
       setRankings(undefined);
@@ -160,7 +171,7 @@ export function PersonalDashboardBoard({ employeeId, showRefreshButton = true }:
     } finally {
       setLoadingRankings(false);
     }
-  }, [platform, period, employeeId]);
+  }, [platform, period, employeeId, rankingSort]);
 
   useEffect(() => {
     void loadOverview();
@@ -474,7 +485,27 @@ export function PersonalDashboardBoard({ employeeId, showRefreshButton = true }:
       </Row>
 
       {/* 三大效率榜（OP-24 legacy 样式） */}
-      <Card>
+      <Card
+        title={
+          <Space size={8} align="center">
+            <Typography.Text strong>三大效率榜</Typography.Text>
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              默认按获客数降序
+            </Typography.Text>
+          </Space>
+        }
+        extra={
+          <Space size={4} align="center">
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>排序</Typography.Text>
+            <Segmented
+              size="small"
+              value={rankingSort}
+              onChange={(v) => setRankingSort(v as PersonalRankingSort)}
+              options={RANKING_SORT_OPTIONS}
+            />
+          </Space>
+        }
+      >
         <Tabs items={rankingTabItems} />
       </Card>
     </Space>

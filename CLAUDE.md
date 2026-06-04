@@ -6,11 +6,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 npm install
-npm start              # Starts server on PORT (default 3000) and OWNER_PORT (default 3001)
+npm start              # Starts server on PORT (3000) + OWNER_PORT (3001) + ALL_ROLES_PORT (3003)
 ```
 
 - **Employee/Admin portal**: http://localhost:3000
-- **Owner portal**: http://localhost:3001 (restricted to `role: 'owner'` users)
+- **Owner-only console (总后台)**: http://localhost:3001 (restricted to `role: 'owner'`)
+- **Unified login entry (统一登录入口)**: http://localhost:3003 (admin / supervisor / sales / academic / staff；**owner 仍必须 3001**)
+- **Next.js frontend (dev)**: http://localhost:3002 (新前端，dev/start 脚本固定 3002，与本进程不冲突)
 - Environment variables: copy `.env.example` to `.env` for development, `.env.production.example` for production
 - MySQL must be running and configured (see `MYSQL_SETUP.md`)
 - Database schema: `schema.sql`
@@ -19,13 +21,30 @@ npm start              # Starts server on PORT (default 3000) and OWNER_PORT (de
 
 **Monolithic Node.js/Express application** with no build step, no tests, and no linting configured. Frontend is vanilla JavaScript served as static files.
 
-### Dual-Port Authentication System
+### Multi-Port Authentication System (v1.3，2026-06-04)
 
-The app runs two logical instances on separate ports with role-based isolation:
-- Port 3000: `staff` and `admin` roles
-- Port 3001: `owner` role only (owner accounts cannot log in on port 3000)
+The app runs **one Node process** listening on **three ports** with role-based isolation.
+The business API itself lives in NestJS on port 8089; `server.js` is purely a reverse proxy
++ static file server. See `doc/修复说明-端口体系-v1.3.md` for the full spec, and
+`doc/修复说明-B7-端口隔离.md` for the historical B7 dual-port baseline.
 
-Authentication uses in-memory `Map` sessions with Bearer tokens (not JWT). Sessions are lost on server restart. See `server.js` lines 550-580 for `authRequired` and `requireRole` middleware.
+| Port | Env var | Default | Allowed roles | Rejected |
+| --- | --- | --- | --- | --- |
+| **3000** 主入口 | `PORT` | 3000 | sales / academic / staff / admin / supervisor | owner |
+| **3001** 总后台 | `OWNER_PORT` | 3001 | owner | admin / supervisor / sales / academic / staff |
+| **3003** 统一登录入口 | `ALL_ROLES_PORT` | 3003 | sales / academic / staff / admin / supervisor | owner (L2 拒绝) |
+| 3002 新前端 (Next.js) | — | (frontend owned) | — | server.js 不监听 |
+
+- **3002 reserved by Next.js**: `frontend/package.json` dev/start scripts pin Next.js to `-p 3002`,
+  so the new unified login port defaults to **3003** instead. Set `ALL_ROLES_PORT=3002` only if
+  Next.js is moved off 3002.
+- **Three defenses (L1/L2/L3)**: L1 = `server.js` Express middleware (O(1) JWT peek, 403); L2 =
+  `auth.service.ts:login` (401 with port/role context); L3 = `auth.guard.ts:assertRolePortMatch`
+  (403 on any /api hit).
+- **owner 强制 3001** is a hard P0 rule: even on 3003 the L2 layer rejects `role==='owner'`
+  with the message `owner 账号必须从 3001 端口（总后台）登录`.
+- B7's `ALLOWED_OWNER_ROLES` is **tightened** to `["owner"]` only; admin/supervisor now log in
+  via 3003 and can still hit `/owner` resources through NestJS' normal permission check.
 
 ### Data Layer: MySQL + Legacy JSON
 

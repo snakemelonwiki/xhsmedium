@@ -7,7 +7,7 @@ import { Employee } from '../../entities/employee.entity';
 import { Account } from '../../entities/account.entity';
 import { Order } from '../../entities/order.entity';
 import { normalizePostType } from '../../shared/utils/normalize';
-import { todayString } from '../../shared/utils/date-utils';
+import { formatDateOnly, todayString } from '../../shared/utils/date-utils';
 import { CacheService } from '../../shared/cache.service';
 
 /** 5 分钟缓存 TTL（毫秒） */
@@ -497,14 +497,14 @@ export class DashboardService {
    */
   async getPersonalRankings(
     employeeId: string,
-    filters: { platform?: string; period?: string; from?: string; to?: string } = {},
+    filters: { platform?: string; period?: string; from?: string; to?: string; sort?: string } = {},
   ): Promise<any> {
     const resolved = this.resolvePersonalFilters({ ...filters, metrics: 'totalTraffic' });
-    const cacheKey = `dashboard:personal:rankings:${employeeId}:${resolved.platform || '_all'}:${resolved.from}:${resolved.to}`;
+    const cacheKey = `dashboard:personal:rankings:${employeeId}:${resolved.platform || '_all'}:${resolved.from}:${resolved.to}:${filters.sort || 'leadCount'}`;
     const cached = this.cache.get<ReturnType<typeof this.computePersonalRankings>>(cacheKey);
     if (cached !== undefined) return cached;
 
-    const result = await this.computePersonalRankings(employeeId, resolved);
+    const result = await this.computePersonalRankings(employeeId, resolved, filters.sort);
     this.cache.set(cacheKey, result, CACHE_TTL_MS);
     return result;
   }
@@ -512,6 +512,7 @@ export class DashboardService {
   private async computePersonalRankings(
     employeeId: string,
     filters: { metrics: string; platform: string | null; period: string; from: string; to: string },
+    sort?: string,
   ): Promise<any> {
     const { platform, from, to } = filters;
 
@@ -617,12 +618,37 @@ export class DashboardService {
       period: { from, to },
       employeeId,
       platform: filters.platform,
-      accounts: {
-        traffic: [...accounts].sort((a, b) => b.traffic - a.traffic),
-        efficiency: [...accounts].sort((a, b) => b.efficiency - a.efficiency),
-        leadEfficiency: [...accounts].sort((a, b) => b.leadEfficiency - a.leadEfficiency),
-      },
+      accounts: this.sortRankings(accounts, sort),
     };
+  }
+
+  /**
+   * 按 sort 字段对 accounts 重新排序。sort 不识别时按 leadCount DESC（默认）。
+   * 返回 { traffic, efficiency, leadEfficiency } 三个榜单，但三个榜单共用同一组账号，
+   * 排序顺序也由 sort 决定 —— 这样用户在前端选 sort 之后，三个 tab 顺序一致。
+   */
+  private sortRankings(accounts: any[], sort?: string): {
+    traffic: any[];
+    efficiency: any[];
+    leadEfficiency: any[];
+  } {
+    const key = (a: any): number => {
+      switch (sort) {
+        case 'postCount':
+          return a.postCount;
+        case 'traffic':
+          return a.traffic;
+        case 'efficiency':
+          return a.efficiency;
+        case 'leadEfficiency':
+          return a.leadEfficiency;
+        case 'leadCount':
+        default:
+          return a.leadCount;
+      }
+    };
+    const sorted = [...accounts].sort((a, b) => key(b) - key(a));
+    return { traffic: sorted, efficiency: sorted, leadEfficiency: sorted };
   }
 
   /**
@@ -880,7 +906,7 @@ export class DashboardService {
    */
   async getAllAccountsTimeSeries(
     employeeId: string,
-    options: { days?: number; from?: string; to?: string; platform?: string } = {},
+    options: { days?: number; from?: string; to?: string; platform?: string; sort?: string } = {},
   ): Promise<any> {
     if (!employeeId) {
       return { accounts: [], items: [], from: '', to: '' };
@@ -894,10 +920,10 @@ export class DashboardService {
     const from = options.from || fromDate.toISOString().slice(0, 10);
     const to = options.to || today;
 
-    const cacheKey = `dashboard:all-accounts-timeseries:${employeeId}:${options.platform || ''}:${from}:${to}`;
+    const cacheKey = `dashboard:all-accounts-timeseries:${employeeId}:${options.platform || ''}:${from}:${to}:${options.sort || 'leadCount'}`;
     const cached = this.cache.get<any>(cacheKey);
     if (cached !== undefined) return cached;
-    const result = await this.computeAllAccountsTimeSeries(employeeId, from, to, options.platform);
+    const result = await this.computeAllAccountsTimeSeries(employeeId, from, to, options.platform, options.sort);
     this.cache.set(cacheKey, result, CACHE_TTL_MS);
     return result;
   }
@@ -907,18 +933,40 @@ export class DashboardService {
     from: string,
     to: string,
     platform?: string,
+    sort?: string,
   ): Promise<any> {
-    // 查员工名下账号
     const accountWhere = platform ? 'AND a.platform = ?' : '';
-    const accountParams: any[] = platform ? [employeeId, platform] : [employeeId];
-    const accountRows = await this.accountRepo.query(
+    const accountParams: any[] = platform
+      ? [from, to, from, to, employeeId, platform]
+      : [from, to, from, to, employeeId];
+    const accountRows: any = await this.accountRepo.query(
       `SELECT a.id, a.account_name AS accountName, a.platform, a.posting_plan AS postingPlan,
-              a.persona, a.positioning
+              a.persona, a.positioning,
+              COALESCE(p_agg.has_recent_posts, 0) AS has_recent_posts,
+              COALESCE(p_agg.post_count, 0) AS post_count,
+              COALESCE(p_agg.total_traffic, 0) AS total_traffic,
+              COALESCE(l_agg.total_leads, 0) AS total_leads
          FROM accounts a
+         LEFT JOIN (
+           SELECT account_id,
+                  COUNT(*) AS post_count,
+                  (CASE WHEN COUNT(*) > 0 THEN 1 ELSE 0 END) AS has_recent_posts,
+                  COALESCE(SUM(likes + comments + favorites), 0) AS total_traffic
+             FROM posts
+            WHERE published_at BETWEEN ? AND ?
+            GROUP BY account_id
+         ) p_agg ON p_agg.account_id COLLATE utf8mb4_unicode_ci = a.id COLLATE utf8mb4_unicode_ci
+         LEFT JOIN (
+           SELECT account_id, COUNT(*) AS total_leads
+             FROM leads
+            WHERE created_at BETWEEN ? AND ?
+            GROUP BY account_id
+         ) l_agg ON l_agg.account_id COLLATE utf8mb4_unicode_ci = a.id COLLATE utf8mb4_unicode_ci
         WHERE a.employee_id = ? ${accountWhere}`,
       accountParams,
     );
-    const accounts: any[] = accountRows || [];
+    const accounts: any[] = Array.isArray(accountRows) ? accountRows : [];
+    this.applyAccountSort(accounts, sort);
 
     if (accounts.length === 0) {
       return { accounts: [], items: [], from, to };
@@ -930,6 +978,41 @@ export class DashboardService {
     );
 
     return { accounts, items, from, to };
+  }
+
+  /**
+   * 对账号数组原地排序。sort 不识别或为 'default' 时按「作品数/获客数降序」
+   * (leadCount DESC, postCount DESC)，与 sort='leadCount' 行为一致。
+   * - leadCount     : total_leads DESC, post_count DESC
+   * - postCount     : post_count DESC, total_leads DESC
+   * - traffic       : total_traffic DESC, total_leads DESC
+   * - default       : leadCount DESC, postCount DESC
+   */
+  private applyAccountSort(accounts: any[], sort?: string): void {
+    const num = (v: unknown) => Number(v || 0);
+    const key = (a: any): number => {
+      switch (sort) {
+        case 'postCount':
+          return num(a.post_count);
+        case 'traffic':
+          return num(a.total_traffic);
+        case 'leadCount':
+        case 'default':
+        default:
+          return num(a.total_leads);
+      }
+    };
+    accounts.sort((a, b) => {
+      const diff = key(b) - key(a);
+      if (diff !== 0) return diff;
+      // 相同主键时按次级键降序（leadCount/postCount/traffic 互为次级）
+      const secondary = (sort === 'postCount') ? num(b.total_leads) - num(a.total_leads)
+        : (sort === 'traffic') ? num(b.total_leads) - num(a.total_leads)
+        : num(b.post_count) - num(a.post_count);
+      if (secondary !== 0) return secondary;
+      // 再相同按账号名升序兜底
+      return String(a.accountName || '').localeCompare(String(b.accountName || ''));
+    });
   }
 
   private async computeAccountTimeSeries(accountId: string, from: string, to: string): Promise<any> {
@@ -1158,7 +1241,7 @@ export class DashboardService {
     return {
       filters: { platform, employeeId: employeeId || '' },
       platformTrend: platformTrend.map((row: any) => ({
-        date: row.date,
+        date: formatDateOnly(row.date),
         platform: row.platform,
         postCount: Number(row.post_count || 0),
         likes: Number(row.likes || 0),
@@ -1168,7 +1251,7 @@ export class DashboardService {
         count: Number(row.count || 0),
       })),
       leadTrend: leadTrend.map((row: any) => ({
-        date: row.date,
+        date: formatDateOnly(row.date),
         platform: row.platform,
         leadCount: Number(row.lead_count || 0),
       })),

@@ -12,7 +12,6 @@ import { Employee } from '../../entities/employee.entity';
 import { ExportsController } from './exports.controller';
 import { ExportsService } from './exports.service';
 import { ExportsProcessor } from './exports.processor';
-import { NotificationsModule } from '../notifications/notifications.module';
 import { OperationLogsModule } from '../operation-logs/operation-logs.module';
 
 @Module({
@@ -28,7 +27,6 @@ import { OperationLogsModule } from '../operation-logs/operation-logs.module';
       Account,
       Employee,
     ]),
-    NotificationsModule,
     OperationLogsModule,
   ],
   controllers: [ExportsController],

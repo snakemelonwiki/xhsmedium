@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { LeadDraft } from '../../entities/lead-draft.entity';
 import { makeId } from '../../shared/utils/id-generator';
+import { encryptContentJson, decryptContentJson } from '../../shared/utils/crypto-field';
 
 interface UpsertDraftDto {
   draftType: string;
@@ -24,7 +25,7 @@ export class LeadDraftsService {
       where: { userId, draftType },
       order: { updatedAt: 'DESC' },
     });
-    return rows.map(this.mapDraft);
+    return rows.map((row) => this.mapDraft(row, /* decrypt */ true));
   }
 
   // ---- §9 / AC-10.2 客资草稿列表分页 ----
@@ -45,7 +46,7 @@ export class LeadDraftsService {
       skip: safeOffset,
     });
     return {
-      items: rows.map(this.mapDraft),
+      items: rows.map((row) => this.mapDraft(row, /* decrypt */ true)),
       total,
       limit: safeLimit,
       offset: safeOffset,
@@ -60,7 +61,10 @@ export class LeadDraftsService {
 
   async upsert(id: string, userId: string, dto: UpsertDraftDto): Promise<any> {
     const draftType = dto.draftType;
-    const contentJson = dto.contentJson || '';
+    // C4-013 修复：写入前对 contentJson 中的敏感字段加密
+    const contentJson = dto.contentJson
+      ? encryptContentJson(dto.contentJson)
+      : '';
     const imageUrls = dto.imageUrls === undefined ? null : dto.imageUrls;
 
     const existing = await this.draftRepository.findOne({ where: { id } });
@@ -86,7 +90,7 @@ export class LeadDraftsService {
     await this.pruneOldDrafts(userId, draftType);
 
     const saved = await this.draftRepository.findOne({ where: { id } });
-    return saved ? this.mapDraft(saved) : null;
+    return saved ? this.mapDraft(saved, /* decrypt */ true) : null;
   }
 
   async remove(id: string): Promise<void> {
@@ -104,12 +108,13 @@ export class LeadDraftsService {
     await this.draftRepository.delete(toDelete);
   }
 
-  private mapDraft(row: LeadDraft): any {
+  private mapDraft(row: LeadDraft, decrypt: boolean = false): any {
     return {
       id: row.id,
       userId: row.userId,
       draftType: row.draftType,
-      contentJson: row.contentJson,
+      // C4-013 修复：读取时按需解密（明文标记存在时）
+      contentJson: decrypt ? decryptContentJson(row.contentJson) : row.contentJson,
       imageUrls: row.imageUrls || null,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,

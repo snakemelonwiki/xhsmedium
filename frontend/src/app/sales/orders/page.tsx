@@ -5,21 +5,47 @@ import { Button, message } from 'antd';
 import { useRouter } from 'next/navigation';
 
 import { OrderTable } from '@/app/academic/orders/OrderTable';
-import { createExport } from '@/shared/api/exports';
+import { createExport, getExport, downloadExportUrl } from '@/shared/api/exports';
 
 export default function SalesOrdersPage() {
   const router = useRouter();
 
   async function exportMyOrders() {
+    const hide = message.loading('正在生成导出文件...', 0);
     try {
       const result = await createExport({
         exportType: 'orders',
         filter: { scope: 'mine' },
       });
-      message.success(`导出任务已创建（#${result.id.slice(0, 8)}），完成后会通知`);
-      router.push('/academic/exports');
+
+      // 轮询导出状态，最多等待30秒
+      let attempts = 0;
+      const maxAttempts = 30;
+
+      while (attempts < maxAttempts) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        const exportTask = await getExport(result.id);
+
+        if (exportTask.status === 'completed') {
+          hide();
+          const downloadUrl = downloadExportUrl(result.id);
+          window.open(downloadUrl, '_blank');
+          message.success('导出成功，文件开始下载');
+          return;
+        } else if (exportTask.status === 'failed') {
+          hide();
+          message.error('导出失败，请重试');
+          return;
+        }
+
+        attempts++;
+      }
+
+      hide();
+      message.warning('导出任务进行中，请稍后在导出记录中下载');
     } catch (err) {
-      message.error(err instanceof Error ? err.message : '导出任务创建失败');
+      hide();
+      message.error(err instanceof Error ? err.message : '导出失败');
     }
   }
 

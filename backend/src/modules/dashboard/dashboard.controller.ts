@@ -108,10 +108,11 @@ export class DashboardController {
     @Query('period') period?: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
+    @Query('sort') sort?: string,
   ) {
     const employeeId = await this.resolveSessionEmployeeId(req);
     if (!employeeId) return res.status(401).json({ message: '未登录或未关联员工' });
-    const data = await this.dashboardService.getPersonalRankings(employeeId, { platform, period, from, to });
+    const data = await this.dashboardService.getPersonalRankings(employeeId, { platform, period, from, to, sort });
     return res.json(data);
   }
 
@@ -124,9 +125,10 @@ export class DashboardController {
     @Query('period') period?: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
+    @Query('sort') sort?: string,
   ) {
     if (!this.isSupervisorRole(req)) return res.status(403).json({ message: 'forbidden' });
-    const data = await this.dashboardService.getPersonalRankings(id, { platform, period, from, to });
+    const data = await this.dashboardService.getPersonalRankings(id, { platform, period, from, to, sort });
     return res.json(data);
   }
 
@@ -274,6 +276,7 @@ export class DashboardController {
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('platform') platform?: string,
+    @Query('sort') sort?: string,
   ) {
     const employeeId = await this.resolveSessionEmployeeId(req);
     if (!employeeId) return res.status(401).json({ message: '未登录或未关联员工' });
@@ -282,6 +285,7 @@ export class DashboardController {
       from,
       to,
       platform: platform || undefined,
+      sort,
     });
     return res.json(data);
   }

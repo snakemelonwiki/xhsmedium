@@ -6,7 +6,7 @@ import type { ColumnsType } from 'antd/es/table';
 import { useEffect, useState } from 'react';
 
 import { apiClient } from '@/shared/api/apiClient';
-import { createExport } from '@/shared/api/exports';
+import { createExport, downloadExportUrl, getExport } from '@/shared/api/exports';
 
 import { buildRankingExportFilter } from './exportFilter';
 
@@ -90,11 +90,31 @@ export default function AdminRankingsPage() {
 
   async function handleExport() {
     setExporting(true);
+    const hide = message.loading('正在生成导出文件...', 0);
     try {
-      await createExport({ exportType: 'rankings', filter: buildRankingExportFilter({ type, period, platform }) });
-      message.success('已创建排行榜导出任务，可到导出中心下载');
+      const result = await createExport({ exportType: 'rankings', filter: buildRankingExportFilter({ type, period, platform }) });
+      let attempts = 0;
+      const maxAttempts = 30;
+      while (attempts < maxAttempts) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        const exportTask = await getExport(result.id);
+        if (exportTask.status === 'completed') {
+          hide();
+          window.open(downloadExportUrl(result.id), '_blank');
+          message.success('导出成功，文件开始下载');
+          return;
+        } else if (exportTask.status === 'failed') {
+          hide();
+          message.error('导出失败，请重试');
+          return;
+        }
+        attempts++;
+      }
+      hide();
+      message.warning('导出超时，请到导出中心查看');
     } catch (err) {
-      message.error(err instanceof Error ? err.message : '排行榜导出创建失败');
+      hide();
+      message.error(err instanceof Error ? err.message : '排行榜导出失败');
     } finally {
       setExporting(false);
     }

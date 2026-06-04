@@ -77,12 +77,20 @@ export class AuthController {
   }
 
   @Post('logout')
-  logout(@Req() req: Request, @Res() res: Response) {
+  async logout(@Req() req: Request, @Res() res: Response) {
     const token = req.headers.authorization?.replace('Bearer ', '');
     // 用户 ID 优先从 session / 解析 token 拿
     const userId = getSessionUserId(req) || '';
+    let revoked = false;
     if (token) {
-      this.authService.logout(token);
+      try {
+        const result = await this.authService.logout(token, userId);
+        revoked = result?.revoked === true;
+      } catch (err: any) {
+        // 写撤销表失败不应阻塞登出响应（用户体感是「已登出」），但打 ERROR
+        // eslint-disable-next-line no-console
+        console.error('[auth] logout failed', err?.message || err);
+      }
     }
     // 写操作日志：登出（best-effort）
     void this.operationLogs
@@ -91,13 +99,13 @@ export class AuthController {
         action: OPERATION_LOG_ACTIONS.LOGOUT,
         targetType: OPERATION_LOG_TARGET_TYPES.USER,
         targetId: userId,
-        detail: stringifyDetail({ token: token ? 'present' : 'absent' }),
+        detail: stringifyDetail({ token: token ? 'present' : 'absent', revoked }),
         ip: parseIp(req),
       })
       .catch((logErr: any) => {
         // eslint-disable-next-line no-console
         console.error('[auth] operation log failed', logErr?.message || logErr);
       });
-    return res.json({ ok: true });
+    return res.json({ ok: true, revoked });
   }
 }

@@ -12,7 +12,6 @@ const DOMAIN_EVENT_NAMES = [
   "order.created",
   "order.updated",
   "order.abnormal",
-  "export.finished",
   "lead.deal_done",
   "supervisor.suggestion"
 ];
