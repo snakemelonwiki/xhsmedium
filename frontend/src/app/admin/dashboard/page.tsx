@@ -2,6 +2,7 @@
 
 import {
   BellOutlined,
+  CheckOutlined,
   DashboardOutlined,
   ExclamationCircleOutlined,
   FileSearchOutlined,
@@ -13,13 +14,34 @@ import {
   UserSwitchOutlined,
   WarningOutlined,
 } from '@ant-design/icons';
-import { Badge, Card, Col, Row, Segmented, Skeleton, Space, Statistic, Tag, Typography } from 'antd';
+import {
+  Badge,
+  Button,
+  Card,
+  Col,
+  Dropdown,
+  Empty,
+  List,
+  Row,
+  Segmented,
+  Skeleton,
+  Space,
+  Statistic,
+  Tag,
+  Typography,
+  message as antdMessage,
+} from 'antd';
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 
 import { getSupervisorOverview, type SupervisorOverview } from '@/shared/api/admin';
+import { listNotifications } from '@/shared/api/notifications';
+import { getReminderUnreadCount, markReminderRead } from '@/shared/api/reminders';
 import { readAuthenticatedUser } from '@/shared/auth/auth';
 import { useNotifications } from '@/shared/contexts/NotificationContext';
+import { useNotificationSocket } from '@/shared/hooks/useNotificationSocket';
+import type { NotificationItem } from '@/shared/types/notifications';
+import { formatDateTime } from '@/shared/utils/date-format';
 
 type Period = 'today' | 'week' | 'month';
 
@@ -140,6 +162,22 @@ export default function AdminDashboardPage() {
   const { unreadCount } = useNotifications();
   const user = typeof window === 'undefined' ? undefined : readAuthenticatedUser();
 
+  // v1.3 SUP-3: 主管端顶部"消息中心"（跨端口提醒）
+  // - GET /api/reminders/unread-count → 红点 + 未读数
+  // - /api/notifications?type=reminder → 列表
+  // - PATCH /api/reminders/:id/read → 标记已读
+  // - Socket.IO 监听 reminder.created（与 notification.created 复用同一通道），
+  //   收到推送后立即刷新计数与列表
+  const token =
+    typeof window === 'undefined' ? null : window.localStorage.getItem('xhsmedium.token');
+  const { onMessage: onSocketMessage } = useNotificationSocket({
+    token,
+    userId: user?.id ?? null,
+  });
+  const [reminderUnread, setReminderUnread] = useState(0);
+  const [reminderItems, setReminderItems] = useState<NotificationItem[]>([]);
+  const [reminderLoading, setReminderLoading] = useState(false);
+
   const fetchOverview = useCallback((p: Period) => {
     setLoading(true);
     getSupervisorOverview(p)
@@ -148,9 +186,138 @@ export default function AdminDashboardPage() {
       .finally(() => setLoading(false));
   }, []);
 
+  // 拉取提醒未读数 + 列表
+  const loadReminders = useCallback(async () => {
+    setReminderLoading(true);
+    try {
+      const [unread, list] = await Promise.all([
+        getReminderUnreadCount().catch(() => ({ unreadCount: 0 })),
+        listNotifications({ pageSize: 8, type: 'reminder' }).catch(() => ({ items: [] as NotificationItem[] })),
+      ]);
+      setReminderUnread(Number(unread.unreadCount || 0));
+      setReminderItems(Array.isArray(list.items) ? list.items : []);
+    } finally {
+      setReminderLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     fetchOverview(period);
   }, [period, fetchOverview]);
+
+  useEffect(() => {
+    void loadReminders();
+  }, [loadReminders]);
+
+  // 监听 Socket.IO 推送：reminder.created 事件（新提醒到达时刷新）
+  useEffect(() => {
+    const unsubscribe = onSocketMessage((raw) => {
+      const type =
+        String(
+          (raw as any).typeCode ??
+            (raw as any).notificationType ??
+            (raw as any).type ??
+            '',
+        ).toLowerCase();
+      if (type === 'reminder') {
+        void loadReminders();
+      }
+    });
+    return unsubscribe;
+  }, [onSocketMessage, loadReminders]);
+
+  // 标记单条已读
+  const handleMarkReminderRead = useCallback(
+    async (id: string | number) => {
+      try {
+        await markReminderRead(String(id));
+        setReminderItems((prev) =>
+          prev.map((it) => (String(it.id) === String(id) ? { ...it, unread: false } : it)),
+        );
+        setReminderUnread((n) => Math.max(0, n - 1));
+      } catch (err) {
+        antdMessage.warning(err instanceof Error ? err.message : '标记已读失败');
+      }
+    },
+    [],
+  );
+
+  // 消息中心下拉内容
+  const reminderDropdown = (
+    <div
+      style={{
+        background: '#fff',
+        borderRadius: 8,
+        boxShadow: '0 6px 16px rgba(0,0,0,0.12)',
+        padding: 12,
+        width: 360,
+        maxHeight: 420,
+        overflow: 'auto',
+      }}
+    >
+      <Space
+        style={{ width: '100%', justifyContent: 'space-between', marginBottom: 8 }}
+        align="center"
+      >
+        <Typography.Text strong>消息中心 - 跨端口提醒</Typography.Text>
+        <Badge count={reminderUnread} size="small" overflowCount={99}>
+          <Tag color={reminderUnread > 0 ? 'cyan' : 'default'}>未读 {reminderUnread}</Tag>
+        </Badge>
+      </Space>
+      {reminderLoading && reminderItems.length === 0 ? (
+        <Skeleton active paragraph={{ rows: 3 }} />
+      ) : reminderItems.length === 0 ? (
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无提醒" />
+      ) : (
+        <List
+          size="small"
+          dataSource={reminderItems}
+          renderItem={(item) => (
+            <List.Item
+              style={{ padding: '6px 0' }}
+              actions={
+                item.unread
+                  ? [
+                      <Button
+                        key="read"
+                        type="link"
+                        size="small"
+                        icon={<CheckOutlined />}
+                        onClick={() => void handleMarkReminderRead(item.id)}
+                      >
+                        标记已读
+                      </Button>,
+                    ]
+                  : []
+              }
+            >
+              <Space direction="vertical" size={2} style={{ width: '100%' }}>
+                <Space size={4} align="center">
+                  {item.unread ? <Badge status="processing" /> : null}
+                  <Typography.Text strong={Boolean(item.unread)}>{item.title}</Typography.Text>
+                </Space>
+                {item.content ? (
+                  <Typography.Text type="secondary" ellipsis={{ tooltip: item.content }}>
+                    {item.content}
+                  </Typography.Text>
+                ) : null}
+                <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+                  {formatDateTime(item.createdAt)}
+                </Typography.Text>
+              </Space>
+            </List.Item>
+          )}
+        />
+      )}
+      <div style={{ marginTop: 8, textAlign: 'right' }}>
+        <Link href="/admin/messages">
+          <Button type="link" size="small">
+            查看全部 <RightOutlined />
+          </Button>
+        </Link>
+      </div>
+    </div>
+  );
 
   return (
     <Space direction="vertical" size={16} className="page-stack">
@@ -175,6 +342,22 @@ export default function AdminDashboardPage() {
           <Tag color="purple" icon={<TeamOutlined />}>
             {user?.name ?? '主管'}
           </Tag>
+          {/* v1.3 SUP-3: 顶部消息中心 — 红点为 reminder 未读数；点击展开提醒列表并支持标记已读 */}
+          <Dropdown
+            popupRender={() => reminderDropdown}
+            trigger={['click']}
+            placement="bottomRight"
+          >
+            <Badge count={reminderUnread} offset={[-2, 6]} overflowCount={99}>
+              <Tag
+                color={reminderUnread > 0 ? 'cyan' : 'default'}
+                icon={<BellOutlined />}
+                style={{ cursor: 'pointer' }}
+              >
+                消息中心
+              </Tag>
+            </Badge>
+          </Dropdown>
           <Link href="/admin/messages">
             <Badge count={unreadCount} offset={[-2, 6]} overflowCount={99}>
               <Tag color={unreadCount > 0 ? 'red' : 'default'} icon={<BellOutlined />}>

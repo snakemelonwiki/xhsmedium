@@ -1,6 +1,13 @@
 'use client';
 
-import { FilterOutlined, ReloadOutlined } from '@ant-design/icons';
+import {
+  EditOutlined,
+  FileTextOutlined,
+  FireOutlined,
+  ReloadOutlined,
+  SearchOutlined,
+  TagOutlined,
+} from '@ant-design/icons';
 import {
   Alert,
   Button,
@@ -10,37 +17,44 @@ import {
   Empty,
   Form,
   Input,
+  InputNumber,
   Modal,
   Pagination,
   Select,
   Space,
   Spin,
+  Table,
+  Tag,
+  Tooltip,
   Typography,
   message,
 } from 'antd';
+import type { TableColumnsType } from 'antd';
 import dayjs, { type Dayjs } from 'dayjs';
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 
-import { listAdminEmployees } from '@/shared/api/admin';
-import { listSalesLeads, updateLeadBoard } from '@/shared/api/leads';
-import { LeadCard } from '@/shared/components/leads';
 import {
-  LeadStatus,
+  listSalesLeads,
+  updateLeadDealStatus,
+  updateLeadIntentionLevel,
+  type CloseLeadDealPayload,
+} from '@/shared/api/leads';
+import { ReminderButton } from '@/shared/components/notifications/ReminderButton';
+import { StatusTag } from '@/shared/components/status';
+import { formatDateTime } from '@/shared/utils/date-format';
+import {
   LeadAddStatus,
   LeadProcessStatus,
+  LeadStatus,
 } from '@/shared/constants/lead-status-enums';
-import type { AdminEmployee } from '@/shared/types/admin';
-import type { SalesLead } from '@/shared/types/leads';
+import type { DealStatusCode, IntentionLevelCode, SalesLead } from '@/shared/types/leads';
 
 const { RangePicker } = DatePicker;
 
 const statusOptions = [
   { label: '全部状态', value: '' },
   { label: '新分配', value: LeadStatus.ASSIGNED },
-  { label: '待添加', value: 'pending_add' },
-  { label: '未通过', value: LeadAddStatus.NOT_PASSED },
-  { label: '已通过', value: LeadAddStatus.ADDED },
   { label: '跟进中', value: LeadStatus.IN_FOLLOWUP },
   { label: '已成交', value: 'deal_done' },
   { label: '无效', value: LeadStatus.INVALID },
@@ -50,66 +64,92 @@ const addStatusOptions = [
   { label: '全部添加状态', value: '' },
   { label: '未添加', value: LeadAddStatus.NOT_ADDED },
   { label: '已申请添加', value: LeadAddStatus.APPLIED },
-  { label: '待通过', value: 'waiting_pass' },
   { label: '客户未通过', value: LeadAddStatus.NOT_PASSED },
   { label: '运营已提醒', value: LeadAddStatus.OPERATION_REMINDED },
   { label: '已添加通过', value: LeadAddStatus.ADDED },
 ];
 
-const platformOptions = [
-  { label: '全部平台', value: '' },
-  { label: '小红书', value: 'xiaohongshu' },
-  { label: '抖音', value: 'douyin' },
-  { label: '其他', value: 'other' },
-];
-
 const intentionLevelOptions = [
   { label: '全部意向度', value: '' },
-  { label: '1 - 很低', value: 1 },
-  { label: '2 - 较低', value: 2 },
-  { label: '3 - 一般', value: 3 },
-  { label: '4 - 较高', value: 4 },
-  { label: '5 - 很高', value: 5 },
+  { label: '高', value: 'high' },
+  { label: '中', value: 'mid' },
+  { label: '低', value: 'low' },
+  { label: '无效', value: 'invalid' },
+  { label: '待判断', value: 'pending' },
 ];
+
+const dealStatusOptions: { label: string; value: DealStatusCode }[] = [
+  { label: '未成交', value: 'not_deal' },
+  { label: '待成交', value: 'deal_pending' },
+  { label: '已成交', value: 'deal_done' },
+  { label: '已退款', value: 'refunded' },
+  { label: '无效', value: 'invalid' },
+];
+
+const dealStatusMeta: Record<DealStatusCode, { label: string; color: string }> = {
+  not_deal: { label: '未成交', color: 'default' },
+  deal_pending: { label: '待成交', color: 'orange' },
+  deal_done: { label: '已成交', color: 'green' },
+  refunded: { label: '已退款', color: 'magenta' },
+  invalid: { label: '无效', color: 'red' },
+};
+
+const intentionLevelMeta: Record<IntentionLevelCode, { label: string; color: string }> = {
+  high: { label: '高', color: 'red' },
+  mid: { label: '中', color: 'orange' },
+  low: { label: '低', color: 'blue' },
+  invalid: { label: '无效', color: 'default' },
+  pending: { label: '待判断', color: 'default' },
+};
 
 type Filters = {
   status: string;
   addStatus: string;
-  platform: string;
-  sourceAccount: string;
-  operatorId: string;
   intentionLevel: string;
   startDate: string;
   endDate: string;
-  nextFollowStart: string;
-  nextFollowEnd: string;
+  search: string;
 };
 
 const EMPTY_FILTERS: Filters = {
   status: '',
   addStatus: '',
-  platform: '',
-  sourceAccount: '',
-  operatorId: '',
   intentionLevel: '',
   startDate: '',
   endDate: '',
-  nextFollowStart: '',
-  nextFollowEnd: '',
+  search: '',
 };
 
-type AdvancedFormValues = {
-  platform?: string;
-  sourceAccount?: string;
-  operatorId?: string;
-  intentionLevel?: string;
-  dateRange?: (Dayjs | null)[] | null;
-  nextFollowRange?: (Dayjs | null)[] | null;
+type FollowFormValues = {
+  clientDegree?: string;
+  clientMajorResearch?: string;
+  clientTimeRequirement?: string;
+  objectionPoint?: string;
+  intentionLevel?: IntentionLevelCode;
+  followAction?: string;
+  content?: string;
+  nextFollowTime?: Dayjs | null;
 };
 
-function formatDayjs(value: Dayjs | null | undefined): string {
-  if (!value) return '';
-  return value.format('YYYY-MM-DD');
+type DealStatusFormValues = {
+  dealStatus: DealStatusCode;
+  dealAmount?: number | string | null;
+};
+
+type IntentionFormValues = {
+  intentionLevel: IntentionLevelCode;
+};
+
+function isTodayNotAdded(lead: SalesLead): boolean {
+  if (lead.addStatus !== LeadAddStatus.NOT_ADDED) return false;
+  if (!lead.assignedAt) return false;
+  const today = new Date();
+  const assigned = new Date(lead.assignedAt);
+  return (
+    assigned.getFullYear() === today.getFullYear() &&
+    assigned.getMonth() === today.getMonth() &&
+    assigned.getDate() === today.getDate()
+  );
 }
 
 export default function SalesLeadsPage() {
@@ -122,34 +162,20 @@ export default function SalesLeadsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const [employees, setEmployees] = useState<AdminEmployee[]>([]);
-  const [employeesLoading, setEmployeesLoading] = useState(false);
+  // 行内操作
+  const [followOpen, setFollowOpen] = useState<SalesLead | null>(null);
+  const [dealStatusOpen, setDealStatusOpen] = useState<SalesLead | null>(null);
+  const [intentionOpen, setIntentionOpen] = useState<SalesLead | null>(null);
+  const [closeDealOpen, setCloseDealOpen] = useState<SalesLead | null>(null);
 
-  const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [advancedForm] = Form.useForm();
+  const [followForm] = Form.useForm<FollowFormValues>();
+  const [dealStatusForm] = Form.useForm<DealStatusFormValues>();
+  const [intentionForm] = Form.useForm<IntentionFormValues>();
+  const [closeDealForm] = Form.useForm<CloseLeadDealPayload & { clientRequirementNote?: string }>();
 
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [batchLoading, setBatchLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
-  async function loadEmployees() {
-    setEmployeesLoading(true);
-    try {
-      const result = await listAdminEmployees({ page: 1, pageSize: 200, limit: 200 });
-      setEmployees(result.items);
-    } catch (err) {
-      // 拉取员工列表失败不阻塞主流程
-      // eslint-disable-next-line no-console
-      console.warn('[sales-leads] load employees failed', err);
-    } finally {
-      setEmployeesLoading(false);
-    }
-  }
-
-  async function loadLeads(
-    nextPage = page,
-    nextPageSize = pageSize,
-    nextFilters: Filters = filters,
-  ) {
+  async function loadLeads(nextPage = page, nextPageSize = pageSize, nextFilters: Filters = filters) {
     setLoading(true);
     setError('');
     try {
@@ -162,8 +188,6 @@ export default function SalesLeadsPage() {
       setTotal(result.total);
       setPage(result.page);
       setPageSize(result.pageSize);
-      // 切换条件后清掉选中的行
-      setSelectedIds([]);
     } catch (err) {
       const text = err instanceof Error ? err.message : '客资列表加载失败';
       setError(text);
@@ -174,201 +198,356 @@ export default function SalesLeadsPage() {
   }
 
   useEffect(() => {
-    loadEmployees();
-  }, []);
-
-  useEffect(() => {
     loadLeads(1, pageSize, filters);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    filters.status,
-    filters.addStatus,
-    filters.platform,
-    filters.sourceAccount,
-    filters.operatorId,
-    filters.intentionLevel,
-    filters.startDate,
-    filters.endDate,
-    filters.nextFollowStart,
-    filters.nextFollowEnd,
-  ]);
+  }, [filters.status, filters.addStatus, filters.intentionLevel, filters.startDate, filters.endDate, filters.search]);
 
-  const employeeOptions = useMemo(
-    () => [
-      { label: '全部运营', value: '' },
-      ...employees.map((emp) => ({ label: emp.name, value: emp.id })),
-    ],
-    [employees],
-  );
+  const sortedItems = useMemo(() => {
+    // 今日未添加置顶
+    return [...items].sort((a, b) => {
+      const aT = isTodayNotAdded(a) ? 1 : 0;
+      const bT = isTodayNotAdded(b) ? 1 : 0;
+      if (aT !== bT) return bT - aT;
+      // 然后按更新时间倒序
+      const aTime = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+      const bTime = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+      return bTime - aTime;
+    });
+  }, [items]);
 
-  const selectedLeads = useMemo(
-    () => items.filter((lead) => selectedIds.includes(String(lead.id))),
-    [items, selectedIds],
-  );
-
-  function openAdvanced() {
-    const values: AdvancedFormValues = {
-      platform: filters.platform || undefined,
-      sourceAccount: filters.sourceAccount || undefined,
-      operatorId: filters.operatorId || undefined,
-      intentionLevel: filters.intentionLevel || undefined,
-      dateRange:
-        filters.startDate && filters.endDate
-          ? [dayjs(filters.startDate), dayjs(filters.endDate)]
-          : null,
-      nextFollowRange:
-        filters.nextFollowStart && filters.nextFollowEnd
-          ? [dayjs(filters.nextFollowStart), dayjs(filters.nextFollowEnd)]
-          : null,
-    };
-    advancedForm.setFieldsValue(values);
-    setAdvancedOpen(true);
-  }
-
-  function applyAdvanced() {
-    const values = advancedForm.getFieldsValue() as AdvancedFormValues;
-    setFilters((prev) => ({
-      ...prev,
-      platform: values.platform ?? '',
-      sourceAccount: values.sourceAccount?.trim() ?? '',
-      operatorId: values.operatorId ?? '',
-      intentionLevel: values.intentionLevel ? String(values.intentionLevel) : '',
-      startDate: values.dateRange?.[0] ? formatDayjs(values.dateRange[0]) : '',
-      endDate: values.dateRange?.[1] ? formatDayjs(values.dateRange[1]) : '',
-      nextFollowStart: values.nextFollowRange?.[0] ? formatDayjs(values.nextFollowRange[0]) : '',
-      nextFollowEnd: values.nextFollowRange?.[1] ? formatDayjs(values.nextFollowRange[1]) : '',
-    }));
-    setAdvancedOpen(false);
-  }
-
-  function resetAdvanced() {
-    advancedForm.resetFields();
-    setFilters((prev) => ({
-      ...prev,
-      platform: '',
-      sourceAccount: '',
-      operatorId: '',
-      intentionLevel: '',
-      startDate: '',
-      endDate: '',
-      nextFollowStart: '',
-      nextFollowEnd: '',
-    }));
-    setAdvancedOpen(false);
-  }
-
-  function toggleSelectAll(checked: boolean) {
-    if (checked) {
-      setSelectedIds(items.map((lead) => String(lead.id)));
-    } else {
-      setSelectedIds([]);
-    }
-  }
-
-  function toggleSelectOne(id: string | number, checked: boolean) {
-    const key = String(id);
-    setSelectedIds((prev) => {
-      if (checked) return prev.includes(key) ? prev : [...prev, key];
-      return prev.filter((item) => item !== key);
+  function openFollow(lead: SalesLead) {
+    setFollowOpen(lead);
+    followForm.setFieldsValue({
+      clientDegree: lead.clientDegree || undefined,
+      clientMajorResearch: lead.clientMajorResearch || undefined,
+      clientTimeRequirement: lead.clientTimeRequirement || undefined,
+      objectionPoint: lead.objectionPoint || undefined,
+      intentionLevel: (lead.intentionLevel as IntentionLevelCode) || undefined,
+      followAction: lead.followAction || undefined,
+      content: undefined,
+      nextFollowTime: lead.nextFollowAt ? dayjs(lead.nextFollowAt) : null,
     });
   }
 
-  async function batchMarkRead() {
-    if (selectedLeads.length === 0) {
-      message.warning('请先选择客资');
-      return;
-    }
-    setBatchLoading(true);
-    let success = 0;
-    let failed = 0;
-    await Promise.all(
-      selectedLeads.map(async (lead) => {
-        try {
-          await updateLeadBoard(String(lead.id), { isRead: true });
-          success += 1;
-        } catch {
-          failed += 1;
-        }
-      }),
-    );
-    setBatchLoading(false);
-    if (success > 0) {
-      message.success(`已标记 ${success} 条客资为已读${failed ? `，${failed} 条失败` : ''}`);
-      loadLeads(page, pageSize, filters);
-    } else {
-      message.error('批量标记已读失败');
-    }
-  }
-
-  async function batchMarkCommunicating() {
-    if (selectedLeads.length === 0) {
-      message.warning('请先选择客资');
-      return;
-    }
-    setBatchLoading(true);
-    let success = 0;
-    let failed = 0;
-    await Promise.all(
-      selectedLeads.map(async (lead) => {
-        try {
-          await updateLeadBoard(String(lead.id), {
-            processStatus: LeadProcessStatus.COMMUNICATING,
-          });
-          success += 1;
-        } catch {
-          failed += 1;
-        }
-      }),
-    );
-    setBatchLoading(false);
-    if (success > 0) {
-      message.success(
-        `已将 ${success} 条客资标记为沟通中${failed ? `，${failed} 条失败` : ''}`,
+  async function submitFollow() {
+    if (!followOpen) return;
+    const values = await followForm.validateFields().catch(() => null);
+    if (!values) return;
+    setSubmitting(true);
+    try {
+      // 先写跟进记录（同时回写 leads 字段）
+      await import('@/shared/api/leads').then(({ createLeadFollowRecord }) =>
+        createLeadFollowRecord(String(followOpen.id), {
+          content: values.content || '',
+          clientDegree: values.clientDegree || null,
+          clientMajorResearch: values.clientMajorResearch || null,
+          clientTimeRequirement: values.clientTimeRequirement || null,
+          objectionPoint: values.objectionPoint || null,
+          followAction: values.followAction || null,
+          followActionAt: new Date().toISOString(),
+          intentionLevel: values.intentionLevel || followOpen.intentionLevel,
+          nextFollowTime: values.nextFollowTime ? values.nextFollowTime.toISOString() : undefined,
+        }),
       );
-      loadLeads(page, pageSize, filters);
-    } else {
-      message.error('批量进入待跟进失败');
+      message.success('跟进记录已保存');
+      setFollowOpen(null);
+      followForm.resetFields();
+      await loadLeads();
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '跟进保存失败');
+    } finally {
+      setSubmitting(false);
     }
   }
 
-  function clearSelection() {
-    setSelectedIds([]);
+  function openDealStatus(lead: SalesLead) {
+    setDealStatusOpen(lead);
+    dealStatusForm.setFieldsValue({
+      dealStatus: (lead.dealStatus as DealStatusCode) || 'not_deal',
+      dealAmount: lead.dealAmount || undefined,
+    });
   }
 
-  const advancedActiveCount = [
-    filters.platform,
-    filters.sourceAccount,
-    filters.operatorId,
-    filters.intentionLevel,
-    filters.startDate,
-    filters.endDate,
-    filters.nextFollowStart,
-    filters.nextFollowEnd,
-  ].filter(Boolean).length;
+  async function submitDealStatus() {
+    if (!dealStatusOpen) return;
+    const values = await dealStatusForm.validateFields().catch(() => null);
+    if (!values) return;
+    setSubmitting(true);
+    try {
+      await updateLeadDealStatus(String(dealStatusOpen.id), {
+        dealStatus: values.dealStatus,
+        dealAmount: values.dealAmount ?? null,
+      });
+      message.success('成交状态已更新');
+      setDealStatusOpen(null);
+      dealStatusForm.resetFields();
+      await loadLeads();
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '更新成交状态失败');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  function openIntention(lead: SalesLead) {
+    setIntentionOpen(lead);
+    intentionForm.setFieldsValue({
+      intentionLevel: (lead.intentionLevel as IntentionLevelCode) || 'pending',
+    });
+  }
+
+  async function submitIntention() {
+    if (!intentionOpen) return;
+    const values = await intentionForm.validateFields().catch(() => null);
+    if (!values) return;
+    setSubmitting(true);
+    try {
+      await updateLeadIntentionLevel(String(intentionOpen.id), {
+        intentionLevel: values.intentionLevel,
+      });
+      message.success('意向程度已更新');
+      setIntentionOpen(null);
+      intentionForm.resetFields();
+      await loadLeads();
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '更新意向程度失败');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  function openCloseDeal(lead: SalesLead) {
+    setCloseDealOpen(lead);
+    closeDealForm.resetFields();
+  }
+
+  async function submitCloseDeal() {
+    if (!closeDealOpen) return;
+    const values = await closeDealForm.validateFields().catch(() => null);
+    if (!values) return;
+    setSubmitting(true);
+    try {
+      const { closeLeadDeal } = await import('@/shared/api/leads');
+      const result = await closeLeadDeal(String(closeDealOpen.id), values);
+      message.success(`已标记成交，订单号 ${result.orderCode || result.orderId || ''}`);
+      setCloseDealOpen(null);
+      closeDealForm.resetFields();
+      await loadLeads();
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '成交提交失败');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  const columns = useMemo<TableColumnsType<SalesLead>>(() => [
+    {
+      title: '客户',
+      key: 'customer',
+      width: 200,
+      fixed: 'left',
+      render: (_v, lead) => (
+        <Space direction="vertical" size={0}>
+          <Space size={6}>
+            <Typography.Text strong>{lead.customerName}</Typography.Text>
+            {isTodayNotAdded(lead) ? (
+              <Tag color="red" icon={<FireOutlined />}>今日未添加</Tag>
+            ) : null}
+          </Space>
+          <Typography.Text type="secondary">{lead.contact || '暂无联系方式'}</Typography.Text>
+        </Space>
+      ),
+    },
+    {
+      title: 'IP / 地区',
+      dataIndex: 'ip',
+      key: 'ip',
+      width: 120,
+      render: (value?: string) => value || '-',
+    },
+    {
+      title: '客户学历',
+      key: 'clientDegree',
+      width: 100,
+      render: (_v, lead) => lead.clientDegree || '-',
+    },
+    {
+      title: '客户需求',
+      key: 'requirement',
+      width: 200,
+      ellipsis: true,
+      render: (_v, lead) => lead.requirementNote || lead.note || '-',
+    },
+    {
+      title: '专业/研究方向',
+      key: 'major',
+      width: 180,
+      ellipsis: true,
+      render: (_v, lead) => lead.clientMajorResearch || '-',
+    },
+    {
+      title: '时间要求',
+      key: 'timeRequirement',
+      width: 140,
+      ellipsis: true,
+      render: (_v, lead) => lead.clientTimeRequirement || '-',
+    },
+    {
+      title: '异议点',
+      key: 'objectionPoint',
+      width: 160,
+      ellipsis: true,
+      render: (_v, lead) => lead.objectionPoint || '-',
+    },
+    {
+      title: '意向程度',
+      key: 'intentionLevel',
+      width: 90,
+      render: (_v, lead) => {
+        const code = (lead.intentionLevel as IntentionLevelCode) || 'pending';
+        const meta = intentionLevelMeta[code] || { label: code, color: 'default' };
+        return <Tag color={meta.color}>{meta.label}</Tag>;
+      },
+    },
+    {
+      title: '跟进措施',
+      key: 'followAction',
+      width: 180,
+      ellipsis: true,
+      render: (_v, lead) => lead.followAction || '-',
+    },
+    {
+      title: '下次跟进',
+      key: 'nextFollow',
+      width: 150,
+      render: (_v, lead) => lead.nextFollowAt ? formatDateTime(lead.nextFollowAt) : '-',
+    },
+    {
+      title: '最近跟进',
+      key: 'latestFollow',
+      width: 150,
+      render: (_v, lead) => lead.latestFollowAt ? formatDateTime(lead.latestFollowAt) : '-',
+    },
+    {
+      title: '添加状态',
+      key: 'addStatus',
+      width: 110,
+      render: (_v, lead) => <StatusTag kind="addStatus" code={lead.addStatus ?? LeadAddStatus.NOT_ADDED} />,
+    },
+    {
+      title: '处理状态',
+      key: 'processStatus',
+      width: 100,
+      render: (_v, lead) => <StatusTag kind="processStatus" code={lead.processStatus ?? LeadProcessStatus.NOT_CONTACTED} />,
+    },
+    {
+      title: '订单状态',
+      key: 'dealStatus',
+      width: 100,
+      render: (_v, lead) => {
+        const code = (lead.dealStatus as DealStatusCode) || 'not_deal';
+        const meta = dealStatusMeta[code] || { label: code, color: 'default' };
+        return <Tag color={meta.color}>{meta.label}</Tag>;
+      },
+    },
+    {
+      title: '操作',
+      key: 'actions',
+      width: 360,
+      fixed: 'right',
+      render: (_v, lead) => (
+        <Space size={4} wrap>
+          <Tooltip title="查看客资详情">
+            <Button size="small" onClick={() => router.push(`/sales/leads/${lead.id}`)}>详情</Button>
+          </Tooltip>
+          <Button
+            size="small"
+            type="primary"
+            ghost
+            icon={<FileTextOutlined />}
+            onClick={() => openFollow(lead)}
+          >
+            写跟进
+          </Button>
+          <Button
+            size="small"
+            icon={<EditOutlined />}
+            onClick={() => openDealStatus(lead)}
+          >
+            成交状态
+          </Button>
+          <Button
+            size="small"
+            icon={<TagOutlined />}
+            onClick={() => openIntention(lead)}
+          >
+            意向程度
+          </Button>
+          <Button
+            size="small"
+            type="primary"
+            onClick={() => openCloseDeal(lead)}
+            disabled={lead.dealStatus === 'deal_done'}
+          >
+            标记成交
+          </Button>
+          {lead.sales?.id ? (
+            <ReminderButton
+              size="small"
+              recipientId={String(lead.sales.id)}
+              recipientRole="operation"
+              relatedType="lead"
+              relatedId={String(lead.id)}
+              content={`客资 ${lead.customerName || lead.id} 需要运营协助`}
+            >
+              提醒
+            </ReminderButton>
+          ) : null}
+        </Space>
+      ),
+    },
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  ], [router]);
 
   return (
     <Space direction="vertical" size={16} className="page-stack">
       <div className="toolbar-row">
         <div>
           <Typography.Title level={2}>我的客资</Typography.Title>
-          <Typography.Paragraph type="secondary">查看分配给当前销售的客资，并进入详情继续跟进。</Typography.Paragraph>
+          <Typography.Paragraph type="secondary">
+            查看分配给当前销售的客资，进入详情继续跟进；今日未添加的客资会红标置顶。
+          </Typography.Paragraph>
         </div>
         <Space wrap>
+          <Input
+            prefix={<SearchOutlined />}
+            placeholder="按联系方式/客户姓名搜索"
+            value={filters.search}
+            onChange={(e) => setFilters((prev) => ({ ...prev, search: e.target.value }))}
+            allowClear
+            style={{ width: 220 }}
+          />
           <Select
             value={filters.status}
             options={statusOptions}
             onChange={(value) => setFilters((prev) => ({ ...prev, status: value }))}
-            style={{ width: 160 }}
+            style={{ width: 140 }}
+            placeholder="状态"
           />
           <Select
             value={filters.addStatus}
             options={addStatusOptions}
             onChange={(value) => setFilters((prev) => ({ ...prev, addStatus: value }))}
-            style={{ width: 180 }}
+            style={{ width: 150 }}
+            placeholder="添加状态"
           />
-          <Button icon={<FilterOutlined />} onClick={openAdvanced}>
-            高级筛选{advancedActiveCount > 0 ? ` (${advancedActiveCount})` : ''}
-          </Button>
+          <Select
+            value={filters.intentionLevel}
+            options={intentionLevelOptions}
+            onChange={(value) => setFilters((prev) => ({ ...prev, intentionLevel: value }))}
+            style={{ width: 130 }}
+            placeholder="意向度"
+          />
           <Button icon={<ReloadOutlined />} onClick={() => loadLeads()} loading={loading}>
             刷新
           </Button>
@@ -379,92 +558,15 @@ export default function SalesLeadsPage() {
 
       <Spin spinning={loading}>
         <Card>
-          {selectedLeads.length > 0 ? (
-            <div
-              style={{
-                display: 'flex',
-                flexWrap: 'wrap',
-                alignItems: 'center',
-                gap: 12,
-                padding: '8px 12px',
-                marginBottom: 12,
-                background: '#f0f5ff',
-                border: '1px solid #adc6ff',
-                borderRadius: 6,
-              }}
-            >
-              <Typography.Text>已选 {selectedLeads.length} 条</Typography.Text>
-              <Button
-                type="primary"
-                ghost
-                size="small"
-                loading={batchLoading}
-                onClick={batchMarkRead}
-              >
-                批量标记已读
-              </Button>
-              <Button
-                type="primary"
-                size="small"
-                loading={batchLoading}
-                onClick={batchMarkCommunicating}
-              >
-                批量进入待跟进
-              </Button>
-              <Button size="small" type="link" onClick={clearSelection}>
-                清空选择
-              </Button>
-            </div>
-          ) : null}
-
-          {items.length ? (
-            <>
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  padding: '4px 0 12px',
-                  borderBottom: '1px dashed #f0f0f0',
-                  marginBottom: 12,
-                }}
-              >
-                <Checkbox
-                  indeterminate={
-                    selectedIds.length > 0 && selectedIds.length < items.length
-                  }
-                  checked={items.length > 0 && selectedIds.length === items.length}
-                  onChange={(e) => toggleSelectAll(e.target.checked)}
-                >
-                  全选当前页
-                </Checkbox>
-              </div>
-              {items.map((lead) => {
-                const leadId = String(lead.id);
-                const checked = selectedIds.includes(leadId);
-                return (
-                  <div
-                    key={leadId}
-                    style={{
-                      position: 'relative',
-                      paddingLeft: 32,
-                      marginBottom: 12,
-                    }}
-                  >
-                    <div style={{ position: 'absolute', left: 0, top: 12 }}>
-                      <Checkbox
-                        checked={checked}
-                        onChange={(e) => toggleSelectOne(lead.id, e.target.checked)}
-                      />
-                    </div>
-                    <LeadCard
-                      lead={lead}
-                      onOpen={(item) => router.push(`/sales/leads/${item.id}`)}
-                      onCollaborate={(item) => router.push(`/sales/collaboration?leadId=${item.id}`)}
-                    />
-                  </div>
-                );
-              })}
-            </>
+          {sortedItems.length ? (
+            <Table<SalesLead>
+              rowKey="id"
+              columns={columns}
+              dataSource={sortedItems}
+              pagination={false}
+              scroll={{ x: 1700 }}
+              size="middle"
+            />
           ) : (
             <Empty description="暂无客资" />
           )}
@@ -479,50 +581,175 @@ export default function SalesLeadsPage() {
         </Card>
       </Spin>
 
+      {/* 写跟进弹窗（SA-1） */}
       <Modal
-        title="高级筛选"
-        open={advancedOpen}
-        onCancel={() => setAdvancedOpen(false)}
-        width={640}
+        title={followOpen ? `写跟进 · ${followOpen.customerName}` : '写跟进'}
+        open={Boolean(followOpen)}
+        onCancel={() => { setFollowOpen(null); followForm.resetFields(); }}
+        onOk={submitFollow}
+        confirmLoading={submitting}
+        width={720}
         destroyOnClose
-        footer={[
-          <Button key="reset" onClick={resetAdvanced}>
-            清空
-          </Button>,
-          <Button key="cancel" onClick={() => setAdvancedOpen(false)}>
-            取消
-          </Button>,
-          <Button key="apply" type="primary" onClick={applyAdvanced}>
-            应用
-          </Button>,
-        ]}
+        okText="保存跟进"
       >
-        <Form form={advancedForm} layout="vertical" preserve={false}>
-          <Form.Item label="平台" name="platform">
-            <Select options={platformOptions} placeholder="全部平台" allowClear />
+        <Form form={followForm} layout="vertical" preserve={false}>
+          <div className="form-grid">
+            <Form.Item name="clientDegree" label="客户学历">
+              <Select
+                allowClear
+                placeholder="本科/硕士/博士..."
+                options={[
+                  { label: '本科', value: '本科' },
+                  { label: '硕士', value: '硕士' },
+                  { label: '博士', value: '博士' },
+                  { label: '大专', value: '大专' },
+                  { label: '其他', value: '其他' },
+                ]}
+              />
+            </Form.Item>
+            <Form.Item name="clientMajorResearch" label="专业 / 研究方向">
+              <Input placeholder="如：计算机科学与技术 · 人工智能方向" />
+            </Form.Item>
+            <Form.Item name="clientTimeRequirement" label="时间要求">
+              <Input placeholder="如：2 个月内、年底前" />
+            </Form.Item>
+            <Form.Item name="objectionPoint" label="异议点">
+              <Input placeholder="如：价格太贵 / 导师不同意" />
+            </Form.Item>
+            <Form.Item name="intentionLevel" label="意向程度">
+              <Select
+                allowClear
+                options={[
+                  { label: '高', value: 'high' },
+                  { label: '中', value: 'mid' },
+                  { label: '低', value: 'low' },
+                  { label: '无效', value: 'invalid' },
+                  { label: '待判断', value: 'pending' },
+                ]}
+              />
+            </Form.Item>
+            <Form.Item name="followAction" label="具体跟进措施">
+              <Input placeholder="如：明天下午 3 点发修改方案" />
+            </Form.Item>
+            <Form.Item name="nextFollowTime" label="下次跟进时间" className="full-row">
+              <DatePicker showTime style={{ width: '100%' }} />
+            </Form.Item>
+            <Form.Item name="content" label="跟进备注" className="full-row" rules={[{ required: true, message: '请输入跟进内容' }]}>
+              <Input.TextArea rows={3} placeholder="记录本次沟通重点和下一步动作" />
+            </Form.Item>
+          </div>
+        </Form>
+      </Modal>
+
+      {/* 更新成交状态（SA-3） */}
+      <Modal
+        title={dealStatusOpen ? `更新成交状态 · ${dealStatusOpen.customerName}` : '更新成交状态'}
+        open={Boolean(dealStatusOpen)}
+        onCancel={() => { setDealStatusOpen(null); dealStatusForm.resetFields(); }}
+        onOk={submitDealStatus}
+        confirmLoading={submitting}
+        destroyOnClose
+      >
+        <Form form={dealStatusForm} layout="vertical" preserve={false}>
+          <Form.Item name="dealStatus" label="成交状态" rules={[{ required: true, message: '请选择成交状态' }]}>
+            <Select options={dealStatusOptions} />
           </Form.Item>
-          <Form.Item label="来源账号" name="sourceAccount">
-            <Input placeholder="按来源账号名模糊匹配" allowClear />
+          <Form.Item name="dealAmount" label="成交金额（元）">
+            <InputNumber min={0} precision={2} style={{ width: '100%' }} placeholder="0.00" />
           </Form.Item>
-          <Form.Item label="运营" name="operatorId">
+        </Form>
+      </Modal>
+
+      {/* 更新意向程度（SA-3） */}
+      <Modal
+        title={intentionOpen ? `更新意向程度 · ${intentionOpen.customerName}` : '更新意向程度'}
+        open={Boolean(intentionOpen)}
+        onCancel={() => { setIntentionOpen(null); intentionForm.resetFields(); }}
+        onOk={submitIntention}
+        confirmLoading={submitting}
+        destroyOnClose
+      >
+        <Form form={intentionForm} layout="vertical" preserve={false}>
+          <Form.Item name="intentionLevel" label="意向程度" rules={[{ required: true, message: '请选择意向程度' }]}>
             <Select
-              options={employeeOptions}
-              loading={employeesLoading}
-              placeholder="全部运营"
-              allowClear
-              showSearch
-              optionFilterProp="label"
+              options={[
+                { label: '高', value: 'high' },
+                { label: '中', value: 'mid' },
+                { label: '低', value: 'low' },
+                { label: '无效', value: 'invalid' },
+                { label: '待判断', value: 'pending' },
+              ]}
             />
           </Form.Item>
-          <Form.Item label="意向度" name="intentionLevel">
-            <Select options={intentionLevelOptions} placeholder="全部意向度" allowClear />
-          </Form.Item>
-          <Form.Item label="分配时间范围" name="dateRange">
-            <RangePicker style={{ width: '100%' }} />
-          </Form.Item>
-          <Form.Item label="下次跟进时间范围" name="nextFollowRange">
-            <RangePicker style={{ width: '100%' }} />
-          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* 成交弹窗（SA-8） */}
+      <Modal
+        title={closeDealOpen ? `标记成交 · ${closeDealOpen.customerName}` : '标记成交'}
+        open={Boolean(closeDealOpen)}
+        onCancel={() => { setCloseDealOpen(null); closeDealForm.resetFields(); }}
+        onOk={submitCloseDeal}
+        confirmLoading={submitting}
+        width={680}
+        destroyOnClose
+        okText="提交成交"
+      >
+        <Form form={closeDealForm} layout="vertical" preserve={false}>
+          <div className="form-grid">
+            <Form.Item name="clientRequirementNote" label="客户要求备注" className="full-row">
+              <Input.TextArea rows={2} placeholder="客户原始诉求、特殊情况等" />
+            </Form.Item>
+            <Form.Item name="productType" label="产品类型" rules={[{ required: true, message: '请选择产品类型' }]}>
+              <Select
+                placeholder="选择产品类型"
+                options={[
+                  { label: '专利', value: '专利' },
+                  { label: '期刊论文', value: '期刊论文' },
+                  { label: '硕士毕业论文', value: '硕士毕业论文' },
+                  { label: '博士毕业论文', value: '博士毕业论文' },
+                  { label: '基金', value: '基金' },
+                  { label: 'EI 会议', value: 'EI会议' },
+                  { label: '普刊', value: '普刊' },
+                  { label: '国际会议', value: '国际会议' },
+                ]}
+              />
+            </Form.Item>
+            <Form.Item name="serviceType" label="服务类型" rules={[{ required: true, message: '请选择服务类型' }]}>
+              <Select
+                placeholder="选择服务类型"
+                options={[
+                  { label: '辅导', value: '辅导' },
+                  { label: '全流程', value: '全流程' },
+                  { label: '润色', value: '润色' },
+                  { label: '返修', value: '返修' },
+                  { label: '代投', value: '代投' },
+                ]}
+              />
+            </Form.Item>
+            <Form.Item name="guaranteeType" label="保障类型">
+              <Select
+                allowClear
+                placeholder="选择保障类型"
+                options={[
+                  { label: '保录', value: '保录' },
+                  { label: '保盲审', value: '保盲审' },
+                  { label: '不保', value: '不保' },
+                ]}
+              />
+            </Form.Item>
+            <Form.Item name="amount" label="成交金额（元）" rules={[{ required: true, message: '请输入成交金额' }]}>
+              <InputNumber min={0} precision={2} style={{ width: '100%' }} placeholder="0.00" />
+            </Form.Item>
+            <Form.Item name="paymentStage" label="付款阶段" className="full-row">
+              <Input placeholder="如：定金 / 中期 / 尾款" />
+            </Form.Item>
+          </div>
+          <Alert
+            type="info"
+            showIcon
+            message="订单编号（ORD-YYYYMMDD-XXXXX）由系统自动生成，无需手动填写。"
+          />
         </Form>
       </Modal>
     </Space>
@@ -530,30 +757,12 @@ export default function SalesLeadsPage() {
 }
 
 function buildListQuery(filters: Filters) {
-  const statusQuery = toStatusQuery(filters.status);
   return {
-    ...statusQuery,
-    addStatus: filters.addStatus || statusQuery.addStatus || undefined,
-    platform: filters.platform || undefined,
-    sourceAccount: filters.sourceAccount || undefined,
-    operatorId: filters.operatorId || undefined,
+    status: filters.status || undefined,
+    addStatus: filters.addStatus || undefined,
     intentionLevel: filters.intentionLevel || undefined,
     startDate: filters.startDate || undefined,
     endDate: filters.endDate || undefined,
-    nextFollowStart: filters.nextFollowStart || undefined,
-    nextFollowEnd: filters.nextFollowEnd || undefined,
+    search: filters.search || undefined,
   };
-}
-
-function toStatusQuery(value: string) {
-  if (value === 'pending_add') return { addStatus: LeadAddStatus.NOT_ADDED };
-  if (value === LeadAddStatus.NOT_PASSED) return { addStatus: LeadAddStatus.NOT_PASSED };
-  if (value === LeadAddStatus.ADDED) return { addStatus: LeadAddStatus.ADDED };
-  if (value === 'deal_done') {
-    return { processStatus: LeadProcessStatus.DEAL_DONE };
-  }
-  if (value === LeadStatus.INVALID) {
-    return { status: LeadStatus.INVALID, processStatus: LeadProcessStatus.INVALID };
-  }
-  return { status: value || undefined };
 }

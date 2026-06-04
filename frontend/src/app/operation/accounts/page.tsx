@@ -320,7 +320,12 @@ export default function OperationAccountsPage() {
             {user?.role === 'operation' ? `当前运营：${user?.name || user?.id || '未知'}` : '查看运营账号、平台和定位信息'}
           </Typography.Paragraph>
         </div>
-        <Button type="primary" icon={<PlusOutlined />} onClick={handleNewAccount}>
+        <Button
+          type="primary"
+          icon={<PlusOutlined />}
+          onClick={handleNewAccount}
+          style={{ display: ['admin', 'owner', 'supervisor'].includes(user?.role as string) ? 'inline-flex' : 'none' }}
+        >
           新增账号
         </Button>
       </div>

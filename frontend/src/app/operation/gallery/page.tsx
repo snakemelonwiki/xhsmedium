@@ -163,7 +163,7 @@ export default function OperationGalleryPage() {
         <div>
           <Typography.Title level={2}>作品广场</Typography.Title>
           <Typography.Paragraph type="secondary">
-            浏览优秀作品，收藏学习。普通运营只能查看自己账号的作品。
+            浏览全公司作品，收藏学习。客户联系方式、跟进记录、成交信息等敏感字段对运营端不展示。
           </Typography.Paragraph>
         </div>
       </div>
@@ -391,38 +391,60 @@ export default function OperationGalleryPage() {
         }
       >
         {detailModal.post && (
+          // v1.3 / OP-22: 详情弹窗顺序改为「封面 → 标题 → 元信息 → 文案 → 数据 → 主管建议」；
+          // 列表已按 all 视图加载（v1.3 / OP-14 全公司作品），联系方式/跟进/成交等敏感字段不展示。
           <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            {/* 1. 封面图置顶，占满宽度 */}
             {(detailModal.post.coverThumbUrl || detailModal.post.coverImageUrl) && (
               <img
                 src={detailModal.post.coverThumbUrl || detailModal.post.coverImageUrl}
                 alt={detailModal.post.title}
-                style={{ width: '100%', maxHeight: 240, objectFit: 'cover', borderRadius: 8 }}
+                style={{ width: '100%', maxHeight: 320, objectFit: 'cover', borderRadius: 8 }}
               />
             )}
-            <Space wrap>
-              <Tag color={detailModal.post.platform?.includes('抖') ? 'blue' : 'red'}>
-                {detailModal.post.platform}
-              </Tag>
-              <Tag>{detailModal.post.postType || '未分类'}</Tag>
-              {detailModal.post.metrics.leadsCount > 0 && (
-                <Tag color="green">获客贴</Tag>
-              )}
+
+            {/* 2. 标题 */}
+            <Typography.Text strong style={{ fontSize: 18 }}>{detailModal.post.title}</Typography.Text>
+
+            {/* 3. 元信息：平台 / 类型 / 时间 / 账号 / 运营 */}
+            <Space direction="vertical" size={6} style={{ width: '100%' }}>
+              <Space wrap>
+                <Tag color={detailModal.post.platform?.includes('抖') ? 'blue' : 'red'}>
+                  {detailModal.post.platform}
+                </Tag>
+                <Tag>{detailModal.post.postType || '未分类'}</Tag>
+                {detailModal.post.metrics.leadsCount > 0 && (
+                  <Tag color="green">获客贴</Tag>
+                )}
+              </Space>
+              <div>
+                <Typography.Text type="secondary">账号：</Typography.Text>
+                <Typography.Text>{detailModal.post.accountName || detailModal.post.accountId || '未知'}</Typography.Text>
+              </div>
+              <div>
+                <Typography.Text type="secondary">运营：</Typography.Text>
+                <Typography.Text>{detailModal.post.employeeName || '-'}</Typography.Text>
+              </div>
+              <div>
+                <Typography.Text type="secondary">发布时间：</Typography.Text>
+                <Typography.Text>{detailModal.post.publishedAt || '-'}</Typography.Text>
+              </div>
             </Space>
-            <div>
-              <Typography.Text strong style={{ fontSize: 16 }}>{detailModal.post.title}</Typography.Text>
-            </div>
-            <div>
-              <Typography.Text type="secondary">账号：</Typography.Text>
-              <Typography.Text>{detailModal.post.accountName || detailModal.post.accountId || '未知'}</Typography.Text>
-            </div>
-            <div>
-              <Typography.Text type="secondary">运营：</Typography.Text>
-              <Typography.Text>{detailModal.post.employeeName || '-'}</Typography.Text>
-            </div>
-            <div>
-              <Typography.Text type="secondary">发布时间：</Typography.Text>
-              <Typography.Text>{detailModal.post.publishedAt || '-'}</Typography.Text>
-            </div>
+
+            {/* 4. 文案 */}
+            {detailModal.post.copywriting && (
+              <div>
+                <Typography.Text type="secondary">文案：</Typography.Text>
+                <Typography.Paragraph
+                  style={{ marginTop: 4, whiteSpace: 'pre-wrap' }}
+                  ellipsis={{ rows: 6, expandable: true }}
+                >
+                  {detailModal.post.copywriting}
+                </Typography.Paragraph>
+              </div>
+            )}
+
+            {/* 5. 互动数据 */}
             <div>
               <Typography.Text type="secondary">互动数据：</Typography.Text>
               <Space wrap>
@@ -435,18 +457,19 @@ export default function OperationGalleryPage() {
                 </Tag>
               </Space>
             </div>
-            {detailModal.post.copywriting && (
-              <div>
-                <Typography.Text type="secondary">文案：</Typography.Text>
-                <Typography.Paragraph
-                  style={{ marginTop: 4, whiteSpace: 'pre-wrap' }}
-                  ellipsis={{ rows: 4, expandable: true }}
-                >
-                  {detailModal.post.copywriting}
-                </Typography.Paragraph>
-              </div>
-            )}
-            {/* 隐藏客户联系方式、销售分配、成交信息 */}
+
+            {/* 6. 主管建议（v1.3 / OP-22：顺序为 封面 → 标题 → 元信息 → 文案 → 数据 → 主管建议） */}
+            <div>
+              <Typography.Text type="secondary">主管建议：</Typography.Text>
+              <Typography.Paragraph
+                style={{ marginTop: 4, whiteSpace: 'pre-wrap' }}
+                ellipsis={{ rows: 4, expandable: true }}
+              >
+                {detailModal.post.supervisorSuggestion || '暂无主管建议'}
+              </Typography.Paragraph>
+            </div>
+
+            {/* 7. 隐藏字段说明（OP-14 全公司作品范围下隐藏联系方式/跟进/成交） */}
             <Alert
               type="info"
               showIcon={false}

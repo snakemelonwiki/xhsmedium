@@ -14,14 +14,40 @@ export class NotificationsController {
     @Req() req: Request,
     @Res() res: Response,
     @Query('actorUserId') actorUserId?: string,
+    @Query('typeCode') typeCode?: string,
   ) {
     const session = (req as any).session;
     const user = (req as any).user;
     const userId = getSessionUserId(req) || actorUserId || '';
     const userRole = session?.role || user?.role || 'staff';
     const portType = this.resolvePortType(userRole);
+    if (typeCode) {
+      // v1.3 / OP-6: 按 typeCode 拆分未读条数（"未读消息"与"主管建议"各自拉）
+      const count = await this.notificationsService.getUnreadCountByType(typeCode, userId);
+      return res.json({ unreadCount: count, typeCode });
+    }
     const unreadCount = await this.notificationsService.countUnread(userId, portType);
     return res.json({ unreadCount });
+  }
+
+  /**
+   * v1.3 SUP-3: 当前用户的未读提醒（type_code = 'reminder'）按发送者分组聚合。
+   * 主管端消息中心使用，便于显示"XX 给你发了 N 条提醒"。
+   * 默认 portType 由角色推得，主管 (admin/supervisor/owner) 走 'operations'。
+   */
+  @Get('unread-by-sender')
+  async unreadBySender(
+    @Req() req: Request,
+    @Res() res: Response,
+    @Query('actorUserId') actorUserId?: string,
+  ) {
+    const session = (req as any).session;
+    const user = (req as any).user;
+    const userId = getSessionUserId(req) || actorUserId || '';
+    const userRole = session?.role || user?.role || 'staff';
+    const portType = this.resolvePortType(userRole);
+    const result = await this.notificationsService.listUnreadBySender(userId, portType);
+    return res.json({ ok: true, ...result });
   }
 
   @Get()

@@ -47,6 +47,10 @@ export const NOTIFICATION_TYPES = {
   // ── 导入 / 导出 ─────────────────────────────────────────────────────
   IMPORT_DONE: 'import_done',
   EXPORT_DONE: 'export_done',
+
+  // ── 跨端口通用提醒（CROSS-3，v1.3）──────────────────────────────────
+  /** 销售/运营/主管三角色互相发送的提醒（POST /api/reminders） */
+  REMINDER: 'reminder',
 } as const;
 
 export type NotificationTypeCode =
@@ -70,4 +74,5 @@ export const ACTIVE_NOTIFICATION_CODES: ReadonlySet<NotificationTypeCode> = new 
   NOTIFICATION_TYPES.ORDER_ABNORMAL,
   NOTIFICATION_TYPES.IMPORT_DONE,
   NOTIFICATION_TYPES.EXPORT_DONE,
+  NOTIFICATION_TYPES.REMINDER,
 ] as NotificationTypeCode[]);

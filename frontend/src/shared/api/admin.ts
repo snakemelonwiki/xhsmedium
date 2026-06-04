@@ -302,10 +302,14 @@ export async function getSupervisorOverview(period: string = 'today'): Promise<S
   };
 }
 
-export async function getSupervisorAnalysis(filters: { platform?: string; employeeId?: string } = {}): Promise<SupervisorAnalysis | undefined> {
+export async function getSupervisorAnalysis(
+  filters: { platform?: string; employeeId?: string } = {},
+  options: { signal?: AbortSignal } = {},
+): Promise<SupervisorAnalysis | undefined> {
   const payload = await apiClient.get<RawRecord>('/dashboard/supervisor/analysis', {
     query: filters,
-  }).catch(() => undefined);
+    signal: options.signal,
+  });
   if (!payload) return undefined;
   return {
     filters: (payload.filters as SupervisorAnalysis['filters']) ?? { platform: null, employeeId: '' },

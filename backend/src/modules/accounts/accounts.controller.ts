@@ -181,19 +181,25 @@ export class AccountsController {
 
   /**
    * 更新账号发布计划。
+   * 运营角色只能修改本人名下账号。
    */
   @Put(':id/posting-plan')
-  async updatePostingPlan(@Param('id') id: string, @Body() body: any, @Res() res: Response) {
+  async updatePostingPlan(@Param('id') id: string, @Body() body: any, @Req() req: Request, @Res() res: Response) {
+    const denied = await this.ensureCanWriteAccount(id, body, req, res);
+    if (denied) return denied;
     await this.accountsService.updatePostingPlan(id, body.postingPlan);
     return res.json({ ok: true });
   }
 
   /**
    * 删除账号。
+   * 运营角色只能删除本人名下账号。
    * E/P1-01: 写一条 DELETE 操作日志（targetType=account），与 leads/employees 保持口径一致。
    */
   @Delete(':id')
   async remove(@Param('id') id: string, @Req() req: Request, @Res() res: Response) {
+    const denied = await this.ensureCanWriteAccount(id, {}, req, res);
+    if (denied) return denied;
     const userId = getSessionUserId(req);
     const before = await this.accountsService.findById(id);
     await this.accountsService.remove(id);

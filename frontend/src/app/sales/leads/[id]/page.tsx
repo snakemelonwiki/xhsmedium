@@ -6,6 +6,7 @@ import {
   Card,
   DatePicker,
   Descriptions,
+  Empty,
   Form,
   Image,
   Input,
@@ -14,12 +15,15 @@ import {
   Select,
   Space,
   Tabs,
+  Tag,
   Tooltip,
+  Timeline,
   Typography,
   message,
 } from 'antd';
 import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
+import dayjs, { type Dayjs } from 'dayjs';
 
 import {
   closeLeadDeal,
@@ -29,16 +33,24 @@ import {
   listCollaborationTasks,
   listLeadFollowRecords,
   updateLeadBoard,
+  updateLeadDealStatus,
+  updateLeadIntentionLevel,
   type CloseLeadDealPayload,
 } from '@/shared/api/leads';
 import { listOrders } from '@/shared/api/orders';
 import { LeadTimeline } from '@/shared/components/leads';
 import { StatusTag } from '@/shared/components/status';
-import { LeadStatus, LeadAddStatus, LeadProcessStatus, CollaborationStatus } from '@/shared/constants/lead-status-enums';
+import { ReminderButton } from '@/shared/components/notifications/ReminderButton';
+import {
+  LeadAddStatus,
+  LeadProcessStatus,
+  LeadStatus,
+  CollaborationStatus,
+} from '@/shared/constants/lead-status-enums';
 import { getStatusMeta } from '@/shared/constants/status';
 import { useSubmitLock } from '@/shared/hooks/useSubmitLock';
 import { formatDateTime } from '@/shared/utils/date-format';
-import type { LeadTimelineItem, SalesLead } from '@/shared/types/leads';
+import type { DealStatusCode, IntentionLevelCode, LeadTimelineItem, SalesLead } from '@/shared/types/leads';
 import type { OrderItem } from '@/shared/types/orders';
 
 const FOLLOW_TYPE_OPTIONS = [
@@ -50,13 +62,49 @@ const FOLLOW_TYPE_OPTIONS = [
   { label: '其他', value: 'other' },
 ];
 
+const DEAL_STATUS_META: Record<DealStatusCode, { label: string; color: string }> = {
+  not_deal: { label: '未成交', color: 'default' },
+  deal_pending: { label: '待成交', color: 'orange' },
+  deal_done: { label: '已成交', color: 'green' },
+  refunded: { label: '已退款', color: 'magenta' },
+  invalid: { label: '无效', color: 'red' },
+};
+
+const INTENTION_META: Record<IntentionLevelCode, { label: string; color: string }> = {
+  high: { label: '高', color: 'red' },
+  mid: { label: '中', color: 'orange' },
+  low: { label: '低', color: 'blue' },
+  invalid: { label: '无效', color: 'default' },
+  pending: { label: '待判断', color: 'default' },
+};
+
 type CloseDealFormValues = {
   amount?: number | string;
   serviceType?: string;
-  contractStatus?: 'unsigned' | 'signed' | 'pending';
-  paidStatus?: 'unpaid' | 'partial' | 'paid';
-  deliveryRequirement?: string;
-  expectedHandleTime?: { format?: () => string; toISOString?: () => string } | string | null;
+  productType?: string;
+  guaranteeType?: string;
+  paymentStage?: string;
+  clientRequirementNote?: string;
+};
+
+type FollowFormValues = {
+  clientDegree?: string;
+  clientMajorResearch?: string;
+  clientTimeRequirement?: string;
+  objectionPoint?: string;
+  intentionLevel?: IntentionLevelCode;
+  followAction?: string;
+  content?: string;
+  nextFollowTime?: Dayjs | string | null;
+};
+
+type DealStatusFormValues = {
+  dealStatus: DealStatusCode;
+  dealAmount?: number | string;
+};
+
+type IntentionFormValues = {
+  intentionLevel: IntentionLevelCode;
 };
 
 export default function SalesLeadDetailPage() {
@@ -66,22 +114,27 @@ export default function SalesLeadDetailPage() {
   const [lead, setLead] = useState<SalesLead>();
   const [timeline, setTimeline] = useState<LeadTimelineItem[]>([]);
   const [order, setOrder] = useState<OrderItem>();
-  const [form] = Form.useForm();
+  const [form] = Form.useForm<FollowFormValues>();
+  const [dealStatusForm] = Form.useForm<DealStatusFormValues>();
+  const [intentionForm] = Form.useForm<IntentionFormValues>();
   const [collaborationForm] = Form.useForm();
-  const [closeDealForm] = Form.useForm();
+  const [closeDealForm] = Form.useForm<CloseDealFormValues>();
   const [collaborationOpen, setCollaborationOpen] = useState(false);
   const [closeDealOpen, setCloseDealOpen] = useState(false);
+  const [dealStatusOpen, setDealStatusOpen] = useState(false);
+  const [intentionOpen, setIntentionOpen] = useState(false);
   const { submitting, run } = useSubmitLock();
 
   async function loadDetail() {
     const [detail, records, collaborations] = await Promise.all([
       getLeadDetail(leadId),
       listLeadFollowRecords(leadId).catch(() => []),
-      listCollaborationTasks({ scope: 'requester', leadId, pageSize: 50 }).then((result) => result.items).catch(() => []),
+      listCollaborationTasks({ scope: 'requester', leadId, pageSize: 50 })
+        .then((result) => result.items)
+        .catch(() => []),
     ]);
     setLead(detail);
     setTimeline([...records, ...collaborations].sort(sortTimelineDesc));
-    // 加载该 lead 关联的最新订单，用于展示订单/教务交付进度
     try {
       const result = await listOrders({ scope: 'sales', pageSize: 20 });
       const matched = result.items.filter((o) => String(o.leadId) === leadId);
@@ -96,19 +149,24 @@ export default function SalesLeadDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.id]);
 
-  async function submitFollow(values: Record<string, unknown>) {
+  async function submitFollow(values: FollowFormValues) {
     await run(async () => {
       try {
+        const nextFollowTime = values.nextFollowTime
+          ? typeof values.nextFollowTime === 'string'
+            ? values.nextFollowTime
+            : (values.nextFollowTime as Dayjs).toISOString()
+          : undefined;
         await createLeadFollowRecord(leadId, {
-          ...values,
-          nextFollowTime: values.nextFollowTime,
-        });
-        await updateLeadBoard(leadId, {
-          processStatus: values.processStatus,
-          addStatus: values.addStatus,
-          followNote: values.content,
+          content: values.content,
+          clientDegree: values.clientDegree || null,
+          clientMajorResearch: values.clientMajorResearch || null,
+          clientTimeRequirement: values.clientTimeRequirement || null,
+          objectionPoint: values.objectionPoint || null,
+          followAction: values.followAction || null,
+          followActionAt: new Date().toISOString(),
           intentionLevel: values.intentionLevel,
-          nextFollowTime: values.nextFollowTime,
+          nextFollowTime,
         });
         message.success('跟进记录已保存');
         form.resetFields();
@@ -119,7 +177,7 @@ export default function SalesLeadDetailPage() {
     });
   }
 
-  async function requestCollaboration(values: { type: string; urgency: 'normal' | 'urgent' | 'critical'; reason: string; remark?: string }) {
+  async function requestCollaboration(values: { type: string; reason: string; remark?: string; urgency?: string }) {
     await run(async () => {
       try {
         await createCollaborationTask({ leadId, ...values });
@@ -141,17 +199,15 @@ export default function SalesLeadDetailPage() {
   async function submitCloseDeal(values: CloseDealFormValues) {
     await run(async () => {
       try {
-        const expectedHandleTime = normalizeExpectedHandleTime(values.expectedHandleTime);
-        const payload: CloseLeadDealPayload = {
+        const result = await closeLeadDeal(leadId, {
           amount: values.amount ?? null,
           serviceType: values.serviceType ?? null,
-          contractStatus: values.contractStatus || undefined,
-          paidStatus: values.paidStatus || undefined,
-          deliveryRequirement: values.deliveryRequirement ?? null,
-          expectedHandleTime,
-        };
-        await closeLeadDeal(leadId, payload);
-        message.success('已标记成交，订单已创建');
+          productType: values.productType ?? null,
+          guaranteeType: values.guaranteeType ?? null,
+          paymentStage: values.paymentStage ?? null,
+          clientRequirementNote: values.clientRequirementNote ?? null,
+        });
+        message.success(`已标记成交，订单编号 ${result.orderCode || result.orderId || ''}`);
         setCloseDealOpen(false);
         closeDealForm.resetFields();
         await loadDetail();
@@ -159,6 +215,37 @@ export default function SalesLeadDetailPage() {
         message.error(err instanceof Error ? err.message : '标记成交失败');
       }
     });
+  }
+
+  async function submitDealStatus() {
+    const values = await dealStatusForm.validateFields().catch(() => null);
+    if (!values) return;
+    try {
+      await updateLeadDealStatus(leadId, {
+        dealStatus: values.dealStatus,
+        dealAmount: values.dealAmount ?? null,
+      });
+      message.success('成交状态已更新');
+      setDealStatusOpen(false);
+      dealStatusForm.resetFields();
+      await loadDetail();
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '更新成交状态失败');
+    }
+  }
+
+  async function submitIntention() {
+    const values = await intentionForm.validateFields().catch(() => null);
+    if (!values) return;
+    try {
+      await updateLeadIntentionLevel(leadId, { intentionLevel: values.intentionLevel });
+      message.success('意向程度已更新');
+      setIntentionOpen(false);
+      intentionForm.resetFields();
+      await loadDetail();
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '更新意向程度失败');
+    }
   }
 
   const canCloseDeal = useMemo(() => {
@@ -176,6 +263,19 @@ export default function SalesLeadDetailPage() {
         <Space wrap>
           <Button onClick={() => router.push('/sales/leads')}>返回列表</Button>
           <Button onClick={() => router.push(`/sales/collaboration?leadId=${leadId}`)}>打开协同页</Button>
+          <Button onClick={() => setIntentionOpen(true)}>更新意向程度</Button>
+          <Button onClick={() => setDealStatusOpen(true)}>更新成交状态</Button>
+          {lead?.sales?.id ? (
+            <ReminderButton
+              recipientId={String(lead.sales.id)}
+              recipientRole="operation"
+              relatedType="lead"
+              relatedId={leadId}
+              content={`客资 ${lead?.customerName || leadId} 需要运营协助`}
+            >
+              提醒运营
+            </ReminderButton>
+          ) : null}
           <Tooltip
             title={canCloseDeal ? '请填写成交金额、产品类型与交付要求' : '仅在跟进中或已添加通过的客资可标记成交'}
           >
@@ -208,11 +308,25 @@ export default function SalesLeadDetailPage() {
             { key: 'id', label: '客资 ID', children: leadId },
             { key: 'name', label: '客户', children: lead?.customerName ?? '详情接口待补齐' },
             { key: 'contact', label: '联系方式', children: lead?.contact ?? '-' },
-            { key: 'sourcePlatform', label: '来源平台', children: lead?.source?.platform ?? '-' },
-            { key: 'sourceAccount', label: '来源账号', children: lead?.source?.accountName ?? lead?.source?.accountId ?? '-' },
-            { key: 'sourcePost', label: '来源作品', children: lead?.source?.postTitle ?? lead?.source?.postId ?? '-' },
             { key: 'ipRegion', label: 'IP / 地区', children: lead?.ip ?? '-' },
-            { key: 'requirementNote', label: '需求备注', children: lead?.requirementNote ?? '-' },
+            // v1.3 / CROSS-2 销售写跟进回写的客户画像字段
+            { key: 'clientDegree', label: '客户学历', children: lead?.clientDegree || '-' },
+            { key: 'clientMajorResearch', label: '专业 / 研究方向', children: lead?.clientMajorResearch || '-' },
+            { key: 'requirementNote', label: '客户需求', children: lead?.requirementNote ?? '-' },
+            { key: 'clientTimeRequirement', label: '时间要求', children: lead?.clientTimeRequirement || '-' },
+            { key: 'objectionPoint', label: '异议点', children: lead?.objectionPoint || '-' },
+            { key: 'followAction', label: '跟进措施', children: lead?.followAction || '-' },
+            { key: 'intentionLevel', label: '意向程度', children: lead?.intentionLevel ? (
+              <Tag color={INTENTION_META[lead.intentionLevel as IntentionLevelCode]?.color || 'default'}>
+                {INTENTION_META[lead.intentionLevel as IntentionLevelCode]?.label || lead.intentionLevel}
+              </Tag>
+            ) : '-' },
+            { key: 'dealStatus', label: '成交状态', children: lead?.dealStatus ? (
+              <Tag color={DEAL_STATUS_META[lead.dealStatus as DealStatusCode]?.color || 'default'}>
+                {DEAL_STATUS_META[lead.dealStatus as DealStatusCode]?.label || lead.dealStatus}
+              </Tag>
+            ) : '-' },
+            { key: 'dealAmount', label: '成交金额', children: lead?.dealAmount ? `¥ ${lead.dealAmount}` : '-' },
             { key: 'supervisorNote', label: '主管备注', children: lead?.supervisorNote ?? '-' },
             {
               key: 'orderInfo',
@@ -233,7 +347,6 @@ export default function SalesLeadDetailPage() {
             { key: 'addStatus', label: '添加状态', children: <StatusTag kind="addStatus" code={lead?.addStatus ?? LeadAddStatus.NOT_ADDED} /> },
             { key: 'processStatus', label: '处理状态', children: <StatusTag kind="processStatus" code={lead?.processStatus ?? 'not_contacted'} /> },
             { key: 'collaborationStatus', label: '协同状态', children: <StatusTag kind="collaborationStatus" code={lead?.collaborationStatus ?? 'none'} /> },
-            { key: 'operator', label: '所属运营', children: lead?.operator?.name ?? '-' },
             { key: 'note', label: '运营备注', children: lead?.note ?? '-' },
             {
               key: 'captureImageUrl',
@@ -258,48 +371,63 @@ export default function SalesLeadDetailPage() {
             label: '写跟进',
             children: (
               <Card>
-                <Form form={form} layout="vertical" onFinish={submitFollow}>
+                <Form<FollowFormValues>
+                  form={form}
+                  layout="vertical"
+                  onFinish={submitFollow}
+                  initialValues={{
+                    clientDegree: lead?.clientDegree,
+                    clientMajorResearch: lead?.clientMajorResearch,
+                    clientTimeRequirement: lead?.clientTimeRequirement,
+                    objectionPoint: lead?.objectionPoint,
+                    followAction: lead?.followAction,
+                    intentionLevel: (lead?.intentionLevel as IntentionLevelCode) || undefined,
+                    nextFollowTime: lead?.nextFollowAt ? dayjs(lead.nextFollowAt) : null,
+                  }}
+                >
                   <div className="form-grid">
-                    <Form.Item name="addStatus" label="添加状态" initialValue={LeadAddStatus.APPLIED}>
-                      <Select
-                        options={[
-                          { label: '已申请添加', value: LeadAddStatus.APPLIED },
-                          { label: '客户未通过', value: LeadAddStatus.NOT_PASSED },
-                          { label: '已添加通过', value: LeadAddStatus.ADDED },
-                        ]}
-                      />
-                    </Form.Item>
-                    <Form.Item name="processStatus" label="处理状态" initialValue={LeadProcessStatus.COMMUNICATING}>
-                      <Select
-                        options={[
-                          { label: '待通过', value: LeadProcessStatus.WAITING_PASS },
-                          { label: '沟通中', value: LeadProcessStatus.COMMUNICATING },
-                          { label: '已报价', value: LeadProcessStatus.QUOTED },
-                          { label: '待成交', value: LeadProcessStatus.DEAL_PENDING },
-                          { label: '无效', value: LeadProcessStatus.INVALID },
-                        ]}
-                      />
-                    </Form.Item>
-                    <Form.Item name="intentionLevel" label="意向度">
+                    <Form.Item name="clientDegree" label="客户学历">
                       <Select
                         allowClear
-                        placeholder="选择客户意向"
+                        placeholder="本科/硕士/博士..."
                         options={[
-                          { label: '高意向', value: 'high' },
-                          { label: '中意向', value: 'medium' },
-                          { label: '低意向', value: 'low' },
-                          { label: '待判断', value: 'unknown' },
+                          { label: '本科', value: '本科' },
+                          { label: '硕士', value: '硕士' },
+                          { label: '博士', value: '博士' },
+                          { label: '大专', value: '大专' },
+                          { label: '其他', value: '其他' },
                         ]}
                       />
                     </Form.Item>
-                    <Form.Item name="followType" label="跟进类型" initialValue="wechat">
-                      <Select options={FOLLOW_TYPE_OPTIONS} placeholder="选择本次跟进的方式" />
+                    <Form.Item name="clientMajorResearch" label="专业 / 研究方向">
+                      <Input placeholder="如：计算机科学与技术 · 人工智能方向" />
                     </Form.Item>
-                    <Form.Item name="nextFollowTime" label="下次跟进时间">
-                      <Input type="datetime-local" />
+                    <Form.Item name="clientTimeRequirement" label="时间要求">
+                      <Input placeholder="如：2 个月内、年底前" />
                     </Form.Item>
-                    <Form.Item className="full-row" name="content" label="跟进备注" rules={[{ required: true, message: '请输入跟进备注' }]}>
-                      <Input.TextArea rows={4} placeholder="记录客户通过情况、沟通重点和下一步动作" />
+                    <Form.Item name="objectionPoint" label="异议点">
+                      <Input placeholder="如：价格太贵 / 导师不同意" />
+                    </Form.Item>
+                    <Form.Item name="intentionLevel" label="意向程度">
+                      <Select
+                        allowClear
+                        options={[
+                          { label: '高', value: 'high' },
+                          { label: '中', value: 'mid' },
+                          { label: '低', value: 'low' },
+                          { label: '无效', value: 'invalid' },
+                          { label: '待判断', value: 'pending' },
+                        ]}
+                      />
+                    </Form.Item>
+                    <Form.Item name="followAction" label="具体跟进措施">
+                      <Input placeholder="如：明天下午 3 点发修改方案" />
+                    </Form.Item>
+                    <Form.Item name="nextFollowTime" label="下次跟进时间" className="full-row">
+                      <DatePicker showTime style={{ width: '100%' }} />
+                    </Form.Item>
+                    <Form.Item name="content" label="跟进备注" className="full-row" rules={[{ required: true, message: '请输入跟进内容' }]}>
+                      <Input.TextArea rows={3} placeholder="记录本次沟通重点和下一步动作" />
                     </Form.Item>
                   </div>
                   <Button type="primary" htmlType="submit" loading={submitting}>保存跟进</Button>
@@ -309,10 +437,29 @@ export default function SalesLeadDetailPage() {
           },
           {
             key: 'timeline',
-            label: '跟进/协同时间线',
+            label: '跟进时间线',
             children: (
               <Card>
-                <LeadTimeline items={timeline} />
+                {timeline.length > 0 ? (
+                  <Timeline
+                    items={timeline.map((item) => ({
+                      dot: item.kind === 'collaboration' ? undefined : undefined,
+                      children: (
+                        <div>
+                          <Typography.Text strong>{item.title}</Typography.Text>
+                          <div className="timeline-meta">
+                            {item.actorName ? `${item.actorName} · ` : ''}
+                            {formatDateTime(item.occurredAt)}
+                          </div>
+                          {item.content ? <Typography.Paragraph className="timeline-content">{item.content}</Typography.Paragraph> : null}
+                        </div>
+                      ),
+                    }))}
+                  />
+                ) : (
+                  <LeadTimeline items={timeline} />
+                )}
+                {timeline.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无跟进记录" /> : null}
               </Card>
             ),
           },
@@ -364,57 +511,113 @@ export default function SalesLeadDetailPage() {
         onCancel={() => setCloseDealOpen(false)}
         footer={null}
         destroyOnClose={false}
+        width={680}
       >
-        <Form form={closeDealForm} layout="vertical" onFinish={submitCloseDeal} preserve>
+        <Form<CloseDealFormValues> form={closeDealForm} layout="vertical" onFinish={submitCloseDeal} preserve>
           <div className="form-grid">
-            <Form.Item
-              name="amount"
-              label="成交金额（元）"
-              rules={[{ required: true, message: '请输入成交金额' }]}
-            >
+            <Form.Item name="clientRequirementNote" label="客户要求备注" className="full-row">
+              <Input.TextArea rows={2} placeholder="客户原始诉求、特殊情况等" />
+            </Form.Item>
+            <Form.Item name="productType" label="产品类型" rules={[{ required: true, message: '请选择产品类型' }]}>
+              <Select
+                placeholder="选择产品类型"
+                options={[
+                  { label: '专利', value: '专利' },
+                  { label: '期刊论文', value: '期刊论文' },
+                  { label: '硕士毕业论文', value: '硕士毕业论文' },
+                  { label: '博士毕业论文', value: '博士毕业论文' },
+                  { label: '基金', value: '基金' },
+                  { label: 'EI 会议', value: 'EI会议' },
+                  { label: '普刊', value: '普刊' },
+                  { label: '国际会议', value: '国际会议' },
+                ]}
+              />
+            </Form.Item>
+            <Form.Item name="serviceType" label="服务类型" rules={[{ required: true, message: '请选择服务类型' }]}>
+              <Select
+                placeholder="选择服务类型"
+                options={[
+                  { label: '辅导', value: '辅导' },
+                  { label: '全流程', value: '全流程' },
+                  { label: '润色', value: '润色' },
+                  { label: '返修', value: '返修' },
+                  { label: '代投', value: '代投' },
+                ]}
+              />
+            </Form.Item>
+            <Form.Item name="guaranteeType" label="保障类型">
+              <Select
+                allowClear
+                placeholder="选择保障类型"
+                options={[
+                  { label: '保录', value: '保录' },
+                  { label: '保盲审', value: '保盲审' },
+                  { label: '不保', value: '不保' },
+                ]}
+              />
+            </Form.Item>
+            <Form.Item name="amount" label="成交金额（元）" rules={[{ required: true, message: '请输入成交金额' }]}>
               <InputNumber min={0} precision={2} style={{ width: '100%' }} placeholder="0.00" />
             </Form.Item>
-            <Form.Item
-              name="serviceType"
-              label="产品类型"
-              rules={[{ required: true, message: '请输入产品类型' }]}
-            >
-              <Input placeholder="如：1v1 私教 / 训练营 / 录播课" />
-            </Form.Item>
-            <Form.Item name="contractStatus" label="合同状态" initialValue="pending">
-              <Select
-                options={[
-                  { label: '未签', value: 'unsigned' },
-                  { label: '已签', value: 'signed' },
-                  { label: '待补', value: 'pending' },
-                ]}
-              />
-            </Form.Item>
-            <Form.Item name="paidStatus" label="付款状态" initialValue="unpaid">
-              <Select
-                options={[
-                  { label: '未付款', value: 'unpaid' },
-                  { label: '部分付款', value: 'partial' },
-                  { label: '已付款', value: 'paid' },
-                ]}
-              />
-            </Form.Item>
-            <Form.Item className="full-row" name="deliveryRequirement" label="交付要求">
-              <Input.TextArea rows={3} placeholder="上课时间、形式、教练偏好等" />
-            </Form.Item>
-            <Form.Item className="full-row" name="expectedHandleTime" label="期望处理时间">
-              <DatePicker
-                showTime
-                format="YYYY年MM月DD日 HH:mm:ss"
-                style={{ width: '100%' }}
-                placeholder="选择期望处理时间"
-              />
+            <Form.Item name="paymentStage" label="付款阶段" className="full-row">
+              <Input placeholder="如：定金 / 中期 / 尾款" />
             </Form.Item>
           </div>
           <Space>
             <Button type="primary" htmlType="submit" loading={submitting}>提交成交</Button>
             <Button onClick={() => setCloseDealOpen(false)}>取消</Button>
           </Space>
+        </Form>
+      </Modal>
+
+      {/* 更新成交状态（SA-3） */}
+      <Modal
+        title="更新成交状态"
+        open={dealStatusOpen}
+        onCancel={() => { setDealStatusOpen(false); dealStatusForm.resetFields(); }}
+        onOk={submitDealStatus}
+        confirmLoading={submitting}
+        destroyOnClose
+      >
+        <Form<DealStatusFormValues> form={dealStatusForm} layout="vertical" preserve={false} initialValues={{ dealStatus: (lead?.dealStatus as DealStatusCode) || 'not_deal' }}>
+          <Form.Item name="dealStatus" label="成交状态" rules={[{ required: true, message: '请选择成交状态' }]}>
+            <Select
+              options={[
+                { label: '未成交', value: 'not_deal' },
+                { label: '待成交', value: 'deal_pending' },
+                { label: '已成交', value: 'deal_done' },
+                { label: '已退款', value: 'refunded' },
+                { label: '无效', value: 'invalid' },
+              ]}
+            />
+          </Form.Item>
+          <Form.Item name="dealAmount" label="成交金额（元）">
+            <InputNumber min={0} precision={2} style={{ width: '100%' }} placeholder="0.00" />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* 更新意向程度（SA-3） */}
+      <Modal
+        title="更新意向程度"
+        open={intentionOpen}
+        onCancel={() => { setIntentionOpen(false); intentionForm.resetFields(); }}
+        onOk={submitIntention}
+        confirmLoading={submitting}
+        destroyOnClose
+      >
+        <Form<IntentionFormValues> form={intentionForm} layout="vertical" preserve={false} initialValues={{ intentionLevel: (lead?.intentionLevel as IntentionLevelCode) || 'pending' }}>
+          <Form.Item name="intentionLevel" label="意向程度" rules={[{ required: true, message: '请选择意向程度' }]}>
+            <Select
+              options={[
+                { label: '高', value: 'high' },
+                { label: '中', value: 'mid' },
+                { label: '低', value: 'low' },
+                { label: '无效', value: 'invalid' },
+                { label: '待判断', value: 'pending' },
+              ]}
+            />
+          </Form.Item>
         </Form>
       </Modal>
     </Space>
@@ -437,18 +640,4 @@ function nextAction(lead: SalesLead) {
   if (lead.addStatus === LeadAddStatus.NOT_PASSED) return '发起运营提醒或二次触达协同';
   if (lead.addStatus === LeadAddStatus.ADDED) return '推进沟通、报价或成交';
   return getStatusMeta('processStatus', lead.processStatus).actionHint;
-}
-
-function normalizeExpectedHandleTime(value: CloseDealFormValues['expectedHandleTime']): string | null {
-  if (!value) return null;
-  if (typeof value === 'string') return value || null;
-  if (value && typeof value === 'object') {
-    if (typeof value.format === 'function') {
-      return value.format();
-    }
-    if (typeof value.toISOString === 'function') {
-      return value.toISOString();
-    }
-  }
-  return null;
 }

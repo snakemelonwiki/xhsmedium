@@ -92,7 +92,7 @@ async function bootstrap() {
   expressApp.use('/uploads', expressStatic(uploadsDir));
   expressApp.use(expressStatic(publicDir, { index: ['index.html'] }));
 
-  const port = Number(process.env.PORT ?? 3000);
+  const port = Number(process.env.PORT ?? 8089);
   await app.listen(port);
   console.log(`运营中台已启动: http://0.0.0.0:${port}`);
 }

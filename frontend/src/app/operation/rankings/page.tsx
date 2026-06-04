@@ -1,13 +1,17 @@
 'use client';
 
-import { DownloadOutlined, StarOutlined } from '@ant-design/icons';
+import { DownloadOutlined, StarOutlined, TrophyOutlined } from '@ant-design/icons';
 import {
   Alert,
+  Avatar,
   Button,
   Card,
+  Col,
   Empty,
+  List,
   message,
   Pagination,
+  Row,
   Segmented,
   Space,
   Table,
@@ -55,6 +59,49 @@ const TYPE_OPTIONS = [
   { label: '流量榜', value: 'traffic' },
 ];
 
+/**
+ * 三卡顶部展示：作品数 / 客资数 / 流量数各取前三名
+ */
+const TOP_CARDS: Array<{
+  key: RankingType;
+  title: string;
+  description: string;
+  color: string;
+  bg: string;
+  /** 排序取值函数：从 RankingRow 中取出该维度对应的数值 */
+  getValue: (row: RankingRow) => number;
+  /** 列表文案后缀 */
+  suffix: string;
+}> = [
+  {
+    key: 'posts',
+    title: '作品数榜 · Top 3',
+    description: '本期作品数前三名',
+    color: '#1677ff',
+    bg: '#e6f4ff',
+    getValue: (row) => numberValue(row.postCount),
+    suffix: '件',
+  },
+  {
+    key: 'leads',
+    title: '客资榜 · Top 3',
+    description: '本期客资数前三名',
+    color: '#52c41a',
+    bg: '#f6ffed',
+    getValue: (row) => numberValue(row.leadCount),
+    suffix: '条',
+  },
+  {
+    key: 'traffic',
+    title: '流量榜 · Top 3',
+    description: '本期流量（点赞+评论+收藏）前三名',
+    color: '#fa8c16',
+    bg: '#fff7e6',
+    getValue: (row) => numberValue(row.traffic ?? row.likes),
+    suffix: '',
+  },
+];
+
 function numberValue(value: unknown): number {
   const parsed = Number(value ?? 0);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -70,6 +117,12 @@ export default function OperationRankingsPage() {
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string>();
+  const [top3ByType, setTop3ByType] = useState<Record<RankingType, RankingRow[]>>({
+    posts: [],
+    leads: [],
+    traffic: [],
+  });
+  const [topLoading, setTopLoading] = useState(false);
   const pageSize = 20;
 
   const load = useCallback(async (nextPage = page, nextType = type, nextPeriod = period) => {
@@ -95,10 +148,47 @@ export default function OperationRankingsPage() {
     }
   }, [page, type, period]);
 
+  /**
+   * v1.3 OP-7：加载三榜 Top 3 用于顶部三卡展示。
+   * 并行拉取三种 type 的 limit=3 数据，period 与下方主榜保持一致。
+   */
+  const loadTop3 = useCallback(async (nextPeriod = period) => {
+    setTopLoading(true);
+    try {
+      const results = await Promise.all(
+        TYPE_OPTIONS.map(async (opt) => {
+          try {
+            const payload = await apiClient.get<{ items?: RankingRow[] }>('/rankings/operations', {
+              query: { type: opt.value, period: nextPeriod, limit: 3, offset: 0 },
+            });
+            return { key: opt.value, rows: payload?.items ?? [] };
+          } catch {
+            return { key: opt.value, rows: [] };
+          }
+        }),
+      );
+      setTop3ByType((prev) => {
+        const next: Record<RankingType, RankingRow[]> = { ...prev };
+        for (const r of results) {
+          const key = r.key as RankingType;
+          next[key] = Array.isArray(r.rows) ? (r.rows as RankingRow[]) : [];
+        }
+        return next;
+      });
+    } finally {
+      setTopLoading(false);
+    }
+  }, [period]);
+
   useEffect(() => {
     void load(1, type, period);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    void loadTop3(period);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [period]);
 
   function changeType(nextType: RankingType) {
     setType(nextType);
@@ -108,6 +198,7 @@ export default function OperationRankingsPage() {
   function changePeriod(nextPeriod: Period) {
     setPeriod(nextPeriod);
     void load(1, type, nextPeriod);
+    void loadTop3(nextPeriod);
   }
 
   async function handleExport() {
@@ -131,7 +222,7 @@ export default function OperationRankingsPage() {
     if (items.length === 0) return [];
     const getValue = (item: RankingRow) => {
       if (type === 'leads') return item.leadCount;
-      if (type === 'traffic') return item.likes ?? item.traffic ?? 0;
+      if (type === 'traffic') return item.traffic ?? item.likes ?? 0;
       return item.postCount;
     };
     return items.map((item, index) => {
@@ -227,15 +318,12 @@ export default function OperationRankingsPage() {
     return [
       ...baseColumns,
       {
-        title: '点赞数',
-        dataIndex: 'likes',
-        sorter: (a, b) => (a.likes ?? 0) - (b.likes ?? 0),
-        render: (val?: number) => <Typography.Text strong>{val ?? 0}</Typography.Text>,
-      },
-      {
-        title: '流量',
+        title: '流量（赞+评+藏）',
         dataIndex: 'traffic',
-        render: (val?: number) => val ?? '-',
+        sorter: (a, b) => (a.traffic ?? a.likes ?? 0) - (b.traffic ?? b.likes ?? 0),
+        render: (val?: number, record?: RankingRow) => (
+          <Typography.Text strong>{val ?? record?.likes ?? 0}</Typography.Text>
+        ),
       },
       {
         title: '与上一名差距',
@@ -259,11 +347,6 @@ export default function OperationRankingsPage() {
         </div>
         <Space wrap>
           <Segmented
-            options={TYPE_OPTIONS}
-            value={type}
-            onChange={(val) => changeType(val as RankingType)}
-          />
-          <Segmented
             options={PERIOD_OPTIONS}
             value={period}
             onChange={(val) => changePeriod(val as Period)}
@@ -277,19 +360,90 @@ export default function OperationRankingsPage() {
           </Button>
         </Space>
       </div>
+
+      {/* v1.3 OP-7：顶部三卡 - 作品数 / 客资数 / 流量数 Top 3 */}
+      <Row gutter={16}>
+        {TOP_CARDS.map((card) => {
+          const rows = top3ByType[card.key] ?? [];
+          return (
+            <Col key={card.key} xs={24} md={8}>
+              <Card
+                size="small"
+                loading={topLoading}
+                title={
+                  <Space>
+                    <TrophyOutlined style={{ color: card.color }} />
+                    <Typography.Text strong>{card.title}</Typography.Text>
+                  </Space>
+                }
+                extra={
+                  <Button
+                    type="link"
+                    size="small"
+                    onClick={() => changeType(card.key)}
+                  >
+                    查看完整榜
+                  </Button>
+                }
+                style={{ background: card.bg, borderColor: card.color }}
+              >
+                {rows.length === 0 ? (
+                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无数据" />
+                ) : (
+                  <List
+                    size="small"
+                    dataSource={rows}
+                    renderItem={(row, idx) => (
+                      <List.Item style={{ padding: '8px 0' }}>
+                        <Space>
+                          <Avatar
+                            size="small"
+                            style={{
+                              backgroundColor: idx === 0 ? '#fa8c16' : idx === 1 ? '#1677ff' : '#52c41a',
+                            }}
+                          >
+                            {idx + 1}
+                          </Avatar>
+                          <Space direction="vertical" size={0}>
+                            <Typography.Text strong>{row.name || row.employeeId || '—'}</Typography.Text>
+                            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                              {card.description}
+                            </Typography.Text>
+                          </Space>
+                        </Space>
+                        <Typography.Text strong style={{ color: card.color, fontSize: 18 }}>
+                          {card.getValue(row)}{card.suffix}
+                        </Typography.Text>
+                      </List.Item>
+                    )}
+                  />
+                )}
+              </Card>
+            </Col>
+          );
+        })}
+      </Row>
+
       {error ? (
         <Alert type="warning" showIcon message="排行榜暂不可用" description={error} />
       ) : null}
       <Card>
-        <Space style={{ marginBottom: 16 }}>
-          <Button
-            icon={<DownloadOutlined />}
-            loading={exporting}
-            onClick={handleExport}
-          >
-            导出
-          </Button>
-        </Space>
+        <div className="toolbar-row" style={{ marginBottom: 16 }}>
+          <Segmented
+            options={TYPE_OPTIONS}
+            value={type}
+            onChange={(val) => changeType(val as RankingType)}
+          />
+          <Space>
+            <Button
+              icon={<DownloadOutlined />}
+              loading={exporting}
+              onClick={handleExport}
+            >
+              导出
+            </Button>
+          </Space>
+        </div>
         <Table
           rowKey="id"
           loading={loading}

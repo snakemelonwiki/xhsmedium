@@ -1,6 +1,6 @@
 'use client';
 
-import { DownloadOutlined, EyeOutlined } from '@ant-design/icons';
+import { BellOutlined, DownloadOutlined, EyeOutlined } from '@ant-design/icons';
 import { ProTable, type ProColumns } from '@ant-design/pro-components';
 import { Button, Card, Empty, Input, Modal, Select, Segmented, Space, Spin, Typography } from 'antd';
 import type { TablePaginationConfig } from 'antd';
@@ -9,6 +9,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { createExport } from '@/shared/api/exports';
 import { getLeadDetail, listCollaborationTasks, listLeadFollowRecords, listSalesLeads } from '@/shared/api/leads';
+import { ReminderButton } from '@/shared/components/notifications/ReminderButton';
 import { LeadTimeline } from '@/shared/components/leads';
 import { StatusTag } from '@/shared/components/status';
 import { CollaborationStatus } from '@/shared/constants/lead-status-enums';
@@ -220,13 +221,40 @@ export default function OperationLeadsPage() {
     },
     {
       title: '操作',
-      width: 100,
+      width: 200,
       fixed: 'right',
-      render: (_, record) => (
-        <Button size="small" icon={<EyeOutlined />} onClick={() => void loadLeadDetail(String(record.id))}>
-          详情
-        </Button>
-      ),
+      render: (_, record) => {
+        const recipientId = record.sales?.id ? String(record.sales.id) : '';
+        const recipientName = record.sales?.name ? String(record.sales.name) : '';
+        const hasContact = Boolean(record.contact || record.phone);
+        return (
+          <Space size={4} wrap>
+            <Button size="small" icon={<EyeOutlined />} onClick={() => void loadLeadDetail(String(record.id))}>
+              详情
+            </Button>
+            <ReminderButton
+              size="small"
+              recipientId={recipientId}
+              recipientRole="sales"
+              relatedType="lead"
+              relatedId={String(record.id || '')}
+              content={
+                hasContact
+                  ? `请关注客资 ${record.customerName || record.nickname || record.id} 的最新跟进情况`
+                  : `运营端提醒：关注客资 ${record.customerName || record.nickname || record.id}`
+              }
+              disabled={!recipientId}
+            >
+              提醒销售
+            </ReminderButton>
+            {!recipientId ? (
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                {recipientName ? `${recipientName}(未关联用户)` : '未分配'}
+              </Typography.Text>
+            ) : null}
+          </Space>
+        );
+      },
     },
   ];
 

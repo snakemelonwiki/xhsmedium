@@ -1,14 +1,11 @@
 import { Injectable } from '@nestjs/common';
-import { PostsService } from './posts.service';
 
+/**
+ * 作品指标抓取服务：封装 Playwright 调用，沿用 legacy `metricsFetcher.js` 的抓取能力。
+ * 注意：本服务不依赖 PostsService，避免与 PostsService 形成循环依赖。
+ */
 @Injectable()
 export class PostsMetricsService {
-  constructor(private readonly postsService: PostsService) {}
-
-  /**
-   * Synchronous fetch metrics for a single post URL (legacy behavior preserved).
-   * Uses Playwright to scrape the page directly.
-   */
   async fetchMetricsFromUrl(url: string): Promise<any> {
     const normalizedUrl = String(url || '').trim();
     if (!normalizedUrl) throw new Error('作品链接不能为空');
@@ -27,6 +24,8 @@ export class PostsMetricsService {
     return {
       platform,
       title: normalizedTitle,
+      authorName: String(metrics.authorName || '').trim() || undefined,
+      authorId: String(metrics.authorId || '').trim() || undefined,
       likes: Number(metrics.likes || 0),
       comments: Number(metrics.comments || 0),
       favorites: Number(metrics.favorites || 0),

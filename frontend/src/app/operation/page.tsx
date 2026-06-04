@@ -4,6 +4,7 @@ import {
   BellOutlined,
   DatabaseOutlined,
   ExportOutlined,
+  FireOutlined,
   FormOutlined,
   OrderedListOutlined,
   ProjectOutlined,
@@ -17,8 +18,9 @@ import { useEffect, useState } from 'react';
 import { apiClient } from '@/shared/api/apiClient';
 import { readAuthenticatedUser } from '@/shared/auth/auth';
 import { useNotifications } from '@/shared/contexts/NotificationContext';
+import { getPersonalToday, type PersonalPlatform, type PersonalTodayResponse } from '@/shared/api/content';
 
-type Period = 'today' | 'week' | 'month';
+type Platform = 'all' | 'xiaohongshu' | 'douyin';
 
 type DashboardSummary = {
   xhsPosts?: number;
@@ -89,8 +91,9 @@ const ENTRY_CARDS: EntryCard[] = [
 ];
 
 export default function OperationHomePage() {
-  const [period, setPeriod] = useState<Period>('today');
+  const [platform, setPlatform] = useState<Platform>('all');
   const [summary, setSummary] = useState<DashboardSummary | undefined>();
+  const [today, setToday] = useState<PersonalTodayResponse | undefined>();
   const [loading, setLoading] = useState(true);
   const { unreadCount } = useNotifications();
   const user = typeof window === 'undefined' ? undefined : readAuthenticatedUser();
@@ -98,13 +101,16 @@ export default function OperationHomePage() {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    apiClient
-      .get<DashboardSummary>('/dashboard/summary', { query: { period } })
-      .then((data) => {
-        if (!cancelled) setSummary(data);
-      })
-      .catch(() => {
-        if (!cancelled) setSummary(undefined);
+    Promise.all([
+      apiClient
+        .get<DashboardSummary>('/dashboard/summary', { query: { period: 'today' } })
+        .catch(() => undefined),
+      getPersonalToday({ platform: platform as PersonalPlatform }).catch(() => undefined),
+    ])
+      .then(([sum, t]) => {
+        if (cancelled) return;
+        if (sum) setSummary(sum);
+        if (t) setToday(t);
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -112,11 +118,12 @@ export default function OperationHomePage() {
     return () => {
       cancelled = true;
     };
-  }, [period]);
+  }, [platform]);
 
-  const posts = (summary?.xhsPosts ?? 0) + (summary?.douyinPosts ?? 0);
-  const leads = summary?.todayLeads ?? 0;
-  const deals = summary?.todayDeals ?? 0;
+  // v1.3 OP-4：顶部 3 张数据卡（今日作品 / 今日客资 / 今日流量），去除今日成交
+  const todayPostCount = today?.todayPostCount ?? (summary?.xhsPosts ?? 0) + (summary?.douyinPosts ?? 0);
+  const todayLeadCount = today?.todayLeadCount ?? summary?.todayLeads ?? 0;
+  const todayTraffic = today?.todayTraffic ?? 0;
   const pendingCollabs = summary?.pendingCollabs ?? 0;
 
   return (
@@ -138,12 +145,12 @@ export default function OperationHomePage() {
             </Badge>
           </Link>
           <Segmented
-            value={period}
-            onChange={(v) => setPeriod(v as Period)}
+            value={platform}
+            onChange={(v) => setPlatform(v as Platform)}
             options={[
-              { label: '今日', value: 'today' },
-              { label: '本周', value: 'week' },
-              { label: '本月', value: 'month' },
+              { label: '全部', value: 'all' },
+              { label: '小红书', value: 'xiaohongshu' },
+              { label: '抖音', value: 'douyin' },
             ]}
           />
         </Space>
@@ -151,16 +158,25 @@ export default function OperationHomePage() {
 
       <Skeleton loading={loading} active paragraph={{ rows: 2 }}>
         <Row gutter={16}>
-          <Col span={6}>
-            <Card><Statistic title="今日作品" value={posts} /></Card>
+          <Col span={8}>
+            <Card><Statistic title="今日作品" value={todayPostCount} /></Card>
           </Col>
-          <Col span={6}>
-            <Card><Statistic title="今日客资" value={leads} /></Card>
+          <Col span={8}>
+            <Card><Statistic title="今日客资" value={todayLeadCount} /></Card>
           </Col>
-          <Col span={6}>
-            <Card><Statistic title="今日成交" value={deals} /></Card>
+          <Col span={8}>
+            <Card>
+              <Statistic
+                title="今日流量（点赞+评论+收藏）"
+                value={todayTraffic}
+                prefix={<FireOutlined style={{ color: '#fa541c' }} />}
+                valueStyle={{ color: '#fa541c' }}
+              />
+            </Card>
           </Col>
-          <Col span={6}>
+        </Row>
+        <Row gutter={16} style={{ marginTop: 12 }}>
+          <Col span={8}>
             <Card><Statistic title="待处理协同" value={pendingCollabs} /></Card>
           </Col>
         </Row>

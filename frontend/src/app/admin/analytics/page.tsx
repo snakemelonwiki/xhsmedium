@@ -1,8 +1,8 @@
 'use client';
 
 import { FundOutlined, SelectOutlined, TeamOutlined } from '@ant-design/icons';
-import { Card, Col, Row, Select, Skeleton, Space, Typography } from 'antd';
-import { useEffect, useRef, useState } from 'react';
+import { Alert, Card, Col, Empty, Row, Select, Skeleton, Space, Tag, Typography } from 'antd';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { getSupervisorAnalysis, type SupervisorAnalysis } from '@/shared/api/admin';
 
@@ -17,7 +17,16 @@ const PLATFORM_OPTIONS = [
   { label: '抖音', value: '抖音' },
 ];
 
-function buildLineOption(title: string, dates: string[], series: { name: string; data: number[] }[]): any {
+const PLATFORM_COLORS: Record<string, string> = {
+  小红书: '#fa8c16',
+  抖音: '#1677ff',
+};
+
+function buildLineOption(
+  title: string,
+  dates: string[],
+  series: { name: string; data: number[]; color: string }[],
+): any {
   return {
     title: { text: title, textStyle: { fontSize: 14, fontWeight: 'normal' }, left: 'center' },
     tooltip: { trigger: 'axis' },
@@ -31,6 +40,7 @@ function buildLineOption(title: string, dates: string[], series: { name: string;
       data: s.data,
       smooth: true,
       showSymbol: false,
+      itemStyle: { color: s.color },
     })),
   };
 }
@@ -51,96 +61,128 @@ function buildPieOption(title: string, data: { name: string; value: number }[]):
   };
 }
 
-function PlatformTrendChart({ analysis, loading }: { analysis?: SupervisorAnalysis; loading: boolean }) {
+/**
+ * 通用 echarts 容器：用 ref 持有 chart 实例避免重复 init，
+ * option 变化时 setOption 复用，option 变 undefined 或卸载时 dispose。
+ * 不再 innerHTML 写占位，避免破坏 React DOM 与 echarts 实例状态。
+ */
+function EChart({ option, height, loading }: { option?: any; height: number; loading: boolean }) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const chartRef = useRef<any>(null);
+  const [echartsReady, setEchartsReady] = useState(false);
+
+  // echarts 通过 layout.tsx 注入的 CDN script 暴露为 window.echarts，
+  // 它的加载晚于组件首次渲染，需要等 ready=true 后再 init，避免 ReferenceError。
+  useEffect(() => {
+    if (typeof echarts === 'undefined') {
+      const timer = window.setInterval(() => {
+        if (typeof echarts !== 'undefined') {
+          setEchartsReady(true);
+          window.clearInterval(timer);
+        }
+      }, 50);
+      return () => window.clearInterval(timer);
+    }
+    setEchartsReady(true);
+    return undefined;
+  }, []);
 
   useEffect(() => {
-    if (loading || !containerRef.current) return;
-    if (!analysis?.platformTrend?.length) {
-      containerRef.current.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#999;">暂无数据</div>';
+    if (!echartsReady) return;
+    if (!containerRef.current) return;
+    if (!option) {
+      chartRef.current?.dispose();
+      chartRef.current = null;
       return;
     }
-    const dates = [...new Set(analysis.platformTrend.map((r) => r.date))].sort();
-    const xhsData = dates.map((d) => {
-      const row = analysis.platformTrend.find((r) => r.date === d && r.platform === '小红书');
-      return row?.postCount ?? 0;
-    });
-    const dyData = dates.map((d) => {
-      const row = analysis.platformTrend.find((r) => r.date === d && r.platform === '抖音');
-      return row?.postCount ?? 0;
-    });
-    const chart = echarts.init(containerRef.current, null, { renderer: 'canvas' });
-    chart.setOption(buildLineOption('平台趋势（作品数）', dates, [
-      { name: '小红书', data: xhsData },
-      { name: '抖音', data: dyData },
-    ]));
-    return () => { chart.dispose(); };
-  }, [loading, analysis]);
+    if (!chartRef.current) {
+      chartRef.current = echarts.init(containerRef.current, null, { renderer: 'canvas' });
+    }
+    chartRef.current.setOption(option, true);
+  }, [option, echartsReady]);
+
+  useEffect(() => {
+    return () => {
+      chartRef.current?.dispose();
+      chartRef.current = null;
+    };
+  }, []);
+
+  return (
+    <Skeleton loading={loading} active>
+      {option && echartsReady ? (
+        <div ref={containerRef} style={{ width: '100%', height }} />
+      ) : (
+        <div
+          style={{
+            width: '100%',
+            height,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: '#999',
+          }}
+        >
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无数据" />
+        </div>
+      )}
+    </Skeleton>
+  );
+}
+
+function PlatformTrendChart({ analysis, loading }: { analysis?: SupervisorAnalysis; loading: boolean }) {
+  const option = useMemo(() => {
+    const rows = analysis?.platformTrend ?? [];
+    if (rows.length === 0) return undefined;
+    // 从实际数据中提取出现的平台，避免切到单平台时仍硬编码两条 series
+    const platforms = Array.from(new Set(rows.map((r) => r.platform))).sort();
+    const dates = Array.from(new Set(rows.map((r) => r.date))).sort();
+    const series = platforms.map((p) => ({
+      name: p,
+      color: PLATFORM_COLORS[p] ?? '#999',
+      data: dates.map((d) => rows.find((r) => r.date === d && r.platform === p)?.postCount ?? 0),
+    }));
+    return buildLineOption('平台趋势（作品数）', dates, series);
+  }, [analysis]);
 
   return (
     <Card title={<><FundOutlined /> 平台趋势</>} styles={{ body: { padding: '12px 12px 0' } }}>
-      <Skeleton loading={loading} active>
-        <div ref={containerRef} style={{ width: '100%', height: 280 }} />
-      </Skeleton>
+      <EChart option={option} height={280} loading={loading} />
     </Card>
   );
 }
 
 function PostStructureChart({ analysis, loading }: { analysis?: SupervisorAnalysis; loading: boolean }) {
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (loading || !containerRef.current) return;
-    if (!analysis?.postStructure?.length) {
-      containerRef.current.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#999;">暂无数据</div>';
-      return;
-    }
-    const data = analysis.postStructure.map((r) => ({ name: r.type, value: r.count }));
-    const chart = echarts.init(containerRef.current, null, { renderer: 'canvas' });
-    chart.setOption(buildPieOption('作品结构', data));
-    return () => { chart.dispose(); };
-  }, [loading, analysis]);
+  const option = useMemo(() => {
+    const rows = analysis?.postStructure ?? [];
+    if (rows.length === 0) return undefined;
+    return buildPieOption('作品结构', rows.map((r) => ({ name: r.type, value: r.count })));
+  }, [analysis]);
 
   return (
     <Card title={<><TeamOutlined /> 作品结构</>} styles={{ body: { padding: '12px 12px 0' } }}>
-      <Skeleton loading={loading} active>
-        <div ref={containerRef} style={{ width: '100%', height: 280 }} />
-      </Skeleton>
+      <EChart option={option} height={280} loading={loading} />
     </Card>
   );
 }
 
 function LeadTrendChart({ analysis, loading }: { analysis?: SupervisorAnalysis; loading: boolean }) {
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (loading || !containerRef.current) return;
-    if (!analysis?.leadTrend?.length) {
-      containerRef.current.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#999;">暂无数据</div>';
-      return;
-    }
-    const dates = [...new Set(analysis.leadTrend.map((r) => r.date))].sort();
-    const xhsData = dates.map((d) => {
-      const row = analysis.leadTrend.find((r) => r.date === d && r.platform === '小红书');
-      return row?.leadCount ?? 0;
-    });
-    const dyData = dates.map((d) => {
-      const row = analysis.leadTrend.find((r) => r.date === d && r.platform === '抖音');
-      return row?.leadCount ?? 0;
-    });
-    const chart = echarts.init(containerRef.current, null, { renderer: 'canvas' });
-    chart.setOption(buildLineOption('客资趋势（新增客资数）', dates, [
-      { name: '小红书', data: xhsData },
-      { name: '抖音', data: dyData },
-    ]));
-    return () => { chart.dispose(); };
-  }, [loading, analysis]);
+  const option = useMemo(() => {
+    const rows = analysis?.leadTrend ?? [];
+    if (rows.length === 0) return undefined;
+    const platforms = Array.from(new Set(rows.map((r) => r.platform))).sort();
+    const dates = Array.from(new Set(rows.map((r) => r.date))).sort();
+    const series = platforms.map((p) => ({
+      name: p,
+      color: PLATFORM_COLORS[p] ?? '#999',
+      data: dates.map((d) => rows.find((r) => r.date === d && r.platform === p)?.leadCount ?? 0),
+    }));
+    return buildLineOption('客资趋势（新增客资数）', dates, series);
+  }, [analysis]);
 
   return (
     <Card title={<><FundOutlined /> 客资趋势</>} styles={{ body: { padding: '12px 12px 0' } }}>
-      <Skeleton loading={loading} active>
-        <div ref={containerRef} style={{ width: '100%', height: 280 }} />
-      </Skeleton>
+      <EChart option={option} height={280} loading={loading} />
     </Card>
   );
 }
@@ -148,14 +190,31 @@ function LeadTrendChart({ analysis, loading }: { analysis?: SupervisorAnalysis; 
 export default function AdminAnalyticsPage() {
   const [analysis, setAnalysis] = useState<SupervisorAnalysis | undefined>();
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string>();
   const [platform, setPlatform] = useState<PlatformFilter>('');
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
+    // 切平台时立即取消上一次请求，避免旧响应覆盖新状态
+    abortRef.current?.abort();
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
     setLoading(true);
-    getSupervisorAnalysis({ platform: platform || undefined })
-      .then(setAnalysis)
-      .catch(() => setAnalysis(undefined))
-      .finally(() => setLoading(false));
+    setError(undefined);
+    getSupervisorAnalysis({ platform: platform || undefined }, { signal: ctrl.signal })
+      .then((data) => {
+        if (ctrl.signal.aborted) return;
+        setAnalysis(data);
+      })
+      .catch((err) => {
+        if (ctrl.signal.aborted) return;
+        setAnalysis(undefined);
+        setError(err instanceof Error ? err.message : '分析数据加载失败');
+      })
+      .finally(() => {
+        if (!ctrl.signal.aborted) setLoading(false);
+      });
+    return () => ctrl.abort();
   }, [platform]);
 
   return (
@@ -168,6 +227,7 @@ export default function AdminAnalyticsPage() {
           </Typography.Paragraph>
         </div>
         <Space size={12} wrap align="center">
+          <Tag color="purple">主管</Tag>
           <Select
             value={platform}
             onChange={(v) => setPlatform(v as PlatformFilter)}
@@ -177,6 +237,10 @@ export default function AdminAnalyticsPage() {
           />
         </Space>
       </div>
+
+      {error ? (
+        <Alert type="warning" showIcon message="分析数据暂不可用" description={error} />
+      ) : null}
 
       <Row gutter={[16, 16]}>
         <Col xs={24} lg={16}>

@@ -100,6 +100,101 @@ export class NotificationsService {
     return this.repo.count({ where });
   }
 
+  /**
+   * v1.3 / OP-6 拆分未读消息：按 typeCode 维度返回未读条数。
+   * 典型用法：今日任务页同时拉「主管建议」与「未读系统消息」两条卡片。
+   *
+   * 主管建议走 supervisor_suggestions 表（不再走 notifications 的 typeCode='supervisor_suggestion'，
+   * 见 supervisor-suggestions.service），所以本方法对 supervisor_suggestion 会返回 0；
+   * 调用方应自行用 supervisor-suggestions 模块的 unread-count 接口。
+   */
+  async getUnreadCountByType(typeCode: string, userId: string): Promise<number> {
+    if (!typeCode || !userId) return 0;
+    return this.repo.count({
+      where: { receiverId: userId, readStatus: 0, typeCode },
+    });
+  }
+
+  /**
+   * v1.3 SUP-3: 当前用户未读提醒（type_code = 'reminder'）按 sender_id 分组聚合。
+   * 每组返回发送者 ID、显示名（来自 users.username，缺省回退到 ID）、未读条数、
+   * 最新一条的 content / createdAt。
+   */
+  async listUnreadBySender(
+    userId: string,
+    portType?: string,
+  ): Promise<{ total: number; senders: Array<{ senderId: string; senderName: string; count: number; latestContent: string | null; latestAt: string | null }> }> {
+    if (!userId) return { total: 0, senders: [] };
+    const params: any[] = [userId];
+    const whereParts = ['n.receiver_id = ?', "n.type_code = 'reminder'", 'n.read_status = 0'];
+    if (portType) {
+      whereParts.push('n.port_type = ?');
+      params.push(portType);
+    }
+    const sql = `
+      SELECT
+        COALESCE(n.sender_id, '') AS sender_id,
+        u.username AS sender_name,
+        COUNT(*) AS cnt
+      FROM notifications n
+      LEFT JOIN users u ON u.id = n.sender_id
+      WHERE ${whereParts.join(' AND ')}
+      GROUP BY n.sender_id, u.username
+      ORDER BY cnt DESC, n.sender_id ASC
+    `;
+    const grouped = (await this.repo.query(sql, params)) as Array<{
+      sender_id: string;
+      sender_name: string | null;
+      cnt: string | number;
+    }>;
+
+    const senders: Array<{
+      senderId: string;
+      senderName: string;
+      count: number;
+      latestContent: string | null;
+      latestAt: string | null;
+    }> = [];
+
+    let total = 0;
+    for (const row of grouped) {
+      const senderId = String(row.sender_id || '').trim();
+      const count = Number(row.cnt || 0);
+      total += count;
+      let latestContent: string | null = null;
+      let latestAt: string | null = null;
+      if (senderId) {
+        const latestParams: any[] = [userId, senderId];
+        const latestWhere = "n.receiver_id = ? AND n.type_code = 'reminder' AND n.read_status = 0 AND n.sender_id = ?";
+        if (portType) {
+          latestParams.push(portType);
+        }
+        const latestSql = `
+          SELECT n.content, n.created_at
+          FROM notifications n
+          WHERE ${latestWhere}${portType ? ' AND n.port_type = ?' : ''}
+          ORDER BY n.created_at DESC
+          LIMIT 1
+        `;
+        const latest = (await this.repo.query(latestSql, latestParams)) as Array<{ content: string | null; created_at: Date | string }>;
+        if (latest[0]) {
+          latestContent = latest[0].content ?? null;
+          latestAt = latest[0].created_at instanceof Date
+            ? latest[0].created_at.toISOString()
+            : String(latest[0].created_at || '');
+        }
+      }
+      senders.push({
+        senderId,
+        senderName: String(row.sender_name || senderId || '未知发送者'),
+        count,
+        latestContent,
+        latestAt,
+      });
+    }
+    return { total, senders };
+  }
+
   private clampLimit(limit: number | undefined): number {
     const n = Number(limit) || 20;
     if (n <= 0) return 20;

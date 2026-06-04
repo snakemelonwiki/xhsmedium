@@ -76,6 +76,9 @@ export class NotificationsGateway implements OnGatewayConnection, OnGatewayDisco
     order_updated: 'order.updated',
     order_abnormal: 'order.abnormal',
     export_done: 'export.finished',
+    // v1.3 CROSS-3: 三角色互相提醒专用业务事件
+    // （同步发 notification.created/notification:new；按 typeCode 额外推 reminder.created）
+    reminder: 'reminder.created',
   };
 
   emitCreated(userId: string, notification: any) {

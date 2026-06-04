@@ -48,6 +48,7 @@ export const NotificationTypeLabels: Record<NotificationType, string> = {
   [NOTIFICATION_TYPES.ORDER_ABNORMAL]: '订单异常',
   [NOTIFICATION_TYPES.IMPORT_DONE]: '导入完成',
   [NOTIFICATION_TYPES.EXPORT_DONE]: '导出完成',
+  [NOTIFICATION_TYPES.REMINDER]: '通用提醒',
   supervisor_suggestion: '主管建议（已下线）',
   lead_deal_done: '成交提醒（已下线）',
 };

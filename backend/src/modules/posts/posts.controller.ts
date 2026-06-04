@@ -38,14 +38,20 @@ export class PostsController {
     @Query('search') search?: string,
     @Query('keyword') keyword?: string,
     @Query('q') q?: string,
+    // v1.3 / OP-14: 作品广场范围放宽，staff 显式传 scope=all 时不再强制按本人过滤
+    @Query('scope') scope?: 'self' | 'all',
   ) {
     const session = (req as any).session;
     const wantsPaging = limit !== undefined || offset !== undefined;
     const nextSearch = (search || keyword || q || '').trim();
+    // 仅当 staff 显式传 scope=all 时不强制本人过滤（默认 self 保留旧行为）
+    const isStaff = session?.role === 'staff' && session?.employeeId;
+    const forceSelf = isStaff && scope !== 'all';
 
     if (wantsPaging) {
       // 漏洞1修复：staff 强制只用 session.employeeId 过滤，不能通过 query 参数绕过
-      if (session?.role === 'staff' && session?.employeeId) {
+      //   v1.3 / OP-14 例外：scope=all 时，staff 也可以看全公司作品（前端 Gallery 用）
+      if (forceSelf) {
         const result = await this.postsService.findPaged(
           {
             employeeId: session.employeeId, // 强制使用 session 的 employeeId
@@ -62,7 +68,7 @@ export class PostsController {
         );
         return res.json(result);
       }
-      // 非 staff：employeeId 参数由 query 决定（主管可查任意员工）
+      // 非 staff 或 scope=all：employeeId 参数由 query 决定（主管可查任意员工；staff 看全公司）
       const result = await this.postsService.findPaged(
         {
           employeeId,
@@ -80,7 +86,7 @@ export class PostsController {
       return res.json(result);
     }
 
-    if (session?.role === 'staff' && session?.employeeId) {
+    if (forceSelf) {
       const rows = await this.postsService.findByEmployee(session.employeeId);
       return res.json(rows);
     }
@@ -89,7 +95,11 @@ export class PostsController {
   }
 
   /**
-   * 解析作品链接，识别平台并返回可回填的基础字段。
+   * 解析作品链接，识别平台并回填表单字段。
+   * 沿用 legacy `metricsFetcher.js` 的 Playwright 抓取能力：
+   *   - 成功：返回完整标题 + 4 项指标（likes/comments/favorites/shares）
+   *   - 抓取失败：返回基础识别 + warning，不抛错（前端可继续录入）
+   *   - 未识别平台：返回 platform='其他'，parsed=false
    */
   @Post('parse-link')
   async parseLink(@Body() body: any, @Res() res: Response) {
@@ -97,7 +107,8 @@ export class PostsController {
     if (!postUrl) {
       return res.status(400).json({ ok: false, message: '作品链接不能为空' });
     }
-    return res.json({ ok: true, data: this.postsService.parsePostLink(postUrl) });
+    const data = await this.postsService.parsePostLink(postUrl, { fetch: body?.fetch !== false });
+    return res.json({ ok: true, data });
   }
 
   /**
@@ -136,6 +147,8 @@ export class PostsController {
       },
       Number(page) || 1,
       Number(pageSize) || 20,
+      // v1.3 OP-14: 透传 viewer 用于按权限收敛 leadsCount
+      { employeeId: session?.employeeId, role: String(role || '').toLowerCase() },
     );
     return res.json({ ok: true, view: effectiveView, ...result });
   }
@@ -185,6 +198,71 @@ export class PostsController {
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename="posts_import_template.csv"');
     return res.send(csv);
+  }
+
+  // 注意：v1.3 SUP-1 `supervisor-picks` 与 v1.3 OP-8 `learning-board` 同样必须位于 :id 路由之前，
+  //      否则 'supervisor-picks' / 'learning-board' 会被 :id 抢占命中 findOne。
+  /**
+   * v1.3 OP-8: 学习榜单维度切换数据源。
+   * Query:
+   *   - dimension: traffic | leads | composite（默认 composite）
+   *   - days: 近 N 天发布的作品，默认 30
+   *   - platform: 可选 小红书 / 抖音
+   *   - limit: 返回前 N 条，默认 20
+   *
+   * 返回字段包含 trafficScore / leadsCount / compositeScore / score（按 dimension 选），
+   * 前端根据当前 dimension 直接渲染即可。
+   */
+  @Get('learning-board')
+  async getLearningBoard(
+    @Req() req: Request,
+    @Res() res: Response,
+    @Query('dimension') dimension?: string,
+    @Query('days') days?: string,
+    @Query('platform') platform?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const session = (req as any).session;
+    const result = await this.postsService.getLearningBoard(
+      {
+        dimension: dimension as any,
+        days: Number(days) || 30,
+        platform: platform || undefined,
+        limit: Number(limit) || 20,
+      },
+      // v1.3 OP-14: 透传 viewer
+      { employeeId: session?.employeeId, role: String(session?.role || '').toLowerCase() },
+    );
+    return res.json({ ok: true, ...result });
+  }
+
+  /**
+   * 主管分页查询被标记的优秀作品（学习榜单"主管推荐"使用）。
+   * Query: pickedBy=可选，过滤"我标记的"; limit/offset
+   * 权限：所有登录用户可读（运营/销售/主管/管理员/教务）
+   */
+  @Get('supervisor-picks')
+  async listSupervisorPicks(
+    @Req() req: Request,
+    @Res() res: Response,
+    @Query('pickedBy') pickedBy?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ) {
+    const session = (req as any).session;
+    const role = String(session?.role || '').toLowerCase();
+    const allowedRoles = new Set(['admin', 'supervisor', 'owner', 'operation', 'staff', 'sales', 'academic']);
+    if (!allowedRoles.has(role)) {
+      return res.status(403).json({ ok: false, message: '无权查询' });
+    }
+    const result = await this.postsService.findSupervisorPicks(
+      { pickedBy: pickedBy || undefined },
+      Number(limit) || 20,
+      Number(offset) || 0,
+      // v1.3 OP-14: 透传 viewer
+      { employeeId: session?.employeeId, role: String(role || '').toLowerCase() },
+    );
+    return res.json({ ok: true, ...result });
   }
 
   @Get(':id')
@@ -301,6 +379,50 @@ export class PostsController {
   async updateSupervisorSuggestion(@Param('id') id: string, @Body() body: any, @Res() res: Response) {
     await this.postsService.updateSupervisorSuggestion(id, body.supervisorSuggestion);
     return res.json({ ok: true });
+  }
+
+  // ── v1.3 SUP-1: 主管手动标记优秀作品 ─────────────────────────────
+  // supervisor-picks 静态路径已在 :id 路由之前（见文件上方）；
+  // :id/pick 与 :id/supervisor-suggestion 同为前缀匹配，按 NestJS 路径注册顺序即可。
+
+  /**
+   * 主管标记作品为优秀。
+   * 权限：supervisor / admin / owner 角色可调用。
+   */
+  @Post(':id/pick')
+  async pickSupervisor(@Param('id') id: string, @Req() req: Request, @Res() res: Response) {
+    const session = (req as any).session;
+    const role = String(session?.role || '').toLowerCase();
+    if (!['supervisor', 'admin', 'owner'].includes(role)) {
+      return res.status(403).json({ ok: false, message: '仅主管/管理员可标记' });
+    }
+    const userId = getSessionUserId(req);
+    if (!userId) {
+      return res.status(401).json({ ok: false, message: '未登录' });
+    }
+    const result = await this.postsService.markSupervisorPick(id, userId);
+    if (!result) {
+      return res.status(404).json({ ok: false, message: '作品不存在' });
+    }
+    return res.json({ ok: true, ...result });
+  }
+
+  /**
+   * 主管取消标记。
+   * 权限：supervisor / admin / owner 角色可调用（与 mark 保持一致）。
+   */
+  @Delete(':id/pick')
+  async unpickSupervisor(@Param('id') id: string, @Req() req: Request, @Res() res: Response) {
+    const session = (req as any).session;
+    const role = String(session?.role || '').toLowerCase();
+    if (!['supervisor', 'admin', 'owner'].includes(role)) {
+      return res.status(403).json({ ok: false, message: '仅主管/管理员可取消标记' });
+    }
+    const result = await this.postsService.unmarkSupervisorPick(id);
+    if (!result) {
+      return res.status(404).json({ ok: false, message: '作品不存在' });
+    }
+    return res.json({ ok: true, ...result });
   }
 
   @Post(':id/fetch-metrics')

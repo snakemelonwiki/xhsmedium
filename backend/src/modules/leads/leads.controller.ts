@@ -167,88 +167,23 @@ export class LeadsController {
     return res.json(rows);
   }
 
-  // ---- 被动添加客资识别（passive） §4.3 ----
-  // 注意：这一组路由必须在所有 `:id` 路由之前注册，否则 NestJS 会把
-  // 字面量 'passive' 当作 :id 参数命中错误的处理函数。
-
-  @Get('passive/candidates')
-  async passiveCandidates(
-    @Req() req: Request,
-    @Res() res: Response,
-    @Query('phone') phone?: string,
-    @Query('wechat') wechat?: string,
-    @Query('nickname') nickname?: string,
-    @Query('actorUserId') queryActorUserId?: string,
-    @Query('limit') limit?: string,
-    @Query('offset') offset?: string,
-  ) {
-    const session = (req as any).session;
-    const actorEmployeeId = session?.employeeId || queryActorUserId || '';
-    const wantsPaging = limit !== undefined || offset !== undefined;
-    if (wantsPaging) {
-      const result = await this.leadsService.findPassiveCandidatesPaged({
-        phone,
-        wechat,
-        nickname,
-        actorEmployeeId,
-        limit: Number(limit) || 20,
-        offset: Number(offset) || 0,
-      });
-      return res.json(result);
-    }
-    const rows = await this.leadsService.findPassiveCandidates({
-      phone,
-      wechat,
-      nickname,
-      actorEmployeeId,
-    });
-    return res.json(rows);
-  }
-
-  @Post('passive/bind')
-  async passiveBind(@Body() body: any, @Req() req: Request, @Res() res: Response) {
-    const session = (req as any).session;
-    const actorUserId = getSessionUserId(req) || body.actorUserId || '';
-    const actorUserName = session?.employeeName || session?.username || '';
-    try {
-      const result = await this.leadsService.bindPassive({
-        leadId: body.leadId,
-        contact: body.contact || '',
-        salesFeedback: body.salesFeedback,
-        actorUserId,
-        actorUserName,
-      });
-      return res.json(result);
-    } catch (err: any) {
-      return res.status(422).json({ ok: false, message: err.message || 'invalid' });
-    }
-  }
-
-  @Post('passive/new')
-  async passiveNew(@Body() body: any, @Req() req: Request, @Res() res: Response) {
-    const session = (req as any).session;
-    const actorUserId = getSessionUserId(req) || body.actorUserId || '';
-    const actorUserName = session?.employeeName || session?.username || '';
-    try {
-      const result = await this.leadsService.createPassive({
-        contact: body.contact || '',
-        nickname: body.nickname,
-        platform: body.platform,
-        salesFeedback: body.salesFeedback,
-        actorUserId,
-        actorUserName,
-      });
-      return res.json(result);
-    } catch (err: any) {
-      return res.status(422).json({ ok: false, message: err.message || 'invalid' });
-    }
-  }
-
   @Post()
   @UseGuards(DebounceGuard)
   async create(@Body() body: any, @Req() req: Request, @Res() res: Response) {
     try {
       const session = (req as any).session;
+      // v1.3 / OP-5 / CROSS-1: 是否分流
+      //   0 = 未分流：必传 assignedSalesUserId（service 层强校验）
+      //   1 = 已分流：销售字段置空
+      // 未传时按未分流处理，保留旧默认。
+      const isDispatchedRaw = body.isDispatched;
+      const isDispatched: 0 | 1 =
+        isDispatchedRaw === 1 || isDispatchedRaw === '1' || isDispatchedRaw === true ? 1 : 0;
+      const rawSalesId = body.assignedSalesUserId ? String(body.assignedSalesUserId) : '';
+      const assignedSalesUserId = isDispatched === 1 ? null : rawSalesId || null;
+      const assignedSalesUserName =
+        isDispatched === 1 ? '' : body.assignedSalesUserName || '';
+
       await this.leadsService.create({
         id: makeId(),
         employeeId: session?.employeeId || '',
@@ -260,7 +195,7 @@ export class LeadsController {
         budget: body.budget,
         majorContent: body.majorContent,
         ip: body.ip,
-        status: body.status || (body.assignedSalesUserId ? 'assigned' : 'new'),
+        status: body.status || (assignedSalesUserId ? 'assigned' : 'new'),
         dealAmount: body.dealAmount,
         note: body.note,
         requirementNote: body.requirementNote,
@@ -269,11 +204,12 @@ export class LeadsController {
         salesFeedback: body.salesFeedback || '',
         salesUpdatedAt: body.salesUpdatedAt,
         salesUserName: body.salesUserName || '',
-        assignedSalesUserId: body.assignedSalesUserId || null,
-        assignedSalesUserName: body.assignedSalesUserName || '',
+        assignedSalesUserId,
+        assignedSalesUserName,
         processStatus: body.processStatus || 'not_contacted',
         addStatus: body.addStatus || 'not_added',
         intention: body.intention || null,
+        isDispatched,
       });
       return res.json({ ok: true });
     } catch (err: any) {
@@ -345,7 +281,9 @@ export class LeadsController {
       actorEmployeeId: session?.employeeId || '',
       actorRole: session?.role || '',
     });
-    await this.leadsService.update(id, {
+    // v1.3 / OP-5 / CROSS-1: 编辑客资时支持 isDispatched
+    // 已分流(isDispatched=1)：销售字段强制清空；未传时保留原值（不强行改）。
+    const updatePatch: Record<string, unknown> = {
       accountId: body.accountId,
       postId: body.postId || null,
       contactInfo: body.contactInfo,
@@ -367,7 +305,18 @@ export class LeadsController {
       processStatus: body.processStatus,
       addStatus: body.addStatus,
       intention: body.intention,
-    });
+    };
+    if (body.isDispatched !== undefined) {
+      const nextIsDispatched: 0 | 1 =
+        body.isDispatched === 1 || body.isDispatched === '1' || body.isDispatched === true ? 1 : 0;
+      updatePatch.isDispatched = nextIsDispatched;
+      if (nextIsDispatched === 1) {
+        // 已分流：销售字段强制置空
+        updatePatch.assignedSalesUserId = null;
+        updatePatch.assignedSalesUserName = '';
+      }
+    }
+    await this.leadsService.update(id, updatePatch);
     // REASSIGN：本次请求把 assigned_sales_user_id 改成与原值不同的人，视为改派
     if (
       before
@@ -543,8 +492,97 @@ export class LeadsController {
         processStatus: body.processStatus,
         intention: body.intention,
         intentionLevel: body.intentionLevel,
+        // v1.3 / SA-1 + CROSS-2 扩展字段，回写 leads 自身
+        clientDegree: body.clientDegree,
+        clientMajorResearch: body.clientMajorResearch,
+        clientTimeRequirement: body.clientTimeRequirement,
+        objectionPoint: body.objectionPoint,
+        followAction: body.followAction,
+        followActionAt: body.followActionAt,
+        requirementNote: body.requirementNote,
       });
       return res.json({ ok: true });
+    } catch (err: any) {
+      return res.status(422).json({ ok: false, message: err.message || 'invalid' });
+    }
+  }
+
+  /**
+   * v1.3 / SA-1: 销售写跟进别名端点（与 follow-records 行为一致）。
+   * 一些前端代码会按 /follow-ups 调用；同时支持。
+   */
+  @Post(':id/follow-ups')
+  async addFollowUp(
+    @Param('id') id: string,
+    @Body() body: any,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    return this.addFollowRecord(id, body, req, res);
+  }
+
+  /**
+   * v1.3 / SA-3: 销售端"更新成交状态"端点。
+   * 弹窗选择 dealStatus（not_deal / deal_pending / deal_done / refunded / invalid）+ dealAmount。
+   */
+  @Patch(':id/deal-status')
+  @UseGuards(DebounceGuard)
+  async updateDealStatus(
+    @Param('id') id: string,
+    @Body() body: any,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    const session = (req as any).session;
+    const actorUserId = getSessionUserId(req) || body.actorUserId || '';
+    const canAccess = await this.leadsService.canAccessLead(id, {
+      actorUserId,
+      actorEmployeeId: session?.employeeId || '',
+      actorRole: session?.role || '',
+    });
+    if (!canAccess) {
+      return res.status(404).json({ ok: false, message: 'not found' });
+    }
+    try {
+      const lead = await this.leadsService.updateDealStatus(id, actorUserId, {
+        dealStatus: body.dealStatus,
+        dealAmount: body.dealAmount,
+      });
+      if (!lead) return res.status(404).json({ ok: false, message: 'not found' });
+      return res.json({ ok: true, lead });
+    } catch (err: any) {
+      return res.status(422).json({ ok: false, message: err.message || 'invalid' });
+    }
+  }
+
+  /**
+   * v1.3 / SA-3: 销售端"更新意向程度"端点。
+   * 弹窗选择 intentionLevel（high / mid / low / invalid / pending）。
+   */
+  @Patch(':id/intention-level')
+  @UseGuards(DebounceGuard)
+  async updateIntentionLevel(
+    @Param('id') id: string,
+    @Body() body: any,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    const session = (req as any).session;
+    const actorUserId = getSessionUserId(req) || body.actorUserId || '';
+    const canAccess = await this.leadsService.canAccessLead(id, {
+      actorUserId,
+      actorEmployeeId: session?.employeeId || '',
+      actorRole: session?.role || '',
+    });
+    if (!canAccess) {
+      return res.status(404).json({ ok: false, message: 'not found' });
+    }
+    try {
+      const lead = await this.leadsService.updateIntentionLevel(id, actorUserId, {
+        intentionLevel: body.intentionLevel,
+      });
+      if (!lead) return res.status(404).json({ ok: false, message: 'not found' });
+      return res.json({ ok: true, lead });
     } catch (err: any) {
       return res.status(422).json({ ok: false, message: err.message || 'invalid' });
     }

@@ -10,7 +10,7 @@ import { apiClient } from '@/shared/api/apiClient';
 import { ImageUploadField } from '@/shared/components/forms';
 import { useSubmitLock } from '@/shared/hooks/useSubmitLock';
 
-type EntryType = 'link' | 'upload' | 'manual';
+type EntryType = 'link' | 'manual';
 
 interface AccountOption {
   id: string;
@@ -51,6 +51,8 @@ export default function OperationPostNewPage() {
 
   /**
    * 调用后端 POST /api/posts/parse-link 解析作品链接
+   * 后端沿用 legacy Playwright 抓取能力：成功时返回完整指标，
+   * 抓取失败（如登录墙）时返回基础识别 + warning，不抛错。
    */
   async function parsePostUrl() {
     const rawUrl = String(form.getFieldValue('postUrl') || '').trim();
@@ -60,30 +62,75 @@ export default function OperationPostNewPage() {
     }
     setParsing(true);
     try {
-      const payload = await apiClient.post<{ ok?: boolean; data?: { platform?: string; title?: string } }>(
-        '/posts/parse-link',
-        { postUrl: rawUrl },
-      );
-      const nextValues: Record<string, string> = {};
-      if (payload?.data?.platform) {
-        nextValues.platform = payload.data.platform;
+      const payload = await apiClient.post<{
+        ok?: boolean;
+        data?: {
+          platform?: string;
+          postUrl?: string;
+          title?: string;
+          authorName?: string;
+          authorId?: string;
+          likes?: number;
+          comments?: number;
+          favorites?: number;
+          shares?: number;
+          parsed?: boolean;
+          warning?: string;
+        };
+      }>('/posts/parse-link', { postUrl: rawUrl });
+
+      const data = payload?.data;
+      const nextValues: Record<string, string | number> = {};
+
+      // 平台：后端返回 '小红书'/'抖音'，需要映射到表单值 xiaohongshu/douyin
+      const platformKey = mapPlatformToKey(data?.platform) || (rawUrl.match(/douyin\.com|iesdouyin\.com/i)
+        ? 'douyin'
+        : rawUrl.match(/xiaohongshu\.com|xhslink\.com/i) ? 'xiaohongshu' : '');
+      if (platformKey) {
+        nextValues.platform = platformKey;
       }
-      if (payload?.data?.title && !form.getFieldValue('title')) {
-        nextValues.title = payload.data.title;
+      if (data?.title && !form.getFieldValue('title')) {
+        nextValues.title = data.title;
       }
-      // 后端未识别时前端兜底
-      if (!nextValues.platform) {
-        if (/douyin\.com|iesdouyin\.com/i.test(rawUrl)) {
-          nextValues.platform = 'douyin';
-        } else if (/xiaohongshu\.com|xhslink\.com/i.test(rawUrl)) {
-          nextValues.platform = 'xiaohongshu';
+
+      // 作者信息回填：匹配账号下拉列表
+      if (data?.authorName && !form.getFieldValue('accountId')) {
+        const matched = accountOptions.find(
+          (a) => a.name === data.authorName || a.id === data.authorId,
+        );
+        if (matched) {
+          nextValues.accountId = matched.id;
         }
       }
+      // 抓取成功时把指标也回填到表单（仅在用户尚未填写时回填）
+      if (data?.parsed) {
+        if (data.likes !== undefined && !form.getFieldValue('likes')) {
+          nextValues.likes = data.likes;
+        }
+        if (data.comments !== undefined && !form.getFieldValue('comments')) {
+          nextValues.comments = data.comments;
+        }
+        if (data.favorites !== undefined && !form.getFieldValue('favorites')) {
+          nextValues.favorites = data.favorites;
+        }
+        if (data.shares !== undefined && !form.getFieldValue('shares')) {
+          nextValues.shares = data.shares;
+        }
+      }
+
+      // 兜底标题
       if (!nextValues.title && !form.getFieldValue('title')) {
         nextValues.title = inferTitleFromUrl(rawUrl);
       }
       form.setFieldsValue(nextValues);
-      message.success('已根据链接回填平台和标题');
+
+      if (data?.parsed) {
+        message.success('已根据链接回填标题与指标');
+      } else if (data?.warning) {
+        message.warning(`已识别平台，但未抓取到指标：${data.warning}`);
+      } else {
+        message.success('已根据链接回填平台和标题');
+      }
     } catch (err) {
       // 后端解析失败时前端兜底
       const nextValues: Record<string, string> = {};
@@ -199,7 +246,7 @@ export default function OperationPostNewPage() {
       </div>
       <Card>
         <Form form={form} layout="vertical" onFinish={submit} preserve>
-          {/* 录入方式切换 */}
+          {/* 录入方式切换：v1.3 / OP-12 移除「截图上传」入口 */}
           <Form.Item label="录入方式">
             <Segmented
               value={entryType}
@@ -208,15 +255,12 @@ export default function OperationPostNewPage() {
                 // 切换时清空相关字段
                 if (val === 'link') {
                   // 链接录入：保留 postUrl
-                } else if (val === 'upload') {
-                  form.setFieldsValue({ postUrl: '' });
                 } else if (val === 'manual') {
                   form.setFieldsValue({ postUrl: '', platform: 'xiaohongshu', postType: 'note' });
                 }
               }}
               options={[
                 { label: '链接录入', value: 'link' },
-                { label: '截图上传', value: 'upload' },
                 { label: '手动录入', value: 'manual' },
               ]}
             />
@@ -253,16 +297,6 @@ export default function OperationPostNewPage() {
               </Form.Item>
             )}
 
-            {/* 截图上传时显示封面上传 */}
-            {entryType === 'upload' && (
-              <Form.Item className="full-row" name="coverImageUrl" label="封面/截图" rules={[{ required: true, message: '请上传封面或截图' }]}>
-                <ImageUploadField
-                  bucket="post-covers"
-                  onThumbChange={(url) => { latestThumbRef.current = url; }}
-                />
-              </Form.Item>
-            )}
-
             <Form.Item name="title" label="标题" rules={getRequiredRules('title')}>
               <Input placeholder="作品标题" />
             </Form.Item>
@@ -288,15 +322,13 @@ export default function OperationPostNewPage() {
             <Form.Item className="full-row" name="copywriting" label="文案">
               <Input.TextArea rows={4} placeholder="作品文案或备注" />
             </Form.Item>
-            {/* 链接录入和手动录入时显示封面上传（非必填） */}
-            {entryType !== 'upload' && (
-              <Form.Item className="full-row" name="coverImageUrl" label="封面/截图">
-                <ImageUploadField
-                  bucket="post-covers"
-                  onThumbChange={(url) => { latestThumbRef.current = url; }}
-                />
-              </Form.Item>
-            )}
+            {/* 链接录入和手动录入时显示封面上传（非必填）；v1.3 / OP-12 截图录入入口已下线，保留封面图可选 */}
+            <Form.Item className="full-row" name="coverImageUrl" label="封面图">
+              <ImageUploadField
+                bucket="post-covers"
+                onThumbChange={(url) => { latestThumbRef.current = url; }}
+              />
+            </Form.Item>
             <Form.Item className="full-row" name="note" label="备注">
               <Input.TextArea rows={3} placeholder="备注信息" />
             </Form.Item>
@@ -323,4 +355,16 @@ function inferTitleFromUrl(rawUrl: string): string {
   } catch {
     return '待补充标题';
   }
+}
+
+/**
+ * 后端平台值（'小红书'/'抖音'）转表单值（'xiaohongshu'/'douyin'）。
+ * 兼容旧接口：若后端已返回小写英文键值则原样返回。
+ */
+function mapPlatformToKey(platform: string | undefined): '' | 'xiaohongshu' | 'douyin' {
+  if (!platform) return '';
+  const lower = String(platform).toLowerCase();
+  if (lower === 'xiaohongshu' || lower.includes('小红书')) return 'xiaohongshu';
+  if (lower === 'douyin' || lower.includes('抖音')) return 'douyin';
+  return '';
 }

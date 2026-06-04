@@ -14,67 +14,12 @@ vi.mock('./apiClient', async (importOriginal) => {
   };
 });
 
-import {
-  bindPassiveLead,
-  confirmLeadSource,
-  createPassiveLead,
-  listPassiveLeadCandidates,
-} from './leads';
+import { confirmLeadSource } from './leads';
 
-describe('passive lead API helpers', () => {
+describe('lead source confirm API helper', () => {
   beforeEach(() => {
     getMock.mockReset();
     postMock.mockReset();
-  });
-
-  it('loads passive lead candidates with paging query', async () => {
-    getMock.mockResolvedValue({
-      items: [{ id: 7, nickname: '小王', contactInfo: 'wx-1', platform: 'xhs' }],
-      total: 1,
-      limit: 20,
-      offset: 0,
-    });
-
-    await expect(listPassiveLeadCandidates({ nickname: '小王' })).resolves.toEqual({
-      items: [{ id: '7', nickname: '小王', contactInfo: 'wx-1', platform: 'xhs' }],
-      total: 1,
-      page: 1,
-      pageSize: 20,
-    });
-
-    expect(getMock).toHaveBeenCalledWith('/leads/passive/candidates', {
-      query: { nickname: '小王', limit: 20, offset: 0 },
-    });
-  });
-
-  it('binds a passive lead with contact and sales feedback', async () => {
-    postMock.mockResolvedValue({ ok: true });
-
-    await bindPassiveLead({ leadId: 'lead-1', contact: 'wx-1', salesFeedback: '已通过' });
-
-    expect(postMock).toHaveBeenCalledWith('/leads/passive/bind', {
-      leadId: 'lead-1',
-      contact: 'wx-1',
-      salesFeedback: '已通过',
-    });
-  });
-
-  it('creates a passive lead with the submitted form values', async () => {
-    postMock.mockResolvedValue({ ok: true });
-
-    await createPassiveLead({
-      contact: '13800000000',
-      nickname: '新客',
-      platform: 'xhs',
-      salesFeedback: '主动添加',
-    });
-
-    expect(postMock).toHaveBeenCalledWith('/leads/passive/new', {
-      contact: '13800000000',
-      nickname: '新客',
-      platform: 'xhs',
-      salesFeedback: '主动添加',
-    });
   });
 
   it('confirms a pending lead source with matched post and operator', async () => {

@@ -91,10 +91,17 @@ describe('PostsController A端契约补齐', () => {
 
   it('解析作品链接时返回平台和兜底标题', async () => {
     const postsService = {
-      parsePostLink: jest.fn().mockReturnValue({
+      parsePostLink: jest.fn().mockResolvedValue({
         platform: '小红书',
         postUrl: 'https://www.xiaohongshu.com/explore/abc',
         title: '小红书作品',
+        authorName: '测试作者',
+        authorId: 'xhs_user_123',
+        likes: 0,
+        comments: 0,
+        favorites: 0,
+        shares: 0,
+        parsed: false,
       }),
     } as any;
     const controller = new PostsController(postsService, {} as any, { log: jest.fn() } as any);
@@ -102,15 +109,75 @@ describe('PostsController A端契约补齐', () => {
 
     await controller.parseLink({ postUrl: 'https://www.xiaohongshu.com/explore/abc' }, res);
 
-    expect(postsService.parsePostLink).toHaveBeenCalledWith('https://www.xiaohongshu.com/explore/abc');
+    expect(postsService.parsePostLink).toHaveBeenCalledWith(
+      'https://www.xiaohongshu.com/explore/abc',
+      { fetch: true },
+    );
     expect(res.json).toHaveBeenCalledWith({
       ok: true,
       data: {
         platform: '小红书',
         postUrl: 'https://www.xiaohongshu.com/explore/abc',
         title: '小红书作品',
+        authorName: '测试作者',
+        authorId: 'xhs_user_123',
+        likes: 0,
+        comments: 0,
+        favorites: 0,
+        shares: 0,
+        parsed: false,
       },
     });
+  });
+
+  it('解析作品链接抓取失败时返回降级数据', async () => {
+    const postsService = {
+      parsePostLink: jest.fn().mockResolvedValue({
+        platform: '小红书',
+        postUrl: 'https://www.xiaohongshu.com/explore/locked',
+        title: '小红书作品',
+        likes: 0,
+        comments: 0,
+        favorites: 0,
+        shares: 0,
+        parsed: false,
+        warning: '当前打开的是小红书登录页，请先打开小红书登录浏览器完成一次登录。',
+      }),
+    } as any;
+    const controller = new PostsController(postsService, {} as any, { log: jest.fn() } as any);
+    const res = response();
+
+    await controller.parseLink({ postUrl: 'https://www.xiaohongshu.com/explore/locked' }, res);
+
+    expect(res.json).toHaveBeenCalledWith({
+      ok: true,
+      data: expect.objectContaining({
+        platform: '小红书',
+        parsed: false,
+        warning: expect.stringContaining('登录'),
+      }),
+    });
+  });
+
+  it('解析作品链接支持 fetch:false 关闭抓取', async () => {
+    const postsService = {
+      parsePostLink: jest.fn().mockResolvedValue({
+        platform: '抖音',
+        postUrl: 'https://v.douyin.com/abc',
+        title: '抖音作品',
+        likes: 0,
+        comments: 0,
+        favorites: 0,
+        shares: 0,
+        parsed: false,
+      }),
+    } as any;
+    const controller = new PostsController(postsService, {} as any, { log: jest.fn() } as any);
+    const res = response();
+
+    await controller.parseLink({ postUrl: 'https://v.douyin.com/abc', fetch: false }, res);
+
+    expect(postsService.parsePostLink).toHaveBeenCalledWith('https://v.douyin.com/abc', { fetch: false });
   });
 
   it('创建作品时遇到重复链接返回 409', async () => {
@@ -174,5 +241,55 @@ describe('PostsController A端契约补齐', () => {
 
     expect(postsService.getMetricsHistory).toHaveBeenCalledWith('post-1');
     expect(res.json).toHaveBeenCalledWith({ items: [{ id: 'metric-1', likes: 12 }] });
+  });
+});
+
+describe('PostsController v1.3 OP-8 学习榜单维度切换', () => {
+  const response = () => ({
+    status: jest.fn().mockReturnThis(),
+    json: jest.fn().mockReturnThis(),
+  }) as any;
+
+  it('learning-board 透传 dimension/days/platform/limit 给 service', async () => {
+    const postsService = {
+      getLearningBoard: jest.fn().mockResolvedValue({ dimension: 'traffic', items: [] }),
+    } as any;
+    const controller = new PostsController(postsService, {} as any, { log: jest.fn() } as any);
+    const res = response();
+    const req = { session: { role: 'admin', employeeId: 'emp-1' } } as any;
+
+    await controller.getLearningBoard(req, res, 'traffic', '14', '小红书', '10');
+
+    expect(postsService.getLearningBoard).toHaveBeenCalledWith(
+      {
+        dimension: 'traffic',
+        days: 14,
+        platform: '小红书',
+        limit: 10,
+      },
+      { employeeId: 'emp-1', role: 'admin' },
+    );
+    expect(res.json).toHaveBeenCalledWith({ ok: true, dimension: 'traffic', items: [] });
+  });
+
+  it('learning-board 缺省参数时使用 service 默认值', async () => {
+    const postsService = {
+      getLearningBoard: jest.fn().mockResolvedValue({ dimension: 'composite', items: [] }),
+    } as any;
+    const controller = new PostsController(postsService, {} as any, { log: jest.fn() } as any);
+    const res = response();
+    const req = { session: { role: 'staff', employeeId: 'emp-2' } } as any;
+
+    await controller.getLearningBoard(req, res);
+
+    expect(postsService.getLearningBoard).toHaveBeenCalledWith(
+      {
+        dimension: undefined,
+        days: 30,
+        platform: undefined,
+        limit: 20,
+      },
+      { employeeId: 'emp-2', role: 'staff' },
+    );
   });
 });

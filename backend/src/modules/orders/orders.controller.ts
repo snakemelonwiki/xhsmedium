@@ -56,6 +56,9 @@ export class OrdersController {
    * Sales marks a lead as deal-closed; spawns the order in a single transaction.
    * Mounted on the leads path so it lives next to the lead lifecycle but inside
    * the orders module (leaves leads.controller.ts untouched).
+   *
+   * v1.3 / SA-8 + SA-9: 同步创建 orders / order_finance / order_follow_records 三表。
+   * 接受 productType / guaranteeType / paymentStage / clientRequirementNote 等扩展字段。
    */
   @Post('leads/:id/close-deal')
   async closeDeal(
@@ -70,26 +73,36 @@ export class OrdersController {
       return res.status(401).json({ ok: false, message: 'unauthenticated' });
     }
     try {
-      const orderId = await this.ordersService.closeDeal(leadId, salesUserId, {
+      const result = await this.ordersService.closeDeal(leadId, salesUserId, {
         serviceType: body?.serviceType ?? null,
         amount: body?.amount ?? null,
         remark: body?.remark ?? null,
+        productType: body?.productType ?? null,
+        guaranteeType: body?.guaranteeType ?? null,
+        paymentStage: body?.paymentStage ?? null,
+        clientRequirementNote: body?.clientRequirementNote ?? null,
+        contractStatus: body?.contractStatus ?? null,
+        paidStatus: body?.paidStatus ?? null,
+        deliveryRequirement: body?.deliveryRequirement ?? null,
+        expectedHandleTime: body?.expectedHandleTime ?? null,
       });
       // 写操作日志：销售成单（订单创建）
       await this.logSafe({
         userId: salesUserId,
         action: OPERATION_LOG_ACTIONS.CREATE,
         targetType: OPERATION_LOG_TARGET_TYPES.ORDER,
-        targetId: orderId,
+        targetId: result.orderId,
         detail: {
           from: 'lead.close-deal',
           leadId,
           serviceType: body?.serviceType ?? null,
+          productType: body?.productType ?? null,
           amount: body?.amount ?? null,
+          orderCode: result.orderCode,
         },
         req,
       });
-      return res.json({ ok: true, orderId });
+      return res.json({ ok: true, orderId: result.orderId, orderCode: result.orderCode });
     } catch (err: any) {
       const status = err?.status || 422;
       return res.status(status).json({ ok: false, message: err?.message || 'invalid' });

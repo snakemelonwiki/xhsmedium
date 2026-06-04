@@ -1,6 +1,8 @@
 'use client';
 
-import { Select, Space, Spin, Tag, Typography } from 'antd';
+import { BarChartOutlined, RightOutlined } from '@ant-design/icons';
+import { Button, Select, Space, Spin, Tag, Typography } from 'antd';
+import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 
 import { apiClient } from '@/shared/api/apiClient';
@@ -73,10 +75,28 @@ export default function AdminPersonalPage() {
 
       {selectedEmployeeId && selectedEmployee ? (
         <>
-          <div style={{ marginBottom: 8 }}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: 8,
+              marginBottom: 8,
+            }}
+          >
             <Typography.Text type="secondary">
               当前查看：<Typography.Text strong>{selectedEmployee.name || selectedEmployee.id}</Typography.Text>
             </Typography.Text>
+            {/* v1.3 SUP-2: 同步到账号分析子菜单 — 跳到该员工对应的账号页 */}
+            <Link
+              href={`/admin/accounts?employeeId=${encodeURIComponent(selectedEmployeeId)}`}
+            >
+              <Button size="small" icon={<BarChartOutlined />}>
+                查看账号分析
+                <RightOutlined />
+              </Button>
+            </Link>
           </div>
           <PersonalDashboardBoard
             employeeId={selectedEmployeeId}

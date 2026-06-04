@@ -5,60 +5,73 @@ import {
   EyeOutlined,
   LinkOutlined,
   ReloadOutlined,
+  StarFilled,
+  StarOutlined,
 } from '@ant-design/icons';
 import {
   Button,
   Card,
-  Col,
   DatePicker,
   Empty,
-  Form,
   Image,
   Input,
-  message,
   Modal,
   Pagination,
-  Row,
+  Segmented,
   Select,
   Space,
   Spin,
   Statistic,
   Table,
   Tag,
+  Tooltip,
   Typography,
+  message,
 } from 'antd';
 import type { TablePaginationConfig } from 'antd/es/table/interface';
-import type { ColumnsType } from 'antd/es/table';
+import type { ColumnsType, TableProps } from 'antd/es/table';
 import dayjs, { type Dayjs } from 'dayjs';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import { apiClient } from '@/shared/api/apiClient';
 import { createExport } from '@/shared/api/exports';
+import { buildPostExportFilter, getPostDetailDisplay } from './postDetail';
 
 const { RangePicker } = DatePicker;
 const DEFAULT_PAGE_SIZE = 20;
+const PAGE_SIZE_OPTIONS = [20, 50, 100];
+
+type PeriodKey = 'today' | 'week' | 'month' | 'all' | 'custom';
 
 type Filters = {
+  period: PeriodKey;
+  customRange: [string, string] | null;
   platform: string;
   employeeId: string;
   accountId: string;
   postType: string;
   isLeadPost: string;
-  startDate: string;
-  endDate: string;
   keyword: string;
 };
 
 const EMPTY_FILTERS: Filters = {
+  period: 'all',
+  customRange: null,
   platform: '',
   employeeId: '',
   accountId: '',
   postType: '',
   isLeadPost: '',
-  startDate: '',
-  endDate: '',
   keyword: '',
 };
+
+const PERIOD_OPTIONS: { label: string; value: PeriodKey }[] = [
+  { label: '今日', value: 'today' },
+  { label: '本周', value: 'week' },
+  { label: '本月', value: 'month' },
+  { label: '累计', value: 'all' },
+  { label: '自定义', value: 'custom' },
+];
 
 const platformOptions = [
   { label: '全部平台', value: '' },
@@ -85,9 +98,32 @@ function formatDate(value?: string): string {
   return value.slice(0, 10);
 }
 
-function formatDayjs(value: Dayjs | null | undefined): string {
-  if (!value) return '';
-  return value.format('YYYY-MM-DD');
+/**
+ * 主管作品看板 - 时间筛选 (OP-21)。
+ * 把 today/week/month/all 翻译成 (from, to)；custom 由 customRange 决定。
+ */
+function resolvePeriodRange(
+  period: PeriodKey,
+  customRange: [string, string] | null,
+): { from?: string; to?: string } {
+  const today = dayjs().format('YYYY-MM-DD');
+  switch (period) {
+    case 'today':
+      return { from: today, to: today };
+    case 'week': {
+      const weekStart = dayjs().startOf('week').format('YYYY-MM-DD');
+      return { from: weekStart, to: today };
+    }
+    case 'month': {
+      const monthStart = dayjs().startOf('month').format('YYYY-MM-DD');
+      return { from: monthStart, to: today };
+    }
+    case 'custom':
+      return { from: customRange?.[0], to: customRange?.[1] };
+    case 'all':
+    default:
+      return { from: undefined, to: undefined };
+  }
 }
 
 type Post = {
@@ -107,6 +143,7 @@ type Post = {
   metricsUpdatedAt?: string;
   note?: string;
   supervisorSuggestion?: string;
+  isSupervisorPicked?: number;
   metrics: {
     traffic: number;
     likes: number;
@@ -120,28 +157,38 @@ type Post = {
 type Employee = { id: string; name: string };
 type Account = { id: string; name: string; employeeId?: string };
 
+type SortField =
+  | 'publishedAt'
+  | 'traffic'
+  | 'leadsCount'
+  | 'likes'
+  | 'comments'
+  | 'favorites'
+  | 'shares';
+
+type SortState = { field: SortField; order: 'ascend' | 'descend' };
+
 export default function AdminPostsPage() {
   const [items, setItems] = useState<Post[]>([]);
   const [total, setTotal] = useState(0);
-  const [stats, setStats] = useState({ total: 0, leadPosts: 0, pending: 0 });
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
-  const [statsLoading, setStatsLoading] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [savingSuggestion, setSavingSuggestion] = useState(false);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
-  const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [advancedForm] = Form.useForm();
+  const [sort, setSort] = useState<SortState>({ field: 'publishedAt', order: 'descend' });
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
   const [suggestionDraft, setSuggestionDraft] = useState('');
   const [leadRecords, setLeadRecords] = useState<Array<{ id: string; customerName: string; platform?: string; createdAt?: string }>>([]);
   const [leadRecordsLoading, setLeadRecordsLoading] = useState(false);
   const [exportConfirmOpen, setExportConfirmOpen] = useState(false);
   const [exportCountdown, setExportCountdown] = useState(5);
+  const [pickPendingId, setPickPendingId] = useState<string | null>(null);
+  const [customRangeValue, setCustomRangeValue] = useState<[Dayjs, Dayjs] | null>(null);
 
   // 导出确认弹窗倒计时
   useEffect(() => {
@@ -176,51 +223,25 @@ export default function AdminPostsPage() {
     }
   }
 
-  async function loadStats() {
-    setStatsLoading(true);
-    try {
-      // 加载全量作品列表用于统计
-      const baseQuery: Record<string, string | number> = {
-        limit: 10000,
-        offset: 0,
-      };
-      if (filters.platform) baseQuery.platform = filters.platform;
-      if (filters.employeeId) baseQuery.employeeId = filters.employeeId;
-      if (filters.accountId) baseQuery.accountId = filters.accountId;
-      if (filters.postType) baseQuery.postType = filters.postType;
-      if (filters.startDate) baseQuery.from = filters.startDate;
-      if (filters.endDate) baseQuery.to = filters.endDate;
-      if (filters.keyword) baseQuery.search = filters.keyword;
-      const payload = await apiClient.get<any>('/posts', { query: baseQuery });
-      const data = payload?.items ?? payload ?? [];
-      const posts = Array.isArray(data) ? data : [];
-      const leadPosts = posts.filter((p: any) => (p.leadsCount ?? p.leadCount ?? 0) >= 5).length;
-      const pending = posts.filter((p: any) => !p.supervisorSuggestion && (p.leadsCount ?? p.leadCount ?? 0) >= 3).length;
-      setStats({
-        total: posts.length,
-        leadPosts,
-        pending,
-      });
-    } catch {
-      // 忽略统计错误
-    } finally {
-      setStatsLoading(false);
-    }
-  }
-
   function buildQuery(override: { page?: number; pageSize?: number } = {}) {
     const { page: p = page, pageSize: ps = pageSize } = override;
     const query: Record<string, string | number> = {
       limit: ps,
       offset: (p - 1) * ps,
     };
+    const { from, to } = resolvePeriodRange(filters.period, filters.customRange);
+    if (from) query.from = from;
+    if (to) query.to = to;
     if (filters.platform) query.platform = filters.platform;
     if (filters.employeeId) query.employeeId = filters.employeeId;
     if (filters.accountId) query.accountId = filters.accountId;
     if (filters.postType) query.postType = filters.postType;
-    if (filters.startDate) query.from = filters.startDate;
-    if (filters.endDate) query.to = filters.endDate;
     if (filters.keyword) query.search = filters.keyword;
+    // 排序：后端 sort 参数支持 'leads'（按关联 lead 数量降序）；
+    // 其它字段（traffic / published_at）由后端默认行为处理，前端在拿到数据后兜底做客户端排序。
+    if (sort.field === 'leadsCount') {
+      query.sort = 'leads';
+    }
     return query;
   }
 
@@ -240,7 +261,7 @@ export default function AdminPostsPage() {
       }
 
       // 映射数据
-      const mapped = posts.map((p: any): Post => ({
+      let mapped = posts.map((p: any): Post => ({
         id: String(p.id ?? ''),
         platform: p.platform ?? '未知平台',
         title: p.title ?? '未命名作品',
@@ -257,6 +278,7 @@ export default function AdminPostsPage() {
         metricsUpdatedAt: p.metricsUpdatedAt ?? p.metrics_updated_at,
         note: p.note,
         supervisorSuggestion: p.supervisorSuggestion ?? p.supervisor_suggestion,
+        isSupervisorPicked: Number(p.isSupervisorPicked ?? p.is_supervisor_picked ?? 0),
         metrics: {
           traffic: Number(p.traffic ?? 0),
           likes: Number(p.likes ?? 0),
@@ -266,6 +288,23 @@ export default function AdminPostsPage() {
           leadsCount: Number(p.leadsCount ?? p.lead_count ?? p.leads_count ?? 0),
         },
       }));
+
+      // 客户端兜底排序（除 leads 走后端 sort=leads 外）
+      if (sort.field !== 'leadsCount') {
+        const sortKey = sort.field;
+        const dir = sort.order === 'ascend' ? 1 : -1;
+        mapped = [...mapped].sort((a, b) => {
+          const av = sortKey === 'publishedAt'
+            ? String(a.publishedAt || '')
+            : Number(a.metrics[sortKey as keyof Post['metrics']] ?? 0);
+          const bv = sortKey === 'publishedAt'
+            ? String(b.publishedAt || '')
+            : Number(b.metrics[sortKey as keyof Post['metrics']] ?? 0);
+          if (av < bv) return -1 * dir;
+          if (av > bv) return 1 * dir;
+          return 0;
+        });
+      }
 
       setItems(mapped);
       // 分页的 total 使用过滤前的总数，实际显示由前端控制
@@ -286,7 +325,6 @@ export default function AdminPostsPage() {
   }, []);
 
   useEffect(() => {
-    void loadStats();
     void load(1, pageSize);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
@@ -295,10 +333,69 @@ export default function AdminPostsPage() {
     filters.accountId,
     filters.postType,
     filters.isLeadPost,
-    filters.startDate,
-    filters.endDate,
+    filters.period,
+    filters.customRange,
     filters.keyword,
+    sort.field,
+    sort.order,
   ]);
+
+  function handlePeriodChange(value: PeriodKey | string) {
+    const v = value as PeriodKey;
+    if (v === 'custom') {
+      // 切到自定义时，如果还没有值，默认给一个最近 30 天的范围
+      if (!customRangeValue) {
+        const today = dayjs();
+        const start = today.subtract(29, 'day');
+        setCustomRangeValue([start, today]);
+        setFilters((prev) => ({ ...prev, period: v, customRange: [start.format('YYYY-MM-DD'), today.format('YYYY-MM-DD')] }));
+      } else {
+        setFilters((prev) => ({
+          ...prev,
+          period: v,
+          customRange: [customRangeValue[0].format('YYYY-MM-DD'), customRangeValue[1].format('YYYY-MM-DD')],
+        }));
+      }
+    } else {
+      setFilters((prev) => ({ ...prev, period: v, customRange: null }));
+    }
+  }
+
+  function handleCustomRangeChange(values: [Dayjs | null, Dayjs | null] | null) {
+    if (!values || !values[0] || !values[1]) {
+      setCustomRangeValue(null);
+      setFilters((prev) => ({ ...prev, customRange: null }));
+      return;
+    }
+    setCustomRangeValue([values[0]!, values[1]!]);
+    setFilters((prev) => ({
+      ...prev,
+      period: 'custom',
+      customRange: [values[0]!.format('YYYY-MM-DD'), values[1]!.format('YYYY-MM-DD')],
+    }));
+  }
+
+  /**
+   * v1.3 SUP-1: 主管标记 / 取消标记优秀作品。
+   * 后端端点已由 Wave 2a 实现（POST /api/posts/:id/pick / DELETE /api/posts/:id/pick）。
+   * 前端只做集成：行内 toggle 按钮 + 乐观更新。
+   */
+  async function togglePick(row: Post) {
+    const isPicked = Number(row.isSupervisorPicked || 0) === 1;
+    const method = isPicked ? 'DELETE' : 'POST';
+    setPickPendingId(row.id);
+    try {
+      await apiClient.request(`/posts/${encodeURIComponent(row.id)}/pick`, { method });
+      setItems((prev) =>
+        prev.map((it) => (it.id === row.id ? { ...it, isSupervisorPicked: isPicked ? 0 : 1 } : it)),
+      );
+      message.success(isPicked ? '已取消优秀标记' : '已标记为优秀作品');
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '标记失败');
+    } finally {
+      setPickPendingId(null);
+    }
+  }
 
   async function openDetail(row: Post) {
     setSelectedPost(row);
@@ -347,15 +444,17 @@ export default function AdminPostsPage() {
   async function handleExport() {
     setExporting(true);
     try {
-      const filter: Record<string, string> = {};
-      if (filters.platform) filter.platform = filters.platform;
-      if (filters.employeeId) filter.employeeId = filters.employeeId;
+      const { from, to } = resolvePeriodRange(filters.period, filters.customRange);
+      const filter: Record<string, string> = buildPostExportFilter({
+        employeeId: filters.employeeId || undefined,
+        platform: filters.platform || undefined,
+        keyword: filters.keyword || undefined,
+      });
       if (filters.accountId) filter.accountId = filters.accountId;
       if (filters.postType) filter.postType = filters.postType;
       if (filters.isLeadPost) filter.isLeadPost = filters.isLeadPost;
-      if (filters.startDate) filter.from = filters.startDate;
-      if (filters.endDate) filter.to = filters.endDate;
-      if (filters.keyword) filter.search = filters.keyword;
+      if (from) filter.from = from;
+      if (to) filter.to = to;
       await createExport({ exportType: 'posts', filter });
       setExportConfirmOpen(false);
       message.success('导出任务已创建，请到导出中心下载');
@@ -393,61 +492,6 @@ export default function AdminPostsPage() {
     }
   }
 
-  function openAdvanced() {
-    advancedForm.setFieldsValue({
-      platform: filters.platform || undefined,
-      employeeId: filters.employeeId || undefined,
-      accountId: filters.accountId || undefined,
-      postType: filters.postType || undefined,
-      isLeadPost: filters.isLeadPost || undefined,
-      dateRange: filters.startDate && filters.endDate
-        ? [dayjs(filters.startDate), dayjs(filters.endDate)]
-        : null,
-      keyword: filters.keyword || undefined,
-    });
-    setAdvancedOpen(true);
-  }
-
-  function applyAdvanced() {
-    const values = advancedForm.getFieldsValue() as {
-      platform?: string;
-      employeeId?: string;
-      accountId?: string;
-      postType?: string;
-      isLeadPost?: string;
-      dateRange?: (Dayjs | null)[] | null;
-      keyword?: string;
-    };
-    setFilters({
-      platform: values.platform ?? '',
-      employeeId: values.employeeId ?? '',
-      accountId: values.accountId ?? '',
-      postType: values.postType ?? '',
-      isLeadPost: values.isLeadPost ?? '',
-      startDate: values.dateRange?.[0] ? formatDayjs(values.dateRange[0]) : '',
-      endDate: values.dateRange?.[1] ? formatDayjs(values.dateRange[1]) : '',
-      keyword: values.keyword ?? '',
-    });
-    setAdvancedOpen(false);
-  }
-
-  function resetAdvanced() {
-    advancedForm.resetFields();
-    setFilters(EMPTY_FILTERS);
-    setAdvancedOpen(false);
-  }
-
-  const advancedActiveCount = [
-    filters.platform,
-    filters.employeeId,
-    filters.accountId,
-    filters.postType,
-    filters.isLeadPost,
-    filters.startDate,
-    filters.endDate,
-    filters.keyword,
-  ].filter(Boolean).length;
-
   const employeeOptions = [
     { label: '全部员工', value: '' },
     ...employees.map((e) => ({ label: e.name || e.id, value: e.id })),
@@ -457,6 +501,33 @@ export default function AdminPostsPage() {
     { label: '全部账号', value: '' },
     ...accounts.map((a) => ({ label: a.name, value: a.id })),
   ];
+
+  const employeeMap = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const e of employees) m.set(e.id, e.name || e.id);
+    return m;
+  }, [employees]);
+
+  const accountMap = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const a of accounts) m.set(a.id, a.name);
+    return m;
+  }, [accounts]);
+
+  // 列排序 sorter：点击切换升降序，二次点击反向
+  const sortColumn = (field: SortField) => ({
+    sorter: true,
+    sortOrder: sort.field === field ? sort.order : undefined,
+    onHeaderCell: () => ({
+      onClick: () => {
+        setSort((prev) => {
+          if (prev.field !== field) return { field, order: 'descend' };
+          if (prev.order === 'descend') return { field, order: 'ascend' };
+          return { field, order: 'descend' };
+        });
+      },
+    }),
+  });
 
   const columns: ColumnsType<Post> = [
     {
@@ -494,16 +565,61 @@ export default function AdminPostsPage() {
     { title: '账号', dataIndex: 'accountName', width: 100, render: (v?: string) => v || '-' },
     { title: '员工', dataIndex: 'employeeName', width: 90, render: (v?: string) => v || '-' },
     { title: '类型', dataIndex: 'postType', width: 80 },
-    { title: '发布日期', dataIndex: 'publishedAt', width: 110, render: formatDate },
-    { title: '流量', dataIndex: ['metrics', 'traffic'], width: 80 },
-    { title: '赞', dataIndex: ['metrics', 'likes'], width: 70 },
-    { title: '评', dataIndex: ['metrics', 'comments'], width: 70 },
-    { title: '藏', dataIndex: ['metrics', 'favorites'], width: 70 },
-    { title: '分享', dataIndex: ['metrics', 'shares'], width: 70 },
+    {
+      title: '发布日期',
+      dataIndex: 'publishedAt',
+      width: 110,
+      ...sortColumn('publishedAt'),
+      render: (v?: string, r?: Post) => {
+        if (!r) return formatDate(v);
+        const isPicked = Number(r.isSupervisorPicked || 0) === 1;
+        return (
+          <Space size={4}>
+            {isPicked ? (
+              <Tooltip title="已被主管标记为优秀作品">
+                <StarFilled style={{ color: '#faad14' }} />
+              </Tooltip>
+            ) : null}
+            <span>{formatDate(v)}</span>
+          </Space>
+        );
+      },
+    },
+    {
+      title: '流量',
+      dataIndex: ['metrics', 'traffic'],
+      width: 80,
+      ...sortColumn('traffic'),
+    },
+    {
+      title: '赞',
+      dataIndex: ['metrics', 'likes'],
+      width: 70,
+      ...sortColumn('likes'),
+    },
+    {
+      title: '评',
+      dataIndex: ['metrics', 'comments'],
+      width: 70,
+      ...sortColumn('comments'),
+    },
+    {
+      title: '藏',
+      dataIndex: ['metrics', 'favorites'],
+      width: 70,
+      ...sortColumn('favorites'),
+    },
+    {
+      title: '分享',
+      dataIndex: ['metrics', 'shares'],
+      width: 70,
+      ...sortColumn('shares'),
+    },
     {
       title: '客资数',
       dataIndex: ['metrics', 'leadsCount'],
-      width: 80,
+      width: 90,
+      ...sortColumn('leadsCount'),
       render: (v: number) => (
         <Tag color={v >= 5 ? 'green' : v >= 3 ? 'orange' : 'default'}>{v}</Tag>
       ),
@@ -517,17 +633,32 @@ export default function AdminPostsPage() {
     {
       title: '操作',
       key: 'action',
-      width: 90,
+      width: 220,
       fixed: 'right',
-      render: (_: unknown, row: Post) => (
-        <Button size="small" icon={<EyeOutlined />} onClick={() => openDetail(row)}>
-          详情
-        </Button>
-      ),
+      render: (_: unknown, row: Post) => {
+        const isPicked = Number(row.isSupervisorPicked || 0) === 1;
+        const isPending = pickPendingId === row.id;
+        return (
+          <Space size={4}>
+            <Button
+              size="small"
+              type={isPicked ? 'primary' : 'default'}
+              icon={isPicked ? <StarFilled /> : <StarOutlined />}
+              loading={isPending}
+              onClick={() => void togglePick(row)}
+            >
+              {isPicked ? '已标记优秀' : '标记优秀作品'}
+            </Button>
+            <Button size="small" icon={<EyeOutlined />} onClick={() => openDetail(row)}>
+              详情
+            </Button>
+          </Space>
+        );
+      },
     },
   ];
 
-  const handleTableChange = (next: TablePaginationConfig) => {
+  const handleTableChange: TableProps<Post>['onChange'] = (next: TablePaginationConfig) => {
     void load(next.current ?? 1, next.pageSize ?? DEFAULT_PAGE_SIZE);
   };
 
@@ -545,10 +676,7 @@ export default function AdminPostsPage() {
           </Button>
           <Button
             icon={<ReloadOutlined />}
-            onClick={() => {
-              void loadStats();
-              void load(1, pageSize);
-            }}
+            onClick={() => void load(1, pageSize)}
             loading={loading}
           >
             刷新
@@ -556,34 +684,23 @@ export default function AdminPostsPage() {
         </Space>
       </div>
 
-      {/* 3 统计卡 */}
-      <Row gutter={16}>
-        <Col span={8}>
-          <Card size="small">
-            <Statistic title="作品总数" value={stats.total} loading={statsLoading} />
-          </Card>
-        </Col>
-        <Col span={8}>
-          <Card size="small">
-            <Statistic
-              title="获客贴数(≥5)"
-              value={stats.leadPosts}
-              loading={statsLoading}
-              valueStyle={{ color: '#52c41a' }}
+      {/* 时间筛选（OP-21）：今日 / 本周 / 本月 / 累计 / 自定义 */}
+      <Card size="small">
+        <Space size={12} wrap align="center">
+          <Segmented
+            value={filters.period}
+            onChange={handlePeriodChange}
+            options={PERIOD_OPTIONS}
+          />
+          {filters.period === 'custom' ? (
+            <RangePicker
+              value={customRangeValue}
+              onChange={handleCustomRangeChange}
+              allowClear={false}
             />
-          </Card>
-        </Col>
-        <Col span={8}>
-          <Card size="small">
-            <Statistic
-              title="待补充建议(≥3客资)"
-              value={stats.pending}
-              loading={statsLoading}
-              valueStyle={{ color: '#faad14' }}
-            />
-          </Card>
-        </Col>
-      </Row>
+          ) : null}
+        </Space>
+      </Card>
 
       {/* 筛选栏 */}
       <Card size="small">
@@ -639,7 +756,7 @@ export default function AdminPostsPage() {
           columns={columns}
           dataSource={items}
           pagination={false}
-          scroll={{ x: 1500 }}
+          scroll={{ x: 1600 }}
           onChange={handleTableChange}
           locale={{ emptyText: <Empty description="暂无作品" /> }}
         />
@@ -647,6 +764,7 @@ export default function AdminPostsPage() {
           current={page}
           pageSize={pageSize}
           total={total}
+          pageSizeOptions={PAGE_SIZE_OPTIONS.map(String)}
           showSizeChanger
           showQuickJumper
           onChange={(p, ps) => void load(p, ps)}
@@ -697,7 +815,18 @@ export default function AdminPostsPage() {
                 <Typography.Paragraph
                   style={{ whiteSpace: 'pre-wrap', marginTop: 8, marginBottom: 0, maxHeight: 200, overflow: 'auto' }}
                 >
-                  {selectedPost.copywriting?.trim() || '暂无完整文案'}
+                  {getPostDetailDisplay({
+                    id: selectedPost.id,
+                    title: selectedPost.title,
+                    copywriting: selectedPost.copywriting,
+                    coverImageUrl: selectedPost.coverImageUrl,
+                    coverThumbUrl: selectedPost.coverThumbUrl,
+                    traffic: selectedPost.metrics?.traffic,
+                    likes: selectedPost.metrics?.likes,
+                    comments: selectedPost.metrics?.comments,
+                    favorites: selectedPost.metrics?.favorites,
+                    supervisorSuggestion: selectedPost.supervisorSuggestion,
+                  }).copywriting}
                 </Typography.Paragraph>
               </Card>
 
@@ -816,18 +945,23 @@ export default function AdminPostsPage() {
                   ? { label: '平台', value: filters.platform === 'xiaohongshu' ? '小红书' : filters.platform === 'douyin' ? '抖音' : filters.platform }
                   : null,
                 filters.employeeId
-                  ? { label: '员工', value: employees.find((e) => e.id === filters.employeeId)?.name || filters.employeeId }
+                  ? { label: '员工', value: employeeMap.get(filters.employeeId) || filters.employeeId }
                   : null,
                 filters.accountId
-                  ? { label: '账号', value: accounts.find((a) => a.id === filters.accountId)?.name || filters.accountId }
+                  ? { label: '账号', value: accountMap.get(filters.accountId) || filters.accountId }
                   : null,
                 filters.postType ? { label: '作品类型', value: filters.postType } : null,
                 filters.isLeadPost
                   ? { label: '获客贴', value: filters.isLeadPost === 'yes' ? '获客贴(≥5)' : '普通贴(<5)' }
                   : null,
-                (filters.startDate || filters.endDate)
-                  ? { label: '日期范围', value: `${filters.startDate || '-'} 至 ${filters.endDate || '-'}` }
-                  : null,
+                (() => {
+                  const { from, to } = resolvePeriodRange(filters.period, filters.customRange);
+                  if (from || to) {
+                    const periodLabel = PERIOD_OPTIONS.find((p) => p.value === filters.period)?.label || '自定义';
+                    return { label: '时间范围', value: `${periodLabel} (${from || '-'} 至 ${to || '-'})` };
+                  }
+                  return null;
+                })(),
               ]
                 .filter((item): item is { label: string; value: string } => item !== null)
                 .map((item) => (
@@ -843,8 +977,7 @@ export default function AdminPostsPage() {
                 filters.accountId,
                 filters.postType,
                 filters.isLeadPost,
-                filters.startDate,
-                filters.endDate,
+                filters.period !== 'all' ? filters.period : '',
               ].filter(Boolean).length && (
                 <Typography.Text type="secondary">无筛选条件（将导出全部作品）</Typography.Text>
               )}

@@ -3,6 +3,7 @@
 import {
   CalendarOutlined,
   ExclamationCircleOutlined,
+  FundOutlined,
   InboxOutlined,
   MessageOutlined,
   ScheduleOutlined,
@@ -39,15 +40,15 @@ const CARDS: CardConfig[] = [
   {
     key: 'pendingAdd',
     title: '待添加',
-    href: '/sales/leads?status=pending_add',
-    description: '已申请添加好友、等待客户通过的客资',
+    href: '/sales/leads?addStatus=not_added',
+    description: '今日分配但还未添加好友的客资（红标置顶）',
     icon: <UserAddOutlined />,
     accent: '#13c2c2',
   },
   {
     key: 'notPassed',
     title: '未通过',
-    href: '/sales/leads?status=not_passed',
+    href: '/sales/leads?addStatus=not_passed',
     description: '客户暂未通过好友申请，需要二次触达',
     icon: <ExclamationCircleOutlined />,
     accent: '#fa8c16',
@@ -55,7 +56,7 @@ const CARDS: CardConfig[] = [
   {
     key: 'pendingCommunicate',
     title: '待沟通',
-    href: '/sales/leads?status=communicating',
+    href: '/sales/leads?status=in_followup',
     description: '已添加好友、等待沟通报价的客资',
     icon: <UserSwitchOutlined />,
     accent: '#722ed1',
@@ -63,18 +64,26 @@ const CARDS: CardConfig[] = [
   {
     key: 'todayFollowups',
     title: '今日待跟进',
-    href: '/sales/followups',
-    description: '今日需要复访、报价或推进的客户',
+    href: '/sales/today-followups',
+    description: 'nextFollowTime ≤ 今日 23:59 的客资',
     icon: <CalendarOutlined />,
     accent: '#eb2f96',
   },
   {
     key: 'pendingOrders',
-    title: '订单待处理',
+    title: '订单跟进',
     href: '/sales/orders',
     description: '成交后等待教务/客户确认的订单',
     icon: <ShopOutlined />,
     accent: '#52c41a',
+  },
+  {
+    key: 'dealDone',
+    title: '我的成交',
+    href: '/sales/deals',
+    description: '已成交的订单（按 ORD 编号展示）',
+    icon: <FundOutlined />,
+    accent: '#1890ff',
   },
 ];
 

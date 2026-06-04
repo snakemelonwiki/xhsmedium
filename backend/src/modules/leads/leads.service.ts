@@ -32,6 +32,15 @@ interface FollowRecordDto {
   processStatus?: string;
   intention?: string | null;
   intentionLevel?: string;
+  // v1.3 / SA-1 + CROSS-2：销售"写跟进"扩展字段，回写到 leads 自身
+  clientDegree?: string | null;
+  clientRequirement?: string | null;
+  clientMajorResearch?: string | null;
+  clientTimeRequirement?: string | null;
+  objectionPoint?: string | null;
+  followAction?: string | null;
+  followActionAt?: string | Date | null;
+  requirementNote?: string | null;
 }
 
 interface LeadFilterOptions {
@@ -62,6 +71,12 @@ const ADD_STATUS_OPERATION_REMINDED = 'operation_reminded';
 const LEAD_STATUS_CODES = new Set(['new', 'assigned', 'in_followup', LEAD_STATUS_IN_COLLABORATION, LEAD_STATUS_OPERATION_HANDLED, 'added_success', 'deal_done', 'invalid']);
 const ADD_STATUS_CODES = new Set(['not_added', 'applied', 'not_passed', ADD_STATUS_OPERATION_REMINDED, 'added']);
 const PROCESS_STATUS_CODES = new Set(['not_contacted', 'waiting_pass', 'communicating', 'quoted', 'deal_pending', 'deal_done', 'invalid']);
+
+// v1.3 / SA-3 销售"更新成交状态" + "更新意向程度" 端点合法值。
+// 成交状态：not_deal 未成交 / deal_pending 待成交 / deal_done 已成交 / refunded 已退款 / invalid 无效
+const DEAL_STATUS_CODES = new Set(['not_deal', 'deal_pending', 'deal_done', 'refunded', 'invalid']);
+// 意向程度（与 leads.intention_level 对齐；前端选择 high/mid/low/invalid/pending）
+const INTENTION_LEVEL_CODES = new Set(['high', 'mid', 'low', 'invalid', 'pending']);
 
 const STATUS_ALIASES: Record<string, string> = {
   contact_added: 'added_success',
@@ -226,6 +241,15 @@ export class LeadsService {
         'l.deal_status AS l_deal_status',
         'l.requirement_note AS l_requirement_note',
         'l.supervisor_note AS l_supervisor_note',
+        // v1.3 / CROSS-1 客资分流标志
+        'l.is_dispatched AS l_is_dispatched',
+        // v1.3 / CROSS-2 销售"写跟进"回写的客户画像字段
+        'l.client_degree AS l_client_degree',
+        'l.client_major_research AS l_client_major_research',
+        'l.client_time_requirement AS l_client_time_requirement',
+        'l.objection_point AS l_objection_point',
+        'l.follow_action AS l_follow_action',
+        'l.follow_action_at AS l_follow_action_at',
         'a.account_name AS account_name',
         'p.title AS post_title',
         'p.post_url AS post_url',
@@ -342,6 +366,15 @@ export class LeadsService {
         nextFollowAt: r.l_next_follow_time,
         matchedPostId: r.l_matched_post_id,
         sourceUnknown: !!r.l_source_unknown,
+        // v1.3 / CROSS-1 客资分流标志（销售端列表默认 is_dispatched=0）
+        isDispatched: Number(r.l_is_dispatched) === 1,
+        // v1.3 / SA-1 + CROSS-2 销售"写跟进"回写的客户画像字段
+        clientDegree: r.l_client_degree || null,
+        clientMajorResearch: r.l_client_major_research || null,
+        clientTimeRequirement: r.l_client_time_requirement || null,
+        objectionPoint: r.l_objection_point || null,
+        followAction: r.l_follow_action || null,
+        followActionAt: r.l_follow_action_at || null,
         latestFollowNote: follow?.content || r.l_sales_feedback || r.l_note || null,
         latestFollowAt: follow?.created_at || r.l_sales_updated_at || r.l_updated_at,
         createdAt: r.l_created_at,
@@ -420,6 +453,11 @@ export class LeadsService {
     } else if (scope === 'employee') {
       qb.andWhere('l.employee_id = :employeeId', { employeeId: filters.employeeId || '' });
     }
+    // v1.3 / CROSS-1: 销售端任何列表/统计查询必须 WHERE is_dispatched = 0，
+    // 主管端 admin/owner 不限制（与文档 §10 销售端约束一致）。
+    if (role === 'sales' || (filters.actorUserId && !role)) {
+      qb.andWhere('l.is_dispatched = 0');
+    }
   }
 
   private applyLeadFilters(qb: any, filters: LeadFilterOptions): void {
@@ -466,6 +504,21 @@ export class LeadsService {
       throw new BadRequestException(`缺少必填字段: ${errors.join(', ')}`);
     }
 
+    // v1.3 / OP-5 / CROSS-1: isDispatched 字段语义
+    //   0 = 未分流 → 必须分配销售（进入销售端统计/列表）
+    //   1 = 已分流 → 销售字段置空（不进销售端看板）
+    // 默认 0（未分流），与销售端既有逻辑保持一致。
+    const rawIsDispatched = (dto as any).isDispatched;
+    const isDispatched = rawIsDispatched === 1 || rawIsDispatched === '1' || rawIsDispatched === true ? 1 : 0;
+    if (isDispatched === 0 && !dto.assignedSalesUserId) {
+      throw new BadRequestException('未分流的客资必须选择销售（assignedSalesUserId 不能为空）');
+    }
+    if (isDispatched === 1 && dto.assignedSalesUserId) {
+      // 已分流：销售字段强制清空，避免误传
+      dto.assignedSalesUserId = null;
+      dto.assignedSalesUserName = '';
+    }
+
     const leadId = (dto as any).id || makeId();
     const lead = this.leadRepository.create({
       ...dto,
@@ -475,6 +528,7 @@ export class LeadsService {
       salesUserName: dto.salesUserName || '',
       processStatus: dto.processStatus || 'not_contacted',
       addStatus: dto.addStatus || 'not_added',
+      isDispatched,
     } as any);
 
     try {
@@ -661,10 +715,175 @@ export class LeadsService {
     if (normalized.processStatus !== undefined) patch.processStatus = normalized.processStatus || 'not_contacted';
     if (dto.intention !== undefined) patch.intention = dto.intention || null;
     if (dto.intentionLevel !== undefined) patch.intentionLevel = dto.intentionLevel || 'pending';
+    // v1.3 / SA-1 + CROSS-2: 销售"写跟进"把客户学历/需求/专业/时间要求/异议点/跟进措施回写到 leads。
+    // 客户需求走 requirement_note（已存在字段，CR/兼容）；其他字段是新加的列。
+    if (dto.clientDegree !== undefined) patch.clientDegree = dto.clientDegree || null;
+    if (dto.clientMajorResearch !== undefined) patch.clientMajorResearch = dto.clientMajorResearch || null;
+    if (dto.clientTimeRequirement !== undefined) patch.clientTimeRequirement = dto.clientTimeRequirement || null;
+    if (dto.objectionPoint !== undefined) patch.objectionPoint = dto.objectionPoint || null;
+    if (dto.followAction !== undefined) patch.followAction = dto.followAction || null;
+    if (dto.followActionAt !== undefined) {
+      patch.followActionAt = dto.followActionAt ? new Date(dto.followActionAt) : new Date();
+    }
+    if (dto.requirementNote !== undefined) patch.requirementNote = dto.requirementNote || null;
     this.applySalesStateTransition(current, patch, normalized);
     if (Object.keys(patch).length > 0) {
       await this.leadRepository.update(leadId, patch);
     }
+  }
+
+  // ============================================================
+  // v1.3 / SA-3: 销售端"更新成交状态" / "更新意向程度"两个独立端点。
+  // 与写跟进分开，只动 leads 自身一行 + 写操作日志，不写跟进记录。
+  // ============================================================
+
+  async updateDealStatus(
+    id: string,
+    actorUserId: string,
+    dto: { dealStatus: string; dealAmount?: number | string | null },
+  ): Promise<any | null> {
+    const dealStatus = String(dto.dealStatus || '').trim();
+    if (!DEAL_STATUS_CODES.has(dealStatus)) {
+      throw new BadRequestException(
+        `invalid dealStatus: ${dealStatus}（必须是 ${Array.from(DEAL_STATUS_CODES).join(' / ')}）`,
+      );
+    }
+    const current = await this.leadRepository.findOne({ where: { id } });
+    if (!current) return null;
+
+    const patch: Partial<Lead> = { dealStatus };
+    if (dto.dealAmount !== undefined) {
+      patch.dealAmount = dto.dealAmount != null && dto.dealAmount !== '' ? String(dto.dealAmount) : null;
+    }
+    // deal_done 同步 processStatus=deal_done + status=in_followup（与 closeDeal 保持一致口径）
+    if (dealStatus === 'deal_done') {
+      patch.processStatus = 'deal_done';
+      patch.status = 'in_followup';
+    } else if (dealStatus === 'invalid') {
+      patch.processStatus = 'invalid';
+      patch.status = 'invalid';
+    }
+    await this.leadRepository.update(id, patch);
+    try {
+      await this.operationLogsService.log({
+        userId: actorUserId || '',
+        action: 'lead_status_update',
+        targetType: 'lead',
+        targetId: id,
+        detail: JSON.stringify({
+          from: { dealStatus: current.dealStatus, dealAmount: current.dealAmount },
+          to: { dealStatus, dealAmount: patch.dealAmount ?? current.dealAmount },
+          field: 'dealStatus',
+        }),
+      });
+    } catch {
+      // best-effort
+    }
+    const updated = await this.leadRepository.findOne({ where: { id } });
+    if (!updated) return null;
+    const latestCollaboration = await this.latestCollaborationByLeadIds([updated.id]);
+    return this.mapLead(updated, undefined, latestCollaboration.get(updated.id));
+  }
+
+  async updateIntentionLevel(
+    id: string,
+    actorUserId: string,
+    dto: { intentionLevel: string },
+  ): Promise<any | null> {
+    const intentionLevel = String(dto.intentionLevel || '').trim();
+    if (!INTENTION_LEVEL_CODES.has(intentionLevel)) {
+      throw new BadRequestException(
+        `invalid intentionLevel: ${intentionLevel}（必须是 ${Array.from(INTENTION_LEVEL_CODES).join(' / ')}）`,
+      );
+    }
+    const current = await this.leadRepository.findOne({ where: { id } });
+    if (!current) return null;
+    await this.leadRepository.update(id, { intentionLevel });
+    try {
+      await this.operationLogsService.log({
+        userId: actorUserId || '',
+        action: 'lead_status_update',
+        targetType: 'lead',
+        targetId: id,
+        detail: JSON.stringify({
+          from: { intentionLevel: current.intentionLevel },
+          to: { intentionLevel },
+          field: 'intentionLevel',
+        }),
+      });
+    } catch {
+      // best-effort
+    }
+    const updated = await this.leadRepository.findOne({ where: { id } });
+    if (!updated) return null;
+    const latestCollaboration = await this.latestCollaborationByLeadIds([updated.id]);
+    return this.mapLead(updated, undefined, latestCollaboration.get(updated.id));
+  }
+
+  /**
+   * v1.3 / SA-6 当天未添加的客资标识 + 当日待跟进。
+   * 今日分配给我但 add_status=not_added 的客资，红标置顶。
+   * 用于销售端首页"当日未添加"快捷入口与 /api/sales/leads/today-not-added。
+   */
+  async findTodayNotAdded(
+    salesUserId: string,
+    limit: number,
+    offset: number,
+  ): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
+    if (!salesUserId) return { items: [], total: 0, limit: this.clampLimit(limit), offset: Math.max(Number(offset) || 0, 0) };
+    const safeLimit = this.clampLimit(limit);
+    const safeOffset = Math.max(Number(offset) || 0, 0);
+    // v1.3 / CROSS-1 联动：销售端 is_dispatched = 0
+    const qb = this.leadRepository.createQueryBuilder('l')
+      .where('l.assigned_sales_user_id = :uid', { uid: salesUserId })
+      .andWhere('l.is_dispatched = 0')
+      .andWhere('l.add_status = :addStatus', { addStatus: 'not_added' })
+      // 当日 00:00 之后创建/分配；用 created_at 兜底（assigned_at 未在 schema 中）
+      .andWhere('l.created_at >= :todayStart', {
+        todayStart: this.todayStartDate(),
+      })
+      .orderBy('l.created_at', 'ASC')
+      .take(safeLimit)
+      .skip(safeOffset);
+    const [rows, total] = await qb.getManyAndCount();
+    return { items: await this.mapLeads(rows), total, limit: safeLimit, offset: safeOffset };
+  }
+
+  /**
+   * v1.3 / SA-11 当日待跟进列表：next_follow_time ≤ 今天 23:59:59 且未关闭（process_status != invalid / deal_done）。
+   */
+  async findTodayFollowupsForSales(
+    salesUserId: string,
+    limit: number,
+    offset: number,
+  ): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
+    if (!salesUserId) return { items: [], total: 0, limit: this.clampLimit(limit), offset: Math.max(Number(offset) || 0, 0) };
+    const safeLimit = this.clampLimit(limit);
+    const safeOffset = Math.max(Number(offset) || 0, 0);
+    const todayEnd = this.todayEndDate();
+    const qb = this.leadRepository.createQueryBuilder('l')
+      .where('l.assigned_sales_user_id = :uid', { uid: salesUserId })
+      .andWhere('l.is_dispatched = 0')
+      .andWhere('l.next_follow_time IS NOT NULL')
+      .andWhere('l.next_follow_time <= :todayEnd', { todayEnd })
+      .andWhere("l.process_status NOT IN ('invalid', 'deal_done')")
+      .orderBy('l.next_follow_time', 'ASC')
+      .take(safeLimit)
+      .skip(safeOffset);
+    const [rows, total] = await qb.getManyAndCount();
+    return { items: await this.mapLeads(rows), total, limit: safeLimit, offset: safeOffset };
+  }
+
+  private todayStartDate(): string {
+    const d = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} 00:00:00`;
+  }
+
+  private todayEndDate(): string {
+    const d = new Date();
+    d.setHours(23, 59, 59, 999);
+    return this.fmt(d);
   }
 
   async updateSalesStatus(id: string, dto: BoardPatchDto, actorUserId: string): Promise<any | null> {
@@ -852,237 +1071,6 @@ export class LeadsService {
 
   async remove(id: string): Promise<void> {
     await this.leadRepository.delete(id);
-  }
-
-  // ---------- 被动添加客资识别（passive） ----------
-
-  /**
-   * §4.3 加权打分的候选客资匹配，返回 Top 5。
-   * - phone 精确 +50
-   * - wechat 精确 +50
-   * - nickname 模糊 +20
-   * - 创建时间在 7 天内 +15
-   * - 来源运营 = 当前操作人对应的员工 ID +10
-   */
-  async findPassiveCandidates(params: {
-    phone?: string;
-    wechat?: string;
-    nickname?: string;
-    actorEmployeeId?: string;
-  }): Promise<any[]> {
-    const phone = (params.phone || '').trim();
-    const wechat = (params.wechat || '').trim();
-    const nickname = (params.nickname || '').trim();
-    const actorEmployeeId = (params.actorEmployeeId || '').trim();
-
-    if (!phone && !wechat && !nickname) {
-      return [];
-    }
-
-    const qb = this.leadRepository.createQueryBuilder('l');
-
-    const scoreExpr =
-      `(CASE WHEN :phone <> '' AND l.contact_info = :phone THEN 50 ELSE 0 END)` +
-      ` + (CASE WHEN :wechat <> '' AND l.contact_info = :wechat THEN 50 ELSE 0 END)` +
-      ` + (CASE WHEN :nicknameRaw <> '' AND l.nickname LIKE :nicknameLike THEN 20 ELSE 0 END)` +
-      ` + (CASE WHEN l.created_at >= (NOW() - INTERVAL 7 DAY) THEN 15 ELSE 0 END)` +
-      ` + (CASE WHEN :actorEmployeeId <> '' AND l.employee_id = :actorEmployeeId THEN 10 ELSE 0 END)`;
-
-    qb.addSelect(scoreExpr, 'score');
-    qb.setParameters({
-      phone,
-      wechat,
-      nicknameRaw: nickname,
-      nicknameLike: `%${nickname}%`,
-      actorEmployeeId,
-    });
-
-    // 任一字段命中再进入排序，避免全表扫描
-    const whereParts: string[] = [];
-    if (phone) whereParts.push('l.contact_info = :phone');
-    if (wechat) whereParts.push('l.contact_info = :wechat');
-    if (nickname) whereParts.push('l.nickname LIKE :nicknameLike');
-    if (whereParts.length > 0) {
-      qb.where(`(${whereParts.join(' OR ')})`);
-    }
-
-    qb.orderBy('score', 'DESC')
-      .addOrderBy('l.created_at', 'DESC')
-      .limit(5);
-
-    const raw = await qb.getRawAndEntities();
-    return raw.entities.map((row, idx) => {
-      const mapped = this.mapLead(row);
-      const scoreVal = Number(raw.raw[idx]?.score) || 0;
-      return { ...mapped, score: scoreVal };
-    });
-  }
-
-  async findPassiveCandidatesPaged(params: {
-    phone?: string;
-    wechat?: string;
-    nickname?: string;
-    actorEmployeeId?: string;
-    limit: number;
-    offset: number;
-  }): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
-    const phone = (params.phone || '').trim();
-    const wechat = (params.wechat || '').trim();
-    const nickname = (params.nickname || '').trim();
-    const actorEmployeeId = (params.actorEmployeeId || '').trim();
-
-    if (!phone && !wechat && !nickname) {
-      return { items: [], total: 0, limit: params.limit, offset: params.offset };
-    }
-
-    const safeLimit = this.clampLimit(params.limit);
-    const safeOffset = Math.max(Number(params.offset) || 0, 0);
-
-    const qb = this.leadRepository.createQueryBuilder('l');
-
-    const scoreExpr =
-      `(CASE WHEN :phone <> '' AND l.contact_info = :phone THEN 50 ELSE 0 END)` +
-      ` + (CASE WHEN :wechat <> '' AND l.contact_info = :wechat THEN 50 ELSE 0 END)` +
-      ` + (CASE WHEN :nicknameRaw <> '' AND l.nickname LIKE :nicknameLike THEN 20 ELSE 0 END)` +
-      ` + (CASE WHEN l.created_at >= (NOW() - INTERVAL 7 DAY) THEN 15 ELSE 0 END)` +
-      ` + (CASE WHEN :actorEmployeeId <> '' AND l.employee_id = :actorEmployeeId THEN 10 ELSE 0 END)`;
-
-    qb.addSelect(scoreExpr, 'score');
-    qb.setParameters({
-      phone,
-      wechat,
-      nicknameRaw: nickname,
-      nicknameLike: `%${nickname}%`,
-      actorEmployeeId,
-    });
-
-    const whereParts: string[] = [];
-    if (phone) whereParts.push('l.contact_info = :phone');
-    if (wechat) whereParts.push('l.contact_info = :wechat');
-    if (nickname) whereParts.push('l.nickname LIKE :nicknameLike');
-    if (whereParts.length > 0) {
-      qb.where(`(${whereParts.join(' OR ')})`);
-    }
-
-    qb.orderBy('score', 'DESC')
-      .addOrderBy('l.created_at', 'DESC')
-      .limit(safeLimit)
-      .offset(safeOffset);
-
-    const raw = await qb.getRawAndEntities();
-    const items = raw.entities.map((row, idx) => {
-      const mapped = this.mapLead(row);
-      const scoreVal = Number(raw.raw[idx]?.score) || 0;
-      return { ...mapped, score: scoreVal };
-    });
-
-    const countQb = this.leadRepository.createQueryBuilder('l');
-    countQb.setParameters({
-      phone,
-      wechat,
-      nicknameRaw: nickname,
-      nicknameLike: `%${nickname}%`,
-      actorEmployeeId,
-    });
-    if (whereParts.length > 0) {
-      countQb.where(`(${whereParts.join(' OR ')})`);
-    }
-    const total = await countQb.getCount();
-
-    return { items, total, limit: safeLimit, offset: safeOffset };
-  }
-
-  /**
-   * §4.3 销售选定候选客资 → 绑定为被动添加。
-   */
-  async bindPassive(params: {
-    leadId: string;
-    contact: string;
-    salesFeedback?: string;
-    actorUserId: string;
-    actorUserName: string;
-  }): Promise<{ ok: boolean; leadId: string; lead_code: string | null }> {
-    const { leadId, contact, salesFeedback, actorUserId, actorUserName } = params;
-    if (!leadId) throw new Error('leadId required');
-
-    const current = await this.leadRepository.findOne({ where: { id: leadId } });
-    if (!current) {
-      throw new Error('lead not found');
-    }
-
-    const patch: Partial<Lead> = {
-      addMethod: 'passive',
-      addStatus: 'added',
-      assignedSalesUserId: actorUserId || null,
-      assignedSalesUserName: actorUserName || '',
-    };
-    const trimmedContact = (contact || '').trim();
-    if (trimmedContact && trimmedContact !== current.contactInfo) {
-      patch.contactInfo = trimmedContact;
-    }
-
-    await this.leadRepository.update(leadId, patch);
-
-    await this.followRepository.save({
-      id: makeId(),
-      leadId,
-      userId: actorUserId || '',
-      followType: '微信',
-      content: `[被动添加绑定] ${salesFeedback || '客户主动加销售并已通过'}`,
-      nextFollowTime: null,
-    });
-
-    return { ok: true, leadId, lead_code: current.leadCode || null };
-  }
-
-  /**
-   * §4.3 匹配不到候选 → 新建被动客资（source_unknown=1，待运营确认来源）。
-   */
-  async createPassive(params: {
-    contact: string;
-    nickname?: string;
-    platform?: string;
-    salesFeedback?: string;
-    actorUserId: string;
-    actorUserName: string;
-  }): Promise<{ ok: boolean; leadId: string; lead_code: string | null }> {
-    const { contact, nickname, platform, salesFeedback, actorUserId, actorUserName } = params;
-    const trimmedContact = (contact || '').trim();
-    if (!trimmedContact) throw new Error('contact required');
-
-    const leadId = makeId();
-    const lead = this.leadRepository.create({
-      id: leadId,
-      leadCode: this.generateLeadCode(),
-      employeeId: '',
-      accountId: '',
-      contactInfo: trimmedContact,
-      nickname: (nickname || '').trim(),
-      platform: (platform || 'unknown').trim() || 'unknown',
-      addMethod: 'passive',
-      addStatus: 'added',
-      sourceUnknown: 1,
-      status: 'contact_added',
-      assignedSalesUserId: actorUserId || null,
-      assignedSalesUserName: actorUserName || '',
-      processStatus: 'chatting',
-      intentionLevel: 'pending',
-      note: `[被动添加新建] ${salesFeedback || ''}`,
-    } as Partial<Lead>);
-
-    await this.leadRepository.save(lead);
-
-    await this.followRepository.save({
-      id: makeId(),
-      leadId,
-      userId: actorUserId || '',
-      followType: '微信',
-      content: `[被动添加新建] ${salesFeedback || '客户主动加销售并已通过'}`,
-      nextFollowTime: null,
-    });
-
-    const saved = await this.leadRepository.findOne({ where: { id: leadId } });
-    return { ok: true, leadId, lead_code: saved?.leadCode || null };
   }
 
   /**
@@ -1402,6 +1390,7 @@ export class LeadsService {
       ip: row.ip,
       status: row.status,
       dealAmount: row.dealAmount,
+      dealStatus: row.dealStatus,
       note: row.note,
       requirementNote: row.requirementNote,
       supervisorNote: row.supervisorNote,
@@ -1422,6 +1411,15 @@ export class LeadsService {
       nextFollowAt: row.nextFollowTime,
       matchedPostId: row.matchedPostId,
       sourceUnknown: !!row.sourceUnknown,
+      // v1.3 / CROSS-1 客资分流：销售端只看到 is_dispatched=0 的行。
+      isDispatched: row.isDispatched,
+      // v1.3 / SA-1 + CROSS-2: 销售"写跟进"回写的客户画像字段。
+      clientDegree: row.clientDegree,
+      clientMajorResearch: row.clientMajorResearch,
+      clientTimeRequirement: row.clientTimeRequirement,
+      objectionPoint: row.objectionPoint,
+      followAction: row.followAction,
+      followActionAt: row.followActionAt,
       latestFollowNote: latestFollow?.content || row.salesFeedback || row.note || null,
       latestFollowAt: latestFollow?.createdAt || row.salesUpdatedAt || row.updatedAt,
       createdAt: row.createdAt,

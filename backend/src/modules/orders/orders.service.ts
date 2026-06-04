@@ -1,8 +1,9 @@
 import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
-import { Repository, DataSource, In } from 'typeorm';
+import { Repository, DataSource, In, EntityManager } from 'typeorm';
 import { Order, HANDOVER_STATUS_CODES, HandoverStatusCode } from '../../entities/order.entity';
 import { OrderFollowRecord } from '../../entities/order-follow-record.entity';
+import { OrderFinance } from '../../entities/order-finance.entity';
 import { Lead } from '../../entities/lead.entity';
 import { User } from '../../entities/user.entity';
 import { makeId } from '../../shared/utils/id-generator';
@@ -53,6 +54,15 @@ interface CloseDealDto {
   serviceType?: string | null;
   amount?: number | string | null;
   remark?: string | null;
+  // v1.3 / SA-8 销售成交录入扩展字段
+  productType?: string | null;
+  guaranteeType?: string | null;
+  paymentStage?: string | null;
+  clientRequirementNote?: string | null;
+  contractStatus?: string | null;
+  paidStatus?: string | null;
+  deliveryRequirement?: string | null;
+  expectedHandleTime?: string | Date | null;
 }
 
 interface ListOrdersOptions {
@@ -97,6 +107,8 @@ export class OrdersService {
     private readonly orderRepository: Repository<Order>,
     @InjectRepository(OrderFollowRecord)
     private readonly orderFollowRepository: Repository<OrderFollowRecord>,
+    @InjectRepository(OrderFinance)
+    private readonly orderFinanceRepository: Repository<OrderFinance>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
     @InjectDataSource()
@@ -113,13 +125,22 @@ export class OrdersService {
 
   /**
    * Sales marks a lead as deal-closed and spawns a new order in a single transaction.
+   * v1.3 / SA-8 + SA-9 增强：除原 orders 落库外，还创建 order_finance（订单额/已付/待付）
+   * 与 order_follow_records（首条跟进=销售成交记录）。
    */
-  async closeDeal(leadId: string, salesUserId: string, dto: CloseDealDto): Promise<string> {
+  async closeDeal(leadId: string, salesUserId: string, dto: CloseDealDto): Promise<{
+    orderId: string;
+    orderCode: string | null;
+    orderFinanceId: string;
+  }> {
     if (!salesUserId) {
       throw new BadRequestException('sales user required');
     }
     const orderId = makeId();
+    const orderFinanceId = makeId();
     let leadContact = '';
+    let orderCode: string | null = null;
+    let generatedOrderCode: string | null = null;
     await this.dataSource.transaction(async (manager) => {
       const lead = await manager.findOne(Lead, { where: { id: leadId } });
       if (!lead) {
@@ -140,17 +161,52 @@ export class OrdersService {
         dealStatus: 'deal_done',
         status: 'in_followup',
       });
+      // v1.3 / CROSS-4: 在同一事务内生成订单编号 ORD-YYYYMMDD-XXXXX
+      // 必须在 INSERT Order 之前完成（行锁在同一事务内保持），避免并发时序号重复。
+      generatedOrderCode = await this.generateOrderCode(manager);
+      orderCode = generatedOrderCode;
+      // v1.3 / SA-8: 销售成交的 serviceType 字段可以同时承载"产品类型"语义，
+      // 但前端会把产品类型/服务类型分开传。后端保持 serviceType 字段为原"服务类型"，
+      // 新加的"产品类型/保障类型/付款阶段"等放到 remark / order_finance 阶段备注中。
+      const mergedServiceType = dto.serviceType
+        || (dto.productType ? String(dto.productType) : null)
+        || null;
       await manager.insert(Order, {
         id: orderId,
         leadId,
         salesUserId,
         academicUserId: null,
-        serviceType: dto.serviceType ?? null,
+        serviceType: mergedServiceType,
         amount: dto.amount != null && dto.amount !== '' ? String(dto.amount) : null,
-        paidStatus: 'unpaid',
+        paidStatus: dto.paidStatus || 'unpaid',
         orderStatus: 'to_receive',
         handoverStatus: 'handed_over',
-        remark: dto.remark ?? null,
+        // remark 同时承载"客户要求备注 + 保障类型 + 付款阶段"，便于后续教务端拆开展示
+        remark: this.composeRemark(dto),
+        orderCode,
+      });
+
+      // v1.3 / SA-9: 创建 order_finance（订单额/已付/待付 = 订单额 - 已付 = 订单额）。
+      await manager.insert(OrderFinance, {
+        id: orderFinanceId,
+        orderId,
+        orderAmount: dto.amount != null && dto.amount !== '' ? String(dto.amount) : null,
+        clientPaid: '0.00',
+        clientPending: dto.amount != null && dto.amount !== '' ? String(dto.amount) : null,
+        teacherPrice: null,
+        teacherPaid: null,
+        teacherPending: null,
+      });
+
+      // v1.3 / SA-9: 落首条 order_follow_records（销售成交记录）。
+      const followContent = this.composeFollowContent(dto, generatedOrderCode);
+      await manager.insert(OrderFollowRecord, {
+        id: makeId(),
+        orderId,
+        userId: salesUserId,
+        nodeType: '销售成交',
+        content: followContent,
+        nextRemindAt: dto.expectedHandleTime ? new Date(dto.expectedHandleTime) : null,
       });
     });
 
@@ -169,7 +225,7 @@ export class OrdersService {
           portType: 'academic',
           typeCode: NOTIFICATION_TYPES.DEAL_CLOSED,
           title: '新订单已成交',
-          content: `客资 ${leadContact} 已成交，请尽快接单`,
+          content: `客资 ${leadContact} 已成交（订单号 ${orderCode || orderId}），请尽快接单`,
           relatedId: orderId,
           relatedType: 'order',
         });
@@ -179,7 +235,79 @@ export class OrdersService {
       console.error('[orders] notify deal closed failed', err?.message || err);
     }
 
-    return orderId;
+    return { orderId, orderCode, orderFinanceId };
+  }
+
+  /**
+   * v1.3 / SA-8: 合成 orders.remark 字段，把客户要求/产品类型/服务类型/保障类型/付款阶段
+   * 拼成结构化文本（用「||」分隔），便于教务端拆开解析。
+   * 例：`客户要求: 12周见刊 || 产品: 期刊论文 || 服务: 全流程 || 保障: 保录 || 付款: 定金 / 中期 / 尾款`
+   */
+  private composeRemark(dto: CloseDealDto): string | null {
+    const parts: string[] = [];
+    if (dto.clientRequirementNote) parts.push(`客户要求: ${dto.clientRequirementNote}`);
+    if (dto.productType) parts.push(`产品: ${dto.productType}`);
+    if (dto.serviceType && dto.serviceType !== dto.productType) parts.push(`服务: ${dto.serviceType}`);
+    if (dto.guaranteeType) parts.push(`保障: ${dto.guaranteeType}`);
+    if (dto.paymentStage) parts.push(`付款: ${dto.paymentStage}`);
+    if (dto.deliveryRequirement) parts.push(`交付要求: ${dto.deliveryRequirement}`);
+    if (parts.length === 0) return dto.remark || null;
+    return parts.join(' || ');
+  }
+
+  /**
+   * v1.3 / SA-9: 销售成交首条 order_follow_records 的 content 文本。
+   */
+  private composeFollowContent(dto: CloseDealDto, orderCode: string | null): string {
+    const codeLine = orderCode ? `订单编号 ${orderCode}` : '';
+    const amountLine = dto.amount != null && dto.amount !== '' ? `金额 ¥${dto.amount}` : '';
+    const stageLine = dto.paymentStage ? `付款阶段 ${dto.paymentStage}` : '';
+    const lines = [codeLine, amountLine, stageLine].filter(Boolean);
+    return lines.join(' | ') || '销售成交';
+  }
+
+  /**
+   * v1.3 / CROSS-4: 生成订单编号 ORD-YYYYMMDD-XXXXX。
+   * - YYYYMMDD：业务统一用 UTC+8 当日日期作为分界（与日志/前端展示一致）
+   * - XXXXX：5 位当日自增序号，从 00001 开始每日重置
+   * - 并发安全：依赖 orders_order_code_seq 单行 (seq_date) + SELECT ... FOR UPDATE 行锁
+   *   保证同一秒内多次成交不会拿到重复序号；事务内调用即可获得行锁语义。
+   *
+   * 注意：必须传入 EntityManager（来自外层 transaction 的 manager），
+   * 不能直接用 Repository 走新连接 — 否则行锁无法跨调用保持。
+   */
+  private async generateOrderCode(manager: EntityManager): Promise<string> {
+    // 业务统一用 UTC+8（北京时间）作为日期分界，避免跨时区部署时出现日期错位。
+    const now = new Date();
+    const utc8Ms = now.getTime() + 8 * 3600 * 1000;
+    const utc8 = new Date(utc8Ms);
+    const yyyy = utc8.getUTCFullYear();
+    const mm = String(utc8.getUTCMonth() + 1).padStart(2, '0');
+    const dd = String(utc8.getUTCDate()).padStart(2, '0');
+    const dateKey = `${yyyy}-${mm}-${dd}`;
+    const orderCodePrefix = `ORD-${yyyy}${mm}${dd}-`;
+
+    // 先保证当日行存在（INSERT ... ON DUPLICATE KEY UPDATE 不变更 current_seq，仅保证行可被锁）。
+    // uk_orders_order_code_seq_date 唯一索引保证每天 1 行。
+    await manager.query(
+      `INSERT INTO orders_order_code_seq (seq_date, current_seq)
+       VALUES (?, 0)
+       ON DUPLICATE KEY UPDATE seq_date = seq_date`,
+      [dateKey],
+    );
+    // 行锁：FOR UPDATE 阻塞其他事务对该行的读取，确保自增串行化。
+    const rows: Array<{ current_seq: number | string }> = await manager.query(
+      `SELECT current_seq FROM orders_order_code_seq WHERE seq_date = ? FOR UPDATE`,
+      [dateKey],
+    );
+    const raw = rows[0]?.current_seq;
+    const currentSeq = Number(raw ?? 0) || 0;
+    const nextSeq = currentSeq + 1;
+    await manager.query(
+      `UPDATE orders_order_code_seq SET current_seq = ? WHERE seq_date = ?`,
+      [nextSeq, dateKey],
+    );
+    return `${orderCodePrefix}${String(nextSeq).padStart(5, '0')}`;
   }
 
   private async getActorContext(
@@ -1008,6 +1136,45 @@ export class OrdersService {
     };
   }
 
+  // ============================================================
+  // v1.3 / SA-7: 销售"我的成交"列表
+  // 只查 orders.sales_user_id = currentUser 的订单（与 closeDeal 落库保持一致）。
+  // 支持时间/产品类型/订单状态筛选，导出 Excel 走 sales.controller 的 createExport。
+  // ============================================================
+
+  async listMyDeals(salesUserId: string, options: {
+    status?: string;
+    productType?: string;
+    startDate?: string;
+    endDate?: string;
+    limit: number;
+    offset: number;
+  }): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
+    const safeLimit = this.clampLimit(options.limit);
+    const safeOffset = Math.max(Number(options.offset) || 0, 0);
+    if (!salesUserId) return { items: [], total: 0, limit: safeLimit, offset: safeOffset };
+    const qb = this.orderRepository.createQueryBuilder('o')
+      .where('o.sales_user_id = :uid', { uid: salesUserId });
+    if (options.status && ALLOWED_ORDER_STATUS.includes(options.status as OrderStatus)) {
+      qb.andWhere('o.order_status = :status', { status: options.status });
+    }
+    if (options.productType) {
+      // 产品类型藏在 service_type 或 remark 里（详见 closeDeal.composeRemark）
+      qb.andWhere(
+        '(o.service_type = :productType OR o.remark LIKE :productTypeLike)',
+        { productType: options.productType, productTypeLike: `%产品: ${options.productType}%` },
+      );
+    }
+    if (options.startDate) qb.andWhere('o.created_at >= :startDate', { startDate: options.startDate });
+    if (options.endDate) qb.andWhere('o.created_at <= :endDate', { endDate: options.endDate });
+    qb.orderBy('o.created_at', 'DESC')
+      .addOrderBy('o.id', 'DESC')
+      .take(safeLimit)
+      .skip(safeOffset);
+    const [rows, total] = await qb.getManyAndCount();
+    return { items: rows.map((r) => this.mapOrder(r)), total, limit: safeLimit, offset: safeOffset };
+  }
+
   private mapOrder(row: Order): any {
     return {
       id: row.id,
@@ -1020,6 +1187,7 @@ export class OrdersService {
       orderStatus: row.orderStatus,
       handoverStatus: row.handoverStatus,
       remark: row.remark,
+      orderCode: row.orderCode,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };

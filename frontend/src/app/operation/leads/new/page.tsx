@@ -1,6 +1,6 @@
 'use client';
 
-import { Button, Card, Form, Input, message, Modal, Select, Space, Typography } from 'antd';
+import { Button, Card, Form, Input, message, Modal, Radio, Select, Space, Typography } from 'antd';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
@@ -11,11 +11,14 @@ import { useSubmitLock } from '@/shared/hooks/useSubmitLock';
 
 const DRAFT_KEY = 'operation.leads.new';
 
+type DispatchMode = 0 | 1;
+
 export default function OperationLeadNewPage() {
   const [form] = Form.useForm();
   const { submitting, run } = useSubmitLock();
   const router = useRouter();
   const accountId = Form.useWatch('accountId', form);
+  const isDispatched = Form.useWatch('isDispatched', form) as DispatchMode | undefined;
   const [salesUsers, setSalesUsers] = useState<CatalogOption[]>([]);
   const [accounts, setAccounts] = useState<CatalogOption[]>([]);
   const [posts, setPosts] = useState<CatalogOption[]>([]);
@@ -52,11 +55,30 @@ export default function OperationLeadNewPage() {
       .catch(() => setPosts([]));
   }, [accountId]);
 
+  // 已分流 → 销售字段置空（避免误传）
+  useEffect(() => {
+    if (isDispatched === 1) {
+      form.setFieldValue('assignedSalesUserId', undefined);
+    }
+  }, [isDispatched, form]);
+
   async function submit(values: Record<string, unknown>) {
+    const nextIsDispatched: DispatchMode =
+      values.isDispatched === 1 || values.isDispatched === '1' ? 1 : 0;
+    const assignedSalesUserId = nextIsDispatched === 1
+      ? undefined
+      : values.assignedSalesUserId
+        ? String(values.assignedSalesUserId)
+        : undefined;
+    if (nextIsDispatched === 0 && !assignedSalesUserId) {
+      message.error('未分流的客资必须选择销售账号');
+      return;
+    }
+    const selectedSalesUser = assignedSalesUserId
+      ? salesUsers.find((item) => item.id === assignedSalesUserId)
+      : undefined;
     try {
       await run(async () => {
-        const assignedSalesUserId = values.assignedSalesUserId ? String(values.assignedSalesUserId) : undefined;
-        const selectedSalesUser = salesUsers.find((item) => item.id === assignedSalesUserId);
         await apiClient.post('/leads', {
           ...values,
           assignedSalesUserId,
@@ -64,6 +86,7 @@ export default function OperationLeadNewPage() {
           status: assignedSalesUserId ? 'assigned' : 'new',
           addStatus: 'not_added',
           processStatus: 'not_contacted',
+          isDispatched: nextIsDispatched,
         });
         clearDraft(DRAFT_KEY);
 
@@ -80,7 +103,7 @@ export default function OperationLeadNewPage() {
         }
 
         setSubmitted(true);
-        message.success('客资已录入');
+        message.success(nextIsDispatched === 1 ? '已录入（已分流，不进销售看板）' : '客资已录入');
       });
     } catch (err) {
       message.error(err instanceof Error ? err.message : '客资提交失败，已保留当前填写内容');
@@ -107,11 +130,13 @@ export default function OperationLeadNewPage() {
     message.success('已识别并回填客资信息');
   }
 
+  const salesRequired = isDispatched !== 1;
+
   return (
     <Space direction="vertical" size={16} className="page-stack">
       <div>
         <Typography.Title level={2}>客资录入</Typography.Title>
-        <Typography.Paragraph type="secondary">录入客户来源和联系方式，并分配给销售继续跟进。</Typography.Paragraph>
+        <Typography.Paragraph type="secondary">录入客户来源和联系方式，并决定是否分给销售跟进。</Typography.Paragraph>
       </div>
       <Card>
         <DraftFormShell draftKey={DRAFT_KEY} form={form}>
@@ -119,6 +144,7 @@ export default function OperationLeadNewPage() {
             form={form}
             layout="vertical"
             onFinish={submit}
+            initialValues={{ isDispatched: 0 }}
             onValuesChange={(_, values) => {
               if (!submitted) saveDraft(DRAFT_KEY, values);
             }}
@@ -165,13 +191,41 @@ export default function OperationLeadNewPage() {
                   options={posts.map((item) => ({ label: item.name, value: item.id }))}
                 />
               </Form.Item>
-              <Form.Item name="assignedSalesUserId" label="分配销售">
+              <Form.Item
+                name="isDispatched"
+                label="是否分流"
+                rules={[{ required: true, message: '请选择是否分流' }]}
+              >
+                <Radio.Group
+                  optionType="button"
+                  buttonStyle="solid"
+                  onChange={() => {
+                    // 切换后由 useEffect 清空销售字段
+                  }}
+                >
+                  <Radio.Button value={0}>未分流</Radio.Button>
+                  <Radio.Button value={1}>已分流</Radio.Button>
+                </Radio.Group>
+              </Form.Item>
+              <Form.Item
+                name="assignedSalesUserId"
+                label="分配销售"
+                rules={salesRequired ? [{ required: true, message: '未分流的客资必须选择销售' }] : []}
+                tooltip={salesRequired ? undefined : '已分流客资不进销售看板，无需分配销售'}
+              >
                 <Select
                   allowClear
                   showSearch
                   loading={catalogLoading}
                   optionFilterProp="label"
-                  placeholder={salesUsers.length > 0 ? '选择销售账号' : '暂无可分配销售账号'}
+                  disabled={!salesRequired}
+                  placeholder={
+                    !salesRequired
+                      ? '已分流，无需分配销售'
+                      : salesUsers.length > 0
+                        ? '选择销售账号'
+                        : '暂无可分配销售账号'
+                  }
                   options={salesUsers.map((item) => ({ label: item.name, value: item.id }))}
                 />
               </Form.Item>

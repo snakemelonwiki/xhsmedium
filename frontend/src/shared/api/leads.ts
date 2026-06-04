@@ -4,33 +4,6 @@ import type { LeadTimelineItem, SalesLead } from '@/shared/types/leads';
 
 type RawRecord = Record<string, unknown>;
 
-export type PassiveLeadCandidate = {
-  id: string;
-  nickname?: string;
-  contactInfo?: string;
-  platform?: string;
-  createdAt?: string;
-};
-
-export type PassiveLeadQuery = PageQuery & {
-  phone?: string;
-  wechat?: string;
-  nickname?: string;
-};
-
-export type BindPassiveLeadBody = {
-  leadId: string | number;
-  contact: string;
-  salesFeedback?: string;
-};
-
-export type CreatePassiveLeadBody = {
-  contact: string;
-  nickname?: string;
-  platform?: string;
-  salesFeedback?: string;
-};
-
 export type ConfirmLeadSourceBody = {
   leadId: string | number;
   matchedPostId: string | number;
@@ -54,6 +27,12 @@ export type CloseLeadDealPayload = {
   paidStatus?: 'unpaid' | 'partial' | 'paid' | string;
   deliveryRequirement?: string | null;
   expectedHandleTime?: string | null;
+  // v1.3 / SA-8 销售成交录入扩展字段
+  productType?: string | null;
+  guaranteeType?: string | null;
+  paymentStage?: string | null;
+  clientRequirementNote?: string | null;
+  remark?: string | null;
 };
 
 export type SalesHomeSummary = {
@@ -63,6 +42,7 @@ export type SalesHomeSummary = {
   pendingCommunicate: number;
   todayFollowups: number;
   pendingOrders: number;
+  dealDone?: number;
 };
 
 function text(value: unknown): string | undefined {
@@ -114,6 +94,18 @@ function mapLead(raw: RawRecord): SalesLead {
     ip: text(raw.ip),
     requirementNote: text(raw.requirementNote) ?? text(raw.requirement_note),
     supervisorNote: text(raw.supervisorNote) ?? text(raw.supervisor_note),
+    // v1.3 / CROSS-1 客资分流
+    isDispatched: Boolean(raw.isDispatched),
+    // v1.3 / CROSS-2 + SA-1 销售写跟进扩展字段
+    clientDegree: text(raw.clientDegree) ?? text(raw.client_degree) ?? null,
+    clientMajorResearch: text(raw.clientMajorResearch) ?? text(raw.client_major_research) ?? null,
+    clientTimeRequirement: text(raw.clientTimeRequirement) ?? text(raw.client_time_requirement) ?? null,
+    objectionPoint: text(raw.objectionPoint) ?? text(raw.objection_point) ?? null,
+    followAction: text(raw.followAction) ?? text(raw.follow_action) ?? null,
+    followActionAt: text(raw.followActionAt) ?? text(raw.follow_action_at) ?? null,
+    dealStatus: text(raw.dealStatus) ?? text(raw.deal_status) ?? null,
+    dealAmount: text(raw.dealAmount) ?? text(raw.deal_amount) ?? null,
+    intentionLevel: text(raw.intentionLevel) ?? text(raw.intention_level) ?? null,
   };
 }
 
@@ -162,16 +154,6 @@ function normalizeCollaborationStatus(status?: string): string | undefined {
   return aliases[status] ?? status;
 }
 
-function mapPassiveLead(raw: RawRecord): PassiveLeadCandidate {
-  return {
-    id: idText(raw.id),
-    nickname: text(raw.nickname),
-    contactInfo: text(raw.contactInfo) ?? text(raw.contact),
-    platform: text(raw.platform),
-    createdAt: text(raw.createdAt) ?? text(raw.created_at),
-  };
-}
-
 export async function listSalesLeads(query: PageQuery = {}): Promise<PagedResult<SalesLead>> {
   const limit = Number(query.pageSize ?? query.limit ?? 20);
   const page = Number(query.page ?? 1);
@@ -201,22 +183,6 @@ export async function listTomorrowFollowups(query: PageQuery = {}): Promise<Page
     page,
     pageSize: limit,
     items: paged.items.map(mapLead),
-  };
-}
-
-export async function listPassiveLeadCandidates(query: PassiveLeadQuery = {}): Promise<PagedResult<PassiveLeadCandidate>> {
-  const limit = Number(query.pageSize ?? query.limit ?? 20);
-  const page = Number(query.page ?? 1);
-  const offset = query.offset ?? (page - 1) * limit;
-  const payload = await apiClient.get<unknown>('/leads/passive/candidates', {
-    query: { ...query, limit, offset },
-  });
-  const paged = normalizePagedResult<RawRecord>(payload);
-  return {
-    ...paged,
-    page,
-    pageSize: limit,
-    items: paged.items.map(mapPassiveLead),
   };
 }
 
@@ -268,14 +234,6 @@ export async function createCollaborationTask(body: CreateCollaborationTaskBody)
   return apiClient.post(`/leads/${leadId}/collaboration`, payload);
 }
 
-export async function bindPassiveLead(body: BindPassiveLeadBody) {
-  return apiClient.post('/leads/passive/bind', body);
-}
-
-export async function createPassiveLead(body: CreatePassiveLeadBody) {
-  return apiClient.post('/leads/passive/new', body);
-}
-
 export async function confirmLeadSource({ leadId, matchedPostId, sourceOperatorId }: ConfirmLeadSourceBody) {
   return apiClient.post(`/leads/${leadId}/source-confirm`, {
     matchedPostId,
@@ -299,9 +257,97 @@ export async function closeLeadDeal(id: string, body: CloseLeadDealPayload) {
     paidStatus: body.paidStatus ?? null,
     deliveryRequirement: body.deliveryRequirement ?? null,
     expectedHandleTime: body.expectedHandleTime ?? null,
-    remark: body.deliveryRequirement ?? null,
+    // v1.3 / SA-8 销售成交录入扩展字段
+    productType: body.productType ?? null,
+    guaranteeType: body.guaranteeType ?? null,
+    paymentStage: body.paymentStage ?? null,
+    clientRequirementNote: body.clientRequirementNote ?? null,
+    remark: body.remark ?? body.deliveryRequirement ?? null,
   };
-  return apiClient.post<{ ok?: boolean; orderId?: string }>(`/leads/${id}/close-deal`, payload);
+  return apiClient.post<{ ok?: boolean; orderId?: string; orderCode?: string }>(`/leads/${id}/close-deal`, payload);
+}
+
+/**
+ * v1.3 / SA-3: 销售更新客资成交状态（独立端点，与写跟进分开）。
+ */
+export async function updateLeadDealStatus(
+  id: string,
+  body: { dealStatus: 'not_deal' | 'deal_pending' | 'deal_done' | 'refunded' | 'invalid'; dealAmount?: number | string | null },
+) {
+  return apiClient.patch<{ ok: boolean; lead?: SalesLead }>(`/leads/${id}/deal-status`, body);
+}
+
+/**
+ * v1.3 / SA-3: 销售更新客资意向程度（独立端点）。
+ */
+export async function updateLeadIntentionLevel(
+  id: string,
+  body: { intentionLevel: 'high' | 'mid' | 'low' | 'invalid' | 'pending' },
+) {
+  return apiClient.patch<{ ok: boolean; lead?: SalesLead }>(`/leads/${id}/intention-level`, body);
+}
+
+/**
+ * v1.3 / SA-6: 销售端"今日未添加"客资列表（红标置顶数据源）。
+ * 今日分配给我但 add_status = not_added 的客资。
+ */
+export async function listTodayNotAddedLeads(query: PageQuery = {}): Promise<PagedResult<SalesLead>> {
+  const limit = Number(query.pageSize ?? query.limit ?? 50);
+  const page = Number(query.page ?? 1);
+  const offset = query.offset ?? (page - 1) * limit;
+  const payload = await apiClient.get<unknown>('/sales/leads/today-not-added', {
+    query: { ...query, limit, offset },
+  });
+  const paged = normalizePagedResult<RawRecord>(payload);
+  return {
+    ...paged,
+    page,
+    pageSize: limit,
+    items: paged.items.map(mapLead),
+  };
+}
+
+/**
+ * v1.3 / SA-11: 销售端"当日待跟进"列表。
+ * next_follow_time ≤ 今天 23:59:59 且未关闭。
+ */
+export async function listTodayFollowupsForSales(query: PageQuery = {}): Promise<PagedResult<SalesLead>> {
+  const limit = Number(query.pageSize ?? query.limit ?? 50);
+  const page = Number(query.page ?? 1);
+  const offset = query.offset ?? (page - 1) * limit;
+  const payload = await apiClient.get<unknown>('/sales/followups/today', {
+    query: { ...query, limit, offset },
+  });
+  const paged = normalizePagedResult<RawRecord>(payload);
+  return {
+    ...paged,
+    page,
+    pageSize: limit,
+    items: paged.items.map(mapLead),
+  };
+}
+
+/**
+ * v1.3 / SA-7: 销售"我的成交"列表。
+ */
+export async function listMyDeals(query: {
+  status?: string;
+  productType?: string;
+  startDate?: string;
+  endDate?: string;
+  page?: number;
+  pageSize?: number;
+  limit?: number;
+  offset?: number;
+} = {}): Promise<PagedResult<Record<string, unknown>>> {
+  const limit = Number(query.pageSize ?? query.limit ?? 20);
+  const page = Number(query.page ?? 1);
+  const offset = query.offset ?? (page - 1) * limit;
+  const payload = await apiClient.get<unknown>('/sales/deals', {
+    query: { ...query, limit, offset },
+  });
+  const paged = normalizePagedResult<Record<string, unknown>>(payload);
+  return { ...paged, page, pageSize: limit, items: paged.items };
 }
 
 const EMPTY_SALES_HOME_SUMMARY: SalesHomeSummary = {
@@ -311,6 +357,7 @@ const EMPTY_SALES_HOME_SUMMARY: SalesHomeSummary = {
   pendingCommunicate: 0,
   todayFollowups: 0,
   pendingOrders: 0,
+  dealDone: 0,
 };
 
 function numberOrZero(value: unknown): number {
@@ -337,5 +384,6 @@ export async function getSalesHomeSummary(): Promise<SalesHomeSummary> {
     pendingCommunicate: numberOrZero((payload as SalesHomeSummary).pendingCommunicate),
     todayFollowups: numberOrZero((payload as SalesHomeSummary).todayFollowups),
     pendingOrders: numberOrZero((payload as SalesHomeSummary).pendingOrders),
+    dealDone: numberOrZero((payload as SalesHomeSummary).dealDone),
   };
 }

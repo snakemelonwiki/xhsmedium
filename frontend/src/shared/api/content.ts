@@ -1,9 +1,12 @@
 import { apiClient, normalizePagedResult } from '@/shared/api/apiClient';
 import type { PageQuery, PagedResult } from '@/shared/types/pagination';
 import type {
+  AccountTimeseries,
   ContentPost,
   DashboardSummary,
   ImportTask,
+  PlatformDistributionItem,
+  PlatformTrend,
   PostTypeDistribution,
   RankingRow,
 } from '@/shared/types/content';
@@ -253,4 +256,294 @@ export async function listImportTasks(query: PageQuery = {}): Promise<PagedResul
   });
   const paged = normalizePagedResult<RawRecord>(payload);
   return { ...paged, page, pageSize, items: paged.items.map(mapImportTask) };
+}
+
+// ============ v1.3 OP-18/19/23 双平台 + 账号分析 ============
+
+function textOrEmpty(value: unknown): string {
+  return text(value) ?? '';
+}
+
+/**
+ * v1.3 OP-18: 双平台分布（小红书 / 抖音）作品 / 流量 / 获客占比
+ */
+export async function getPersonalPlatformDistribution(
+  query: { from?: string; to?: string; platform?: string } = {},
+): Promise<PlatformDistributionItem[]> {
+  const payload = await apiClient.get<unknown>('/dashboard/personal/platform-distribution', {
+    query,
+  });
+  return rawItems(payload).map((raw) => ({
+    platform: text(raw.platform) ?? '',
+    postCount: numberValue(raw.postCount ?? raw.post_count),
+    leadCount: numberValue(raw.leadCount ?? raw.lead_count),
+    traffic: numberValue(raw.traffic),
+  }));
+}
+
+/**
+ * v1.3 OP-19: 双平台作品量（每日/每周/每月）+ 流量 + 获客
+ */
+export async function getPersonalPlatformTrend(
+  query: { period?: 'day' | 'week' | 'month'; from?: string; to?: string } = {},
+): Promise<PlatformTrend> {
+  const raw = (await apiClient.get<unknown>('/dashboard/personal/platform-trend', {
+    query,
+  })) as RawRecord;
+  const points = Array.isArray(raw.points)
+    ? (raw.points as RawRecord[]).map((p) => ({
+        date: text(p.date) ?? '',
+        xiaohongshuCount: numberValue(p.xiaohongshuCount),
+        douyinCount: numberValue(p.douyinCount),
+        xiaohongshuTraffic: numberValue(p.xiaohongshuTraffic),
+        douyinTraffic: numberValue(p.douyinTraffic),
+        xiaohongshuLeads: numberValue(p.xiaohongshuLeads),
+        douyinLeads: numberValue(p.douyinLeads),
+      }))
+    : [];
+  const period = (text(raw.period) ?? 'day') as 'day' | 'week' | 'month';
+  return {
+    period,
+    from: text(raw.from) ?? '',
+    to: text(raw.to) ?? '',
+    points,
+  };
+}
+
+/**
+ * v1.3 OP-23: 账号时间序列（按日聚合）
+ * - days=30 默认；与 from/to 互斥
+ * - 返回 { account, from, to, days, summary }
+ */
+export async function getAccountTimeseries(
+  accountId: string,
+  query: { days?: number; from?: string; to?: string } = {},
+): Promise<AccountTimeseries> {
+  const raw = (await apiClient.get<unknown>(
+    `/dashboard/personal/account/${encodeURIComponent(accountId)}/timeseries`,
+    { query },
+  )) as RawRecord;
+  return parseAccountTimeseries(raw);
+}
+
+/**
+ * v1.3 OP-23 扩展：当前员工名下全部账号的时间序列（各账号独立）。
+ * 不再聚合为单条数据，而是返回每个账号各自的 timeseries 数组。
+ * 前端分别渲染各账号的日历视图。
+ */
+export async function getAllAccountsTimeseries(
+  query: { days?: number; from?: string; to?: string; platform?: string } = {},
+): Promise<{ accounts: AccountInfo[]; items: AccountTimeseries[] }> {
+  const raw = (await apiClient.get<unknown>(
+    `/dashboard/personal/accounts/timeseries`,
+    { query },
+  )) as RawRecord;
+  const accounts = Array.isArray(raw.accounts) ? (raw.accounts as RawRecord[]).map(mapAccountInfo) : [];
+  const items = Array.isArray(raw.items) ? (raw.items as RawRecord[]).map(parseAccountTimeseries) : [];
+  return { accounts, items };
+}
+
+function mapAccountInfo(raw: RawRecord): AccountInfo {
+  return {
+    id: textOrEmpty(raw.id),
+    accountName: textOrEmpty(raw.accountName),
+    platform: textOrEmpty(raw.platform),
+    postingPlan: text(raw.postingPlan) ?? '',
+    persona: text(raw.persona) ?? '',
+    positioning: text(raw.positioning) ?? '',
+  };
+}
+
+export interface AccountInfo {
+  id: string;
+  accountName: string;
+  platform: string;
+  postingPlan: string;
+  persona: string;
+  positioning: string;
+}
+
+function parseAccountTimeseries(raw: RawRecord): AccountTimeseries {
+  const account = (raw.account ?? {}) as RawRecord;
+  const summary = (raw.summary ?? {}) as RawRecord;
+  const days = Array.isArray(raw.days)
+    ? (raw.days as RawRecord[]).map((d) => ({
+        date: text(d.date) ?? '',
+        postCount: numberValue(d.postCount),
+        leadCount: numberValue(d.leadCount),
+        traffic: numberValue(d.traffic),
+        posts: Array.isArray(d.posts)
+          ? (d.posts as RawRecord[]).map((p) => ({
+              postId: textOrEmpty(p.postId),
+              title: textOrEmpty(p.title),
+              platform: textOrEmpty(p.platform),
+              type: textOrEmpty(p.type),
+              isLead: p.isLead === true || p.isLead === 1 || p.isLead === '1',
+              leadCount: numberValue(p.leadCount),
+              traffic: numberValue(p.traffic),
+            }))
+          : [],
+      }))
+    : [];
+  return {
+    account: {
+      id: textOrEmpty(account.id),
+      accountName: textOrEmpty(account.accountName),
+      platform: textOrEmpty(account.platform),
+      postingPlan: text(account.postingPlan) ?? '',
+      persona: text(account.persona) ?? '',
+      positioning: text(account.positioning) ?? '',
+    },
+    from: text(raw.from) ?? '',
+    to: text(raw.to) ?? '',
+    days,
+    summary: {
+      postCount: numberValue(summary.postCount),
+      leadCount: numberValue(summary.leadCount),
+      traffic: numberValue(summary.traffic),
+      highLeadDays: numberValue(summary.highLeadDays),
+      lowLeadDays: numberValue(summary.lowLeadDays),
+      noPostDays: numberValue(summary.noPostDays),
+    },
+  };
+}
+
+// ============================================================
+// v1.3 个人看板（OP-1/2/3/4/16/17/24）
+// 流量口径：likes + comments + favorites（不含分享）
+// ============================================================
+
+export type PersonalMetric = 'totalLeads' | 'totalTraffic' | 'efficiency' | 'leadEfficiency';
+export type PersonalPlatform = 'xiaohongshu' | 'douyin' | 'all';
+export type PersonalPeriod = 'today' | 'week' | 'month' | 'all';
+
+export interface PersonalOverview {
+  totalTraffic: number;
+  totalLeads: number;
+  monthPostCount: number;
+  monthLeadCount: number;
+  monthTraffic: number;
+  monthLeadPostCount: number;
+}
+
+export interface PersonalOverviewResponse {
+  period: { from: string; to: string; code: string; monthStart: string };
+  employeeId: string;
+  metrics: string;
+  platform: string | null;
+  overview: PersonalOverview;
+  ranking: {
+    rank: number | null;
+    total: number;
+    gapToPrev: number;
+    metricValue: number;
+  };
+}
+
+export interface EfficiencyAccount {
+  accountId: string;
+  accountName: string;
+  platform: string;
+  postCount: number;
+  leadPostCount: number;
+  leadCount: number;
+  traffic: number;
+  efficiency: number;
+  leadEfficiency: number;
+  trend: number[];
+}
+
+export interface PersonalRankingsResponse {
+  period: { from: string; to: string };
+  employeeId: string;
+  platform: string | null;
+  accounts: {
+    traffic: EfficiencyAccount[];
+    efficiency: EfficiencyAccount[];
+    leadEfficiency: EfficiencyAccount[];
+  };
+}
+
+export interface PersonalTodayResponse {
+  date: string;
+  platform: string | null;
+  todayPostCount: number;
+  todayLeadCount: number;
+  todayTraffic: number;
+}
+
+export interface PersonalOverviewQuery {
+  metrics?: PersonalMetric;
+  platform?: PersonalPlatform;
+  period?: PersonalPeriod;
+  from?: string;
+  to?: string;
+  /** 主管查看指定员工时使用 */
+  employeeId?: string;
+}
+
+function buildPersonalPath(employeeId?: string): string {
+  if (employeeId) {
+    return `/dashboard/supervisor/employee/${encodeURIComponent(employeeId)}/overview`;
+  }
+  return '/dashboard/personal/overview';
+}
+
+function buildRankingsPath(employeeId?: string): string {
+  if (employeeId) {
+    return `/dashboard/supervisor/employee/${encodeURIComponent(employeeId)}/rankings`;
+  }
+  return '/dashboard/personal/rankings';
+}
+
+function buildTodayPath(employeeId?: string): string {
+  if (employeeId) {
+    return `/dashboard/supervisor/employee/${encodeURIComponent(employeeId)}/today`;
+  }
+  return '/dashboard/personal/today';
+}
+
+/**
+ * v1.3 OP-1/2/3/16 个人看板 5 张概览卡 + 名次。
+ * 运营端不传 employeeId；主管端传 employeeId 即查看指定员工数据。
+ */
+export async function getPersonalOverview(
+  query: PersonalOverviewQuery = {},
+): Promise<PersonalOverviewResponse> {
+  return apiClient.get<PersonalOverviewResponse>(buildPersonalPath(query.employeeId), {
+    query: {
+      metrics: query.metrics,
+      platform: query.platform,
+      period: query.period,
+      from: query.from,
+      to: query.to,
+    },
+  });
+}
+
+/**
+ * v1.3 OP-17/24 三大效率榜（流量榜 / 获客效率榜 / 获客贴效率榜）。
+ */
+export async function getPersonalRankings(
+  query: { platform?: PersonalPlatform; period?: PersonalPeriod; from?: string; to?: string; employeeId?: string } = {},
+): Promise<PersonalRankingsResponse> {
+  return apiClient.get<PersonalRankingsResponse>(buildRankingsPath(query.employeeId), {
+    query: {
+      platform: query.platform,
+      period: query.period,
+      from: query.from,
+      to: query.to,
+    },
+  });
+}
+
+/**
+ * v1.3 OP-4 运营总览今日数据：今日作品 / 今日客资 / 今日流量（去除今日成交）。
+ */
+export async function getPersonalToday(
+  query: { platform?: PersonalPlatform; date?: string; employeeId?: string } = {},
+): Promise<PersonalTodayResponse> {
+  return apiClient.get<PersonalTodayResponse>(buildTodayPath(query.employeeId), {
+    query: { platform: query.platform, date: query.date },
+  });
 }

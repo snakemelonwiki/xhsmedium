@@ -87,18 +87,21 @@ export class RankingsService {
         .sort((a, b) => b.leadCount - a.leadCount);
     }
 
-    // 流量榜：按点赞数排序
+    // 流量榜：按 SUM(likes+comments+favorites) 排序
+    // v1.3 OP-7：运营统一口径——流量 = 点赞 + 评论 + 收藏（不含 shares），与 OP-16 一致。
     if (type === 'traffic') {
-      const likesByEmployee: Record<string, number> = {};
+      const trafficByEmployee: Record<string, number> = {};
       for (const post of posts) {
-        likesByEmployee[post.employeeId] = (likesByEmployee[post.employeeId] || 0) + Number(post.likes || 0);
+        const score = Number(post.likes || 0) + Number(post.comments || 0) + Number(post.favorites || 0);
+        trafficByEmployee[post.employeeId] = (trafficByEmployee[post.employeeId] || 0) + score;
       }
       return rows
         .map((r) => ({
           ...r,
-          likes: likesByEmployee[r.employeeId] || 0,
+          traffic: trafficByEmployee[r.employeeId] || 0,
+          likes: trafficByEmployee[r.employeeId] || 0, // 兼容老前端：traffic / likes 都用同一数值
         }))
-        .sort((a, b) => b.likes - a.likes);
+        .sort((a, b) => b.traffic - a.traffic);
     }
 
     // 学习榜：按客资数优先，客资相同再看获客效率和点赞数

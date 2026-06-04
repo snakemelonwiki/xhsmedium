@@ -6,7 +6,7 @@ import {
   FileTextOutlined,
   FormOutlined,
   ProjectOutlined,
-  ShoppingOutlined,
+  ShopOutlined,
   UsergroupAddOutlined,
 } from '@ant-design/icons';
 import { Badge, Card, Col, List, Row, Segmented, Skeleton, Space, Statistic, Tag, Typography } from 'antd';
@@ -37,6 +37,14 @@ type Notification = {
   relatedId?: string | null;
 };
 
+type SupervisorSuggestionItem = {
+  id: string;
+  content?: string;
+  targetType?: string;
+  targetId?: string;
+  createdAt?: string;
+};
+
 type DashboardSummary = {
   xhsPosts?: number;
   douyinPosts?: number;
@@ -53,12 +61,21 @@ type SummaryStats = {
 };
 
 /**
- * 运营端"今日任务"页面：聚合今日要做的事——待处理协同、新分配客资、未读提醒、今日产能小计。
+ * 运营端"今日任务"页面：聚合今日要做的事——待处理协同、今日已录入客资、主管建议、未读提醒、今日产能小计。
+ *
+ * v1.3 / OP-6 调整：
+ * - 原"今日新分配客资" → 改名为"今日已录入客资"（点击进入当日自己录入的客资列表）
+ * - 顶部"主管建议/未读消息"拆为两个独立卡片
+ *   - 主管建议：来自 supervisor_suggestions（GET /supervisor-suggestions）
+ *   - 未读消息：来自 notifications（GET /notifications/unread-count?typeCode=...）
  */
 export default function OperationTodayTasksPage() {
   const [period, setPeriod] = useState<Period>('today');
   const [pendingCollabs, setPendingCollabs] = useState<CollabTask[]>([]);
   const [unreadNotifications, setUnreadNotifications] = useState<Notification[]>([]);
+  const [unreadNotificationsCount, setUnreadNotificationsCount] = useState(0);
+  const [supervisorSuggestions, setSupervisorSuggestions] = useState<SupervisorSuggestionItem[]>([]);
+  const [supervisorSuggestionsCount, setSupervisorSuggestionsCount] = useState(0);
   const [summaryStats, setSummaryStats] = useState<SummaryStats>({ posts: 0, leads: 0, deals: 0, pendingCollabs: 0 });
   const [loading, setLoading] = useState(true);
   const { unreadCount } = useNotifications();
@@ -67,11 +84,20 @@ export default function OperationTodayTasksPage() {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [collabs, notifications, summary, leadStats] = await Promise.all([
+      const [
+        collabs,
+        notifications,
+        summary,
+        leadStats,
+        suggestionList,
+        suggestionUnread,
+      ] = await Promise.all([
         apiClient.get<any>('/collaboration-tasks', { query: { scope: 'inbox', status: 'pending', limit: 20 } }).catch(() => null),
         apiClient.get<any>('/notifications', { query: { read: 0, limit: 10 } }).catch(() => null),
         apiClient.get<DashboardSummary>('/dashboard/summary', { query: { period } }).catch(() => null),
         apiClient.get<any>('/leads/stats', { query: { scope: 'self', period } }).catch(() => null),
+        apiClient.get<any>('/supervisor-suggestions', { query: { readStatus: 0, limit: 5 } }).catch(() => null),
+        apiClient.get<any>('/supervisor-suggestions/unread-count').catch(() => null),
       ]);
 
       // 协同任务
@@ -80,7 +106,15 @@ export default function OperationTodayTasksPage() {
 
       // 未读通知
       const notifList = notifications?.items ?? notifications?.notifications ?? notifications ?? [];
-      setUnreadNotifications(Array.isArray(notifList) ? notifList.slice(0, 10) : []);
+      setUnreadNotifications(Array.isArray(notifList) ? notifList.slice(0, 5) : []);
+      setUnreadNotificationsCount(
+        Number(notifications?.unreadCount ?? (Array.isArray(notifList) ? notifList.length : 0)),
+      );
+
+      // 主管建议
+      const suggList = suggestionList?.items ?? suggestionList ?? [];
+      setSupervisorSuggestions(Array.isArray(suggList) ? suggList.slice(0, 5) : []);
+      setSupervisorSuggestionsCount(Number(suggestionUnread?.count ?? (Array.isArray(suggList) ? suggList.length : 0)));
 
       // 今日汇总
       if (summary) {
@@ -186,23 +220,23 @@ export default function OperationTodayTasksPage() {
           </Card>
         </Col>
 
-        {/* 今日新分配客资 */}
+        {/* 今日已录入客资（OP-6 改名：原"今日新分配客资"） */}
         <Col span={12}>
           <Card
             title={
               <Space>
                 <UsergroupAddOutlined />
-                今日新分配客资
+                今日已录入客资
               </Space>
             }
             extra={<Link href={`/operation/leads?from=${todayUrl}&to=${todayUrl}`}>查看全部</Link>}
           >
             <Space direction="vertical" style={{ width: '100%' }}>
               <Typography.Paragraph type="secondary" style={{ marginBottom: 8 }}>
-                跳转到客资看板，筛选今日录入的客资记录。
+                跳转到客资看板，查看今日自己录入的全部客资（含已分流 / 未分流）。
               </Typography.Paragraph>
               <Link href={`/operation/leads?from=${todayUrl}&to=${todayUrl}`}>
-                <Tag color="blue" icon={<DatabaseOutlined />}>查看今日录入客资</Tag>
+                <Tag color="blue" icon={<DatabaseOutlined />}>查看今日已录入客资</Tag>
               </Link>
             </Space>
           </Card>
@@ -210,13 +244,56 @@ export default function OperationTodayTasksPage() {
       </Row>
 
       <Row gutter={16}>
-        {/* 主管建议/未读消息 */}
+        {/* 主管建议（OP-6 拆分为独立卡） */}
+        <Col span={12}>
+          <Card
+            title={
+              <Space>
+                <ProjectOutlined />
+                <span>主管建议</span>
+                {supervisorSuggestionsCount > 0 ? (
+                  <Badge count={supervisorSuggestionsCount} overflowCount={99} />
+                ) : null}
+              </Space>
+            }
+            extra={<Link href="/operation/messages">查看消息中心</Link>}
+          >
+            {supervisorSuggestions.length > 0 ? (
+              <List
+                size="small"
+                dataSource={supervisorSuggestions}
+                renderItem={(item) => (
+                  <List.Item>
+                    <List.Item.Meta
+                      title={<Typography.Text strong>{item.targetType === 'post' ? '作品' : item.targetType === 'account' ? '账号' : '员工'}建议</Typography.Text>}
+                      description={
+                        <Space direction="vertical" size={0}>
+                          <span>{item.content || '-'}</span>
+                          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                            {item.createdAt}
+                          </Typography.Text>
+                        </Space>
+                      }
+                    />
+                  </List.Item>
+                )}
+              />
+            ) : (
+              <Typography.Text type="secondary">暂无主管建议</Typography.Text>
+            )}
+          </Card>
+        </Col>
+
+        {/* 未读消息（OP-6 拆分为独立卡） */}
         <Col span={12}>
           <Card
             title={
               <Space>
                 <BellOutlined />
-                主管建议/未读消息
+                <span>未读消息</span>
+                {unreadNotificationsCount > 0 ? (
+                  <Badge count={unreadNotificationsCount} overflowCount={99} />
+                ) : null}
               </Space>
             }
             extra={<Link href="/operation/messages">查看消息中心</Link>}
@@ -224,7 +301,7 @@ export default function OperationTodayTasksPage() {
             {unreadNotifications.length > 0 ? (
               <List
                 size="small"
-                dataSource={unreadNotifications.slice(0, 5)}
+                dataSource={unreadNotifications}
                 renderItem={(item) => (
                   <List.Item>
                     <List.Item.Meta
@@ -242,13 +319,15 @@ export default function OperationTodayTasksPage() {
                 )}
               />
             ) : (
-              <Typography.Text type="secondary">暂无未读提醒</Typography.Text>
+              <Typography.Text type="secondary">暂无未读消息</Typography.Text>
             )}
           </Card>
         </Col>
+      </Row>
 
+      <Row gutter={16}>
         {/* 未完成录入 */}
-        <Col span={12}>
+        <Col span={24}>
           <Card
             title={
               <Space>
@@ -269,7 +348,7 @@ export default function OperationTodayTasksPage() {
                   <Tag color="green" icon={<UsergroupAddOutlined />}>客资录入</Tag>
                 </Link>
                 <Link href="/operation/posts">
-                  <Tag color="purple" icon={<ShoppingOutlined />}>我的作品</Tag>
+                  <Tag color="purple" icon={<ShopOutlined />}>我的作品</Tag>
                 </Link>
               </Space>
             </Space>

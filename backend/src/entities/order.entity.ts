@@ -69,6 +69,18 @@ export class Order {
   @Column({ type: 'text', nullable: true })
   remark: string | null;
 
+  // v1.3 增量（CROSS-4，迁移 M26）：订单编号 ORD-YYYYMMDD-XXXXX
+  // 唯一索引 uk_orders_order_code 在迁移中建立。
+  /**
+   * 订单编号，规则 `ORD-YYYYMMDD-XXXXX`：
+   * - YYYYMMDD 为 UTC+8 当日日期；
+   * - XXXXX 为当日 5 位自增序号（每日从 00001 开始重置）。
+   * 生成逻辑：orders.service.ts 的 generateOrderCode() 私有方法，依赖 orders_order_code_seq 序列表 + 行锁保证并发安全。
+   * 历史订单允许 NULL（迁移 M26 不回填），uk_orders_order_code 唯一索引对多个 NULL 兼容。
+   */
+  @Column({ name: 'order_code', length: 32, nullable: true })
+  orderCode: string | null;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 
