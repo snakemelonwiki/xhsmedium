@@ -20,7 +20,7 @@ import type { TableColumnsType, TablePaginationConfig } from 'antd';
 import { useEffect, useState } from 'react';
 
 import { listAdminAccounts, listAdminEmployees, saveAdminAccount } from '@/shared/api/admin';
-import { createExportTask } from '@/shared/api/exports';
+import { createExport, downloadExportUrl, getExport } from '@/shared/api/exports';
 import type { AdminAccount, AdminEmployee } from '@/shared/types/admin';
 
 type Account = AdminAccount & {
@@ -85,6 +85,8 @@ export default function AdminAccountsPage() {
   const [deactivateModalOpen, setDeactivateModalOpen] = useState(false);
   const [deactivateAccount, setDeactivateAccount] = useState<Account>();
   const [deactivateLoading, setDeactivateLoading] = useState(false);
+
+  const [exporting, setExporting] = useState(false);
 
   async function load(page = pagination.current, pageSize = pagination.pageSize, nextKeyword = keyword) {
     setLoading(true);
@@ -195,11 +197,34 @@ export default function AdminAccountsPage() {
 
   // 导出
   async function handleExport() {
+    setExporting(true);
+    const hide = message.loading('正在生成导出文件...', 0);
     try {
-      const result = await createExportTask('accounts', { scope: 'all' });
-      message.success(`导出任务已创建，任务ID: ${result.id}`);
+      const result = await createExport({ exportType: 'accounts', filter: { scope: 'all' } });
+      let attempts = 0;
+      const maxAttempts = 30;
+      while (attempts < maxAttempts) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        const exportTask = await getExport(result.id);
+        if (exportTask.status === 'completed') {
+          hide();
+          window.open(downloadExportUrl(result.id), '_blank');
+          message.success('导出成功，文件开始下载');
+          return;
+        } else if (exportTask.status === 'failed') {
+          hide();
+          message.error('导出失败，请重试');
+          return;
+        }
+        attempts++;
+      }
+      hide();
+      message.warning('导出超时，请到导出中心查看');
     } catch (err: unknown) {
-      message.error((err as Error)?.message || '导出创建失败');
+      hide();
+      message.error((err as Error)?.message || '导出失败');
+    } finally {
+      setExporting(false);
     }
   }
 
@@ -287,7 +312,7 @@ export default function AdminAccountsPage() {
             onSearch={handleSearch}
             style={{ width: 220 }}
           />
-          <Button icon={<ExportOutlined />} onClick={handleExport}>
+          <Button icon={<ExportOutlined />} loading={exporting} onClick={handleExport}>
             导出
           </Button>
           <Button type="primary" onClick={() => startEdit()}>新增账号</Button>

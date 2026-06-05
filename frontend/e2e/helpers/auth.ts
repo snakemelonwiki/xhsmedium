@@ -24,8 +24,16 @@ export async function loginAs(
   expectPath: string | RegExp = /\/sales\//,
 ) {
   await page.goto('/login', { waitUntil: 'domcontentloaded' });
-  await page.getByPlaceholder('用户名').fill(ACCOUNTS[user].username);
-  await page.getByPlaceholder('密码').fill(ACCOUNTS[user].password);
+  // 等待登录表单两个 input 真正出现在 DOM（dev 模式 HMR / 路由编译可能慢）
+  const usernameInput = page.getByPlaceholder('用户名');
+  const passwordInput = page.getByPlaceholder('密码');
+  await usernameInput.waitFor({ state: 'visible', timeout: 30_000 });
+  await passwordInput.waitFor({ state: 'visible', timeout: 30_000 });
+  // 清空后填，避免 dev 自动填充或上一次残留导致用户名/密码串行错位
+  await usernameInput.fill('');
+  await passwordInput.fill('');
+  await usernameInput.fill(ACCOUNTS[user].username);
+  await passwordInput.fill(ACCOUNTS[user].password);
 
   // 重试 2 次：dev 模式 HMR / 反代慢时偶发等不到响应
   let resp: import('@playwright/test').Response | null = null;

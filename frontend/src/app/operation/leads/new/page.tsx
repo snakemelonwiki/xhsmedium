@@ -152,15 +152,15 @@ export default function OperationLeadNewPage() {
           >
             <div className="form-grid">
               <Form.Item className="full-row" label="粘贴解析">
-                <Space.Compact style={{ width: '100%' }}>
-                  <Input.TextArea
-                    rows={3}
-                    value={pasteText}
-                    onChange={(event) => setPasteText(event.target.value)}
-                    placeholder="粘贴客户昵称、微信/手机号、平台和需求描述"
-                  />
+                <Input.TextArea
+                  rows={3}
+                  value={pasteText}
+                  onChange={(event) => setPasteText(event.target.value)}
+                  placeholder="粘贴客户昵称、微信/手机号、平台和需求描述"
+                />
+                <div style={{ marginTop: 8, textAlign: 'right' }}>
                   <Button onClick={parsePastedLead}>识别</Button>
-                </Space.Compact>
+                </div>
               </Form.Item>
               <Form.Item name="platform" label="来源平台" initialValue="xiaohongshu" rules={[{ required: true, message: '请选择平台' }]}>
                 <Select
@@ -270,19 +270,70 @@ function parseLeadText(raw: string): Record<string, string> {
   const text = raw.trim();
   if (!text) return {};
   const result: Record<string, string> = {};
-  // 识别手机号（1开头的11位数字）
+
+  // 尝试解析结构化模板（key:value 格式）
+  const lines = text.split('\n').filter((line) => line.trim());
+  let isStructured = false;
+
+  for (const line of lines) {
+    const match = line.match(/^([^:：]+)[:：]\s*(.*)$/);
+    if (!match) continue;
+
+    isStructured = true;
+    const [, key, value] = match;
+    const keyNorm = key.trim();
+    const valueNorm = value.trim();
+
+    // 来源: 提取平台和账号名
+    if (/来源|平台/.test(keyNorm)) {
+      if (/抖音|douyin/i.test(valueNorm)) result.platform = 'douyin';
+      if (/小红书|xiaohongshu|xhs/i.test(valueNorm)) result.platform = 'xiaohongshu';
+
+      // 提取账号名（支持中文括号（）和英文括号()）
+      const accountMatch = valueNorm.match(/[（(]([^)）]+)[)）]/);
+      if (accountMatch) {
+        result._accountName = accountMatch[1].trim();
+      }
+    }
+    // 预算
+    else if (/预算/.test(keyNorm) && valueNorm) {
+      result.budget = valueNorm;
+    }
+    // 具体情况/专业/需求
+    else if (/具体|专业|需求/.test(keyNorm) && valueNorm) {
+      result.majorContent = valueNorm;
+    }
+    // 昵称
+    else if (/昵称|姓名|客户/.test(keyNorm) && valueNorm) {
+      result.nickname = valueNorm;
+    }
+    // IP/地区
+    else if (/IP|地区|区域/.test(keyNorm) && valueNorm) {
+      result.ip = valueNorm;
+    }
+    // 联系方式（微信号/电话/手机）
+    else if (/微信|电话|手机|联系/.test(keyNorm) && valueNorm) {
+      result.contactInfo = valueNorm;
+    }
+  }
+
+  // 如果是结构化模板，直接返回
+  if (isStructured) {
+    // 完整文本填入需求备注
+    result.requirementNote = text;
+    return result;
+  }
+
+  // 非结构化文本：使用原有的正则识别逻辑
   const phone = text.match(/1[3-9]\d{9}/)?.[0];
-  // 识别微信号（wx/wechat开头或包含的数字字母组合）
   const wechat = text.match(/(?:微信|wx|wechat)[:：\s]*([a-zA-Z][-_a-zA-Z0-9]{5,19})/i)?.[1];
-  // 识别昵称
   const nickname = text.match(/(?:昵称|客户|姓名)[:：\s]*([^\s,，;；]+)/)?.[1];
 
   if (/抖音|douyin/i.test(text)) result.platform = 'douyin';
   if (/小红书|xiaohongshu|xhs/i.test(text)) result.platform = 'xiaohongshu';
-  if (/微信|wechat/i.test(text)) result.platform = 'xiaohongshu'; // 默认微信来源归属小红书
+  if (/微信|wechat/i.test(text)) result.platform = 'xiaohongshu';
   if (phone || wechat) result.contactInfo = phone || wechat || '';
   if (nickname) result.nickname = nickname;
-  // 完整文本填入需求备注
   result.requirementNote = text;
   return result;
 }

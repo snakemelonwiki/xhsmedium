@@ -47,6 +47,12 @@ export class PostsController {
     // 仅当 staff 显式传 scope=all 时不强制本人过滤（默认 self 保留旧行为）
     const isStaff = session?.role === 'staff' && session?.employeeId;
     const forceSelf = isStaff && scope !== 'all';
+    // 透传 viewer 给 service，让 isFavorited 等个人化字段按当前用户返回
+    const viewer = {
+      viewerUserId: getSessionUserId(req),
+      viewerRole: String(session?.role || '').toLowerCase(),
+      viewerEmployeeId: session?.employeeId,
+    };
 
     if (wantsPaging) {
       // 漏洞1修复：staff 强制只用 session.employeeId 过滤，不能通过 query 参数绕过
@@ -65,6 +71,7 @@ export class PostsController {
           },
           Number(limit) || 20,
           Number(offset) || 0,
+          viewer,
         );
         return res.json(result);
       }
@@ -82,15 +89,16 @@ export class PostsController {
         },
         Number(limit) || 20,
         Number(offset) || 0,
+        viewer,
       );
       return res.json(result);
     }
 
     if (forceSelf) {
-      const rows = await this.postsService.findByEmployee(session.employeeId);
+      const rows = await this.postsService.findByEmployee(session.employeeId, viewer);
       return res.json(rows);
     }
-    const rows = await this.postsService.findAll();
+    const rows = await this.postsService.findAll(viewer);
     return res.json(rows);
   }
 
@@ -266,8 +274,14 @@ export class PostsController {
   }
 
   @Get(':id')
-  async findOne(@Param('id') id: string, @Res() res: Response) {
-    const post = await this.postsService.findById(id);
+  async findOne(@Param('id') id: string, @Req() req: Request, @Res() res: Response) {
+    const session = (req as any).session;
+    const viewer = {
+      viewerUserId: getSessionUserId(req),
+      viewerRole: String(session?.role || '').toLowerCase(),
+      viewerEmployeeId: session?.employeeId,
+    };
+    const post = await this.postsService.findById(id, viewer);
     if (!post) return res.status(404).json({ message: '作品不存在' });
     return res.json(post);
   }
@@ -442,14 +456,63 @@ export class PostsController {
     }
   }
 
+  /**
+   * C8 修复：单条作品刷新端点。复用 fetchMetrics + 写 operation_log。
+   * POST /api/posts/:id/refresh-metrics  body: { postUrl? }
+   * - 已存在作品链接：直接抓取
+   * - 未传 postUrl 且作品已存 postUrl：使用现存链接
+   */
+  @Post(':id/refresh-metrics')
+  async refreshSinglePostMetrics(
+    @Param('id') id: string,
+    @Body() body: any,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    const post = await this.postsService.findById(id);
+    if (!post) return res.status(404).json({ message: '作品不存在' });
+    const targetUrl = body?.postUrl || post.postUrl;
+    if (!targetUrl) return res.status(400).json({ message: '请先填写作品链接' });
+    try {
+      const metrics = await this.postsMetricsService.fetchMetricsFromUrl(targetUrl);
+      await this.postsService.updateMetrics(id, metrics);
+      await this.postsService.recordMetricsHistory(id, metrics);
+      try {
+        await this.operationLogs.log({
+          userId: getSessionUserId(req),
+          action: OPERATION_LOG_ACTIONS.UPDATE,
+          targetType: OPERATION_LOG_TARGET_TYPES.POST,
+          targetId: id,
+          detail: stringifyDetail({
+            source: 'refresh-metrics',
+            refreshedFields: ['likes', 'comments', 'favorites', 'shares'],
+          }),
+          ip: parseIp(req),
+        });
+      } catch (logErr) {
+        // eslint-disable-next-line no-console
+        console.error('[posts] refresh-metrics op log failed', (logErr as any)?.message || logErr);
+      }
+      return res.json({ ok: true, metrics });
+    } catch (error: any) {
+      return res.status(400).json({ ok: false, message: error.message || '刷新失败' });
+    }
+  }
+
   @Post('refresh-metrics')
-  async refreshMetrics(@Body() body: any, @Res() res: Response) {
+  async refreshMetrics(@Body() body: any, @Req() req: Request, @Res() res: Response) {
     const postIds = Array.isArray(body?.postIds)
       ? body.postIds.map((id: any) => String(id || '').trim()).filter(Boolean)
       : [];
+    const session = (req as any).session;
+    const viewer = {
+      viewerUserId: getSessionUserId(req),
+      viewerRole: String(session?.role || '').toLowerCase(),
+      viewerEmployeeId: session?.employeeId,
+    };
     const posts = postIds.length
-      ? await this.postsService.findByIds(postIds)
-      : await this.postsService.findAll();
+      ? await this.postsService.findByIds(postIds, viewer)
+      : await this.postsService.findAll(viewer);
     const eligible = posts.filter((p) => p.postUrl);
     if (eligible.length === 0) {
       return res.status(400).json({ message: '当前范围内没有可刷新的作品' });

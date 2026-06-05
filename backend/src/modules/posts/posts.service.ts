@@ -8,6 +8,7 @@ import { PostMetrics } from '../../entities/post-metrics.entity';
 import { makeId } from '../../shared/utils/id-generator';
 import { normalizePostType, normalizeTrafficByType, normalizeExternalUrl, normalizeMediaUrl } from '../../shared/utils/normalize';
 import { PostsMetricsService } from './posts-metrics.service';
+import { FavoritesService } from '../favorites/favorites.service';
 
 interface PostListFilters {
   employeeId?: string;
@@ -39,6 +40,16 @@ interface PostViewer {
   role?: string;
 }
 
+/**
+ * viewer 上下文：用于按当前登录用户计算 isFavorited 等个人化字段。
+ * 透传自 controller，使用 getSessionUserId / getSessionRole 提取。
+ */
+export interface PostsListViewer {
+  viewerUserId?: string;
+  viewerRole?: string;
+  viewerEmployeeId?: string;
+}
+
 @Injectable()
 export class PostsService {
   constructor(
@@ -52,26 +63,30 @@ export class PostsService {
     private readonly postMetricsRepository: Repository<PostMetrics>,
     @Optional()
     private readonly postsMetricsService?: PostsMetricsService,
+    @Optional()
+    private readonly favoritesService?: FavoritesService,
   ) {}
 
-  async findAll(): Promise<any[]> {
+  async findAll(viewer?: PostsListViewer): Promise<any[]> {
     const rows = await this.postRepository.find({ order: { publishedAt: 'DESC', createdAt: 'DESC' } });
-    return this.attachJoinNames(rows.map(this.mapPost));
+    const items = await this.attachJoinNames(rows.map((r) => this.mapPost(r)));
+    return this.decorateWithFavorites(items, viewer);
   }
 
-  async findByEmployee(employeeId: string): Promise<any[]> {
+  async findByEmployee(employeeId: string, viewer?: PostsListViewer): Promise<any[]> {
     const rows = await this.postRepository.find({
       where: { employeeId },
       order: { publishedAt: 'DESC', createdAt: 'DESC' },
     });
-    return this.attachJoinNames(rows.map(this.mapPost));
+    const items = await this.attachJoinNames(rows.map((r) => this.mapPost(r)));
+    return this.decorateWithFavorites(items, viewer);
   }
 
-  async findAllPaged(limit: number, offset: number): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
-    return this.findPaged({}, limit, offset);
+  async findAllPaged(limit: number, offset: number, viewer?: PostsListViewer): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
+    return this.findPaged({}, limit, offset, viewer);
   }
 
-  async findPaged(filters: PostListFilters, limit: number, offset: number): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
+  async findPaged(filters: PostListFilters, limit: number, offset: number, viewer?: PostsListViewer): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
     const safeLimit = this.clampLimit(limit);
     const safeOffset = Math.max(Number(offset) || 0, 0);
     const qb = this.postRepository.createQueryBuilder('p');
@@ -106,11 +121,12 @@ export class PostsService {
     }
 
     const [rows, total] = await qb.take(safeLimit).skip(safeOffset).getManyAndCount();
-    const items = await this.attachJoinNames(rows.map(this.mapPost));
+    const items = await this.attachJoinNames(rows.map((r) => this.mapPost(r)));
+    await this.decorateWithFavorites(items, viewer);
     return { items, total, limit: safeLimit, offset: safeOffset };
   }
 
-  async findAllPagedLegacy(limit: number, offset: number): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
+  async findAllPagedLegacy(limit: number, offset: number, viewer?: PostsListViewer): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
     const safeLimit = this.clampLimit(limit);
     const safeOffset = Math.max(Number(offset) || 0, 0);
     const [rows, total] = await this.postRepository.findAndCount({
@@ -118,7 +134,8 @@ export class PostsService {
       take: safeLimit,
       skip: safeOffset,
     });
-    const items = await this.attachJoinNames(rows.map(this.mapPost));
+    const items = await this.attachJoinNames(rows.map((r) => this.mapPost(r)));
+    await this.decorateWithFavorites(items, viewer);
     return { items, total, limit: safeLimit, offset: safeOffset };
   }
 
@@ -201,18 +218,21 @@ export class PostsService {
   /**
    * 查找重复作品链接，更新时可排除当前作品。
    */
-  async findDuplicateByUrl(postUrl: string, excludeId?: string): Promise<any | null> {
+  async findDuplicateByUrl(postUrl: string, excludeId?: string, viewer?: PostsListViewer): Promise<any | null> {
     const normalizedUrl = normalizeExternalUrl(postUrl);
     if (!normalizedUrl) return null;
     const qb = this.postRepository.createQueryBuilder('p')
       .where('p.post_url = :postUrl', { postUrl: normalizedUrl });
     if (excludeId) qb.andWhere('p.id != :excludeId', { excludeId });
     const row = await qb.getOne();
-    return row ? this.mapPost(row) : null;
+    if (!row) return null;
+    const items = await this.attachJoinNames([this.mapPost(row)]);
+    await this.decorateWithFavorites(items, viewer);
+    return items[0];
   }
 
-  async findByEmployeePaged(employeeId: string, limit: number, offset: number): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
-    return this.findPaged({ employeeId }, limit, offset);
+  async findByEmployeePaged(employeeId: string, limit: number, offset: number, viewer?: PostsListViewer): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
+    return this.findPaged({ employeeId }, limit, offset, viewer);
   }
 
   async findPlaza(
@@ -262,7 +282,7 @@ export class PostsService {
         FROM leads
         WHERE post_id IS NOT NULL
         GROUP BY post_id
-      ) lc ON lc.post_id = p.id
+      ) lc ON lc.post_id COLLATE utf8mb4_unicode_ci = p.id COLLATE utf8mb4_unicode_ci
       ${favoriteJoin}
       WHERE ${whereParts.join(' AND ')}
       ${havingClause}
@@ -289,25 +309,25 @@ export class PostsService {
         COALESCE(fc.cnt, 0) AS favorite_count,
         CASE WHEN fav_user.target_id IS NOT NULL THEN 1 ELSE 0 END AS is_favorited
       FROM posts p
-      LEFT JOIN employees e ON e.id = p.employee_id
-      LEFT JOIN accounts a ON a.id = p.account_id
+      LEFT JOIN employees e ON e.id COLLATE utf8mb4_unicode_ci = p.employee_id COLLATE utf8mb4_unicode_ci
+      LEFT JOIN accounts a ON a.id COLLATE utf8mb4_unicode_ci = p.account_id COLLATE utf8mb4_unicode_ci
       LEFT JOIN (
         SELECT post_id, COUNT(*) AS cnt
         FROM leads
         WHERE post_id IS NOT NULL
         GROUP BY post_id
-      ) lc ON lc.post_id = p.id
+      ) lc ON lc.post_id COLLATE utf8mb4_unicode_ci = p.id COLLATE utf8mb4_unicode_ci
       LEFT JOIN (
         SELECT target_id, COUNT(*) AS cnt
         FROM favorites
         WHERE target_type = 'post'
         GROUP BY target_id
-      ) fc ON fc.target_id = p.id
+      ) fc ON fc.target_id COLLATE utf8mb4_unicode_ci = p.id COLLATE utf8mb4_unicode_ci
       LEFT JOIN (
         SELECT target_id
         FROM favorites
         WHERE target_type = 'post' AND user_id = ?
-      ) fav_user ON fav_user.target_id = p.id
+      ) fav_user ON fav_user.target_id COLLATE utf8mb4_unicode_ci = p.id COLLATE utf8mb4_unicode_ci
       ${favoriteJoin}
       WHERE ${whereParts.join(' AND ')}
       ${havingClause}
@@ -328,12 +348,15 @@ export class PostsService {
     return Math.min(n, 200);
   }
 
-  async findById(id: string): Promise<any | null> {
+  async findById(id: string, viewer?: PostsListViewer): Promise<any | null> {
     const row = await this.postRepository.findOne({ where: { id } });
-    return row ? this.mapPost(row) : null;
+    if (!row) return null;
+    const items = await this.attachJoinNames([this.mapPost(row)]);
+    await this.decorateWithFavorites(items, viewer);
+    return items[0];
   }
 
-  async findByIds(ids: string[]): Promise<any[]> {
+  async findByIds(ids: string[], viewer?: PostsListViewer): Promise<any[]> {
     const cleanIds = Array.from(new Set((ids || []).filter(Boolean)));
     if (!cleanIds.length) return [];
     const rows = await this.postRepository.createQueryBuilder('p')
@@ -341,7 +364,9 @@ export class PostsService {
       .orderBy('p.published_at', 'DESC')
       .addOrderBy('p.created_at', 'DESC')
       .getMany();
-    return rows.map(this.mapPost);
+    const items = await this.attachJoinNames(rows.map((r) => this.mapPost(r)));
+    await this.decorateWithFavorites(items, viewer);
+    return items;
   }
 
   async create(dto: Partial<Post>): Promise<void> {
@@ -485,20 +510,20 @@ export class PostsService {
         ((COALESCE(p.likes, 0) + COALESCE(p.comments, 0) + COALESCE(p.favorites, 0))
           + COALESCE(lc.cnt, 0) * 50) AS composite_score
       FROM posts p
-      LEFT JOIN employees e ON e.id = p.employee_id
-      LEFT JOIN accounts a ON a.id = p.account_id
+      LEFT JOIN employees e ON e.id COLLATE utf8mb4_unicode_ci = p.employee_id COLLATE utf8mb4_unicode_ci
+      LEFT JOIN accounts a ON a.id COLLATE utf8mb4_unicode_ci = p.account_id COLLATE utf8mb4_unicode_ci
       LEFT JOIN (
         SELECT post_id, COUNT(*) AS cnt
         FROM leads
         WHERE post_id IS NOT NULL
         GROUP BY post_id
-      ) lc ON lc.post_id = p.id
+      ) lc ON lc.post_id COLLATE utf8mb4_unicode_ci = p.id COLLATE utf8mb4_unicode_ci
       LEFT JOIN (
         SELECT target_id, COUNT(*) AS cnt
         FROM favorites
         WHERE target_type = 'post'
         GROUP BY target_id
-      ) fc ON fc.target_id = p.id
+      ) fc ON fc.target_id COLLATE utf8mb4_unicode_ci = p.id COLLATE utf8mb4_unicode_ci
       WHERE ${whereClause}
       ORDER BY composite_score DESC, leads_count DESC, traffic_score DESC, p.published_at DESC
       LIMIT ?
@@ -592,20 +617,20 @@ export class PostsService {
         COALESCE(lc.cnt, 0) AS leads_count,
         COALESCE(fc.cnt, 0) AS favorite_count
       FROM posts p
-      LEFT JOIN employees e ON e.id = p.employee_id
-      LEFT JOIN accounts a ON a.id = p.account_id
+      LEFT JOIN employees e ON e.id COLLATE utf8mb4_unicode_ci = p.employee_id COLLATE utf8mb4_unicode_ci
+      LEFT JOIN accounts a ON a.id COLLATE utf8mb4_unicode_ci = p.account_id COLLATE utf8mb4_unicode_ci
       LEFT JOIN (
         SELECT post_id, COUNT(*) AS cnt
         FROM leads
         WHERE post_id IS NOT NULL
         GROUP BY post_id
-      ) lc ON lc.post_id = p.id
+      ) lc ON lc.post_id COLLATE utf8mb4_unicode_ci = p.id COLLATE utf8mb4_unicode_ci
       LEFT JOIN (
         SELECT target_id, COUNT(*) AS cnt
         FROM favorites
         WHERE target_type = 'post'
         GROUP BY target_id
-      ) fc ON fc.target_id = p.id
+      ) fc ON fc.target_id COLLATE utf8mb4_unicode_ci = p.id COLLATE utf8mb4_unicode_ci
       WHERE ${whereClause}
       ORDER BY p.supervisor_picked_at DESC, p.created_at DESC
       LIMIT ? OFFSET ?
@@ -821,7 +846,44 @@ export class PostsService {
       supervisorPickedAt: (row as any).supervisorPickedAt ?? null,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
+      // 个人化字段：默认 false/0，decorateWithFavorites 步骤会按当前 viewer 覆盖
+      //  - isFavorited: 当前用户是否已收藏（按 viewerUserId 判断）
+      //  - favoriteCount: 作品被收藏的总数（直接用 posts.favorites 列，避免 N+1）
+      isFavorited: false,
+      favoriteCount: Number((row as any).favorites || 0),
     };
+  }
+
+  /**
+   * 批量给一组 post 输出注入 isFavorited 字段。
+   * 走 FavoritesService.ids 一次查回当前 viewer 收藏过的所有 post id，
+   * 然后 O(1) 判断每条 item 命中情况。**不**逐条 query → 避免 N+1。
+   *
+   * 兜底：favoritesService 未注入（@Optional）或 viewer 未登录 → 不抛错，全置 false。
+   */
+  private async decorateWithFavorites(items: any[], viewer?: PostsListViewer): Promise<any[]> {
+    if (!items || !items.length) return items;
+    const userId = String(viewer?.viewerUserId || '').trim();
+    if (!userId || !this.favoritesService) {
+      // 没有 viewer / 没注入 service：保持 mapPost 里的默认 false
+      return items;
+    }
+    let favoritedIds: string[] = [];
+    try {
+      favoritedIds = await this.favoritesService.ids(userId, 'post');
+    } catch (err) {
+      // 收藏服务异常不阻塞主列表返回
+      // eslint-disable-next-line no-console
+      console.error('[posts] favoritesService.ids failed', (err as any)?.message || err);
+      return items;
+    }
+    const favSet = new Set(favoritedIds.map((id) => String(id)));
+    for (const item of items) {
+      if (item && item.id !== undefined) {
+        item.isFavorited = favSet.has(String(item.id));
+      }
+    }
+    return items;
   }
 
   /**

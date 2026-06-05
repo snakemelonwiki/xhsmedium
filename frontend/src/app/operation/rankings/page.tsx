@@ -22,7 +22,7 @@ import type { ColumnsType } from 'antd/es/table';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { createExport } from '@/shared/api/exports';
+import { createExport, downloadExportUrl, getExport } from '@/shared/api/exports';
 import { apiClient } from '@/shared/api/apiClient';
 import type { ContentPost } from '@/shared/types/content';
 
@@ -203,10 +203,38 @@ export default function OperationRankingsPage() {
 
   async function handleExport() {
     setExporting(true);
+    const hide = message.loading('正在生成导出文件...', 0);
     try {
-      await createExport({ exportType: 'rankings', filter: { type, period } });
-      message.success('已创建排行榜导出任务，可到导出中心下载');
+      const result = await createExport({ exportType: 'rankings', filter: { type, period } });
+
+      if (!result?.id) {
+        hide();
+        message.warning('导出任务已创建，请在导出中心查看进度');
+        return;
+      }
+
+      // 轮询导出状态，最多等待30秒
+      let attempts = 0;
+      const maxAttempts = 30;
+      while (attempts < maxAttempts) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        const exportTask = await getExport(result.id);
+        if (exportTask.status === 'completed' || exportTask.status === 'success') {
+          hide();
+          window.open(downloadExportUrl(result.id), '_blank');
+          message.success('导出成功，文件开始下载');
+          return;
+        } else if (exportTask.status === 'failed') {
+          hide();
+          message.error('导出失败，请重试');
+          return;
+        }
+        attempts++;
+      }
+      hide();
+      message.warning('导出超时，请到导出中心查看');
     } catch (err) {
+      hide();
       message.error(err instanceof Error ? err.message : '排行榜导出创建失败');
     } finally {
       setExporting(false);

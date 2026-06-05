@@ -13,8 +13,6 @@ import { Account } from '../../entities/account.entity';
 import { Employee } from '../../entities/employee.entity';
 import { makeId } from '../../shared/utils/id-generator';
 import { StorageService } from '../../shared/storage/storage.service';
-import { NotificationsService } from '../notifications/notifications.service';
-import { NOTIFICATION_TYPES } from '../../shared/notifications';
 import { OperationLogsService } from '../operation-logs/operation-logs.service';
 
 export type ExportType =
@@ -142,7 +140,6 @@ export class ExportsService implements OnModuleInit, OnModuleDestroy {
     @InjectRepository(User)
     private readonly userRepo: Repository<User>,
     private readonly storage: StorageService,
-    private readonly notifications: NotificationsService,
     private readonly operationLogs: OperationLogsService,
   ) {}
 
@@ -394,27 +391,7 @@ export class ExportsService implements OnModuleInit, OnModuleDestroy {
       finishedAt: new Date(),
     });
 
-    // §11.1 export_done: 通知发起人下载
-    if (task.userId) {
-      // 根据用户角色设置正确的端口类型
-      let portType: 'operations' | 'sales' | 'academic' = 'operations';
-      if (userRole === 'sales') {
-        portType = 'sales';
-      } else if (userRole === 'academic') {
-        portType = 'academic';
-      }
-
-      await this.notifications.create({
-        receiverIds: [task.userId],
-        senderId: null,
-        portType,
-        typeCode: NOTIFICATION_TYPES.EXPORT_DONE,
-        title: `${this.typeNameZh(task.exportType)}导出完成`,
-        content: `点击下载：${fileUrl}`,
-        relatedId: exportId,
-        relatedType: 'export',
-      });
-    }
+    // 导出完成，文件可直接下载，无需发送通知
 
     // 写 export_create 操作日志（脱敏 filter 字段）
     try {
@@ -1032,9 +1009,11 @@ export class ExportsService implements OnModuleInit, OnModuleDestroy {
     if (!task) {
       return { ok: false, status: 404, message: 'not found' };
     }
-    const isAdminLike = role === 'admin' || role === 'owner';
+    // v1.3 BF-SUPERVISOR-EXPORT：supervisor 权限等同 admin/owner，可下载任意导出任务。
+    // 非 admin/owner/supervisor 看不到别人的任务，统一 404 避免泄露任务存在性。
+    const isAdminLike =
+      role === 'admin' || role === 'owner' || role === 'supervisor';
     if (!isAdminLike && task.userId && task.userId !== userId) {
-      // 非 admin/owner 看不到别人的任务，统一 404 避免泄露任务存在性
       return { ok: false, status: 404, message: 'not found' };
     }
     if (task.status !== 'completed') {

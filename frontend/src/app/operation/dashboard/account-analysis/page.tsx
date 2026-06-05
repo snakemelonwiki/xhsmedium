@@ -53,6 +53,14 @@ const DAYS_OPTIONS: { label: string; value: number }[] = [
   { label: '近 90 天', value: 90 },
 ];
 
+type AccountAnalysisSort = 'leadCount' | 'postCount' | 'traffic';
+
+const SORT_OPTIONS: { label: string; value: AccountAnalysisSort }[] = [
+  { label: '按获客数', value: 'leadCount' },
+  { label: '按作品数', value: 'postCount' },
+  { label: '按流量', value: 'traffic' },
+];
+
 const MAX_VISIBLE_DAYS = 30; // 日历视图最多展示 30 格（>30 时折叠）
 
 export default function AccountAnalysisPage() {
@@ -61,6 +69,8 @@ export default function AccountAnalysisPage() {
   const [viewMode, setViewMode] = useState<ViewMode>('all');
   const [selectedAccountId, setSelectedAccountId] = useState<string | undefined>();
   const [days, setDays] = useState<number>(30);
+  // 全部账号视图排序：默认按获客数降序
+  const [sort, setSort] = useState<AccountAnalysisSort>('leadCount');
   const [timeseries, setTimeseries] = useState<AccountTimeseries | undefined>();
   const [allAccountsData, setAllAccountsData] = useState<{ accounts: AccountInfo[]; items: AccountTimeseries[] } | undefined>();
   const [loadingAccounts, setLoadingAccounts] = useState(false);
@@ -109,7 +119,7 @@ export default function AccountAnalysisPage() {
     setError(undefined);
     try {
       if (viewMode === 'all') {
-        const data = await getAllAccountsTimeseries({ days, platform: platform || undefined });
+        const data = await getAllAccountsTimeseries({ days, platform: platform || undefined, sort });
         setAllAccountsData(data);
         setTimeseries(undefined);
       } else {
@@ -124,7 +134,7 @@ export default function AccountAnalysisPage() {
     } finally {
       setLoadingSeries(false);
     }
-  }, [viewMode, selectedAccountId, days, platform]);
+  }, [viewMode, selectedAccountId, days, platform, sort]);
 
   useEffect(() => {
     void loadAccounts();
@@ -194,6 +204,13 @@ export default function AccountAnalysisPage() {
             onChange={(v) => setDays(v as number)}
             options={DAYS_OPTIONS.map((o) => ({ label: o.label, value: o.value }))}
           />
+          {viewMode === 'all' ? (
+            <Segmented
+              value={sort}
+              onChange={(v) => setSort(v as AccountAnalysisSort)}
+              options={SORT_OPTIONS}
+            />
+          ) : null}
           <Button icon={<ReloadOutlined />} loading={loadingSeries} onClick={() => void loadTimeseries()}>
             刷新
           </Button>

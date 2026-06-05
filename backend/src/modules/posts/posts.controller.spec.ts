@@ -61,6 +61,7 @@ describe('PostsController pagination', () => {
       expect.objectContaining({}),
       20,
       0,
+      expect.objectContaining({ viewerRole: 'admin' }),
     );
     expect(res.json).toHaveBeenCalledWith({ total: 21, items: [{ id: 'post-1' }], limit: 20, offset: 0 });
   });
@@ -78,6 +79,7 @@ describe('PostsController pagination', () => {
       expect.objectContaining({ employeeId: 'emp-1' }),
       10,
       10,
+      expect.objectContaining({ viewerRole: 'staff', viewerEmployeeId: 'emp-1' }),
     );
     expect(res.json).toHaveBeenCalledWith({ total: 30, items: [{ id: 'post-11' }], limit: 10, offset: 10 });
   });

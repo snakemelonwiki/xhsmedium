@@ -25,7 +25,7 @@ import { useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
 import { listSourceAccounts, type CatalogOption } from '@/shared/api/catalog';
-import { createExport } from '@/shared/api/exports';
+import { createExport, downloadExportUrl, getExport } from '@/shared/api/exports';
 import { listPosts, refreshPostMetrics, getPostDetail } from '@/shared/api/content';
 import type { ContentPost } from '@/shared/types/content';
 
@@ -134,12 +134,48 @@ export default function OperationPostsPage() {
       const filterJson: any = { ...filters };
       if (fromParam) filterJson.from = fromParam;
       if (toParam) filterJson.to = toParam;
-      await createExport({
+      const created = await createExport({
         exportType: 'posts',
         filter: filterJson,
       });
-      message.success('导出任务已创建，请在导出中心查看进度');
+      const taskId = created?.id;
+      if (!taskId) {
+        // 后端没返回 id,退回到老路径(去导出中心)
+        message.success('导出任务已创建，请在导出中心查看进度');
+        return;
+      }
+      // 修复 (2026-06-04) — 运营端"我的作品"导出应直接下载文件,不是发通知/跳转。
+      //   后端导出是异步的(BullMQ 队列 + OSS 异步上传),普通数据 < 2s 内即可 completed。
+      //   这里用轮询代替"去导出中心"两步操作,完成后自动 window.open 下载链接。
+      message.loading({ content: '正在生成导出文件…', key: 'op-post-export', duration: 0 });
+      const deadline = Date.now() + 30_000; // 30s 上限,超过后让用户去导出中心看
+      let lastStatus: string = 'pending';
+      while (Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 1000));
+        try {
+          const task = await getExport(taskId);
+          lastStatus = String(task?.status || 'pending');
+          if (lastStatus === 'completed' || lastStatus === 'success') {
+            // 直接触发浏览器下载(走 OSS 302,前端不需拿文件)
+            window.open(downloadExportUrl(taskId), '_blank');
+            message.destroy('op-post-export');
+            message.success('导出完成,文件已开始下载');
+            return;
+          }
+          if (lastStatus === 'failed') {
+            message.destroy('op-post-export');
+            message.error('导出失败,请到导出中心查看');
+            return;
+          }
+        } catch {
+          // 单次轮询失败忽略,继续
+        }
+      }
+      // 超时:30s 内还没完成(数据量大),退回到"去导出中心"路径
+      message.destroy('op-post-export');
+      message.warning('导出仍在后台生成,请到导出中心查看并下载');
     } catch (err) {
+      message.destroy('op-post-export');
       message.error(err instanceof Error ? err.message : '导出失败');
     } finally {
       setExporting(false);
@@ -221,7 +257,7 @@ export default function OperationPostsPage() {
       dataIndex: 'publishedAt',
       width: 110,
       sorter: false,
-      render: (v: string) => v || '-',
+      render: (v?: string) => (v ? v.slice(0, 10) : '-'),
     },
     {
       title: '点赞/评论/收藏/转发',

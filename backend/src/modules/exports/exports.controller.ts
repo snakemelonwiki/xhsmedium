@@ -21,16 +21,18 @@ const ALLOWED_TYPES: ExportType[] = [
 ];
 
 // 按角色限制可触发的 exportType，防止低权限角色下载全公司数据。
-//   admin / owner：所有类型
+//   admin / owner / supervisor：所有类型（v1.3 主管端导出权限等同 admin，
+//                                见 BF-SUPERVISOR-EXPORT 修复说明）
 //   staff（运营）：作品、账号、客资、协同记录、排行榜
 //   sales：客资（仅自己的）、订单、订单跟进、协同记录
 //   academic：订单、订单跟进（仅自己的+池单）
 const ROLE_EXPORT_WHITELIST: Record<string, ExportType[]> = {
-  admin:    ['leads', 'orders', 'order_progress', 'collaboration_records', 'posts', 'rankings', 'accounts'],
-  owner:    ['leads', 'orders', 'order_progress', 'collaboration_records', 'posts', 'rankings', 'accounts'],
-  staff:    ['leads', 'posts', 'rankings', 'collaboration_records', 'accounts'],
-  sales:    ['leads', 'orders', 'order_progress', 'collaboration_records'],
-  academic: ['orders', 'order_progress'],
+  admin:      ['leads', 'orders', 'order_progress', 'collaboration_records', 'posts', 'rankings', 'accounts'],
+  owner:      ['leads', 'orders', 'order_progress', 'collaboration_records', 'posts', 'rankings', 'accounts'],
+  supervisor: ['leads', 'orders', 'order_progress', 'collaboration_records', 'posts', 'rankings', 'accounts'],
+  staff:      ['leads', 'posts', 'rankings', 'collaboration_records', 'accounts'],
+  sales:      ['leads', 'orders', 'order_progress', 'collaboration_records'],
+  academic:   ['orders', 'order_progress'],
 };
 
 @Controller('exports')
@@ -66,13 +68,17 @@ export class ExportsController {
     try {
       const raw = (body?.filter && typeof body.filter === 'object') ? { ...body.filter } : {};
       // 强制覆盖：客户端传来的 role / currentUserId / actorUserId / scope=all 一律忽略。
-      // admin / owner 默认 scope=all（看全量），其它角色默认 scope=mine。
+      // admin / owner / supervisor 默认 scope=all（看全量）— v1.3 BF-SUPERVISOR-EXPORT：
+      //   主管端权限等同 admin，可看全量数据。
+      //   其它角色默认 scope=mine。
       delete raw.role;
       delete raw.currentUserId;
       delete raw.actorUserId;
       delete raw.actorRole;
       delete raw._userRole;
-      if (raw.scope === 'all' && userRole !== 'admin' && userRole !== 'owner') {
+      const isAdminLikeRole =
+        userRole === 'admin' || userRole === 'owner' || userRole === 'supervisor';
+      if (raw.scope === 'all' && !isAdminLikeRole) {
         delete raw.scope;
       }
       const filter: Record<string, any> = {
@@ -80,7 +86,7 @@ export class ExportsController {
         role: userRole,
         currentUserId: userId,
         currentEmployeeId: session?.employeeId || '',
-        scope: raw.scope || (userRole === 'admin' || userRole === 'owner' ? 'all' : 'mine'),
+        scope: raw.scope || (isAdminLikeRole ? 'all' : 'mine'),
         _userRole: userRole,
       };
       const result = await this.service.create({
@@ -147,8 +153,9 @@ export class ExportsController {
     if (!task) {
       return res.status(404).json({ ok: false, message: 'not found' });
     }
-    // admin / owner 可看全部，其它角色只能看自己创建的导出任务
-    const isAdminLike = role === 'admin' || role === 'owner';
+    // admin / owner / supervisor 可看全部，其它角色只能看自己创建的导出任务
+    // v1.3 BF-SUPERVISOR-EXPORT：supervisor 权限等同 admin。
+    const isAdminLike = role === 'admin' || role === 'owner' || role === 'supervisor';
     if (!isAdminLike && task.userId && task.userId !== userId) {
       return res.status(404).json({ ok: false, message: 'not found' });
     }
@@ -157,9 +164,11 @@ export class ExportsController {
 
   /**
    * 下载已完成的导出文件。
-   * - 权限：仅任务创建者可下载；admin / owner 可下载全部
+   * - 权限：仅任务创建者可下载；admin / owner / supervisor 可下载全部
+   *   （v1.3 BF-SUPERVISOR-EXPORT：supervisor 权限等同 admin）
    * - 状态：仅 status === 'completed' 可下载
    * - 写 operation_logs（action='export_download'）
+   * - 不发送通知（与 BF-SUPERVISOR-EXPORT 一致：导出完成 = 直接下载文件）
    */
   @Get(':id/download')
   async download(@Param('id') id: string, @Req() req: Request, @Res() res: Response) {

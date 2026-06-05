@@ -9,6 +9,12 @@ describe('AuthService refreshToken', () => {
   const employeeRepository = {
     find: jest.fn(),
   };
+  const revokedTokenRepository = {
+    findOne: jest.fn().mockResolvedValue(null),
+    save: jest.fn().mockResolvedValue(undefined),
+    delete: jest.fn().mockResolvedValue({ affected: 0 }),
+    create: jest.fn((x: any) => x),
+  };
   const jwtService = {
     sign: jest.fn(),
     verify: jest.fn(),
@@ -21,6 +27,7 @@ describe('AuthService refreshToken', () => {
     new AuthService(
       userRepository as any,
       employeeRepository as any,
+      revokedTokenRepository as any,
       jwtService as unknown as JwtService,
       configService as any,
     );

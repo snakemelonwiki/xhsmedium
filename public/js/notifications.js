@@ -171,7 +171,6 @@ function connectNotificationSocket() {
     "order.created",
     "order.updated",
     "order.abnormal",
-    "export.finished",
     "lead.deal_done",
     "supervisor.suggestion"
   ];
@@ -282,9 +281,6 @@ async function handleDomainEvent(eventName, payload) {
       safeCall(typeof loadSalesOrders === "function" ? loadSalesOrders : null);
       safeCall(typeof loadAcademicOrders === "function" ? loadAcademicOrders : null);
       safeCall(typeof loadAdminOrders === "function" ? loadAdminOrders : null);
-      break;
-    case "export.finished":
-      safeCall(typeof loadImportHistory === "function" ? loadImportHistory : null);
       break;
     case "supervisor.suggestion":
     default:

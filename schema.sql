@@ -663,6 +663,28 @@ CREATE TABLE IF NOT EXISTS supervisor_suggestions (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='主管建议表：存储主管给运营的建议（关联账号/作品/员工）';
 
 -- ============================================================
+-- 19. revoked_tokens
+-- backend/src/modules/auth/entities/revoked-token.entity.ts
+-- 撤销 token 表：登出 / admin 强制下线时写入；AuthGuard 在 JWT 验证通过后再校验此表
+-- 修复 P0 回归 PF-05：原 auth.service.logout() 只清 in-memory Map，
+--   JWT 仍可在 24h 过期前通过 verify，2026-06-04 修复。
+-- token_hash = SHA256(token) 存索引（不存原 token）
+-- expires_at = 原 token 过期时间（后台定时清理过期记录）
+-- ============================================================
+CREATE TABLE IF NOT EXISTS revoked_tokens (
+  id          VARCHAR(64)  PRIMARY KEY,
+  token_hash  VARCHAR(64)  NOT NULL UNIQUE COMMENT 'SHA256(token) 哈希（不存原 token）',
+  user_id     VARCHAR(64)  NOT NULL COMMENT '所属用户ID',
+  revoked_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '撤销时间',
+  expires_at  DATETIME     NULL COMMENT '原 token 过期时间（定时清理用）',
+  reason      VARCHAR(32)  NOT NULL DEFAULT 'logout' COMMENT 'logout / admin_revoke / password_change / session_replaced 等',
+
+  INDEX idx_revoked_tokens_token   (token_hash),
+  INDEX idx_revoked_tokens_user    (user_id),
+  INDEX idx_revoked_tokens_expires (expires_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='已撤销的 JWT token（PF-05 修复）';
+
+-- ============================================================
 -- 19. teachers（教务端 v1.3 业务参考新增：稳定老师库）
 -- 业务来源：完整项目源码包 v1 原型「稳定老师库」页面
 -- 业务字段：老师姓名、电话/微信、专业能力、接单方向、稳定性、质量评分、备注

@@ -191,7 +191,13 @@ export class CollaborationTasksController {
       });
       return res.json({ ok: true, task });
     } catch (err: any) {
-      return res.status(422).json({ ok: false, message: err.message || 'invalid' });
+      // TC-HANDLE-IDEMPOTENT：'no permission' / 'handler required' 翻译为 403，
+      // 与 close 路径行为一致；其它业务错误保持 422。
+      const msg = err?.message || 'invalid';
+      if (typeof msg === 'string' && /no permission|handler required/i.test(msg)) {
+        return res.status(403).json({ ok: false, message: msg });
+      }
+      return res.status(422).json({ ok: false, message: msg });
     }
   }
 

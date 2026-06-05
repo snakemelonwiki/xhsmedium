@@ -2,13 +2,14 @@
 
 import { BellOutlined, DownloadOutlined, EyeOutlined } from '@ant-design/icons';
 import { ProTable, type ProColumns } from '@ant-design/pro-components';
-import { Button, Card, Empty, Input, Modal, Select, Segmented, Space, Spin, Typography } from 'antd';
+import { Button, Card, Empty, Input, message, Modal, Select, Segmented, Space, Spin, Typography } from 'antd';
 import type { TablePaginationConfig } from 'antd';
 import { useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 
-import { createExport } from '@/shared/api/exports';
+import { createExport, downloadExportUrl, getExport } from '@/shared/api/exports';
 import { getLeadDetail, listCollaborationTasks, listLeadFollowRecords, listSalesLeads } from '@/shared/api/leads';
+import { getAdminLeadsStats } from '@/shared/api/admin';
 import { ReminderButton } from '@/shared/components/notifications/ReminderButton';
 import { LeadTimeline } from '@/shared/components/leads';
 import { StatusTag } from '@/shared/components/status';
@@ -93,6 +94,40 @@ export default function OperationLeadsPage() {
     }
   }, []);
 
+  /**
+   * 构造与列表/统计完全一致的筛选 query（不含分页），
+   * load / stats / export 三处共用，避免重复实现。
+   */
+  const buildQuery = useCallback(function buildQuery(src: LeadFilters = filters) {
+    const query: Record<string, unknown> = {};
+    if (src.platform) query.platform = src.platform;
+    if (src.processStatus) query.processStatus = src.processStatus;
+    if (src.addStatus) query.addStatus = src.addStatus;
+    if (src.collaborationStatus) query.collaborationStatus = src.collaborationStatus;
+    if (src.sourcePost) query.search = src.sourcePost;
+    if (src.sourceAccount) query.sourceAccountId = src.sourceAccount;
+
+    const now = new Date();
+    if (src.period === 'today') {
+      const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      query.from = start.toISOString().slice(0, 10);
+      query.to = now.toISOString().slice(0, 10);
+    } else if (src.period === 'week') {
+      const start = new Date(now);
+      start.setDate(now.getDate() - 7);
+      query.from = start.toISOString().slice(0, 10);
+      query.to = now.toISOString().slice(0, 10);
+    } else if (src.period === 'month') {
+      const start = new Date(now.getFullYear(), now.getMonth(), 1);
+      query.from = start.toISOString().slice(0, 10);
+      query.to = now.toISOString().slice(0, 10);
+    } else if (src.period === 'custom' && src.from && src.to) {
+      query.from = `${src.from} 00:00:00`;
+      query.to = `${src.to} 23:59:59`;
+    }
+    return query;
+  }, [filters]);
+
   const load = useCallback(async function load(
     nextPage = pagination.current,
     nextPageSize = pagination.pageSize,
@@ -104,34 +139,8 @@ export default function OperationLeadsPage() {
         scope: 'self',
         page: nextPage,
         pageSize: nextPageSize,
+        ...buildQuery(nextFilters),
       };
-      if (nextFilters.platform) query.platform = nextFilters.platform;
-      if (nextFilters.processStatus) query.processStatus = nextFilters.processStatus;
-      if (nextFilters.addStatus) query.addStatus = nextFilters.addStatus;
-      if (nextFilters.collaborationStatus) query.collaborationStatus = nextFilters.collaborationStatus;
-      if (nextFilters.sourcePost) query.search = nextFilters.sourcePost;
-      if (nextFilters.sourceAccount) query.sourceAccountId = nextFilters.sourceAccount;
-
-      // 周期筛选映射到后端日期参数
-      const now = new Date();
-      if (nextFilters.period === 'today') {
-        const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        query.from = start.toISOString().slice(0, 10);
-        query.to = now.toISOString().slice(0, 10);
-      } else if (nextFilters.period === 'week') {
-        const start = new Date(now);
-        start.setDate(now.getDate() - 7);
-        query.from = start.toISOString().slice(0, 10);
-        query.to = now.toISOString().slice(0, 10);
-      } else if (nextFilters.period === 'month') {
-        const start = new Date(now.getFullYear(), now.getMonth(), 1);
-        query.from = start.toISOString().slice(0, 10);
-        query.to = now.toISOString().slice(0, 10);
-      } else if (nextFilters.period === 'custom' && nextFilters.from && nextFilters.to) {
-        // 自定义日期范围：从 URL 参数或手动选择
-        query.from = `${nextFilters.from} 00:00:00`;
-        query.to = `${nextFilters.to} 23:59:59`;
-      }
 
       const result = await listSalesLeads(query as Parameters<typeof listSalesLeads>[0]);
       setItems(result.items);
@@ -139,7 +148,7 @@ export default function OperationLeadsPage() {
     } finally {
       setLoading(false);
     }
-  }, [filters, pagination.current, pagination.pageSize]);
+  }, [buildQuery, filters, pagination.current, pagination.pageSize]);
 
   useEffect(() => {
     // 延迟加载，确保 URL 参数初始化完成
@@ -153,16 +162,56 @@ export default function OperationLeadsPage() {
   async function handleExport() {
     setExporting(true);
     try {
-      await createExport({
-        exportType: 'leads',
-        filter: buildOperationLeadsExportFilter({
-          page: pagination.current,
-          pageSize: pagination.pageSize,
-          platform: filters.platform,
-          status: filters.processStatus,
-          search: filters.sourcePost,
-        }),
-      });
+      // 1) 先用当前筛选条件查 total,无数据直接短路提示
+      const statsResult = await getAdminLeadsStats({ scope: 'self', ...buildQuery() } as Parameters<typeof getAdminLeadsStats>[0]).catch(() => null);
+      const total = statsResult?.total ?? 0;
+      if (total === 0) {
+        message.warning('当前筛选条件下无数据,无需导出');
+        return;
+      }
+      // 2) 有数据:走 createExport + 轮询 + 自动下载
+      const hide = message.loading('正在生成导出文件...', 0);
+      try {
+        const result = await createExport({
+          exportType: 'leads',
+          filter: buildOperationLeadsExportFilter({
+            page: pagination.current,
+            pageSize: pagination.pageSize,
+            platform: filters.platform,
+            status: filters.processStatus,
+            search: filters.sourcePost,
+          }),
+        });
+
+        if (!result?.id) {
+          hide();
+          message.warning('导出任务已创建，请在导出中心查看进度');
+          return;
+        }
+
+        let attempts = 0;
+        const maxAttempts = 30;
+        while (attempts < maxAttempts) {
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+          const exportTask = await getExport(result.id);
+          if (exportTask.status === 'completed' || exportTask.status === 'success') {
+            hide();
+            window.open(downloadExportUrl(result.id), '_blank');
+            message.success('导出成功，文件开始下载');
+            return;
+          } else if (exportTask.status === 'failed') {
+            hide();
+            message.error('导出失败，请重试');
+            return;
+          }
+          attempts++;
+        }
+        hide();
+        message.warning('导出超时，请到导出中心查看');
+      } catch (err) {
+        hide();
+        message.error(err instanceof Error ? err.message : '导出失败');
+      }
     } finally {
       setExporting(false);
     }

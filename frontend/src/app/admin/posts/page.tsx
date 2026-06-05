@@ -34,7 +34,7 @@ import dayjs, { type Dayjs } from 'dayjs';
 import { useEffect, useMemo, useState } from 'react';
 
 import { apiClient } from '@/shared/api/apiClient';
-import { createExport } from '@/shared/api/exports';
+import { createExport, downloadExportUrl, getExport } from '@/shared/api/exports';
 import { buildPostExportFilter, getPostDetailDisplay } from './postDetail';
 
 const { RangePicker } = DatePicker;
@@ -443,6 +443,7 @@ export default function AdminPostsPage() {
 
   async function handleExport() {
     setExporting(true);
+    const hide = message.loading('正在生成导出文件...', 0);
     try {
       const { from, to } = resolvePeriodRange(filters.period, filters.customRange);
       const filter: Record<string, string> = buildPostExportFilter({
@@ -455,11 +456,32 @@ export default function AdminPostsPage() {
       if (filters.isLeadPost) filter.isLeadPost = filters.isLeadPost;
       if (from) filter.from = from;
       if (to) filter.to = to;
-      await createExport({ exportType: 'posts', filter });
+      const result = await createExport({ exportType: 'posts', filter });
+
+      let attempts = 0;
+      const maxAttempts = 30;
+      while (attempts < maxAttempts) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        const exportTask = await getExport(result.id);
+        if (exportTask.status === 'completed') {
+          hide();
+          window.open(downloadExportUrl(result.id), '_blank');
+          message.success('导出成功，文件开始下载');
+          setExportConfirmOpen(false);
+          return;
+        } else if (exportTask.status === 'failed') {
+          hide();
+          message.error('导出失败，请重试');
+          return;
+        }
+        attempts++;
+      }
+      hide();
+      message.warning('导出超时，请到导出中心查看');
       setExportConfirmOpen(false);
-      message.success('导出任务已创建，请到导出中心下载');
     } catch (err) {
-      message.error(err instanceof Error ? err.message : '作品导出创建失败');
+      hide();
+      message.error(err instanceof Error ? err.message : '作品导出失败');
     } finally {
       setExporting(false);
     }

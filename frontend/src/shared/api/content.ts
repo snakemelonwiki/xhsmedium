@@ -332,7 +332,7 @@ export async function getAccountTimeseries(
  * 前端分别渲染各账号的日历视图。
  */
 export async function getAllAccountsTimeseries(
-  query: { days?: number; from?: string; to?: string; platform?: string } = {},
+  query: { days?: number; from?: string; to?: string; platform?: string; sort?: string } = {},
 ): Promise<{ accounts: AccountInfo[]; items: AccountTimeseries[] }> {
   const raw = (await apiClient.get<unknown>(
     `/dashboard/personal/accounts/timeseries`,
@@ -524,8 +524,10 @@ export async function getPersonalOverview(
 /**
  * v1.3 OP-17/24 三大效率榜（流量榜 / 获客效率榜 / 获客贴效率榜）。
  */
+export type PersonalRankingSort = 'leadCount' | 'postCount' | 'traffic' | 'efficiency' | 'leadEfficiency';
+
 export async function getPersonalRankings(
-  query: { platform?: PersonalPlatform; period?: PersonalPeriod; from?: string; to?: string; employeeId?: string } = {},
+  query: { platform?: PersonalPlatform; period?: PersonalPeriod; from?: string; to?: string; employeeId?: string; sort?: PersonalRankingSort } = {},
 ): Promise<PersonalRankingsResponse> {
   return apiClient.get<PersonalRankingsResponse>(buildRankingsPath(query.employeeId), {
     query: {
@@ -533,6 +535,7 @@ export async function getPersonalRankings(
       period: query.period,
       from: query.from,
       to: query.to,
+      sort: query.sort,
     },
   });
 }

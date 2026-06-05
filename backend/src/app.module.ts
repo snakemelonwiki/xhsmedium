@@ -76,7 +76,7 @@ import { TokenRefreshInterceptor } from './common/token-refresh.interceptor';
         username: config.get('MYSQL_USER', 'root'),
         password: config.get('MYSQL_PASSWORD', ''),
         database: config.get('MYSQL_DATABASE', 'lan_dual_role_system'),
-        entities: [User, Employee, Account, Post, Lead, LeadFollowRecord, LeadDraft, CollaborationTask, Order, OrderFollowRecord, OrderAbnormalFeedback, ImportTask, Notification, Favorite, PostMetricsHistory, ExportTask, OperationLog, SupervisorSuggestion, Teacher, OrderAuthor, OrderSubmission, OrderStatusHistory, OrderReminder, OrderFinance],
+        entities: [User, Employee, Account, Post, Lead, LeadFollowRecord, LeadDraft, CollaborationTask, Order, OrderFollowRecord, OrderAbnormalFeedback, ImportTask, Notification, Favorite, PostMetricsHistory, ExportTask, OperationLog, SupervisorSuggestion],
         synchronize: false,
         charset: 'utf8mb4',
         logging: true,

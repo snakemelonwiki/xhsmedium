@@ -2,10 +2,12 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Reflector } from '@nestjs/core';
+import { ConfigService } from '@nestjs/config';
 import { AppModule } from './app.module';
 import * as path from 'path';
 import { createBodySizeGuard } from './common/body-size.middleware';
 import { AuthGuard } from './common/auth.guard';
+import { AuthService } from './modules/auth/auth.service';
 
 // HTTP request logger
 function requestLogger(req: any, res: any, next: any) {
@@ -47,9 +49,35 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
   // 注入 AuthGuard 依赖（避免子模块未 import JwtModule 导致 DI 失败）
-  AuthGuard.configure(app.get(JwtService), app.get(Reflector));
+  // B7 修复（2026-06-03）：多传一个 ConfigService，让 AuthGuard 知道当前
+  // 进程对应的 PORT / OWNER_PORT，用于路由级 port-role 二次校验。
+  // PF-05 修复（2026-06-04）：再传 AuthService.isTokenRevoked 函数，
+  //   AuthGuard 在 JWT verify 通过后异步调它来查 revoked_tokens 表。
+  const authService = app.get(AuthService);
+  AuthGuard.configure(
+    app.get(JwtService),
+    app.get(Reflector),
+    app.get(ConfigService),
+    (token: string) => authService.isTokenRevoked(token),
+  );
 
   app.setGlobalPrefix('api');
+
+  // B7 兜底：如果请求没带 x-server-port（说明没经过 server.js proxy，
+  // 例如本地 8089 直连 / 测试），用 process.env.PORT 兜底，AuthGuard 据此
+  // 判断是主入口还是 owner 端口。
+  // v1.3：同步支持 ALL_ROLES_PORT（3003 统一登录入口）的兜底；process.env.PORT
+  // 是 NestJS 进程自己的 8089，所以全部三个端口的「缺省透传」都走 8089。
+  const selfServerPort = String(Number(process.env.PORT ?? 3000) || 3000);
+  app.use((req: any, _res: any, next: any) => {
+    if (!req.headers['x-server-port']) {
+      req.headers['x-server-port'] = selfServerPort;
+    }
+    if (!req.headers['x-origin-port']) {
+      req.headers['x-origin-port'] = selfServerPort;
+    }
+    next();
+  });
 
   // HTTP request logger
   app.use(requestLogger);

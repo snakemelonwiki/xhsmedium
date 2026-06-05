@@ -23,6 +23,7 @@ import { useEffect, useState } from 'react';
 import {
   createExport,
   downloadExportUrl,
+  getExport,
   listExports,
   type ExportFilter,
   type ExportStatus,
@@ -137,15 +138,37 @@ export default function AcademicExportsPage() {
       filter.to = exportRange[1].endOf('day').toISOString();
     }
     setSubmitting(true);
+    const hide = message.loading('正在生成导出文件...', 0);
     try {
       const result = await createExport({ exportType: 'orders', filter });
-      message.success(`导出任务已创建（#${result.id.slice(0, 8)}），完成后会通知`);
-      setExportModalOpen(false);
-      setExportStatus('');
-      setExportPaidStatus('');
-      setExportRange(null);
-      void load(1, pageSize);
+
+      // 轮询导出状态，最多等待30秒
+      let attempts = 0;
+      const maxAttempts = 30;
+      while (attempts < maxAttempts) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        const exportTask = await getExport(result.id);
+        if (exportTask.status === 'completed') {
+          hide();
+          window.open(downloadExportUrl(result.id), '_blank');
+          message.success('导出成功，文件开始下载');
+          setExportModalOpen(false);
+          setExportStatus('');
+          setExportPaidStatus('');
+          setExportRange(null);
+          void load(1, pageSize);
+          return;
+        } else if (exportTask.status === 'failed') {
+          hide();
+          message.error('导出失败，请重试');
+          return;
+        }
+        attempts++;
+      }
+      hide();
+      message.warning('导出超时，请到导出中心查看');
     } catch (err) {
+      hide();
       message.error(err instanceof Error ? err.message : '导出任务创建失败');
     } finally {
       setSubmitting(false);
@@ -284,7 +307,7 @@ export default function AcademicExportsPage() {
       >
         <Space direction="vertical" size={12} style={{ width: '100%' }}>
           <Typography.Text type="secondary">
-            生成完成后会发送通知（export_done），可在下方列表或消息中心查看下载链接。
+            生成完成后会自动下载文件，可在下方列表中查看导出记录。
           </Typography.Text>
           <div>
             <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 4 }}>

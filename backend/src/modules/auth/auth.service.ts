@@ -1,11 +1,16 @@
-import { Injectable, UnauthorizedException, ForbiddenException, Inject } from '@nestjs/common';
+import { Injectable, UnauthorizedException, ForbiddenException, Inject, BadRequestException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, LessThan } from 'typeorm';
 import { JwtService } from '@nestjs/jwt';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { User } from '../../entities/user.entity';
 import { Employee } from '../../entities/employee.entity';
+import { RevokedToken } from './entities/revoked-token.entity';
 import { ConfigService } from '@nestjs/config';
+import { AuthGuard } from '../../common/auth.guard';
 import * as bcrypt from 'bcrypt';
+import * as crypto from 'crypto';
+import { randomUUID } from 'crypto';
 
 const sessions = new Map<string, any>();
 
@@ -19,11 +24,15 @@ const FAILED_LOGIN_LOCK_THRESHOLD = 5;
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
     @InjectRepository(Employee)
     private readonly employeeRepository: Repository<Employee>,
+    @InjectRepository(RevokedToken)
+    private readonly revokedTokenRepository: Repository<RevokedToken>,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
   ) {}
@@ -105,11 +114,42 @@ export class AuthService {
       }
     }
 
-    // 端口隔离仅保留"非 owner 不可从总后台入口登录"这一道反向保护，
-    // owner 角色现在允许从主前端入口登录（统一到 Next.js）。
-    const ownerPort = Number(this.configService.get('OWNER_PORT', 3001));
-    if (requestPort === ownerPort && user.role !== 'owner') {
-      throw new UnauthorizedException({ message: '这个入口是总后台，请使用总后台账号登录' });
+    // 端口隔离（修复 B7，2026-06-03；v1.3 新增 3003 统一登录入口分支，2026-06-04）：
+    //   - 3001 总后台（OWNER_PORT）：仅 owner / admin / supervisor 可登录；其他角色禁止
+    //   - 3000 主入口（PORT）：owner 角色禁止从此处登录（必须走 3001 总后台）
+    //   - 3003 统一登录入口（ALL_ROLES_PORT）：全角色放行；**owner 必须从 3001 登录**
+    //   - requestPort === 0 表示「未透传」（如本地 8089 直连测试），不强制端口
+    // 同时 server.js 那一层也会做一遍校验（O(1) 拦截 + 日志），这里作为最后防线。
+    if (requestPort && requestPort > 0) {
+      const ownerPort = Number(this.configService.get('OWNER_PORT', 3001));
+      const allRolesPort = Number(this.configService.get('ALL_ROLES_PORT', 3003));
+      if (requestPort === ownerPort) {
+        if (!['owner', 'admin', 'supervisor'].includes(user.role)) {
+          throw new UnauthorizedException({
+            message: '这个入口是总后台，请使用总后台账号登录',
+            port: requestPort,
+            role: user.role,
+          });
+        }
+      } else if (requestPort === allRolesPort) {
+        // v1.3：3003 统一登录入口；除 owner 外全角色放行（owner 仍必须 3001）
+        if (user.role === 'owner') {
+          throw new UnauthorizedException({
+            message: 'owner 账号必须从 3001 端口（总后台）登录',
+            port: requestPort,
+            role: user.role,
+            requiredPort: ownerPort,
+          });
+        }
+      } else if (requestPort === Number(this.configService.get('PORT', 3000)) || requestPort === 3000) {
+        if (user.role === 'owner') {
+          throw new UnauthorizedException({
+            message: 'owner 账号必须从 3001 端口（总后台）登录',
+            port: requestPort,
+            role: user.role,
+          });
+        }
+      }
     }
 
     const employees = await this.employeeRepository.find();
@@ -197,7 +237,96 @@ export class AuthService {
     };
   }
 
-  logout(token: string): void {
+  /**
+   * 登出（PF-05 修复于 2026-06-04）：
+   *   1) 算 SHA256(token) → tokenHash
+   *   2) 解析 JWT exp → expiresAt
+   *   3) 写入 revoked_tokens 表
+   *   4) 清 in-memory session Map（兼容旧路径）
+   *   5) 主动失效 AuthGuard 撤销缓存（保证下一次请求立即拒绝，不受 5min TTL 限制）
+   * 失败处理：撤销表写入失败时降级到原行为（清 Map + 抛错），避免阻塞用户登出体验。
+   */
+  async logout(token: string, userId?: string): Promise<{ ok: true; revoked: boolean }> {
+    if (!token) {
+      return { ok: true, revoked: false };
+    }
+    // 1) 清 in-memory session Map（兼容旧路径）
     sessions.delete(token);
+    // 2) 解析 token 拿到 userId 和 exp
+    let resolvedUserId = userId || '';
+    let expiresAt: Date | null = null;
+    try {
+      const decoded: any = this.jwtService.verify(token);
+      if (decoded?.sub) resolvedUserId = resolvedUserId || String(decoded.sub);
+      if (decoded?.exp && typeof decoded.exp === 'number') {
+        expiresAt = new Date(decoded.exp * 1000);
+      }
+    } catch {
+      // token 已过期/无效：仍可撤销（让任何残留的同 token 拒绝），但拿不到 exp
+    }
+    if (!resolvedUserId) {
+      // 无 userId 上下文：直接清缓存即可，不写表（避免脏数据）
+      AuthGuard.invalidateRevokedCache(token);
+      return { ok: true, revoked: false };
+    }
+    // 3) 算 SHA256
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+    // 4) 写撤销表
+    let revoked = false;
+    try {
+      await this.revokedTokenRepository.save(
+        this.revokedTokenRepository.create({
+          id: randomUUID(),
+          tokenHash,
+          userId: resolvedUserId,
+          expiresAt,
+          reason: 'logout',
+        } as Partial<RevokedToken>),
+      );
+      revoked = true;
+    } catch (err: any) {
+      // 写表失败：不阻塞登出响应（用户体感是「已登出」），但打 ERROR 日志
+      this.logger.error(
+        `[PF-05] 写 revoked_tokens 失败 userId=${resolvedUserId} err=${err?.message || err}`,
+      );
+    }
+    // 5) 主动失效缓存，保证下一次请求立即拒绝
+    AuthGuard.invalidateRevokedCache(token);
+    return { ok: true, revoked };
+  }
+
+  /**
+   * PF-05：检查 token 是否已被撤销（供 AuthGuard 注入使用）。
+   * AuthGuard 内部已有 5min 缓存，这里只做一次 DB 查询。
+   * @param token 原始 Bearer token
+   * @returns true 表示已撤销
+   */
+  async isTokenRevoked(token: string): Promise<boolean> {
+    if (!token) return false;
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+    const row = await this.revokedTokenRepository.findOne({
+      where: { tokenHash },
+    });
+    return !!row;
+  }
+
+  /**
+   * PF-05：每小时清理过期撤销记录（expires_at < now）。
+   * 避免 revoked_tokens 表无限增长。
+   */
+  @Cron(CronExpression.EVERY_HOUR)
+  async cleanupRevokedTokens(): Promise<void> {
+    try {
+      const result = await this.revokedTokenRepository.delete({
+        expiresAt: LessThan(new Date()),
+      } as any);
+      const affected = (result as any)?.affected ?? 0;
+      if (affected > 0) {
+        this.logger.log(`[PF-05] 清理 ${affected} 条过期撤销 token 记录`);
+      }
+    } catch (err: any) {
+      // 清理失败不应阻塞系统
+      this.logger.error(`[PF-05] cleanupRevokedTokens 失败: ${err?.message || err}`);
+    }
   }
 }

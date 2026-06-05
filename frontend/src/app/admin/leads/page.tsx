@@ -1,6 +1,6 @@
 'use client';
 
-import { FilterOutlined, ReloadOutlined, SwapOutlined, HistoryOutlined } from '@ant-design/icons';
+import { DownloadOutlined, FilterOutlined, ReloadOutlined, SwapOutlined, HistoryOutlined } from '@ant-design/icons';
 import {
   Alert,
   Button,
@@ -29,7 +29,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { apiClient } from '@/shared/api/apiClient';
 import { getAdminLeadsStats, listAdminEmployees, listAdminLeads } from '@/shared/api/admin';
 import { listSourceAccounts, listSourcePosts, listAssignableSalesUsers, type CatalogOption } from '@/shared/api/catalog';
-import { createExport } from '@/shared/api/exports';
+import { createExport, downloadExportUrl, getExport } from '@/shared/api/exports';
 import { getStatusMeta } from '@/shared/constants/status';
 import type { AdminEmployee } from '@/shared/types/admin';
 import type { AdminLeadsStats } from '@/shared/api/admin';
@@ -179,6 +179,8 @@ export default function AdminLeadsPage() {
   const [followRecords, setFollowRecords] = useState<LeadTimelineItem[]>([]);
   const [followRecordsLoading, setFollowRecordsLoading] = useState(false);
 
+  const [exporting, setExporting] = useState(false);
+
   // 合并: 初始加载 employees + sales users (并行，一次性)
   useEffect(() => {
     void Promise.all([
@@ -263,6 +265,47 @@ export default function AdminLeadsPage() {
 
   function buildListQuery() {
     return buildStatsQuery();
+  }
+
+  async function handleExport() {
+    setExporting(true);
+    try {
+      // 1) 先用当前筛选条件查 total,无数据直接短路提示
+      const statsResult = await getAdminLeadsStats(buildStatsQuery());
+      if (!statsResult || statsResult.total === 0) {
+        message.warning('当前筛选条件下无数据,无需导出');
+        return;
+      }
+      // 2) 有数据:走 createExport + 轮询 + 自动下载
+      const hide = message.loading('正在生成导出文件...', 0);
+      try {
+        const result = await createExport({ exportType: 'leads', filter: buildStatsQuery() });
+        let attempts = 0;
+        const maxAttempts = 30;
+        while (attempts < maxAttempts) {
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+          const exportTask = await getExport(result.id);
+          if (exportTask.status === 'completed') {
+            hide();
+            window.open(downloadExportUrl(result.id), '_blank');
+            message.success('导出成功，文件开始下载');
+            return;
+          } else if (exportTask.status === 'failed') {
+            hide();
+            message.error('导出失败，请重试');
+            return;
+          }
+          attempts++;
+        }
+        hide();
+        message.warning('导出超时，请到导出中心查看');
+      } catch (err) {
+        hide();
+        message.error(err instanceof Error ? err.message : '客资导出失败');
+      }
+    } finally {
+      setExporting(false);
+    }
   }
 
   function openAdvanced() {
@@ -529,6 +572,9 @@ export default function AdminLeadsPage() {
         <Space wrap>
           <Button icon={<FilterOutlined />} onClick={openAdvanced}>
             高级筛选{advancedActiveCount > 0 ? ` (${advancedActiveCount})` : ''}
+          </Button>
+          <Button icon={<DownloadOutlined />} loading={exporting} onClick={handleExport}>
+            导出
           </Button>
           <Button icon={<ReloadOutlined />} onClick={() => { void loadStats(); void loadLeads(); }} loading={loading}>
             刷新
