@@ -115,9 +115,30 @@ export class CollaborationTasksService {
     });
 
     // §11.1 collab_requested: 通知客资来源运营。
+    // fallback：lead.employeeId 缺失 / 对应 user 找不到时，把通知广播给所有 role=operation
+    // 的运营账号，避免「协同任务已落库但运营/教务端没收到消息」的静默丢失。
+    let receiverIds: string[] = [];
     if (sourceUserId) {
+      receiverIds.push(sourceUserId);
+    } else {
+      const operators = await this.userRepository.find({
+        where: { role: 'operation' },
+        select: { id: true },
+      });
+      if (operators.length > 0) {
+        receiverIds = operators.map((u) => u.id);
+        this.logger.warn(
+          `[collab] lead ${dto.leadId} 缺失 employeeId 映射，通知已 fallback 给 ${operators.length} 个运营账号`,
+        );
+      } else {
+        this.logger.warn(
+          `[collab] lead ${dto.leadId} 无 sourceUserId 且系统内无 role=operation 账号，协同通知已跳过`,
+        );
+      }
+    }
+    if (receiverIds.length > 0) {
       await this.notificationsService.create({
-        receiverIds: [sourceUserId],
+        receiverIds,
         senderId: dto.requesterId,
         portType: 'operations',
         typeCode: NOTIFICATION_TYPES.COLLAB_REQUESTED,

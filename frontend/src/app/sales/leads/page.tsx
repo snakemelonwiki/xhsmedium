@@ -495,9 +495,11 @@ export default function SalesLeadsPage() {
             <ReminderButton
               size="small"
               recipientId={String(lead.sales.id)}
+              recipientName={lead.sales?.name}
               recipientRole="operation"
               relatedType="lead"
               relatedId={String(lead.id)}
+              relatedTitle={lead.customerName || lead.leadCode}
               content={`客资 ${lead.customerName || lead.id} 需要运营协助`}
             >
               提醒

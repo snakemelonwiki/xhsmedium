@@ -29,6 +29,8 @@ export interface UpdateEmployeeWithLoginInput {
   phone?: string | null;
   hireDate?: string | null;
   status?: string;
+  /** v1.4 主管端-员工管理：部门名称（简单字符串，不另建表） */
+  department?: string | null;
   // 登录账号字段（可选，缺省保持不变）
   loginPassword?: string | null;
   loginRole?: string | null;
@@ -263,6 +265,7 @@ export class EmployeesService {
     if (input.phone !== undefined) updates.phone = input.phone || null;
     if (input.hireDate !== undefined) updates.hireDate = input.hireDate || null;
     if (input.status !== undefined) updates.status = input.status;
+    if (input.department !== undefined) updates.department = input.department || null;
 
     if (Object.keys(updates).length > 0) {
       await this.employeeRepository.update(id, updates);

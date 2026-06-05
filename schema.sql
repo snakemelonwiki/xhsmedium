@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS employees (
   phone          VARCHAR(64) NULL COMMENT '联系电话',
   hire_date      DATE        NULL COMMENT '入职日期',
   status         VARCHAR(32) NOT NULL DEFAULT '在职' COMMENT '员工状态',
+  department     VARCHAR(64) NULL COMMENT '部门名称（v1.4 简单字符串存储，不另建部门表）',
   created_at     DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at     DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='员工信息表';

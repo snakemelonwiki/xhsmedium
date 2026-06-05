@@ -31,25 +31,27 @@ import {
   Typography,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import {
-  getPersonalOverview,
-  getPersonalPlatformDistribution,
-  getPersonalPlatformTrend,
-  getPersonalRankings,
-  type EfficiencyAccount,
-  type PersonalMetric,
-  type PersonalOverviewResponse,
-  type PersonalPeriod,
-  type PersonalPlatform,
-  type PersonalRankingSort,
-  type PersonalRankingsResponse,
+import type {
+  EfficiencyAccount,
+  PersonalMetric,
+  PersonalOverviewResponse,
+  PersonalPeriod,
+  PersonalPlatform,
+  PersonalRankingSort,
+  PersonalRankingsResponse,
 } from '@/shared/api/content';
 import type { PlatformDistributionItem, PlatformTrend, PlatformTrendPoint } from '@/shared/types/content';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 
+import { useEchartsChart, useEchartsRender } from './useEchartsChart';
+import { usePersonalDashboardData } from './usePersonalDashboardData';
+import { PlatformAnalysisPanel } from './PlatformAnalysisPanel';
 import styles from './PersonalDashboardBoard.module.css';
 
-// echarts 通过全局变量声明（与 admin/analytics 一致）；实际脚本由前端 bundle 之外的 CDN 注入
+// echarts 通过 layout.tsx 注入的 CDN script 暴露为 window.echarts，
+// 它的加载晚于组件首次渲染，需要在 useEffect 内等 ready 后再 init，
+// 避免 dev 模式 HMR 偶发丢失全局变量导致 ReferenceError。
+// 参考 admin/analytics/page.tsx 的 EChart 容器实现；初始化 / dispose 已在 useEchartsChart 中集中。
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 declare const echarts: any;
 
@@ -96,30 +98,6 @@ const OVERVIEW_CARDS: Array<{
   { key: 'monthLeadPostCount', title: '本月获客贴数', hint: 'is_lead_post = 1', color: '#13c2c2', icon: <TrophyOutlined /> },
 ];
 
-/** 按 OP-1 时间切换器返回日期范围（前端只用来作为 OP-18/19 图表的 from/to 上界）。 */
-function resolvePeriodRange(period: PersonalPeriod): { from: string; to: string } {
-  // 注意：浏览器 / Node 在测试环境下 dayjs 可能不可用，这里采用本地 Date 计算避免依赖
-  const today = new Date().toISOString().slice(0, 10);
-  switch (period) {
-    case 'today':
-      return { from: today, to: today };
-    case 'week': {
-      const d = new Date();
-      const day = d.getDay() || 7;
-      d.setDate(d.getDate() - day + 1);
-      return { from: d.toISOString().slice(0, 10), to: today };
-    }
-    case 'month': {
-      const d = new Date();
-      d.setDate(1);
-      return { from: d.toISOString().slice(0, 10), to: today };
-    }
-    case 'all':
-    default:
-      return { from: '1970-01-01', to: today };
-  }
-}
-
 export interface PersonalDashboardBoardProps {
   /** 不传时查当前运营（运营端），传值时查指定员工（主管端） */
   employeeId?: string;
@@ -136,82 +114,26 @@ export function PersonalDashboardBoard({ employeeId, showRefreshButton = true }:
   // 三大效率榜排序字段：默认按获客数降序
   const [rankingSort, setRankingSort] = useState<PersonalRankingSort>('leadCount');
 
-  const [overview, setOverview] = useState<PersonalOverviewResponse | undefined>();
-  const [rankings, setRankings] = useState<PersonalRankingsResponse | undefined>();
-  // v1.3 OP-18/19 双平台图表数据
-  const [platformDist, setPlatformDist] = useState<PlatformDistributionItem[]>([]);
-  const [platformTrend, setPlatformTrend] = useState<PlatformTrend | undefined>();
-  const [loadingOverview, setLoadingOverview] = useState(false);
-  const [loadingRankings, setLoadingRankings] = useState(false);
-  const [loadingDualPlatform, setLoadingDualPlatform] = useState(false);
-  const [error, setError] = useState<string>();
+  const {
+    overview,
+    rankings,
+    platformDist,
+    platformTrend,
+    loadingOverview,
+    loadingRankings,
+    loadingDualPlatform,
+    error,
+    refreshAll,
+  } = usePersonalDashboardData({
+    metric,
+    platform,
+    period,
+    trendPeriod,
+    rankingSort,
+    employeeId,
+  });
 
-  const loadOverview = useCallback(async () => {
-    setLoadingOverview(true);
-    setError(undefined);
-    try {
-      const data = await getPersonalOverview({ metrics: metric, platform, period, employeeId });
-      setOverview(data);
-    } catch (err) {
-      setOverview(undefined);
-      setError(err instanceof Error ? err.message : '个人看板概览加载失败');
-    } finally {
-      setLoadingOverview(false);
-    }
-  }, [metric, platform, period, employeeId]);
-
-  const loadRankings = useCallback(async () => {
-    setLoadingRankings(true);
-    try {
-      const data = await getPersonalRankings({ platform, period, employeeId, sort: rankingSort });
-      setRankings(data);
-    } catch (err) {
-      setRankings(undefined);
-      setError((prev) => prev ?? (err instanceof Error ? err.message : '三大效率榜加载失败'));
-    } finally {
-      setLoadingRankings(false);
-    }
-  }, [platform, period, employeeId, rankingSort]);
-
-  useEffect(() => {
-    void loadOverview();
-  }, [loadOverview]);
-
-  useEffect(() => {
-    void loadRankings();
-  }, [loadRankings]);
-
-  // v1.3 OP-18/19 双平台数据：使用 period 计算的 from/to
-  const dualRange = useMemo(() => {
-    const range = resolvePeriodRange(period);
-    return { from: range.from, to: range.to };
-  }, [period]);
-
-  const loadDualPlatform = useCallback(async () => {
-    setLoadingDualPlatform(true);
-    try {
-      const [dist, trend] = await Promise.all([
-        getPersonalPlatformDistribution({ from: dualRange.from, to: dualRange.to, platform }),
-        getPersonalPlatformTrend({ period: trendPeriod, from: dualRange.from, to: dualRange.to }),
-      ]);
-      setPlatformDist(dist);
-      setPlatformTrend(trend);
-    } catch (err) {
-      setPlatformDist([]);
-      setPlatformTrend(undefined);
-      setError((prev) => prev ?? (err instanceof Error ? err.message : '双平台图表加载失败'));
-    } finally {
-      setLoadingDualPlatform(false);
-    }
-  }, [dualRange.from, dualRange.to, platform, trendPeriod]);
-
-  useEffect(() => {
-    void loadDualPlatform();
-  }, [loadDualPlatform]);
-
-  const refreshAll = useCallback(async () => {
-    await Promise.all([loadOverview(), loadRankings(), loadDualPlatform()]);
-  }, [loadOverview, loadRankings, loadDualPlatform]);
+  // 旧的三个 useEffect + useCallback 加载逻辑已下沉到 usePersonalDashboardData，组件只保留 UI 状态。
 
   const rankingNode = useMemo(() => {
     if (!overview) return <Empty description="暂无名次数据" image={Empty.PRESENTED_IMAGE_SIMPLE} />;
@@ -484,6 +406,13 @@ export function PersonalDashboardBoard({ employeeId, showRefreshButton = true }:
         </Col>
       </Row>
 
+      {/* v1.3 双平台数据分析面板（顶部 3 概览卡 + 3 榜单 Top 8） */}
+      <PlatformAnalysisPanel
+        rankings={rankings}
+        platformDist={platformDist}
+        loading={loadingRankings}
+      />
+
       {/* 三大效率榜（OP-24 legacy 样式） */}
       <Card
         title={
@@ -576,40 +505,46 @@ function Sparkline({ values }: { values: number[] }) {
   );
 }
 
-// ============ 工具：period 区间解析（已在文件顶部定义，复用即可） ============
-
 // ============ v1.3 OP-18 双平台饼状图（echarts） ============
 
 function PlatformPieChart({ items, metric, loading }: { items: PlatformDistributionItem[]; metric: 'postCount' | 'traffic' | 'leadCount'; loading: boolean }) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (loading || !containerRef.current) return;
-    const data = items
-      .filter((it) => it.platform === '小红书' || it.platform === '抖音')
-      .map((it) => ({ name: it.platform, value: it[metric] ?? 0 }))
-      .filter((d) => d.value > 0);
-    if (data.length === 0) {
-      containerRef.current.innerHTML = '<div class="' + styles.pieChartBoxEmpty + '">暂无数据</div>';
-      return;
-    }
-    const chart = echarts.init(containerRef.current, null, { renderer: 'canvas' });
-    const title = metric === 'postCount' ? '作品占比' : metric === 'traffic' ? '流量占比' : '获客占比';
-    chart.setOption({
-      title: { text: title, textStyle: { fontSize: 14, fontWeight: 'normal' }, left: 'center' },
-      tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
-      legend: { bottom: 0 },
-      color: ['#fa8c16', '#1677ff'],
-      series: [
-        {
-          type: 'pie',
-          radius: ['40%', '70%'],
-          data,
-          label: { show: true, formatter: '{b}: {c}' },
-        },
-      ],
-    });
-    return () => { chart.dispose(); };
-  }, [items, metric, loading]);
+  const { containerRef, chartRef, echartsReady } = useEchartsChart();
+
+  useEchartsRender<PlatformDistributionItem[]>({
+    ready: echartsReady,
+    containerRef,
+    chartRef,
+    data: items,
+    isEmpty: (d) =>
+      d
+        .filter((it) => it.platform === '小红书' || it.platform === '抖音')
+        .map((it) => it.platform === '小红书' || it.platform === '抖音' ? (it[metric] ?? 0) : 0)
+        .filter((v) => v > 0).length === 0,
+    emptyHTML: '<div class="' + styles.pieChartBoxEmpty + '">暂无数据</div>',
+    buildOption: (d) => {
+      const data = d
+        .filter((it) => it.platform === '小红书' || it.platform === '抖音')
+        .map((it) => ({ name: it.platform, value: it[metric] ?? 0 }))
+        .filter((it) => it.value > 0);
+      const title = metric === 'postCount' ? '作品占比' : metric === 'traffic' ? '流量占比' : '获客占比';
+      return {
+        title: { text: title, textStyle: { fontSize: 14, fontWeight: 'normal' }, left: 'center' },
+        tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
+        legend: { bottom: 0 },
+        color: ['#fa8c16', '#1677ff'],
+        series: [
+          {
+            type: 'pie',
+            radius: ['40%', '70%'],
+            data,
+            label: { show: true, formatter: '{b}: {c}' },
+          },
+        ],
+      };
+    },
+    deps: [items, metric, loading, echartsReady, containerRef, chartRef],
+  });
+
   return (
     <Skeleton loading={loading} active>
       <div ref={containerRef} className={styles.pieChartBox} />
@@ -620,55 +555,59 @@ function PlatformPieChart({ items, metric, loading }: { items: PlatformDistribut
 // ============ v1.3 OP-19 双平台作品量柱状图（echarts） ============
 
 function PlatformTrendBarChart({ trend, loading }: { trend?: PlatformTrend; loading: boolean }) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (loading || !containerRef.current) return;
-    const points = trend?.points ?? [];
-    if (points.length === 0) {
-      containerRef.current.innerHTML = '<div class="' + styles.trendChartBoxEmpty + '">暂无数据</div>';
-      return;
-    }
-    const dates = points.map((p: PlatformTrendPoint) => p.date);
-    const xhsData = points.map((p) => p.xiaohongshuCount);
-    const dyData = points.map((p) => p.douyinCount);
-    const xhsTraffic = points.map((p) => p.xiaohongshuTraffic);
-    const dyTraffic = points.map((p) => p.douyinTraffic);
-    const xhsLeads = points.map((p) => p.xiaohongshuLeads);
-    const dyLeads = points.map((p) => p.douyinLeads);
-    const chart = echarts.init(containerRef.current, null, { renderer: 'canvas' });
-    chart.setOption({
-      title: { text: '双平台作品量', textStyle: { fontSize: 14, fontWeight: 'normal' }, left: 'center' },
-      tooltip: {
-        trigger: 'axis',
-        axisPointer: { type: 'shadow' },
-        formatter: (params: any[]) => {
-          if (!Array.isArray(params) || params.length === 0) return '';
-          const idx = params[0].dataIndex;
-          const date = dates[idx];
-          const totalPosts = xhsData[idx] + dyData[idx];
-          const totalTraffic = xhsTraffic[idx] + dyTraffic[idx];
-          const totalLeads = xhsLeads[idx] + dyLeads[idx];
-          const lines = params.map((p) => `${p.marker} ${p.seriesName}: ${p.value} 作品`);
-          lines.push(`---`);
-          lines.push(`日期：${date}`);
-          lines.push(`总作品：${totalPosts}（小红书 ${xhsData[idx]} / 抖音 ${dyData[idx]}）`);
-          lines.push(`总流量：${totalTraffic}`);
-          lines.push(`总获客：${totalLeads}`);
-          return lines.join('<br/>');
+  const { containerRef, chartRef, echartsReady } = useEchartsChart();
+  const points = trend?.points ?? [];
+
+  useEchartsRender<PlatformTrendPoint[]>({
+    ready: echartsReady,
+    containerRef,
+    chartRef,
+    data: points,
+    isEmpty: (d) => d.length === 0,
+    emptyHTML: '<div class="' + styles.trendChartBoxEmpty + '">暂无数据</div>',
+    buildOption: (d) => {
+      const dates = d.map((p) => p.date);
+      const xhsData = d.map((p) => p.xiaohongshuCount);
+      const dyData = d.map((p) => p.douyinCount);
+      const xhsTraffic = d.map((p) => p.xiaohongshuTraffic);
+      const dyTraffic = d.map((p) => p.douyinTraffic);
+      const xhsLeads = d.map((p) => p.xiaohongshuLeads);
+      const dyLeads = d.map((p) => p.douyinLeads);
+      return {
+        title: { text: '双平台作品量', textStyle: { fontSize: 14, fontWeight: 'normal' }, left: 'center' },
+        tooltip: {
+          trigger: 'axis',
+          axisPointer: { type: 'shadow' },
+          formatter: (params: any[]) => {
+            if (!Array.isArray(params) || params.length === 0) return '';
+            const idx = params[0].dataIndex;
+            const date = dates[idx];
+            const totalPosts = xhsData[idx] + dyData[idx];
+            const totalTraffic = xhsTraffic[idx] + dyTraffic[idx];
+            const totalLeads = xhsLeads[idx] + dyLeads[idx];
+            const lines = params.map((p) => `${p.marker} ${p.seriesName}: ${p.value} 作品`);
+            lines.push(`---`);
+            lines.push(`日期：${date}`);
+            lines.push(`总作品：${totalPosts}（小红书 ${xhsData[idx]} / 抖音 ${dyData[idx]}）`);
+            lines.push(`总流量：${totalTraffic}`);
+            lines.push(`总获客：${totalLeads}`);
+            return lines.join('<br/>');
+          },
         },
-      },
-      legend: { data: ['小红书', '抖音'], bottom: 0 },
-      color: ['#fa8c16', '#1677ff'],
-      grid: { left: 48, right: 16, top: 36, bottom: 56 },
-      xAxis: { type: 'category', data: dates, axisLabel: { rotate: dates.length > 8 ? 30 : 0 } },
-      yAxis: { type: 'value', name: '作品数' },
-      series: [
-        { name: '小红书', type: 'bar', data: xhsData, itemStyle: { color: '#fa8c16' } },
-        { name: '抖音', type: 'bar', data: dyData, itemStyle: { color: '#1677ff' } },
-      ],
-    });
-    return () => { chart.dispose(); };
-  }, [trend, loading]);
+        legend: { data: ['小红书', '抖音'], bottom: 0 },
+        color: ['#fa8c16', '#1677ff'],
+        grid: { left: 48, right: 16, top: 36, bottom: 56 },
+        xAxis: { type: 'category', data: dates, axisLabel: { rotate: dates.length > 8 ? 30 : 0 } },
+        yAxis: { type: 'value', name: '作品数' },
+        series: [
+          { name: '小红书', type: 'bar', data: xhsData, itemStyle: { color: '#fa8c16' } },
+          { name: '抖音', type: 'bar', data: dyData, itemStyle: { color: '#1677ff' } },
+        ],
+      };
+    },
+    deps: [trend, loading, echartsReady, containerRef, chartRef],
+  });
+
   return (
     <Skeleton loading={loading} active>
       <div ref={containerRef} className={styles.trendChartBox} />

@@ -38,6 +38,7 @@ export interface AdminEmployee {
   phone?: string | null;
   hireDate?: string | null;
   status?: string;
+  department?: string | null;
   createdAt?: string;
 }
 

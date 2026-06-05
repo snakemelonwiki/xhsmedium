@@ -82,17 +82,19 @@ describe('DashboardController A端看板契约', () => {
     expect(res.json).toHaveBeenCalledWith({ overview: { totalTraffic: 100 }, ranking: { rank: 3, total: 8 } });
   });
 
-  it('v1.3 主管端查看指定员工概览：仅 admin/owner/supervisor 可访问', async () => {
+  it('v1.3 主管端查看指定员工概览：仅 admin/owner/supervisor/staff/operation 可访问', async () => {
     const service = {
       getPersonalOverview: jest.fn().mockResolvedValue({ overview: { totalTraffic: 50 } }),
     } as any;
     const userRepo = {} as any;
     const controller = new DashboardController(service, userRepo as Repository<User>);
-    const staffRes = response();
-    const staffReq = { session: { role: 'staff' } } as any;
-    await controller.getSupervisorEmployeeOverview('emp-2', staffReq, staffRes, 'totalLeads', 'all', 'month');
-    expect(staffRes.status).toHaveBeenCalledWith(403);
+    // 销售/教务角色仍应被拒绝
+    const salesRes = response();
+    const salesReq = { session: { role: 'sales' } } as any;
+    await controller.getSupervisorEmployeeOverview('emp-2', salesReq, salesRes, 'totalLeads', 'all', 'month');
+    expect(salesRes.status).toHaveBeenCalledWith(403);
 
+    // admin 角色允许
     const adminRes = response();
     const adminReq = { session: { role: 'admin' } } as any;
     await controller.getSupervisorEmployeeOverview('emp-2', adminReq, adminRes, 'totalLeads', 'all', 'month');

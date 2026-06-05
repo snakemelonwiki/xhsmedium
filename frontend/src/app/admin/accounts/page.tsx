@@ -29,8 +29,10 @@ type Account = AdminAccount & {
 
 const PLATFORM_OPTIONS = [
   { label: '全部平台', value: '' },
-  { label: '小红书', value: 'xiaohongshu' },
-  { label: '抖音', value: 'douyin' },
+  // 平台筛选项 value 必须与后端 accounts.platform 列实际存储值一致（DB 里历史数据是中文 label），
+  // 否则 service.buildWhere 的 { platform: pf } 精确匹配会 0 行。
+  { label: '小红书', value: '小红书' },
+  { label: '抖音', value: '抖音' },
 ];
 
 const STATUS_OPTIONS = [
@@ -88,10 +90,15 @@ export default function AdminAccountsPage() {
 
   const [exporting, setExporting] = useState(false);
 
-  async function load(page = pagination.current, pageSize = pagination.pageSize, nextKeyword = keyword) {
+  async function load(page = pagination.current, pageSize = pagination.pageSize, nextKeyword = keyword, nextPlatform = filterPlatform) {
     setLoading(true);
     try {
-      const result = await listAdminAccounts({ page, pageSize, keyword: nextKeyword.trim() || undefined });
+      const result = await listAdminAccounts({
+        page,
+        pageSize,
+        keyword: nextKeyword.trim() || undefined,
+        platform: nextPlatform || undefined,
+      });
       setItems(result.items as Account[]);
       setPagination({ current: result.page, pageSize: result.pageSize, total: result.total });
     } catch {
@@ -114,6 +121,12 @@ export default function AdminAccountsPage() {
     void load(1, 20);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // 平台筛选变化：服务端过滤，重新拉取（分页重置到第 1 页）
+  useEffect(() => {
+    void load(1, pagination.pageSize, keyword, filterPlatform);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filterPlatform]);
 
   function startEdit(record?: Account) {
     setEditing(record);

@@ -8,6 +8,7 @@ import { useState } from 'react';
 import {
   createReminder,
   REMINDER_PRIORITIES,
+  REMINDER_RECIPIENT_ROLE_LABELS,
   type CreateReminderPayload,
   type ReminderPriority,
   type ReminderRecipientRole,
@@ -17,12 +18,16 @@ import {
 export type ReminderButtonProps = Omit<ButtonProps, 'onClick'> & {
   /** 收件人用户 ID（users.id） */
   recipientId: string;
+  /** 收件人姓名（用于 modal 头部展示，替代裸 ID） */
+  recipientName?: string;
   /** 收件人角色：销售/运营/主管 */
   recipientRole: ReminderRecipientRole;
   /** 关联业务对象类型：lead / order / post / account；可选 */
   relatedType?: ReminderRelatedType;
   /** 关联业务对象 ID；可选 */
   relatedId?: string;
+  /** 关联业务对象的可读标题（如 lead.customerName），用于 modal 展示，替代裸 ID */
+  relatedTitle?: string;
   /**
    * 提醒内容默认值（弹出 modal 内的 textarea 初值）。
    * 注意：用户仍可在 modal 中编辑/覆盖。
@@ -52,9 +57,11 @@ export type ReminderButtonProps = Omit<ButtonProps, 'onClick'> & {
  */
 export function ReminderButton({
   recipientId,
+  recipientName,
   recipientRole,
   relatedType,
   relatedId,
+  relatedTitle,
   content: defaultContent = '',
   onSuccess,
   children,
@@ -145,9 +152,9 @@ export function ReminderButton({
       >
         <Space direction="vertical" size={12} className="page-stack" style={{ width: '100%' }}>
           <Typography.Text type="secondary">
-            收件人角色：<Typography.Text strong>{recipientRole}</Typography.Text>
+            收件人角色：<Typography.Text strong>{REMINDER_RECIPIENT_ROLE_LABELS[recipientRole] || recipientRole}</Typography.Text>
             <span style={{ marginLeft: 12 }}>
-              收件人 ID：<Typography.Text code>{recipientId}</Typography.Text>
+              收件人：<Typography.Text strong>{recipientName || '未命名'}</Typography.Text>
             </span>
           </Typography.Text>
           <Form form={form} layout="vertical" preserve={false}>
@@ -179,8 +186,7 @@ export function ReminderButton({
           </Form>
           {relatedType && relatedId ? (
             <Typography.Text type="secondary">
-              关联业务对象：<Typography.Text code>{relatedType}</Typography.Text> /{' '}
-              <Typography.Text code>{relatedId}</Typography.Text>
+              关联业务对象：<Typography.Text strong>{relatedTitle || `${relatedType}#${String(relatedId).slice(0, 8)}`}</Typography.Text>
             </Typography.Text>
           ) : null}
         </Space>

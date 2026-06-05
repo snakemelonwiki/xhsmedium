@@ -175,10 +175,15 @@ export default function SalesDealsPage() {
     },
     {
       title: '负责教务',
-      dataIndex: 'academicUserId',
-      key: 'academicUserId',
+      key: 'academic',
       width: 130,
-      render: (value: unknown) => (value ? String(value) : <Tag>待分配</Tag>),
+      render: (_value: unknown, record) => {
+        const name = record.academicUserName ? String(record.academicUserName) : '';
+        const id = record.academicUserId ? String(record.academicUserId) : '';
+        if (name) return <span>{name}</span>;
+        if (id) return <Typography.Text type="secondary" style={{ fontSize: 12 }}>{id.slice(0, 8)}…</Typography.Text>;
+        return <Tag>待分配</Tag>;
+      },
     },
     {
       title: '订单状态',

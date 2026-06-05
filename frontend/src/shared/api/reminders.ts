@@ -10,6 +10,13 @@ import { apiClient } from '@/shared/api/apiClient';
 export const REMINDER_RECIPIENT_ROLES = ['sales', 'operation', 'supervisor'] as const;
 export type ReminderRecipientRole = (typeof REMINDER_RECIPIENT_ROLES)[number];
 
+/** 收件人角色枚举 → 中文标签。modal 头部展示用，避免直接显示 'sales' / 'operation' / 'supervisor'。 */
+export const REMINDER_RECIPIENT_ROLE_LABELS: Record<ReminderRecipientRole, string> = {
+  sales: '销售',
+  operation: '运营',
+  supervisor: '主管',
+};
+
 export const REMINDER_RELATED_TYPES = ['lead', 'order', 'post', 'account'] as const;
 export type ReminderRelatedType = (typeof REMINDER_RELATED_TYPES)[number];
 

@@ -645,8 +645,9 @@ export class OrdersService {
       where: { orderId: id },
       order: { createdAt: 'DESC' },
     });
+    const names = await this.lookupUserNames([order.salesUserId, order.academicUserId]);
     return {
-      ...this.mapOrder(order),
+      ...this.mapOrder(order, names),
       followRecords: followRecords.map((r) => this.mapFollowRecord(r)),
     };
   }
@@ -863,14 +864,13 @@ export class OrdersService {
       // 若失败不影响主流程（仍保存 follow record），仅 auto-accept 不生效。
       if (order.academicUserId == null && actorUserId) {
         try {
-          const actorCtx = await this.getActorContext(actorUserId);
-          // 用 employeeId 优先；缺 employeeId 时兜底用 userId（与历史数据兼容）
-          const targetEmployeeId = actorCtx.employeeId || actorUserId;
+          // 统一存 users.id：与 canAccessOrder / acceptHandover / closeDeal 落库保持一致
+          // 历史数据兜底：缺 userId 时退到 employeeId（兼容老记录）
           await this.orderRepository.update(
             { id: orderId },
-            { academicUserId: targetEmployeeId },
+            { academicUserId: actorUserId },
           );
-          order.academicUserId = targetEmployeeId;
+          order.academicUserId = actorUserId;
         } catch (err: any) {
           // eslint-disable-next-line no-console
           console.error(
@@ -1026,8 +1026,8 @@ export class OrdersService {
    * P0-NEW-03 修复：原代码无 owner 校验，任意登录用户都能把任意订单置为 accepted。
    * 修复后：
    *   - admin/owner：旁路 ownership
-   *   - academic：仅当 order.academicUserId === actor.employeeId（不是 userId，
-   *     因为 orders.academic_user_id 存的是 employees.id）
+   *   - academic：仅当 order.academicUserId === actor.userId（统一存 users.id，
+   *     与 canAccessOrder / 池单自动认领 / closeDeal 落库保持一致）
    *   - 其他角色：403
    * 状态机收紧：仅 'handed_over' 可 accept，'pending'（未先 hand-over）也拒绝；
    * 'accepted' 幂等；'rejected' 必须先重新发起 hand-over。
@@ -1053,7 +1053,10 @@ export class OrdersService {
       if (ctx.role && ctx.role !== 'academic') {
         throw new ForbiddenException('only academic or supervisor can accept handover');
       }
-      if (order.academicUserId !== ctx.employeeId) {
+      // 统一用 actorUserId（与 orders.academic_user_id 落库值一致）；
+      // 历史数据若仍存 employeeId，用 ctx.employeeId 兜底兼容（迁移窗口期）
+      const actorKey = actorUserId || ctx.employeeId;
+      if (order.academicUserId !== actorKey) {
         throw new ForbiddenException('only the assigned academic can accept handover');
       }
     }
@@ -1221,20 +1224,53 @@ export class OrdersService {
     }
     if (options.startDate) qb.andWhere('o.created_at >= :startDate', { startDate: options.startDate });
     if (options.endDate) qb.andWhere('o.created_at <= :endDate', { endDate: options.endDate });
+    // 销售/教务展示姓名：LEFT JOIN users 取 username。
+    // 注意：orders / users 两表 collation 不同（utf8mb4_unicode_ci vs utf8mb4_0900_ai_ci），
+    // ON 条件必须显式 COLLATE，否则 MySQL 抛 ER_CANT_AGGREGATE_2COLLATIONS。
+    // 用同一个别名 u 同时 join 两列，省一次 JOIN。
+    qb.leftJoin('users', 'u', 'u.id COLLATE utf8mb4_unicode_ci = o.academic_user_id COLLATE utf8mb4_unicode_ci')
+      .addSelect('u.username', 'academic_user_name');
     qb.orderBy('o.created_at', 'DESC')
       .addOrderBy('o.id', 'DESC')
       .take(safeLimit)
       .skip(safeOffset);
     const [rows, total] = await qb.getManyAndCount();
-    return { items: rows.map((r) => this.mapOrder(r)), total, limit: safeLimit, offset: safeOffset };
+    const namesRaw = await qb.getRawMany();
+    const academicNameByOrderId = new Map<string, string | null>();
+    for (const raw of namesRaw) {
+      const orderId = raw['o_id'] || raw['o_id' as string];
+      if (orderId) academicNameByOrderId.set(String(orderId), raw['academic_user_name'] || null);
+    }
+    // 销售姓名批量查（PK 查不会触发跨表 collation 冲突）
+    const salesUserIds = Array.from(new Set(rows.map((r) => r.salesUserId).filter(Boolean) as string[]));
+    const salesUserList = salesUserIds.length
+      ? await this.userRepository.find({
+          where: salesUserIds.map((id) => ({ id })),
+          select: { id: true, username: true },
+        })
+      : [];
+    const salesNameById = new Map(salesUserList.map((u) => [u.id, u.username]));
+    return {
+      items: rows.map((r) =>
+        this.mapOrder(r, {
+          academicUserName: academicNameByOrderId.get(r.id) || null,
+          salesUserName: r.salesUserId ? salesNameById.get(r.salesUserId) || null : null,
+        }),
+      ),
+      total,
+      limit: safeLimit,
+      offset: safeOffset,
+    };
   }
 
-  private mapOrder(row: Order): any {
+  private mapOrder(row: Order, names: { salesUserName?: string | null; academicUserName?: string | null } = {}): any {
     return {
       id: row.id,
       leadId: row.leadId,
       salesUserId: row.salesUserId,
+      salesUserName: names.salesUserName ?? null,
       academicUserId: row.academicUserId,
+      academicUserName: names.academicUserName ?? null,
       serviceType: row.serviceType,
       amount: row.amount,
       paidStatus: row.paidStatus,
@@ -1244,6 +1280,31 @@ export class OrdersService {
       orderCode: row.orderCode,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
+    };
+  }
+
+  /**
+   * 批量查 users 表，把 userId 列表映射成 { id -> username }。
+   * 用于给订单详情 / 我的成交返回「销售」「教务」的真实姓名，避免前端显示裸 ID。
+   * 注意：跨表 collation 不一致（orders=unicode_ci vs users=0900_ai_ci），
+   *       用 IN-list 主键查询走 PK 不会触发 collation 冲突。
+   */
+  private async lookupUserNames(
+    userIds: Array<string | null | undefined>,
+  ): Promise<{ salesUserName: string | null; academicUserName: string | null }> {
+    const ids = Array.from(new Set(userIds.filter((v): v is string => !!v)));
+    if (ids.length === 0) {
+      return { salesUserName: null, academicUserName: null };
+    }
+    const users = await this.userRepository.find({
+      where: ids.map((id) => ({ id })),
+      select: { id: true, username: true },
+    });
+    const byId = new Map<string, string>();
+    for (const u of users) byId.set(u.id, u.username);
+    return {
+      salesUserName: byId.get(userIds[0] || '') ?? null,
+      academicUserName: byId.get(userIds[1] || '') ?? null,
     };
   }
 

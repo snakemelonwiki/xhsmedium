@@ -266,9 +266,10 @@ function textOrEmpty(value: unknown): string {
 
 /**
  * v1.3 OP-18: 双平台分布（小红书 / 抖音）作品 / 流量 / 获客占比
+ * - employeeId: 主管查看指定员工时传入，运营端查看自己时不传
  */
 export async function getPersonalPlatformDistribution(
-  query: { from?: string; to?: string; platform?: string } = {},
+  query: { from?: string; to?: string; platform?: string; employeeId?: string } = {},
 ): Promise<PlatformDistributionItem[]> {
   const payload = await apiClient.get<unknown>('/dashboard/personal/platform-distribution', {
     query,
@@ -283,9 +284,10 @@ export async function getPersonalPlatformDistribution(
 
 /**
  * v1.3 OP-19: 双平台作品量（每日/每周/每月）+ 流量 + 获客
+ * - employeeId: 主管查看指定员工时传入，运营端查看自己时不传
  */
 export async function getPersonalPlatformTrend(
-  query: { period?: 'day' | 'week' | 'month'; from?: string; to?: string } = {},
+  query: { period?: 'day' | 'week' | 'month'; from?: string; to?: string; employeeId?: string } = {},
 ): Promise<PlatformTrend> {
   const raw = (await apiClient.get<unknown>('/dashboard/personal/platform-trend', {
     query,
