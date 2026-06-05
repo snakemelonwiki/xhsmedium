@@ -375,6 +375,7 @@ async function scrapeXiaohongshu(page) {
 async function scrapeDouyin(page) {
   const htmlFallback = await inferDouyinCountsFromHtml(page);
   const likes = await readCountBySelectors(page, [
+    "xpath=//*[@id=\"sliderVideo\"]/div[1]/div/div[1]/div[1]/div/div[2]/div[2]/div/div[2]",
     "[data-e2e='like-count']",
     "[class*='like'] [class*='count']",
     "span:has-text('赞') + span",
@@ -382,6 +383,7 @@ async function scrapeDouyin(page) {
     "[title*='点赞']"
   ]);
   const comments = await readCountBySelectors(page, [
+    "xpath=//*[@id=\"sliderVideo\"]/div[1]/div/div[1]/div[1]/div/div[2]/div[3]/div[1]/div[2]",
     "[data-e2e='comment-count']",
     "[class*='comment'] [class*='count']",
     "span:has-text('评论') + span",
@@ -389,6 +391,7 @@ async function scrapeDouyin(page) {
     "[title*='评论']"
   ]);
   const favorites = await readCountBySelectors(page, [
+    "xpath=//*[@id=\"sliderVideo\"]/div[1]/div/div[1]/div[1]/div/div[2]/div[4]/div[2]",
     "[data-e2e='collect-count']",
     "[data-e2e='favorite-count']",
     "[class*='collect'] [class*='count']",
@@ -397,6 +400,7 @@ async function scrapeDouyin(page) {
     "[title*='收藏']"
   ]);
   const shares = await readCountBySelectors(page, [
+    "xpath=//*[@id=\"sliderVideo\"]/div[1]/div/div[1]/div[1]/div/div[2]/div[6]/div[1]/div[2]",
     "[data-e2e='share-count']",
     "[class*='share'] [class*='count']",
     "span:has-text('分享') + span",

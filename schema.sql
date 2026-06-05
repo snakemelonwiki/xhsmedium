@@ -852,3 +852,40 @@ CREATE TABLE IF NOT EXISTS order_finance (
   created_at      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='订单财务扩展表（订单额/已付/待付 + 老师接单价/已付/待付）';
+
+-- ============================================================
+-- 25. scraping_alerts
+-- backend/src/modules/scraping/scraping-alert.entity.ts + backend/migrations/add-scraping-alerts-table.sql
+-- 抓取告警表：抓取连续失败 / 累计失败到阈值时自动写入
+--   - 连续失败 3 次（fail_streak === 3）  → level=error 一条
+--   - 累计失败 10/30/50/100 次（total_failed 跨阈值）→ level=warn 一条
+-- 状态机：未处理 / 已 owner 手动 mark resolve；不做自动 resolve
+-- 权限：仅 owner 角色可通过 /api/scraping-alerts 列表/stats/resolve/lock-status 四个端点访问
+--   - L1 / L2 / L3 校验与现有 owner-only 端点（operation-logs、scraping-alerts 等）一致
+-- 列名 event_code 避开 MySQL 保留字 trigger
+-- event_code 取值：streak_3 / total_10 / total_30 / total_50 / total_100
+-- source 取值：fetch-metrics / refresh-metrics / parse-link / parser
+-- ============================================================
+CREATE TABLE IF NOT EXISTS scraping_alerts (
+  id            VARCHAR(64)   PRIMARY KEY,
+  level         VARCHAR(32)   NOT NULL                COMMENT 'info / warn / error',
+  platform      VARCHAR(32)   NULL                    COMMENT '小红书 / 抖音 / null（platform_unsupported 时为 null）',
+  source        VARCHAR(64)   NOT NULL                COMMENT 'fetch-metrics / refresh-metrics / parse-link',
+  event_code    VARCHAR(64)   NOT NULL                COMMENT 'streak_3 / total_10 / total_30 / total_50 / total_100（避开 MySQL 保留字 trigger）',
+  post_id       VARCHAR(64)   NULL                    COMMENT '关联作品 ID',
+  post_url      TEXT          NULL                    COMMENT '原始 URL（整链）',
+  error_code    VARCHAR(64)   NULL                    COMMENT 'parser-core.classifyError 的 code',
+  error_message TEXT          NULL                    COMMENT '错误原文',
+  fail_streak   INT           NOT NULL DEFAULT 0      COMMENT '触发告警时的连续失败次数',
+  total_failed  INT           NOT NULL DEFAULT 0      COMMENT '触发告警时的累计失败次数',
+  context       TEXT          NULL                    COMMENT 'JSON.stringify 的额外信息（retry/timeout/retryable...）',
+  resolved      TINYINT       NOT NULL DEFAULT 0      COMMENT '0 未处理 / 1 已处理',
+  resolved_at   DATETIME      NULL                    COMMENT '处理时间',
+  resolved_by   VARCHAR(64)   NULL                    COMMENT '处理人（owner 用户 id）',
+  created_at    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+  INDEX idx_sa_created           (created_at),
+  INDEX idx_sa_level_created     (level, created_at),
+  INDEX idx_sa_resolved_created  (resolved, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='抓取告警表（owner 专属：抓取连续/累计失败到阈值时自动写入）';

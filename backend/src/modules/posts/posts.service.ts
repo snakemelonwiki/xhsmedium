@@ -19,6 +19,8 @@ interface PostListFilters {
   to?: string;
   sort?: string;
   search?: string;
+  url?: string;
+  postUrl?: string;
 }
 
 interface PlazaFilters {
@@ -100,6 +102,13 @@ export class PostsService {
     if (filters.search) {
       const kw = `%${filters.search}%`;
       qb.andWhere('(p.title LIKE :kw OR p.copywriting LIKE :kw)', { kw });
+    }
+    // 修复 (2026-06-05)：运营端作品录入提交前的重复检查依赖此过滤；
+    //   url/postUrl 与 create 时的 normalizeExternalUrl 逻辑保持一致，避免同一 URL 在两侧被识别成不同字符串。
+    const urlFilter = filters.url || filters.postUrl;
+    if (urlFilter) {
+      const normalized = normalizeExternalUrl(urlFilter);
+      if (normalized) qb.andWhere('p.post_url = :postUrl', { postUrl: normalized });
     }
 
     if (filters.sort === 'leads') {
@@ -373,6 +382,10 @@ export class PostsService {
     const post = this.postRepository.create({
       ...dto,
       id: makeId(),
+      // 修复 (2026-06-05)：posts.account_id 是 NOT NULL 但前端表单把它列为可选项。
+      //   TypeORM 收到 undefined 时会让 MySQL 用 DEFAULT 兜底，而该列没设默认 → ER_NO_DEFAULT_FOR_FIELD 500。
+      //   统一把空值归一为 ''，与 copywriting / supervisorSuggestion 的处理保持一致。
+      accountId: (dto.accountId as string | undefined)?.trim() || '',
       postType: normalizePostType(dto.postType),
       traffic: normalizeTrafficByType(dto.postType, dto.traffic),
       coverImageUrl: dto.coverImageUrl ? normalizeMediaUrl(dto.coverImageUrl) : null,

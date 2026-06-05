@@ -23,6 +23,7 @@ import { PostMetricsHistory } from './entities/post-metrics-history.entity';
 import { ExportTask } from './entities/export-task.entity';
 import { OperationLog } from './entities/operation-log.entity';
 import { SupervisorSuggestion } from './entities/supervisor-suggestion.entity';
+import { ScrapingAlert } from './modules/scraping/scraping-alert.entity';
 // v1.3 增量（教务端表 M25）
 import { Teacher } from './entities/teacher.entity';
 import { OrderAuthor } from './entities/order-author.entity';
@@ -52,6 +53,7 @@ import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { ExportsModule } from './modules/exports/exports.module';
 import { OperationLogsModule } from './modules/operation-logs/operation-logs.module';
 import { SupervisorSuggestionsModule } from './modules/supervisor-suggestions/supervisor-suggestions.module';
+import { ScrapingModule } from './modules/scraping/scraping.module';
 import { UploadsModule } from './modules/uploads/uploads.module';
 import { SalesModule } from './modules/sales/sales.module';
 import { EnumsModule } from './modules/enums/enums.module';
@@ -76,7 +78,7 @@ import { TokenRefreshInterceptor } from './common/token-refresh.interceptor';
         username: config.get('MYSQL_USER', 'root'),
         password: config.get('MYSQL_PASSWORD', ''),
         database: config.get('MYSQL_DATABASE', 'lan_dual_role_system'),
-        entities: [User, Employee, Account, Post, Lead, LeadFollowRecord, LeadDraft, CollaborationTask, Order, OrderFollowRecord, OrderAbnormalFeedback, ImportTask, Notification, Favorite, PostMetricsHistory, ExportTask, OperationLog, SupervisorSuggestion],
+        entities: [User, Employee, Account, Post, Lead, LeadFollowRecord, LeadDraft, CollaborationTask, Order, OrderFollowRecord, OrderAbnormalFeedback, ImportTask, Notification, Favorite, PostMetricsHistory, ExportTask, OperationLog, SupervisorSuggestion, ScrapingAlert],
         synchronize: false,
         charset: 'utf8mb4',
         logging: true,
@@ -122,6 +124,7 @@ import { TokenRefreshInterceptor } from './common/token-refresh.interceptor';
     ExportsModule,
     OperationLogsModule,
     SupervisorSuggestionsModule,
+    ScrapingModule,
     UploadsModule,
     SalesModule,
     EnumsModule,

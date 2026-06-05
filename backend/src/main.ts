@@ -64,17 +64,28 @@ async function bootstrap() {
   app.setGlobalPrefix('api');
 
   // B7 兜底：如果请求没带 x-server-port（说明没经过 server.js proxy，
-  // 例如本地 8089 直连 / 测试），用 process.env.PORT 兜底，AuthGuard 据此
-  // 判断是主入口还是 owner 端口。
-  // v1.3：同步支持 ALL_ROLES_PORT（3003 统一登录入口）的兜底；process.env.PORT
-  // 是 NestJS 进程自己的 8089，所以全部三个端口的「缺省透传」都走 8089。
+  // 例如本地 8089 直连 / 测试），AuthGuard 看到 header 缺失会放行。
+  // 但 Next.js rewrite 到 backend 时，浏览器仍带 origin 头（指向 3002），
+  // 此时需把 x-server-port 兜底成 origin 推断的端口（3002），否则会被
+  // main.ts 默认 8089 兜底，AuthGuard 误判 owner 拒绝。
+  // 修复 (2026-06-05)：新增 Next.js 端口（3002）识别。origin/referer
+  //   含已知端口（3000/3001/3002/3003）才兜底成对应端口；都没有则**不
+  //   设置** header，让 AuthGuard 走"缺 header 放行"分支（兼容本地 8089 直连）。
   const selfServerPort = String(Number(process.env.PORT ?? 3000) || 3000);
   app.use((req: any, _res: any, next: any) => {
-    if (!req.headers['x-server-port']) {
-      req.headers['x-server-port'] = selfServerPort;
-    }
-    if (!req.headers['x-origin-port']) {
-      req.headers['x-origin-port'] = selfServerPort;
+    if (!req.headers['x-server-port'] || !req.headers['x-origin-port']) {
+      // 用 origin / referer 反推来源端口（Next.js 浏览器请求会带这两个头）
+      const origin = String(req.headers['origin'] || req.headers['referer'] || '');
+      let inferred: string | undefined;
+      if (origin.includes(':3002')) inferred = '3002';
+      else if (origin.includes(':3003')) inferred = '3003';
+      else if (origin.includes(':3001')) inferred = '3001';
+      else if (origin.includes(':3000')) inferred = '3000';
+      if (inferred) {
+        if (!req.headers['x-server-port']) req.headers['x-server-port'] = inferred;
+        if (!req.headers['x-origin-port']) req.headers['x-origin-port'] = inferred;
+      }
+      // 没有 origin/referer → 不兜底，header 保持 undefined，AuthGuard 直接放行
     }
     next();
   });

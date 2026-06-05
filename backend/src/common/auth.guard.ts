@@ -130,12 +130,16 @@ export class AuthGuard implements CanActivate {
   }
 
   /**
-   * B7 路由级端口-角色校验（v1.3 扩展 ALL_ROLES_PORT 3003 分支）：
+   * B7 路由级端口-角色校验（v1.3 扩展 ALL_ROLES_PORT 3003 分支；2026-06-05 扩展
+   *   3002 新 Next.js 前端）：
    *   - x-server-port 头由 server.js proxy 透传（实际访问的端口：3000 / 3001 / 3003）
+   *     或 Next.js rewrite 直连时由 main.ts 兜底成 8089。
    *   - 3001（owner 端口）→ role 必须在 ALLOWED_OWNER_PORT_ROLES 内
-   *   - 3003（统一登录入口）→ role !== 'owner'（owner 仍必须走 3001）
-   *   - 3000（主入口）/ 其它非 owner 端口 → role !== 'owner'（与 B7 行为一致）
-   * 缺 x-server-port 头（如本地 8089 直连测试）时放行，避免影响开发体验
+   *   - 3003（legacy 统一登录入口）→ role !== 'owner'（owner 仍走 3001 / 3002）
+   *   - 3002（新 Next.js 前端，全角色）→ 放行所有角色（含 owner）
+   *   - 3000（主入口）→ 拒绝 owner
+   *   - 其它任意端口（疑似绕过）→ 拒绝 owner
+   * 缺 x-server-port 头时放行（开发直连 / 测试环境）。
    */
   private assertRolePortMatch(req: Request) {
     const headerVal = req.headers['x-server-port'];
@@ -147,10 +151,15 @@ export class AuthGuard implements CanActivate {
     const role: string = session?.role || '';
     if (!role) return;
 
-    // 默认端口（如果 configService 没注入，按 CLAUDE.md 默认值 3000/3001/3003）
+    // 默认端口（如果 configService 没注入，按 CLAUDE.md 默认值 3001/3003）
     const cfg = AuthGuard.configService;
     const ownerPort = Number(cfg?.get?.('OWNER_PORT') ?? 3001);
     const allRolesPort = Number(cfg?.get?.('ALL_ROLES_PORT') ?? 3003);
+    // 修复 (2026-06-05)：新前端 Next.js 默认 3002（frontend/package.json dev/start 钉死），
+    //   owner 也应能从 3002 访问运营/销售/教务/主管等所有页面（与新前端 7 角色入口对齐）。
+    //   写死 3002 而非用 env var：与 frontend/package.json 的 `-p 3002` 同步；如未来
+    //   Next.js 改端口，需同时调整这里。
+    const nextjsPort = 3002;
 
     if (port === ownerPort) {
       // 命中 owner 端口：必须角色在白名单
@@ -167,33 +176,36 @@ export class AuthGuard implements CanActivate {
         });
       }
     } else if (port === allRolesPort) {
-      // v1.3：3003 统一登录入口；除 owner 外都放行，owner 仍走 3001
+      // v1.3：3003 统一登录入口；除 owner 外都放行，owner 仍走 3001 / 3002
       if (role === 'owner') {
         // eslint-disable-next-line no-console
         console.warn(
           `[v1.3][GUARD] 拒绝 owner 角色访问统一登录入口 (port=${port}, expected=${ownerPort}, path=${req.path})`,
         );
         throw new ForbiddenException({
-          message: 'owner 账号必须从 3001 端口（总后台）访问',
-          error: 'forbidden_owner_use_3001',
+          message: 'owner 账号必须从 3001 或 3002 端口访问',
+          error: 'forbidden_owner_use_3001_or_3002',
           port,
           role,
         });
       }
+    } else if (port === nextjsPort) {
+      // 修复 (2026-06-05)：3002 新前端 Next.js 入口对全角色放行（含 owner），
+      //   不再走 owner 白名单校验。其它非白名单端口（3000/8089 等）仍拒绝 owner。
+      return;
     } else {
-      // 任何非 owner / 3003 端口（含 3000 主入口、8089 NestJS 直连）：禁止 owner 角色
-      // 修复说明：原方案只在「port === mainPort」时拦截，但 NestJS 实际 PORT=8089，
-      // 攻击者只需把 x-server-port 改成 8089 之外的任意值就能绕过。
-      // 改进：非 owner 端口一律拒绝 owner 角色，符合「owner 必须从 OWNER_PORT 入口」
-      // 的端口隔离原则。
+      // 其它任意端口（3000 主入口、8089 NestJS 直连等）：拒绝 owner 角色
+      // 修复说明：原 B7 改进是"非 owner 端口一律拒绝 owner 角色"，本意是防 x-server-port
+      //   头伪造绕过。改造后白名单收紧为 3001/3002/3003（其中 3003 仍拒 owner），
+      //   其它任何端口（含 8089 直连）都拒绝 owner。
       if (role === 'owner') {
         // eslint-disable-next-line no-console
         console.warn(
-          `[B7][GUARD] 拒绝 owner 角色访问非 owner 端口 (port=${port}, expected=${ownerPort}, path=${req.path})`,
+          `[B7][GUARD] 拒绝 owner 角色访问非白名单端口 (port=${port}, allowed=[${ownerPort},${nextjsPort}], path=${req.path})`,
         );
         throw new ForbiddenException({
-          message: 'owner 账号必须从 3001 端口（总后台）访问',
-          error: 'forbidden_owner_use_3001',
+          message: 'owner 账号必须从 3001 或 3002 端口访问',
+          error: 'forbidden_owner_use_3001_or_3002',
           port,
           role,
         });

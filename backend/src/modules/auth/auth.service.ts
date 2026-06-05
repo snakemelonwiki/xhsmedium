@@ -120,9 +120,20 @@ export class AuthService {
     //   - 3003 统一登录入口（ALL_ROLES_PORT）：全角色放行；**owner 必须从 3001 登录**
     //   - requestPort === 0 表示「未透传」（如本地 8089 直连测试），不强制端口
     // 同时 server.js 那一层也会做一遍校验（O(1) 拦截 + 日志），这里作为最后防线。
+    //
+    // 修复 (2026-06-05)：
+    //   1) 原代码用 `this.configService.get('PORT', 3000)` 比较 requestPort，但
+    //      `PORT` 在 backend 进程是 8089（自身端口），与 server.js 的 3000 错位——
+    //      导致 curl / Next.js (port 3002 → 8089) 等无 x-server-port 头的请求被
+    //      误判为「来自主入口」而拦截 owner。
+    //   2) server.js 启动时硬编码 `Number(process.env.PORT || 3000)`，所以
+    //      legacy main port 默认 3000（与 backend 自身 PORT 无关）。
+    //   3) 这里用字面值 3000 兜底（与 server.js 同步）；如果部署改了 server.js 的
+    //      PORT，需同步调整这里或加 LEGACY_PORT env 串联（暂不做）。
     if (requestPort && requestPort > 0) {
       const ownerPort = Number(this.configService.get('OWNER_PORT', 3001));
       const allRolesPort = Number(this.configService.get('ALL_ROLES_PORT', 3003));
+      const legacyMainPort = 3000; // 与 server.js `Number(process.env.PORT || 3000)` 同步
       if (requestPort === ownerPort) {
         if (!['owner', 'admin', 'supervisor'].includes(user.role)) {
           throw new UnauthorizedException({
@@ -141,12 +152,13 @@ export class AuthService {
             requiredPort: ownerPort,
           });
         }
-      } else if (requestPort === Number(this.configService.get('PORT', 3000)) || requestPort === 3000) {
+      } else if (requestPort === legacyMainPort) {
         if (user.role === 'owner') {
           throw new UnauthorizedException({
             message: 'owner 账号必须从 3001 端口（总后台）登录',
             port: requestPort,
             role: user.role,
+            requiredPort: ownerPort,
           });
         }
       }

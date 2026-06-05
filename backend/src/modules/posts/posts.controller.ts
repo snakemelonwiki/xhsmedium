@@ -38,6 +38,11 @@ export class PostsController {
     @Query('search') search?: string,
     @Query('keyword') keyword?: string,
     @Query('q') q?: string,
+    // 修复 (2026-06-05)：新增 url / postUrl 过滤，给前端"提交前重复检查"使用。
+    //   之前 ?url= 被静默忽略，checkDuplicate 拿到的是"当前运营最新一条"——任何提交都会被误判为重复，
+    //   导致 POST /posts 直接被前端拦下，提交后页面不跳转、列表里也看不到新数据。
+    @Query('url') url?: string,
+    @Query('postUrl') postUrl?: string,
     // v1.3 / OP-14: 作品广场范围放宽，staff 显式传 scope=all 时不再强制按本人过滤
     @Query('scope') scope?: 'self' | 'all',
   ) {
@@ -68,6 +73,8 @@ export class PostsController {
             to,
             sort,
             search: nextSearch,
+            url,
+            postUrl,
           },
           Number(limit) || 20,
           Number(offset) || 0,
@@ -86,6 +93,8 @@ export class PostsController {
           to,
           sort,
           search: nextSearch,
+          url,
+          postUrl,
         },
         Number(limit) || 20,
         Number(offset) || 0,

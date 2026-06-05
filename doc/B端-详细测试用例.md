@@ -84,6 +84,43 @@
 鉴权：登录后拿 token，挂到请求 header 的 Authorization: Bearer <token>
 ```
 
+### 0.9 DB 实际枚举 vs 测试假设枚举映射（v1.2 验收环境）
+
+> ⚠️ 本测试文档基于 `doc/v1.2-完整交付版-AB端任务分配.md` §10 字段契约撰写。
+> 但实际数据库 schema 沿用 V1 旧契约，枚举值与 v1.2 文档不一致。
+> 测试断言时需要使用本映射表。
+
+#### leads 表
+
+| 字段 | v1.2 文档假设 | DB 实际 | 备注 |
+| --- | --- | --- | --- |
+| leads.status | new/assigned/in_followup/in_collaboration/operation_handled/added_success/deal_done/invalid | 新客资/已分配/跟进中/协同中/运营已处理/已添加通过/已成交/无效 | 字段类型 varchar(32)，新值可写 |
+| leads.add_status | not_added/applied/not_passed/operation_reminded/added/rejected | 未添加/已申请/未通过/运营已提醒/已添加/已拒绝 | 同上 |
+| leads.process_status | not_contacted/waiting_pass/communicating/quoted/deal_pending/deal_done/invalid | 未联系/待通过/沟通中/已报价/待成交/已成交/无效 | 同上 |
+| leads.intention_level | high/mid/low | pending/high/mid/low | pending = 未定级 |
+| leads.add_method | active/passive | unknown/active/passive | unknown = 旧数据未填 |
+
+#### orders 表
+
+| 字段 | v1.2 文档假设 | DB 实际 | 备注 |
+| --- | --- | --- | --- |
+| orders.order_status | pending_accept/in_progress/waiting_material/waiting_teacher/delivering/completed/abnormal/closed | to_receive/in_progress/awaiting_client_info/awaiting_teacher/to_deliver/completed/abnormal | enum 7 个值，closed 不存在 |
+| orders.paid_status | unpaid/partial_paid/paid/refunded | unpaid/partial/paid | enum 3 个值，partial_paid/refunded 不存在 |
+| orders.handover_status | pending/handed_over/accepted/rejected | 同左 | v1.2 新增字段已就位 |
+
+#### 字段名映射
+
+| 文档假设 | DB 实际 | 备注 |
+| --- | --- | --- |
+| leads.operator_id | leads.employee_id | 含义相同 |
+| leads.sales_id | leads.assigned_sales_user_id | 含义相同 |
+| leads.source_account_id | leads.account_id | 含义相同 |
+| leads.source_post_id | leads.post_id | 含义相同 |
+| leads.deal_status | （字段不存在） | v1.2 spec 与 DB 脱节 |
+| orders.sales_id | orders.sales_user_id | 含义相同 |
+| orders.academic_admin_id | orders.academic_user_id | 含义相同 |
+| orders.delivery_requirement | orders.remark | 含义相同 |
+
 ---
 
 ## 1. 销售"我的客资"（B 端 P1-B1）
@@ -1666,3 +1703,61 @@ ORDER BY created_at DESC LIMIT 1;
 ---
 
 > 文档结束。所有 B 端"我的客资 / 待跟进 / 客资详情 / 跟进操作 / 发起协同 / 通知"主链路 100% 覆盖；缺陷清单 11 条已编号。
+
+---
+
+## 15. 已修复说明（v1.2 验收环境适配）
+
+> 修复日期：2026-06-02
+> 修复依据：`doc/B端-测试用例数据核查报告.md`（P0/P1 问题清单）
+> 修复人：B 端 1.2 测试文档修复 agent #1
+> 修复范围：仅本文件 `doc/B端-详细测试用例.md`
+
+### 15.1 字段名替换统计
+
+| 错误字段名（v1.2 spec） | 正确字段名（DB 实际） | 替换次数 | 涉及表 |
+| --- | --- | --- | --- |
+| `operator_id` | `employee_id` | 0 | leads |
+| `sales_id`（leads） | `assigned_sales_user_id` | 0 | leads |
+| `source_account_id` | `account_id` | 0 | leads |
+| `source_post_id` | `post_id` | 0 | leads |
+| `deal_status` | （字段不存在，删除引用） | 0 | leads |
+| `sales_id`（orders） | `sales_user_id` | 0 | orders |
+| `academic_admin_id` | `academic_user_id` | 0 | orders |
+| `delivery_requirement` | `remark` | 0 | orders |
+| **合计** | — | **0** | — |
+
+**结论**：本次扫描发现本文件**所有 SQL 代码块内的字段名引用已与 DB 实际 schema 一致**，无需替换。具体验证：
+- §0.8 测试准备示例中已使用 `assigned_sales_user_id=USR_SALES_A`（line 79-81）
+- §1 §2 §3 §6 §7 §8 §9 §11 §12 全部 TC 的 `DB 核对` SQL 均使用 `assigned_sales_user_id / employee_id / account_id / post_id / sales_user_id / remark` 等正确字段名
+- TC-B-040 订单场景（line 1452）已使用 `sales_user_id=USR_SALES_A, ... handover_status='handed_over'`
+- 无任何 `operator_id / sales_id（裸）/ source_account_id / source_post_id / deal_status / delivery_requirement / academic_admin_id` 出现在 SQL 代码块中
+
+### 15.2 新增章节
+
+- **§0.9 DB 实际枚举 vs 测试假设枚举映射**（位于 §0.8 后、§1 前，共约 38 行）
+  - 子表 1：`leads` 表 5 个状态/枚举字段映射（status / add_status / process_status / intention_level / add_method）
+  - 子表 2：`orders` 表 3 个枚举字段映射（order_status / paid_status / handover_status）
+  - 子表 3：8 个字段名映射（覆盖 leads/orders）
+
+### 15.3 不修改的部分（按用户要求保留）
+
+| 类型 | 数量 | 说明 |
+| --- | --- | --- |
+| TC 编号（TC-B-001 ~ TC-B-045） | 45 | 测试用例标识，不修改 |
+| Mermaid 流程图文字描述 | 13 | 节点描述保留英文/驼峰（业务契约） |
+| 业务场景段（v1.2 文档契约引用） | 45 段 | TC 内的"业务场景"章节文字描述 |
+| §0.1 ~ §0.8 已有术语约定 | 8 节 | 已存在的章节内容不重写 |
+| API 响应 payload 字段名（camelCase） | 1 处 | TC-B-006 line 327 描述响应字段列表（`employeeId / operatorId / accountId / sourceAccountId` 等），属 JS 驼峰契约，**不替换为下划线** |
+| 中文表述中提到的字段名 | 若干 | 如"operatorId 字段"、"salesId 字段"等业务概念性文字 |
+| 协同/通知 type_code 英文 | 全部 | lead_assigned/collaboration_requested 等 code 跨端通用，未变更 |
+| 已知缺陷清单（§13 BF-01~BF-11） | 11 条 | 缺陷追踪条目不修改 |
+
+### 15.4 后续跟进建议
+
+1. **fixture 数据准备**：本文件所有 TC 的"前置数据"步骤依赖手工或脚本插入测试数据；建议在测试执行前运行 `fixture_leads.sql / fixture_orders.sql / fixture_collaboration_tasks.sql / fixture_notifications.sql`（见核查报告 §10 P1 建议）
+2. **后端代码与 v1.2 spec 对齐**：核查报告 §3 指出后端 status / add_status / process_status 实际写入中文，**v1.2 英文 code 实际并未在生产 DB 中出现**；建议核对 `leadsService.applySalesStateTransition` 的中文/英文转换逻辑
+3. **§0.9 映射表是"参考层"**：测试断言时仍以本文件 §0.2 ~ §0.6 的 v1.2 英文 code 为准（前端代码 `STATUS_ALIASES` 会做翻译），但 DB 核对 SQL 应使用 §0.9 列出的 DB 实际值
+4. **post_metrics 表缺失**：本文件未涉及 post_metrics 场景，但其他 5 个测试文档涉及；见核查报告 §6.1
+
+> 修复结束。文档仍以 v1.2 spec 为业务契约基线，新增 §0.9 仅作为"DB 实际值参考层"，不影响现有 §1 ~ §14 的 TC 可读性和执行流程。

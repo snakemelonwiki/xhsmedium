@@ -36,12 +36,23 @@ export class PostsMetricsService {
   /**
    * 抓取帖子指标并规范化为 NestJS 调用方可直接使用的字段。
    * 失败抛 Error，错误信息由 parser-core 透传（已含分类与中文消息）。
+   *
+   * 抓取内部会走 ScrapingLockService 串行化，失败时由 ScrapingAlertService
+   * 计数并按规则写 scraping_alerts 告警（本方法不直接处理）。
    */
-  async fetchMetricsFromUrl(url: string): Promise<ScrapedMetrics> {
+  async fetchMetricsFromUrl(
+    url: string,
+    opts: { source?: string; postId?: string } = {},
+  ): Promise<ScrapedMetrics> {
     const normalizedUrl = String(url || '').trim();
     if (!normalizedUrl) throw new Error('作品链接不能为空');
 
-    const result = await this.parserService.parse(normalizedUrl, { retry: 2, timeout: 15000 });
+    const result = await this.parserService.parse(normalizedUrl, {
+      retry: 2,
+      timeout: 15000,
+      source: opts.source || 'fetch-metrics',
+      postId: opts.postId,
+    });
     if (isParserFailure(result)) {
       // 透传错误信息，让 controller 用对应 HTTP 状态码返回
       throw new Error(result.error.message);

@@ -24,3 +24,4 @@ TypeORM 实际跑的迁移目录是**仓库根目录的 [`migrations/`](../migra
 | `add-performance-indexes.sql` | 通用性能索引临时验证 | 临时/待清理 |
 | `check-d-p1-01-leads-charset.sql` | leads 表字符集检查脚本 | 临时/待清理 |
 | `fix-d-p1-02-orphan-leads.sql` | 孤立客资数据修复脚本 | 临时/待清理 |
+| `add-scraping-alerts-table.sql` | 抓取告警表 scraping_alerts DDL（v1.4 全局抓取锁 + 失败告警入库改造） | 正式/已纳入 |

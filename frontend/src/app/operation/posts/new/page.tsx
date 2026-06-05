@@ -1,7 +1,7 @@
 'use client';
 
 import { LinkOutlined } from '@ant-design/icons';
-import { Button, Card, DatePicker, Form, Input, Segmented, Select, Space, Typography, Modal, message } from 'antd';
+import { Button, Card, DatePicker, Form, Input, InputNumber, Segmented, Select, Space, Typography, message } from 'antd';
 import dayjs from 'dayjs';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
@@ -55,6 +55,8 @@ export default function OperationPostNewPage() {
    * 抓取失败（如登录墙）时返回基础识别 + warning，不抛错。
    */
   async function parsePostUrl() {
+    // 守卫：粘贴 + 回车 + 按钮可能同帧触发，避免重入
+    if (parsing) return;
     const rawUrl = String(form.getFieldValue('postUrl') || '').trim();
     if (!rawUrl) {
       message.warning('请先粘贴作品链接');
@@ -102,20 +104,16 @@ export default function OperationPostNewPage() {
           nextValues.accountId = matched.id;
         }
       }
-      // 抓取成功时把指标也回填到表单（仅在用户尚未填写时回填）
+      // 修复 (2026-06-05)：抓取成功时直接覆盖指标，不要"仅在未填写时回填"。
+      //   旧逻辑的问题：用户先粘贴 URL A → 指标 A 写进表单（初始 0，!0=true 命中）；
+      //   再粘贴 URL B → !指标A=true 时跳过回填，旧指标一直留着，看起来"没覆盖"。
+      //   粘贴新 URL 即代表要录入新帖子，指标也应该是新帖子的；用户如果想保留旧值，
+      //   不应该再粘贴新 URL（或者用手动录入入口）。
       if (data?.parsed) {
-        if (data.likes !== undefined && !form.getFieldValue('likes')) {
-          nextValues.likes = data.likes;
-        }
-        if (data.comments !== undefined && !form.getFieldValue('comments')) {
-          nextValues.comments = data.comments;
-        }
-        if (data.favorites !== undefined && !form.getFieldValue('favorites')) {
-          nextValues.favorites = data.favorites;
-        }
-        if (data.shares !== undefined && !form.getFieldValue('shares')) {
-          nextValues.shares = data.shares;
-        }
+        if (data.likes !== undefined) nextValues.likes = data.likes;
+        if (data.comments !== undefined) nextValues.comments = data.comments;
+        if (data.favorites !== undefined) nextValues.favorites = data.favorites;
+        if (data.shares !== undefined) nextValues.shares = data.shares;
       }
 
       // 兜底标题
@@ -206,19 +204,14 @@ export default function OperationPostNewPage() {
       latestThumbRef.current = '';
       const today = formatLocalDate(new Date());
 
-      // 提示用户选择后续操作
-      Modal.confirm({
-        title: '作品录入成功',
-        content: '请选择后续操作：',
-        okText: '查看今日记录',
-        cancelText: '继续录入',
-        onOk: () => {
-          router.push(`/operation/posts?from=${today}&to=${today}`);
-        },
-        onCancel: () => {
-          // 留在当前页继续录入
-        },
-      });
+      // 修复 (2026-06-05)：TC-OP-120 要求提交成功后直接跳转到"我的作品"今日筛选。
+      //   之前用 Modal.confirm 让用户手动点"查看今日记录"——绝大多数用户点"继续录入"或
+      //   关闭弹窗，体感上就是"提交后没跳转"；现在改为自动 router.push，URL 带 from/to 参数。
+      router.push(`/operation/posts?from=${today}&to=${today}`);
+      // 修复 (2026-06-05)：router.push 命中 Next.js 路由缓存（默认 staleTimes.dynamic 30s）
+      //   时，列表页 useEffect([fromParam, toParam]) 不会重新触发，停留在旧数据上 —— 用户体感
+      //   是"跳过去没数据，要刷新一下才有"。router.refresh() 让当前路由重新走一次数据流。
+      router.refresh();
     });
   }
 
@@ -289,7 +282,14 @@ export default function OperationPostNewPage() {
             {entryType === 'link' && (
               <Form.Item className="full-row" name="postUrl" label="作品链接" rules={getRequiredRules('postUrl')}>
                 <Space.Compact style={{ width: '100%' }}>
-                  <Input id="postUrl" aria-label="作品链接" placeholder="粘贴小红书/抖音作品链接" />
+                  <Input
+                    id="postUrl"
+                    aria-label="作品链接"
+                    placeholder="粘贴小红书/抖音作品链接,粘贴后自动解析"
+                    // 粘贴/回车都触发解析；setTimeout 让 form value 先落定
+                    onPaste={() => setTimeout(() => parsePostUrl(), 200)}
+                    onPressEnter={() => parsePostUrl()}
+                  />
                   <Button icon={<LinkOutlined />} onClick={parsePostUrl} loading={parsing}>
                     解析链接
                   </Button>
@@ -302,6 +302,20 @@ export default function OperationPostNewPage() {
             </Form.Item>
             <Form.Item name="publishedAt" label="发布日期" rules={getRequiredRules('publishedAt')}>
               <DatePicker style={{ width: '100%' }} />
+            </Form.Item>
+
+            {/* 互动指标：链接录入时由"解析链接"自动回填，手动录入时用户自填；必填 0 起步 */}
+            <Form.Item name="likes" label="点赞数" initialValue={0}>
+              <InputNumber min={0} precision={0} style={{ width: '100%' }} placeholder="0" />
+            </Form.Item>
+            <Form.Item name="comments" label="评论数" initialValue={0}>
+              <InputNumber min={0} precision={0} style={{ width: '100%' }} placeholder="0" />
+            </Form.Item>
+            <Form.Item name="favorites" label="收藏数" initialValue={0}>
+              <InputNumber min={0} precision={0} style={{ width: '100%' }} placeholder="0" />
+            </Form.Item>
+            <Form.Item name="shares" label="转发数" initialValue={0}>
+              <InputNumber min={0} precision={0} style={{ width: '100%' }} placeholder="0" />
             </Form.Item>
             <Form.Item name="accountId" label="来源账号 ID">
               {accountOptions.length > 0 ? (
