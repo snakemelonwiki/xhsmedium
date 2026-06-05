@@ -404,6 +404,8 @@ export class LeadsService {
       .where('l.next_follow_time >= :from', { from: todayEnd })
       .andWhere('l.next_follow_time < :to', { to: dayAfterTomorrow })
       .andWhere('l.assigned_sales_user_id = :uid', { uid: salesUserId })
+      // v1.3 / SA-11 P0 修复：已成交/已退款不进次日跟进提醒
+      .andWhere("(l.deal_status IS NULL OR l.deal_status NOT IN ('deal_done', 'refunded'))")
       .orderBy('l.next_follow_time', 'ASC')
       .getMany();
     return this.mapLeads(rows);
@@ -421,6 +423,8 @@ export class LeadsService {
       .where('l.next_follow_time >= :from', { from: todayEnd })
       .andWhere('l.next_follow_time < :to', { to: dayAfterTomorrow })
       .andWhere('l.assigned_sales_user_id = :uid', { uid: salesUserId })
+      // v1.3 / SA-11 P0 修复：已成交/已退款不进次日跟进提醒
+      .andWhere("(l.deal_status IS NULL OR l.deal_status NOT IN ('deal_done', 'refunded'))")
       .orderBy('l.next_follow_time', 'ASC')
       .take(safeLimit)
       .skip(safeOffset);
@@ -460,6 +464,16 @@ export class LeadsService {
     // 主管端 admin/owner 不限制（与文档 §10 销售端约束一致）。
     if (role === 'sales' || (filters.actorUserId && !role)) {
       qb.andWhere('l.is_dispatched = 0');
+      // v1.3 / SA-11 P0 修复: 「我的客资」= 未成交客资，deal_done / refunded 不应出现。
+      //   - deal_done   → 已成交，已转到「我的成交」(orders 表)；
+      //   - refunded    → 已退款，归属"已完成"侧，不属于待跟进的"我的客资"。
+      //   由 scope 层硬编码，业务上不可被 query string 覆盖，保持与"我的成交"菜单的语义边界。
+      //   admin/owner/supervisor 不加此约束（按运营/管理视角需看到全量）。
+      // 注意: SQL 中 AND 优先级高于 OR，必须用括号把 (IS NULL OR NOT IN) 包成一个整体，
+      //   否则 `is_dispatched=0 AND deal_status IS NULL OR deal_status NOT IN(...)`
+      //   会被解析为 `(is_dispatched=0 AND deal_status IS NULL) OR deal_status NOT IN(...)`，
+      //   后半段会"绕过"前面的 is_dispatched / scope 过滤，错误地放出全部非 deal_done 行。
+      qb.andWhere("(l.deal_status IS NULL OR l.deal_status NOT IN ('deal_done', 'refunded'))");
     }
   }
 
@@ -845,10 +859,13 @@ export class LeadsService {
     const safeLimit = this.clampLimit(limit);
     const safeOffset = Math.max(Number(offset) || 0, 0);
     // v1.3 / CROSS-1 联动：销售端 is_dispatched = 0
+    // v1.3 / SA-11 P0 修复：已成交/已退款客资不进「今日未添加」红标置顶。
+    // 注意: 整个 deal_status 条件用括号包起来,避免 AND/OR 优先级导致"绕过"。
     const qb = this.leadRepository.createQueryBuilder('l')
       .where('l.assigned_sales_user_id = :uid', { uid: salesUserId })
       .andWhere('l.is_dispatched = 0')
       .andWhere('l.add_status = :addStatus', { addStatus: 'not_added' })
+      .andWhere("(l.deal_status IS NULL OR l.deal_status NOT IN ('deal_done', 'refunded'))")
       // 当日 00:00 之后创建/分配；用 created_at 兜底（assigned_at 未在 schema 中）
       .andWhere('l.created_at >= :todayStart', {
         todayStart: this.todayStartDate(),
@@ -872,12 +889,17 @@ export class LeadsService {
     const safeLimit = this.clampLimit(limit);
     const safeOffset = Math.max(Number(offset) || 0, 0);
     const todayEnd = this.todayEndDate();
+    // v1.3 / SA-11 P0 修复：已成交/已退款客资不进「当日待跟进」。
+    //   原条件 process_status NOT IN ('invalid', 'deal_done') 仅兜底 process_status 字段；
+    //   现叠加 deal_status 过滤，避免历史脏数据或回流场景下出现"已成交"在待跟进列表。
+    //   注意: 整个 deal_status 条件用括号包起来,避免 AND/OR 优先级导致"绕过"。
     const qb = this.leadRepository.createQueryBuilder('l')
       .where('l.assigned_sales_user_id = :uid', { uid: salesUserId })
       .andWhere('l.is_dispatched = 0')
       .andWhere('l.next_follow_time IS NOT NULL')
       .andWhere('l.next_follow_time <= :todayEnd', { todayEnd })
       .andWhere("l.process_status NOT IN ('invalid', 'deal_done')")
+      .andWhere("(l.deal_status IS NULL OR l.deal_status NOT IN ('deal_done', 'refunded'))")
       .orderBy('l.next_follow_time', 'ASC')
       .take(safeLimit)
       .skip(safeOffset);

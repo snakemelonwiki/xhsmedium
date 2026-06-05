@@ -649,7 +649,8 @@ const COLLAB_STATUS_LABELS = {
   pending: "待领取",
   handling: "处理中",
   handled: "已处理",
-  closed: "已关闭"
+  closed: "已关闭",
+  timeout: "已超时"
 };
 
 function getCollabTypeLabel(type) {

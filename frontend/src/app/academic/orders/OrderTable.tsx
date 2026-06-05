@@ -11,7 +11,7 @@ import { listOrders, updateOrder } from '@/shared/api/orders';
 import { createExport, downloadExportUrl, getExport, type ExportFilter } from '@/shared/api/exports';
 import { readStoredUser } from '@/shared/auth/auth';
 import type { OrderItem, OrderScope, OrderStatusCode } from '@/shared/types/orders';
-import { HANDOVER_STATUS_OPTIONS, HandoverStatusCode, handoverStatusMeta } from '@/shared/api/enums';
+import { HANDOVER_STATUS_OPTIONS, HandoverStatusCode, handoverStatusMeta, orderStatusMeta, paidStatusMeta } from '@/shared/api/enums';
 import { formatDateTime } from '@/shared/utils/date-format';
 
 const orderStatusOptions: { label: string; value: OrderStatusCode }[] = [
@@ -24,21 +24,8 @@ const orderStatusOptions: { label: string; value: OrderStatusCode }[] = [
   { label: '异常', value: 'abnormal' },
 ];
 
-const orderStatusMeta: Record<string, { label: string; color: string }> = {
-  to_receive: { label: '待领取', color: 'orange' },
-  in_progress: { label: '进行中', color: 'blue' },
-  awaiting_client_info: { label: '待客户资料', color: 'gold' },
-  awaiting_teacher: { label: '待老师', color: 'purple' },
-  to_deliver: { label: '待交付', color: 'cyan' },
-  completed: { label: '已完成', color: 'green' },
-  abnormal: { label: '异常', color: 'red' },
-};
-
-const paidStatusMeta: Record<string, { label: string; color: string }> = {
-  unpaid: { label: '未付款', color: 'default' },
-  partial: { label: '部分付款', color: 'gold' },
-  paid: { label: '已付款', color: 'green' },
-};
+// 旧版 paidStatusMeta / orderStatusMeta 内联字典已删除，统一消费 shared/api/enums。
+// 选中后 v1.3 P0 修复才能在「销售端订单详情」和「教务端订单详情」一致显示中文。
 
 interface OrderTableProps {
   title: string;
@@ -53,13 +40,14 @@ interface OrderTableProps {
   renderRowExtra?: (record: OrderItem) => React.ReactNode;
 }
 
+// 列表渲染使用集中 helper（v1.3 P0 修复后），避免和 enums.ts 重复维护。
 function renderOrderStatus(status: string) {
-  const meta = orderStatusMeta[status] ?? { label: status || '未知', color: 'default' };
+  const meta = orderStatusMeta(status);
   return <Tag color={meta.color}>{meta.label}</Tag>;
 }
 
 function renderPaidStatus(status: string) {
-  const meta = paidStatusMeta[status] ?? { label: status || '未知', color: 'default' };
+  const meta = paidStatusMeta(status);
   return <Tag color={meta.color}>{meta.label}</Tag>;
 }
 

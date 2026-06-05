@@ -9,10 +9,17 @@ export const ACCOUNTS = {
   sales1: { username: 'sales1', password: 'test123', role: 'sales' as const },
   sales2: { username: 'sales2', password: 'test123', role: 'sales' as const },
   staff1: { username: 'staff1', password: 'test123', role: 'staff' as const },
+  // v1.3 主管端 (admin role) + 教务端 (academic role)
+  admin01: { username: 'youlun', password: 'test123', role: 'admin' as const },
+  admin02: { username: 'admin_d', password: 'test123', role: 'admin' as const },
+  academic_a: { username: 'academic02', password: 'test123', role: 'academic' as const },
 } as const;
 
 export type SalesUser = 'sales1' | 'sales2';
 export type StaffUser = 'staff1';
+export type AdminUser = 'admin01' | 'admin02';
+export type AcademicUser = 'academic_a';
+export type AnyUser = SalesUser | StaffUser | AdminUser | AcademicUser;
 
 /**
  * 通过 UI 真实登录（不 mock、不写死 localStorage）。
@@ -20,7 +27,7 @@ export type StaffUser = 'staff1';
  */
 export async function loginAs(
   page: Page,
-  user: SalesUser | StaffUser,
+  user: AnyUser,
   expectPath: string | RegExp = /\/sales\//,
 ) {
   await page.goto('/login', { waitUntil: 'domcontentloaded' });
@@ -92,7 +99,7 @@ export async function hasLoginToken(page: Page): Promise<boolean> {
  */
 export async function ensureLoggedInAs(
   page: Page,
-  user: SalesUser | StaffUser,
+  user: AnyUser,
   expectPath: string | RegExp = /\/sales\//,
 ) {
   const ok = await hasLoginToken(page);

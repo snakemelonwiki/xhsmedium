@@ -33,6 +33,15 @@ const STATUS_COLORS: Record<string, string> = {
   handling: 'blue',
   handled: 'green',
   closed: 'default',
+  timeout: 'red',
+};
+
+const STATUS_LABELS: Record<string, string> = {
+  pending: '待处理',
+  handling: '处理中',
+  handled: '已处理',
+  closed: '已关闭',
+  timeout: '已超时',
 };
 
 /**
@@ -78,7 +87,7 @@ export default function AdminCollaborationPage() {
   const columns: ColumnsType<CollabTask> = [
     { title: '客资', render: (_, r) => r.customerName || r.contactInfo || r.leadId.slice(0, 8) },
     { title: '类型', dataIndex: 'type', width: 110, render: (v) => TYPE_LABELS[v] || v },
-    { title: '状态', dataIndex: 'status', width: 90, render: (v) => <Tag color={STATUS_COLORS[v] || 'default'}>{v}</Tag> },
+    { title: '状态', dataIndex: 'status', width: 90, render: (v) => <Tag color={STATUS_COLORS[v] || 'default'}>{STATUS_LABELS[v] || v}</Tag> },
     { title: '发起人', dataIndex: 'requesterId', width: 130, ellipsis: true },
     { title: '处理人', dataIndex: 'handlerId', width: 130, ellipsis: true, render: (v) => v || '-' },
     { title: '原因', dataIndex: 'reason', ellipsis: true, render: (v) => v || '-' },
@@ -104,6 +113,7 @@ export default function AdminCollaborationPage() {
           <Radio.Button value="handling">处理中</Radio.Button>
           <Radio.Button value="handled">已处理</Radio.Button>
           <Radio.Button value="closed">已关闭</Radio.Button>
+          <Radio.Button value="timeout">已超时</Radio.Button>
         </Radio.Group>
         <Table
           rowKey="id"

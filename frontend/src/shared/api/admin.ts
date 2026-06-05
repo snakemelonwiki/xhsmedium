@@ -62,6 +62,7 @@ function mapAccount(raw: RawRecord): AdminAccount {
   return {
     id: text(raw.id) ?? '',
     employeeId: text(raw.employeeId),
+    employeeName: text(raw.employeeName) ?? '',
     platform: text(raw.platform),
     profileUrl: text(raw.profileUrl) ?? null,
     accountName: text(raw.accountName) ?? '未命名账号',

@@ -63,19 +63,22 @@ const INTENTION_LEVEL_LABEL: Record<string, string> = {
 };
 
 const ORDER_STATUS_LABEL: Record<string, string> = {
-  to_receive: '待接单',
+  pending_accept: '待接单',
+  to_receive: '待领取',
   in_progress: '进行中',
   awaiting_client_info: '待客户资料',
   awaiting_teacher: '待安排老师',
   to_deliver: '待交付',
   completed: '已完成',
   abnormal: '异常',
+  closed: '已关闭',
 };
 
 const PAID_STATUS_LABEL: Record<string, string> = {
   unpaid: '未付款',
   partial: '部分付款',
-  paid: '已付款',
+  paid: '已付清',
+  refunded: '已退款',
 };
 
 const COLLAB_TYPE_LABEL: Record<string, string> = {
@@ -920,6 +923,23 @@ export class ExportsService implements OnModuleInit, OnModuleDestroy {
     qb.orderBy('a.created_at', 'DESC');
     const rows = await qb.getMany();
 
+    // 收集 employeeId，批量解析为员工姓名（运营负责人列展示姓名，employeeId 仍可由前端筛选）
+    const employeeIds = Array.from(
+      new Set(rows.map((r) => String(r.employeeId || '').trim()).filter((id) => id.length > 0)),
+    );
+    const nameMap = new Map<string, string>();
+    if (employeeIds.length > 0) {
+      const placeholders = employeeIds.map(() => '?').join(',');
+      const empRows: Array<{ id: string; name: string | null; employee_code: string | null }> =
+        await this.employeeRepo.query(
+          `SELECT id, name, employee_code FROM employees WHERE id IN (${placeholders})`,
+          employeeIds,
+        );
+      for (const emp of empRows) {
+        nameMap.set(emp.id, (emp.name || emp.employee_code || '').trim());
+      }
+    }
+
     const headers = [
       '创建时间',
       '账号ID',
@@ -933,19 +953,23 @@ export class ExportsService implements OnModuleInit, OnModuleDestroy {
       '发布计划',
       '状态',
     ];
-    const data = rows.map((r) => [
-      r.createdAt,
-      r.id || '',
-      r.employeeId || '',
-      r.platform || '',
-      r.accountName || '',
-      r.accountUid || '',
-      r.profileUrl || '',
-      r.persona || '',
-      r.positioning || '',
-      r.postingPlan || '',
-      r.status || '',
-    ]);
+    const data = rows.map((r) => {
+      const eid = String(r.employeeId || '').trim();
+      const employeeName = eid ? (nameMap.get(eid) || eid) : '';
+      return [
+        r.createdAt,
+        r.id || '',
+        employeeName,
+        r.platform || '',
+        r.accountName || '',
+        r.accountUid || '',
+        r.profileUrl || '',
+        r.persona || '',
+        r.positioning || '',
+        r.postingPlan || '',
+        r.status || '',
+      ];
+    });
     return this.toCsv(headers, data);
   }
 

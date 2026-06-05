@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 
 import { apiClient } from '@/shared/api/apiClient';
+import { orderStatusMeta } from '@/shared/api/enums';
 import { formatDateTime } from '@/shared/utils/date-format';
 
 type ReminderRow = {
@@ -113,7 +114,13 @@ export default function AcademicRemindersPage() {
       title: '订单状态',
       dataIndex: 'orderStatus',
       width: 110,
-      render: (v: string | null) => (v ? <Tag>{v}</Tag> : '-'),
+      // v1.3 P0 修复：消费 orderStatusMeta()，避免 awaiting_teacher 等 enum 直接穿透。
+      // 与 shared/api/enums 字典保持一致，DB 实际值 → 中文标签 统一由中央字典负责。
+      render: (v: string | null) => {
+        if (!v) return '-';
+        const meta = orderStatusMeta(v);
+        return <Tag color={meta.color}>{meta.label}</Tag>;
+      },
     },
   ];
 

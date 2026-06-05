@@ -10,7 +10,7 @@ import { createAbnormalFeedback, closeAbnormalFeedback, createOrderFollowRecord,
 import { createExport, downloadExportUrl, getExport } from '@/shared/api/exports';
 import { uploadFile } from '@/shared/api/uploads';
 import { readStoredUser } from '@/shared/auth/auth';
-import { handoverStatusMeta } from '@/shared/api/enums';
+import { handoverStatusMeta, orderStatusMeta, paidStatusMeta } from '@/shared/api/enums';
 import type { AbnormalTypeCode, ExpectedHelperCode, OrderAbnormalFeedback, OrderFollowRecord, OrderItem } from '@/shared/types/orders';
 import { formatDateTime } from '@/shared/utils/date-format';
 
@@ -258,8 +258,8 @@ export default function AcademicOrderDetailPage() {
                 { key: 'leadId', label: '客资 ID', children: emptyText(order?.leadId) },
                 { key: 'serviceType', label: '服务类型', children: emptyText(order?.serviceType) },
                 { key: 'amount', label: '金额', children: emptyText(order?.amount) },
-                { key: 'paidStatus', label: '付款状态', children: emptyText(order?.paidStatus) },
-                { key: 'orderStatus', label: '订单状态', children: emptyText(order?.orderStatus) },
+                { key: 'paidStatus', label: '付款状态', children: <Tag color={paidStatusMeta(order?.paidStatus).color}>{paidStatusMeta(order?.paidStatus).label}</Tag> },
+                { key: 'orderStatus', label: '订单状态', children: <Tag color={orderStatusMeta(order?.orderStatus).color}>{orderStatusMeta(order?.orderStatus).label}</Tag> },
                 {
                   key: 'handoverStatus',
                   label: '交接状态',

@@ -6,10 +6,16 @@ import { useEffect, useState } from 'react';
 
 import { getOrderDetail, listAbnormalFeedbacks, listOrderFollowRecords } from '@/shared/api/orders';
 import type { OrderAbnormalFeedback, OrderFollowRecord, OrderItem } from '@/shared/types/orders';
+import { handoverStatusMeta, orderStatusMeta, paidStatusMeta } from '@/shared/api/enums';
 import { formatDateTime } from '@/shared/utils/date-format';
 
 function emptyText(value?: string | null) {
   return value || '-';
+}
+
+// 把 enum code 渲染为 tag（中文 + color），与 OrderTable 列表行为保持一致
+function statusTag(meta: { label: string; color: string }) {
+  return <Tag color={meta.color}>{meta.label}</Tag>;
 }
 
 const abnormalTypeLabels: Record<string, string> = {
@@ -93,8 +99,8 @@ export default function SalesOrderDetailPage() {
                 { key: 'leadId', label: '客资 ID', children: emptyText(order?.leadId) },
                 { key: 'serviceType', label: '服务类型', children: emptyText(order?.serviceType) },
                 { key: 'amount', label: '金额', children: emptyText(order?.amount) },
-                { key: 'paidStatus', label: '付款状态', children: emptyText(order?.paidStatus) },
-                { key: 'orderStatus', label: '订单状态', children: emptyText(order?.orderStatus) },
+                { key: 'paidStatus', label: '付款状态', children: statusTag(paidStatusMeta(order?.paidStatus)) },
+                { key: 'orderStatus', label: '订单状态', children: statusTag(orderStatusMeta(order?.orderStatus)) },
                 { key: 'sales', label: '销售', children: emptyText(order?.salesName ?? order?.salesUserId) },
                 { key: 'academic', label: '教务', children: emptyText(order?.academicName ?? order?.academicUserId) },
                 { key: 'createdAt', label: '创建时间', children: formatDateTime(order?.createdAt) },

@@ -261,7 +261,11 @@ export default function AdminAccountsPage() {
       title: '所属员工',
       dataIndex: 'employeeName',
       width: 100,
-      render: (v, record) => v || record?.employeeId || '-',
+      render: (v, record) => {
+        if (v) return v;
+        const emp = employees.find(e => e.id === record.employeeId);
+        return emp?.name || '-';
+      },
     },
     { title: '人设', dataIndex: 'persona', width: 120, render: (v) => v || '-' },
     { title: '定位', dataIndex: 'positioning', width: 150, render: (v) => v || '-' },

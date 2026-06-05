@@ -37,6 +37,13 @@ export class SalesService {
   }> {
     const today = todayString();
 
+    // v1.3 / SA-11 P0 修复：销售端首页六宫格中所有 lead 侧统计也排除 deal_done / refunded，
+    //   与「我的客资」列表保持口径一致——已成交/已退款的客资属于「我的成交」侧，不计入"待跟进"维度。
+    //   orderPending / dealDone 走 orders 表（来源独立），不受此约束。
+    // 注意: 整个条件用括号包成一个 OR 表达式,避免 AND/OR 优先级错配后被前面的 is_dispatched
+    //   之外的字段"绕过"。
+    const leadNotClosed = "(l.deal_status IS NULL OR l.deal_status NOT IN ('deal_done', 'refunded'))";
+
     const [
       newAssigned,
       pendingAdd,
@@ -45,29 +52,33 @@ export class SalesService {
       orderPending,
       dealDone,
     ] = await Promise.all([
-      // 今日新分配客资数（assigned_sales_user_id = 当前销售，is_dispatched = 0）
+      // 今日新分配客资数（assigned_sales_user_id = 当前销售，is_dispatched = 0，且非已成交/已退款）
       this.leadRepo.createQueryBuilder('l')
         .where('DATE(l.created_at) = :today', { today })
         .andWhere('l.assigned_sales_user_id = :salesUserId', { salesUserId })
         .andWhere('l.is_dispatched = 0')
+        .andWhere(leadNotClosed)
         .getCount(),
-      // 待添加微信（add_status = 'not_added'）
+      // 待添加微信（add_status = 'not_added'，且非已成交/已退款）
       this.leadRepo.createQueryBuilder('l')
         .where('l.assigned_sales_user_id = :salesUserId', { salesUserId })
         .andWhere('l.is_dispatched = 0')
         .andWhere('l.add_status = :addStatus', { addStatus: 'not_added' })
+        .andWhere(leadNotClosed)
         .getCount(),
-      // 未通过（跟进中状态，process_status = 'following_up'）
+      // 未通过（跟进中状态，process_status = 'following_up'，且非已成交/已退款）
       this.leadRepo.createQueryBuilder('l')
         .where('l.assigned_sales_user_id = :salesUserId', { salesUserId })
         .andWhere('l.is_dispatched = 0')
         .andWhere('l.process_status = :processStatus', { processStatus: 'following_up' })
+        .andWhere(leadNotClosed)
         .getCount(),
-      // 今日待跟进（创建日期为今天，assigned_sales_user_id = 当前销售）
+      // 今日待跟进（创建日期为今天，assigned_sales_user_id = 当前销售，且非已成交/已退款）
       this.leadRepo.createQueryBuilder('l')
         .where('DATE(l.created_at) = :today', { today })
         .andWhere('l.assigned_sales_user_id = :salesUserId', { salesUserId })
         .andWhere('l.is_dispatched = 0')
+        .andWhere(leadNotClosed)
         .getCount(),
       // 订单待交接（handover_status = 'pending' 或 'handed_over'，且 sales_user_id = 当前销售）
       this.orderRepo.createQueryBuilder('o')

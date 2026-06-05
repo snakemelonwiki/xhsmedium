@@ -253,7 +253,7 @@ export default function OperationAccountsPage() {
     { title: '账号名', dataIndex: 'accountName', width: 140, render: (v, r) => r.profileUrl ? <a href={r.profileUrl} target="_blank" rel="noreferrer">{v}</a> : v },
     { title: '平台', dataIndex: 'platform', width: 90, render: (v) => <Tag>{v || '-'}</Tag> },
     { title: 'UID', dataIndex: 'accountUid', width: 140, ellipsis: true, render: (v) => v || '-' },
-    { title: '所属员工', dataIndex: 'employeeName', width: 100, render: (v, r) => v || r.employeeId || '-' },
+    { title: '所属员工', dataIndex: 'employeeName', width: 100, render: (v) => v || '-' },
     { title: '人设', dataIndex: 'persona', ellipsis: true, render: (v) => v || '-' },
     { title: '定位', dataIndex: 'positioning', ellipsis: true, render: (v) => v || '-' },
     {

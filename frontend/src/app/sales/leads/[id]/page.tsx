@@ -41,6 +41,7 @@ import { listOrders } from '@/shared/api/orders';
 import { LeadTimeline } from '@/shared/components/leads';
 import { StatusTag } from '@/shared/components/status';
 import { ReminderButton } from '@/shared/components/notifications/ReminderButton';
+import { handoverStatusMeta, orderStatusMeta, paidStatusMeta } from '@/shared/api/enums';
 import {
   LeadAddStatus,
   LeadProcessStatus,
@@ -335,9 +336,9 @@ export default function SalesLeadDetailPage() {
                 ? [
                     order.serviceType ? `产品：${order.serviceType}` : null,
                     order.amount ? `金额：${order.amount}元` : null,
-                    order.paidStatus ? `付款：${order.paidStatus}` : null,
-                    order.orderStatus ? `订单状态：${order.orderStatus}` : null,
-                    order.handoverStatus ? `交接：${order.handoverStatus}` : null,
+                    order.paidStatus ? `付款：${paidStatusMeta(order.paidStatus).label}` : null,
+                    order.orderStatus ? `订单状态：${orderStatusMeta(order.orderStatus).label}` : null,
+                    order.handoverStatus ? `交接：${handoverStatusMeta(order.handoverStatus).label}` : null,
                   ]
                     .filter(Boolean)
                     .join(' | ')
