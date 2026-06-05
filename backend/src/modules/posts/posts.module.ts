@@ -8,11 +8,13 @@ import { PostsController } from './posts.controller';
 import { PostsService } from './posts.service';
 import { PostsMetricsService } from './posts-metrics.service';
 import { OperationLogsModule } from '../operation-logs/operation-logs.module';
+import { ParserModule } from '../parser/parser.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Post, Lead, PostMetricsHistory, PostMetrics]),
     OperationLogsModule,
+    ParserModule,
   ],
   controllers: [PostsController],
   providers: [PostsService, PostsMetricsService],

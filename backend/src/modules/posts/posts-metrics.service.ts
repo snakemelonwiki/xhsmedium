@@ -1,59 +1,71 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
+import { isParserFailure, ParserService } from '../parser/parser.service';
+
+export interface ScrapedMetrics {
+  platform: string;
+  title: string;
+  authorName?: string;
+  authorId?: string;
+  likes: number;
+  comments: number;
+  favorites: number;
+  shares?: number;
+  /**
+   * 抓取时间戳。
+   * 用 Date 类型以匹配 postsService.updateMetrics 的入参约束（DB 写入要 Date），
+   * 控制器在 res.json() 时再 .toISOString() 转字符串。
+   */
+  metricsUpdatedAt: Date;
+}
 
 /**
- * 作品指标抓取服务：封装 Playwright 调用，沿用 legacy `metricsFetcher.js` 的抓取能力。
- * 注意：本服务不依赖 PostsService，避免与 PostsService 形成循环依赖。
+ * 作品指标抓取服务：NestJS 包装层。
+ *
+ * - 抓取能力走 ParserService（透传到 scripts/parser-core.js 的 fetchWithRetry），
+ *   拿到自动重试（默认 3 次，指数退避 1s/2s/4s/8s）+ 错误分类 + 明确 HTTP 状态码。
+ * - 不再直接 require('../../../metricsFetcher')，与 legacy 文件的耦合点只剩
+ *   parser-core.js 一处，模块边界更清晰。
+ * - 本服务不依赖 PostsService，避免与 PostsService 形成循环依赖。
  */
 @Injectable()
 export class PostsMetricsService {
-  async fetchMetricsFromUrl(url: string): Promise<any> {
+  private readonly logger = new Logger(PostsMetricsService.name);
+
+  constructor(private readonly parserService: ParserService) {}
+
+  /**
+   * 抓取帖子指标并规范化为 NestJS 调用方可直接使用的字段。
+   * 失败抛 Error，错误信息由 parser-core 透传（已含分类与中文消息）。
+   */
+  async fetchMetricsFromUrl(url: string): Promise<ScrapedMetrics> {
     const normalizedUrl = String(url || '').trim();
     if (!normalizedUrl) throw new Error('作品链接不能为空');
 
-    const platform = this.detectPlatform(normalizedUrl);
-    if (!platform) throw new Error('暂时只支持小红书和抖音作品链接');
-
-    // Delegate to Playwright scraper
-    const metrics = await this.scrapeMetrics(platform, normalizedUrl);
-
-    const normalizedTitle = String(metrics.title || '')
-      .replace(/\s*-\s*小红书\s*$/, '')
-      .replace(/\s*-\s*抖音\s*$/, '')
-      .trim();
-
+    const result = await this.parserService.parse(normalizedUrl, { retry: 2, timeout: 15000 });
+    if (isParserFailure(result)) {
+      // 透传错误信息，让 controller 用对应 HTTP 状态码返回
+      throw new Error(result.error.message);
+    }
+    const d = result.data;
     return {
-      platform,
-      title: normalizedTitle,
-      authorName: String(metrics.authorName || '').trim() || undefined,
-      authorId: String(metrics.authorId || '').trim() || undefined,
-      likes: Number(metrics.likes || 0),
-      comments: Number(metrics.comments || 0),
-      favorites: Number(metrics.favorites || 0),
-      shares: metrics.shares === undefined || metrics.shares === null ? undefined : Number(metrics.shares || 0),
-      metricsUpdatedAt: new Date().toISOString(),
+      platform: d.platform,
+      title: d.title,
+      likes: Number(d.likes || 0),
+      comments: Number(d.comments || 0),
+      favorites: Number(d.favorites || 0),
+      shares: Number(d.shares || 0),
+      // parser-core 给的是 ISO 字符串，转 Date 喂给 updateMetrics；JSON 序列化时再变回 ISO
+      metricsUpdatedAt: d.metricsUpdatedAt ? new Date(d.metricsUpdatedAt) : new Date(),
     };
   }
 
+  /**
+   * 启动有头登录浏览器。GUI 环境（Windows / macOS 桌面）。
+   */
   async openLoginBrowser(platform: string): Promise<any> {
     if (!platform || !['小红书', '抖音'].includes(platform)) {
       throw new Error('请选择要登录的平台');
     }
-    // This is a placeholder — the actual Playwright logic is kept in the original file
-    // and imported directly to avoid duplicating 400+ lines of scraping code.
-    const { openLoginBrowser } = require('../../../../metricsFetcher');
-    return openLoginBrowser(platform);
-  }
-
-  private detectPlatform(url: string): string {
-    const value = url.toLowerCase();
-    if (value.includes('xiaohongshu.com') || value.includes('xhslink.com')) return '小红书';
-    if (value.includes('douyin.com')) return '抖音';
-    return '';
-  }
-
-  private async scrapeMetrics(platform: string, targetUrl: string): Promise<any> {
-    // Delegate to the existing metricsFetcher.js to avoid duplicating 400+ lines
-    const { fetchMetricsFromUrl } = require('../../../../metricsFetcher');
-    return fetchMetricsFromUrl(targetUrl);
+    return this.parserService.openLogin(platform);
   }
 }

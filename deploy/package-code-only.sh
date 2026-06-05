@@ -32,7 +32,9 @@ zip -r "$OUTPUT_PATH" \
   -x "data.json" \
   -x "daily-snapshots.json" \
   -x "*.log" \
-  -x ".DS_Store"
+  -x ".DS_Store" \
+  -x ".playwright-profiles/*" \
+  -x "debug-output/*"
 
 echo "代码包已生成：$OUTPUT_PATH"
-echo "说明：该压缩包不包含本地 data.json、daily-snapshots.json、uploads、backups，不会用于覆盖云端业务数据。"
+echo "说明：该压缩包不包含本地 data.json、daily-snapshots.json、uploads、backups、.playwright-profiles 登录态、debug-output 调试产物，不会用于覆盖云端业务数据或泄漏本地登录 Cookie。"

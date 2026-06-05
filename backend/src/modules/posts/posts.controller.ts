@@ -435,6 +435,7 @@ export class PostsController {
       const metrics = await this.postsMetricsService.fetchMetricsFromUrl(body.postUrl);
       await this.postsService.updateMetrics(id, metrics);
       await this.postsService.recordMetricsHistory(id, metrics);
+      // metricsUpdatedAt 是 Date，JSON 序列化时序列化为 ISO 字符串（Date.prototype.toJSON）
       return res.json({ ok: true, metrics });
     } catch (error: any) {
       return res.status(400).json({ message: error.message || '抓取失败' });
