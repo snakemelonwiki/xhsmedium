@@ -45,7 +45,24 @@
 const fs = require("fs");
 const path = require("path");
 const mysql = require("mysql2/promise");
-require("dotenv").config({ path: path.resolve(__dirname, "..", "backend", ".env") });
+
+// 优先读 backend/.env(本地开发 / 已部署);读不到时再退到根 .env;都没有就用 process.env
+const ENV_PATHS = [
+  path.resolve(__dirname, "..", "backend", ".env"),
+  path.resolve(__dirname, "..", ".env"),
+];
+let envLoaded = false;
+for (const p of ENV_PATHS) {
+  if (fs.existsSync(p)) {
+    require("dotenv").config({ path: p });
+    envLoaded = true;
+    break;
+  }
+}
+if (!envLoaded) {
+  // 没 .env 时尝试 dotenv 加载(可能由环境变量直接传入),不报错
+  require("dotenv").config();
+}
 
 // ─── CLI 参数 ────────────────────────────────────────────
 function parseArgs(argv) {
