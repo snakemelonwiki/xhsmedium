@@ -26,6 +26,7 @@
  *   node scripts/migrate-from-legacy.js --skip-uploads           # 不拷贝 uploads/（默认拷贝）
  *   node scripts/migrate-from-legacy.js --skip-validation        # 跳过迁移后业务关系校验（默认校验）
  *   node scripts/migrate-from-legacy.js --skip-backfill          # 跳过 post_metrics_history.leads_count 回填（默认回填）
+ *   node scripts/migrate-from-legacy.js --skip-preflight        # 跳过数据库访问性预检（默认预检）
  *
  * 退出码：
  *   0  全部成功 / 全部已存在（幂等）
@@ -48,7 +49,7 @@ require("dotenv").config({ path: path.resolve(__dirname, "..", "backend", ".env"
 
 // ─── CLI 参数 ────────────────────────────────────────────
 function parseArgs(argv) {
-  const out = { source: null, dryRun: false, verbose: false, only: null, skipUploads: false, skipValidation: false, skipBackfill: false };
+  const out = { source: null, dryRun: false, verbose: false, only: null, skipUploads: false, skipValidation: false, skipBackfill: false, skipPreflight: false };
   for (const a of argv.slice(2)) {
     if (a.startsWith("--source=")) out.source = a.slice("--source=".length);
     else if (a === "--dry-run") out.dryRun = true;
@@ -56,6 +57,7 @@ function parseArgs(argv) {
     else if (a === "--skip-uploads") out.skipUploads = true;
     else if (a === "--skip-validation") out.skipValidation = true;
     else if (a === "--skip-backfill") out.skipBackfill = true;
+    else if (a === "--skip-preflight") out.skipPreflight = true;
     else if (a.startsWith("--only=")) out.only = a.slice("--only=".length).split(",").map((s) => s.trim());
     else if (a === "--help" || a === "-h") {
       console.log(fs.readFileSync(__filename, "utf8").split("\n").filter((l) => l.startsWith(" *")).join("\n"));
@@ -318,6 +320,147 @@ async function copyUploads(referencedFiles) {
   return { copied, skipped, missing, total };
 }
 
+// ─── 数据库访问性预检 ─────────────────────────────────────
+/**
+ * 包装 mysql.createConnection,把常见错误码翻译成中文。
+ * 这样用户在配置错误时不用看 ECONNREFUSED / Unknown database / ER_ACCESS_DENIED_ERROR 原始信息。
+ */
+async function connectWithChecks(config) {
+  try {
+    const conn = await mysql.createConnection(config);
+    return { conn, error: null };
+  } catch (e) {
+    let friendly = e.message;
+    let hint = "";
+    if (e.code === "ECONNREFUSED" || e.errno === -111) {
+      friendly = `MySQL ${config.host}:${config.port} 连不上`;
+      hint = "检查 .env 的 MYSQL_HOST/PORT,确认 MySQL 服务已启动";
+    } else if (e.code === "ENOTFOUND") {
+      friendly = `MySQL 主机 ${config.host} DNS 解析失败`;
+      hint = "检查 MYSQL_HOST 是否拼写正确,或网络是否能访问该主机";
+    } else if (e.code === "ER_ACCESS_DENIED_ERROR" || e.errno === 1045) {
+      friendly = `MySQL 用户认证失败`;
+      hint = "检查 .env 的 MYSQL_USER / MYSQL_PASSWORD,确认用户有足够权限";
+    } else if (e.code === "ER_BAD_DB_ERROR" || e.errno === 1049) {
+      friendly = `数据库 ${config.database} 不存在`;
+      hint = `先 CREATE DATABASE ${config.database} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci; 或检查 .env 的 MYSQL_DATABASE`;
+    } else if (e.code === "ETIMEDOUT" || e.code === "PROTOCOL_CONNECTION_LOST") {
+      friendly = `MySQL 连接超时`;
+      hint = "网络慢或 MySQL 负载高,可加大 connectTimeout 或排查网络";
+    }
+    return { conn: null, error: friendly, hint, code: e.code };
+  }
+}
+
+/**
+ * 连接建立后立刻跑的预检,失败立即退出 2。
+ *
+ * 5 项检查：
+ *   1. SELECT 1  → 确认连接有效
+ *   2. VERSION() → 报告 MySQL 版本(业务要求 >= 5.7)
+ *   3. 5 张目标表存在 → 缺表时提示先跑 backend migrations
+ *   4. 权限满足 → SELECT / INSERT / UPDATE / DELETE 都得有
+ *   5. 当前 DB 行数 → 让用户知道当前库状态
+ */
+async function preflightCheck(conn) {
+  const checks = [];
+  const push = (level, msg) => checks.push({ level, msg });
+
+  // 1. SELECT 1
+  try {
+    const [rows] = await conn.query("SELECT 1 AS ok");
+    if (rows[0]?.ok === 1) push("ok", "SELECT 1 正常");
+    else push("error", `SELECT 1 返回异常: ${JSON.stringify(rows)}`);
+  } catch (e) {
+    push("error", `SELECT 1 失败: ${e.message}`);
+    return { checks, errors: 1, warnings: 0 };
+  }
+
+  // 2. MySQL 版本
+  try {
+    const [rows] = await conn.query("SELECT VERSION() AS v");
+    const v = String(rows[0].v);
+    push("ok", `MySQL 版本: ${v}`);
+    // 简单 major.minor 解析
+    const m = v.match(/^(\d+)\.(\d+)/);
+    if (m) {
+      const major = Number(m[1]);
+      const minor = Number(m[2]);
+      if (major < 5 || (major === 5 && minor < 7)) {
+        push("warning", `MySQL ${v} < 5.7,JSON 列等特性可能不可用`);
+      }
+    }
+  } catch (e) {
+    push("warning", `读 MySQL 版本失败: ${e.message}`);
+  }
+
+  // 3. 5 张目标表 + 1 张 backfill 表
+  const targetTables = ["employees", "users", "accounts", "posts", "leads"];
+  for (const t of targetTables) {
+    const [rows] = await conn.query("SHOW TABLES LIKE ?", [t]);
+    if (rows.length === 0) {
+      push("error", `目标表 ${t} 不存在 — 需先跑 backend migrations 初始化 schema`);
+    } else {
+      push("ok", `目标表 ${t} 存在`);
+    }
+  }
+  {
+    const [rows] = await conn.query("SHOW TABLES LIKE 'post_metrics_history'");
+    if (rows.length === 0) {
+      push("warning", `post_metrics_history 不存在 — backfill 步骤会无效果,但不阻塞`);
+    } else {
+      push("ok", `post_metrics_history 存在(backfill 目标)`);
+    }
+  }
+
+  // 4. 权限:试一行 SELECT,对每张表通过说明 SELECT 通过
+  for (const t of targetTables) {
+    try {
+      await conn.query(`SELECT 1 FROM \`${t}\` LIMIT 0`);
+      // 不打印 OK,会被下面 currentRowCounts 覆盖;失败时单报
+    } catch (e) {
+      push("error", `${t} SELECT 权限不足: ${e.message}`);
+    }
+  }
+  // 测 INSERT 权限:用 SAVEPOINT 试探(不真写)
+  try {
+    await conn.beginTransaction();
+    try {
+      await conn.query("INSERT INTO `employees` (id, employee_code, name) VALUES ('__preflight__', '__preflight__', '__preflight__')");
+      await conn.query("DELETE FROM `employees` WHERE id = '__preflight__'");
+    } finally {
+      await conn.rollback();
+    }
+    push("ok", "INSERT/DELETE 权限满足(试探 INSERT + DELETE 后回滚)");
+  } catch (e) {
+    push("error", `INSERT/DELETE 权限不足: ${e.message}`);
+  }
+  // 测 UPDATE 权限(在 post_metrics_history 上)
+  try {
+    const [rows] = await conn.query("SHOW TABLES LIKE 'post_metrics_history'");
+    if (rows.length > 0) {
+      await conn.query("UPDATE `post_metrics_history` SET leads_count = leads_count WHERE 1 = 0");
+      push("ok", "UPDATE 权限满足(试探无变化 UPDATE)");
+    }
+  } catch (e) {
+    push("error", `UPDATE 权限不足: ${e.message}`);
+  }
+
+  // 5. 当前行数
+  for (const t of [...targetTables, "post_metrics_history"]) {
+    try {
+      const [rows] = await conn.query(`SELECT COUNT(*) AS n FROM \`${t}\``);
+      push("ok", `当前 ${t} 行数: ${rows[0].n}`);
+    } catch (e) {
+      // 表不存在就跳过(已在第 3 步报错)
+    }
+  }
+
+  const errors = checks.filter((c) => c.level === "error").length;
+  const warnings = checks.filter((c) => c.level === "warning").length;
+  return { checks, errors, warnings };
+}
+
 // ─── 业务关系校验（迁移后跑一遍）────────────────────────
 /**
  * 6 类检查：
@@ -335,6 +478,11 @@ async function validateBusinessRules(conn, expectedCounts) {
   const checks = [];
   const push = (level, msg) => checks.push({ level, msg });
 
+  // 单 check 包装:SQL 报错不阻塞其他 check,只记 error
+  const check = async (fn) => {
+    try { await fn(); } catch (e) { push("error", `校验查询异常: ${e.message}`); }
+  };
+
   // A. 必填字段非空（应已被 mapper 防护，但 DB 层也兜底）
   const requiredChecks = [
     { t: "employees", cols: ["id", "employee_code", "name", "status"] },
@@ -345,10 +493,13 @@ async function validateBusinessRules(conn, expectedCounts) {
   ];
   for (const { t, cols } of requiredChecks) {
     for (const col of cols) {
-      const [rows] = await conn.query(`SELECT COUNT(*) AS n FROM ${t} WHERE ${col} IS NULL OR ${col} = ''`);
-      const n = Number(rows[0].n);
-      if (n > 0) push("error", `${t}.${col} 空值 ${n} 条`);
-      else push("ok", `${t}.${col} 非空`);
+      await check(async () => {
+        // DATE / DATETIME 列空字符串会导致比较报错,用 NULL-safe 比较
+        const [rows] = await conn.query(`SELECT COUNT(*) AS n FROM ${t} WHERE ${col} IS NULL OR TRIM(CAST(${col} AS CHAR)) = ''`);
+        const n = Number(rows[0].n);
+        if (n > 0) push("error", `${t}.${col} 空值 ${n} 条`);
+        else push("ok", `${t}.${col} 非空`);
+      });
     }
   }
 
@@ -362,137 +513,140 @@ async function validateBusinessRules(conn, expectedCounts) {
     { t: "leads",    fk: "account_id",  target: "accounts"  },
   ];
   for (const { t, fk, target } of fkChecks) {
-    const [rows] = await conn.query(
-      `SELECT COUNT(*) AS n FROM ${t} t LEFT JOIN ${target} k ON t.${fk} = k.id WHERE k.id IS NULL`,
-    );
-    const n = Number(rows[0].n);
-    if (n > 0) push("error", `${t}.${fk} → ${target} 孤儿 ${n} 条`);
-    else push("ok", `${t}.${fk} → ${target} 全部命中`);
+    await check(async () => {
+      const [rows] = await conn.query(
+        `SELECT COUNT(*) AS n FROM ${t} t LEFT JOIN ${target} k ON t.${fk} = k.id WHERE k.id IS NULL`,
+      );
+      const n = Number(rows[0].n);
+      if (n > 0) push("error", `${t}.${fk} → ${target} 孤儿 ${n} 条`);
+      else push("ok", `${t}.${fk} → ${target} 全部命中`);
+    });
   }
   // leads.post_id 可空,只统计非空的孤儿
-  {
+  await check(async () => {
     const [rows] = await conn.query(
       `SELECT COUNT(*) AS n FROM leads t LEFT JOIN posts k ON t.post_id = k.id WHERE t.post_id IS NOT NULL AND k.id IS NULL`,
     );
     const n = Number(rows[0].n || 0);
     if (n > 0) push("error", `leads.post_id → posts 孤儿 ${n} 条`);
     else push("ok", `leads.post_id → posts 全部命中`);
-  }
+  });
 
   // C. 业务规则
-  // C1. 平台一致：posts / leads 的 platform 应当与 account.platform 一致
-  {
+  await check(async () => {
     const [rows] = await conn.query(
       `SELECT COUNT(*) AS n FROM posts p JOIN accounts a ON p.account_id = a.id WHERE p.platform <> a.platform`,
     );
     const n = Number(rows[0].n);
     if (n > 0) push("warning", `posts.platform ≠ accounts.platform ${n} 条`);
     else push("ok", `posts.platform 一致`);
-  }
-  {
+  });
+  await check(async () => {
     const [rows] = await conn.query(
       `SELECT COUNT(*) AS n FROM leads l JOIN accounts a ON l.account_id = a.id WHERE l.platform <> a.platform`,
     );
     const n = Number(rows[0].n);
     if (n > 0) push("warning", `leads.platform ≠ accounts.platform ${n} 条`);
     else push("ok", `leads.platform 一致`);
-  }
+  });
   // C2. 数值非负
-  {
+  await check(async () => {
     const [rows] = await conn.query(
       `SELECT COUNT(*) AS n FROM posts WHERE likes < 0 OR comments < 0 OR favorites < 0 OR shares < 0 OR traffic < 0`,
     );
     const n = Number(rows[0].n);
     if (n > 0) push("error", `posts 互动数值 < 0 共 ${n} 条`);
     else push("ok", `posts 互动数值 ≥ 0`);
-  }
-  {
+  });
+  await check(async () => {
     const [rows] = await conn.query(
       `SELECT COUNT(*) AS n FROM accounts WHERE account_name = '' OR platform = ''`,
     );
     const n = Number(rows[0].n);
     if (n > 0) push("error", `accounts 名称或平台空值 ${n} 条`);
     else push("ok", `accounts 名称+平台非空`);
-  }
-  // C3. 日期合理性：published_at 不应是 1970（mapper 兜底默认值），也不应 > 明天
-  {
+  });
+  // C3. 日期合理性:DATE 列可能有空字符串导致 < 比较失败,过滤掉
+  await check(async () => {
     const [rows] = await conn.query(
-      `SELECT COUNT(*) AS n FROM posts WHERE published_at < '2020-01-01' OR published_at > DATE_ADD(CURDATE(), INTERVAL 1 DAY)`,
+      `SELECT COUNT(*) AS n FROM posts WHERE published_at IS NOT NULL AND (published_at < '2020-01-01' OR published_at > DATE_ADD(CURDATE(), INTERVAL 1 DAY))`,
     );
     const n = Number(rows[0].n);
     if (n > 0) push("warning", `posts.published_at 异常（< 2020-01-01 或 > 明天）${n} 条`);
     else push("ok", `posts.published_at 在合理区间`);
-  }
-  // C4. 时间戳顺序：created_at <= updated_at
-  {
+  });
+  // C4. 时间戳顺序
+  await check(async () => {
     const [rows] = await conn.query(
       `SELECT COUNT(*) AS n FROM posts WHERE created_at > updated_at`,
     );
     const n = Number(rows[0].n);
     if (n > 0) push("warning", `posts 时间倒序（created > updated）${n} 条`);
     else push("ok", `posts 时间顺序正常`);
-  }
-  {
+  });
+  await check(async () => {
     const [rows] = await conn.query(
       `SELECT COUNT(*) AS n FROM leads WHERE created_at > updated_at`,
     );
     const n = Number(rows[0].n);
     if (n > 0) push("warning", `leads 时间倒序（created > updated）${n} 条`);
     else push("ok", `leads 时间顺序正常`);
-  }
+  });
 
   // D. 状态/角色 ENUM 合法
-  {
+  await check(async () => {
     const validRoles = new Set(["admin", "staff", "sales", "academic", "owner", "operation", "supervisor"]);
     const [rows] = await conn.query(`SELECT DISTINCT role FROM users`);
     const bad = rows.map((r) => r.role).filter((r) => !validRoles.has(r));
     if (bad.length > 0) push("error", `users.role 非法值：${bad.join(", ")}`);
     else push("ok", `users.role 全部合法`);
-  }
-  {
+  });
+  await check(async () => {
     const validUserStatus = new Set(["active", "inactive", "locked"]);
     const [rows] = await conn.query(`SELECT DISTINCT status FROM users`);
     const bad = rows.map((r) => r.status).filter((s) => !validUserStatus.has(s));
     if (bad.length > 0) push("error", `users.status 非法值：${bad.join(", ")}`);
     else push("ok", `users.status 全部合法`);
-  }
-  {
+  });
+  await check(async () => {
     const validEmpStatus = new Set(["在职", "停用"]);
     const [rows] = await conn.query(`SELECT DISTINCT status FROM employees`);
     const bad = rows.map((r) => r.status).filter((s) => !validEmpStatus.has(s));
     if (bad.length > 0) push("warning", `employees.status 异常值：${bad.join(", ")}（非在职/停用）`);
     else push("ok", `employees.status 全部合法`);
-  }
-  {
+  });
+  await check(async () => {
     const validAccStatus = new Set(["正常", "停用"]);
     const [rows] = await conn.query(`SELECT DISTINCT status FROM accounts`);
     const bad = rows.map((r) => r.status).filter((s) => !validAccStatus.has(s));
     if (bad.length > 0) push("warning", `accounts.status 异常值：${bad.join(", ")}（非正常/停用）`);
     else push("ok", `accounts.status 全部合法`);
-  }
+  });
 
   // E. 唯一约束
-  {
+  await check(async () => {
     const [rows] = await conn.query(
       `SELECT username, COUNT(*) AS n FROM users GROUP BY username HAVING n > 1`,
     );
     if (rows.length > 0) push("error", `users.username 重复：${rows.map((r) => `${r.username}(${r.n})`).join(", ")}`);
     else push("ok", `users.username 唯一`);
-  }
-  {
+  });
+  await check(async () => {
     const [rows] = await conn.query(
       `SELECT employee_code, COUNT(*) AS n FROM employees GROUP BY employee_code HAVING n > 1`,
     );
     if (rows.length > 0) push("error", `employees.employee_code 重复：${rows.map((r) => `${r.employee_code}(${r.n})`).join(", ")}`);
     else push("ok", `employees.employee_code 唯一`);
-  }
+  });
 
-  // F. 跨表计数 sanity（DB 行数 ≥ 源 JSON 数据中已成功迁移的）
+  // F. 跨表计数 sanity
   for (const [t, expected] of Object.entries(expectedCounts)) {
-    const [rows] = await conn.query(`SELECT COUNT(*) AS n FROM ${t}`);
-    const n = Number(rows[0].n);
-    if (n < expected) push("warning", `${t} DB=${n} < 源数据 ${expected}（部分记录未迁入，正常）`);
-    else push("ok", `${t} DB=${n} ≥ 源数据 ${expected}`);
+    await check(async () => {
+      const [rows] = await conn.query(`SELECT COUNT(*) AS n FROM ${t}`);
+      const n = Number(rows[0].n);
+      if (n < expected) push("warning", `${t} DB=${n} < 源数据 ${expected}（部分记录未迁入，正常）`);
+      else push("ok", `${t} DB=${n} ≥ 源数据 ${expected}`);
+    });
   }
 
   const errors = checks.filter((c) => c.level === "error").length;
@@ -559,14 +713,45 @@ async function main() {
   console.log(`源数据：users=${data.users.length}  employees=${data.employees.length}  accounts=${data.accounts.length}  posts=${data.posts.length}  leads=${data.leads.length}  notifications=${data.notifications.length}`);
   console.log();
 
-  const conn = await mysql.createConnection({
+  // ─── 数据库连接(友好错误)────────────────────────────
+  const connConfig = {
     host: process.env.MYSQL_HOST,
     port: Number(process.env.MYSQL_PORT),
     user: process.env.MYSQL_USER,
     password: process.env.MYSQL_PASSWORD,
     database: process.env.MYSQL_DATABASE,
-  });
-  console.log(`✓ 已连上 MySQL：${process.env.MYSQL_HOST}:${process.env.MYSQL_PORT}/${process.env.MYSQL_DATABASE}`);
+    connectTimeout: 5000,  // 5s 内连不上就放弃,避免长时间挂起
+  };
+  const { conn, error: connError, hint: connHint } = await connectWithChecks(connConfig);
+  if (!conn) {
+    console.error(`✗ 数据库连接失败: ${connError}`);
+    if (connHint) console.error(`  提示: ${connHint}`);
+    process.exit(2);
+  }
+  console.log(`✓ 已连上 MySQL: ${connConfig.host}:${connConfig.port}/${connConfig.database} (connectTimeout=${connConfig.connectTimeout}ms)`);
+
+  // ─── 数据库预检 ─────────────────────────────────────
+  let preflightErrors = 0;
+  if (args.skipPreflight) {
+    console.log("\n[preflight] --skip-preflight 已指定,跳过访问性预检");
+  } else {
+    console.log("\n[preflight] 探测数据库访问性...");
+    const t0 = Date.now();
+    const pf = await preflightCheck(conn);
+    const dt = ((Date.now() - t0) / 1000).toFixed(1);
+    preflightErrors = pf.errors;
+    console.log(`[preflight] ${pf.checks.length} checks, errors=${pf.errors} warnings=${pf.warnings} (${dt}s)\n`);
+    for (const c of pf.checks) {
+      const mark = c.level === "ok" ? "✓" : c.level === "warning" ? "⚠" : "✗";
+      console.log(`  ${mark} [${c.level.padEnd(7)}] ${c.msg}`);
+    }
+    if (pf.errors > 0) {
+      console.log(`\n[preflight] ✗ 预检有 ${pf.errors} 个 error,终止迁移`);
+      await conn.end();
+      process.exit(2);
+    }
+    console.log(`\n[preflight] ✓ 通过,可以开始迁移`);
+  }
   console.log();
 
   const summary = {};
@@ -684,8 +869,8 @@ async function main() {
     console.log(`\n[提示] 校验有 ${validationWarnings} 个 warning，建议人工复核。`);
   }
 
-  // 退出码：失败 = 迁移 fail 或校验 error
-  const exitCode = totalFailed > 0 || validationErrors > 0 ? 2 : 0;
+  // 退出码：失败 = preflight error / 迁移 fail / 校验 error
+  const exitCode = preflightErrors > 0 || totalFailed > 0 || validationErrors > 0 ? 2 : 0;
   process.exit(exitCode);
 }
 
