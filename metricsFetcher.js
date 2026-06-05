@@ -24,8 +24,11 @@ fs.mkdirSync(PROFILE_ROOT, { recursive: true });
 
 function detectPlatform(url) {
   const value = String(url || "").toLowerCase();
+  // 小红书:长链 + 短链
   if (value.includes("xiaohongshu.com") || value.includes("xhslink.com")) return "小红书";
-  if (value.includes("douyin.com")) return "抖音";
+  // 抖音:长链(douyin.com / iesdouyin.com 老短链 / v.douyin.com 新短链)
+  // 短链在抓取时会被 302 到长链,这里只做平台识别,真实 URL 在 page.goto 时由浏览器解析
+  if (value.includes("douyin.com") || value.includes("iesdouyin.com") || value.includes("v.douyin.com")) return "抖音";
   return "";
 }
 
@@ -494,6 +497,9 @@ async function closeLoginBrowser(platform) {
 /**
  * 查询某平台 profile 是否带登录态（基于 Cookies 文件 + Local Storage 目录存在性）。
  * 不读 Cookies 内容（避免解密 SQLite），只看文件存在 + 大小 > 0。
+ *
+ * 注：Chromium 124+ 把 Cookies 从 Default/Cookies 移到了 Default/Network/Cookies，
+ *     两路径都得查，否则新 profile 会误判为未登录。
  */
 function getLoginStatus(platform) {
   if (!platform || !["小红书", "抖音"].includes(platform)) {
@@ -504,18 +510,28 @@ function getLoginStatus(platform) {
   const exists = fs.existsSync(profileDir);
   let hasSession = false;
   let cookieSize = 0;
+  let cookiePath = null;
   let localStorageExists = false;
   let lastModified = null;
   if (exists) {
-    const cookiesPath = path.join(profileDir, "Default", "Cookies");
-    const localStoragePath = path.join(profileDir, "Default", "Local Storage");
-    try {
-      const stat = fs.statSync(cookiesPath);
-      cookieSize = stat.size;
-      lastModified = stat.mtime.toISOString();
-      hasSession = stat.size > 0;
-    } catch {}
-    localStorageExists = fs.existsSync(localStoragePath);
+    // 新旧 Chromium profile 路径兼容
+    const candidateCookiePaths = [
+      path.join(profileDir, "Default", "Network", "Cookies"),  // Chromium 124+
+      path.join(profileDir, "Default", "Cookies"),              // Chromium < 124
+    ];
+    for (const p of candidateCookiePaths) {
+      try {
+        const stat = fs.statSync(p);
+        if (stat.size > 0) {
+          cookiePath = p;
+          cookieSize = stat.size;
+          lastModified = stat.mtime.toISOString();
+          hasSession = true;
+          break;
+        }
+      } catch {}
+    }
+    localStorageExists = fs.existsSync(path.join(profileDir, "Default", "Local Storage"));
   }
   return {
     platform,
@@ -524,6 +540,7 @@ function getLoginStatus(platform) {
     isOpen: loginContexts.has(platform),
     hasSession,
     cookieSize,
+    cookiePath,
     localStorageExists,
     lastModified,
   };

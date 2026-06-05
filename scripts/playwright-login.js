@@ -104,7 +104,20 @@ async function main() {
     }
 
     // 默认：启动登录浏览器
-    const result = await openLoginBrowser(args.platform);
+    let result;
+    try {
+      result = await openLoginBrowser(args.platform);
+    } catch (err) {
+      // headful 在无 GUI 环境会抛错（Cannot open display / GUI not available）
+      const msg = err?.message || String(err);
+      process.stdout.write(
+        JSON.stringify({
+          ok: false,
+          error: { code: "open_failed", message: msg, hint: "登录浏览器需要 GUI 环境；服务器请先用本地登录后 rsync .playwright-profiles/" },
+        }) + "\n"
+      );
+      process.exit(EXIT.BUSINESS);
+    }
     process.stdout.write(JSON.stringify(result) + "\n");
     if (result.ok) {
       // 关键：保持 Node 进程存活，让 persistent context 持续（否则进程退出 → context 销毁 → 浏览器闪退）
@@ -121,15 +134,12 @@ async function main() {
     } else {
       process.exit(EXIT.BUSINESS);
     }
-    // headful 在无 GUI 环境会抛错（Cannot open display / GUI not available）
-    const msg = err?.message || String(err);
+  } catch (err) {
+    // 兜底：未预期异常走这里
     process.stdout.write(
-      JSON.stringify({
-        ok: false,
-        error: { code: "open_failed", message: msg, hint: "登录浏览器需要 GUI 环境；服务器请先用本地登录后 rsync .playwright-profiles/" },
-      }) + "\n"
+      JSON.stringify({ ok: false, error: { code: "uncaught", message: err?.stack || String(err) } }) + "\n"
     );
-    process.exit(EXIT.BUSINESS);
+    process.exit(EXIT.SYSTEM ?? EXIT.BUSINESS);
   }
 }
 
