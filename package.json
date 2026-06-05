@@ -3,6 +3,10 @@
   "version": "0.2.0",
   "private": true,
   "description": "运营中台 - 内容运营、客资协同、订单跟进、团队管理一体化中台",
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=10"
+  },
   "main": "server.js",
   "scripts": {
     "start": "concurrently \"npm run start:legacy\" \"npm run start:backend\"",
