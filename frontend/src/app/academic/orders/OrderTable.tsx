@@ -1,9 +1,8 @@
 'use client';
 
 import { DownloadOutlined, ReloadOutlined } from '@ant-design/icons';
-import { Alert, Button, Card, DatePicker, Input, Modal, Pagination, Select, Space, Table, Tag, Typography, message } from 'antd';
+import { Alert, Button, Card, Input, Modal, Pagination, Select, Space, Table, Tag, Typography, message } from 'antd';
 import type { TableColumnsType } from 'antd';
-import type { Dayjs } from 'dayjs';
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 
@@ -13,6 +12,8 @@ import { readStoredUser } from '@/shared/auth/auth';
 import type { OrderItem, OrderScope, OrderStatusCode } from '@/shared/types/orders';
 import { HANDOVER_STATUS_OPTIONS, HandoverStatusCode, handoverStatusMeta, orderStatusMeta, paidStatusMeta } from '@/shared/api/enums';
 import { formatDateTime } from '@/shared/utils/date-format';
+import { QuickRangePicker } from '@/shared/components/date';
+import type { DateRangeValue } from '@/shared/components/date';
 
 const orderStatusOptions: { label: string; value: OrderStatusCode }[] = [
   { label: '待领取', value: 'to_receive' },
@@ -83,7 +84,7 @@ export function OrderTable({ title, description, scope, status, showStatusFilter
   const [assignAcademicUserId, setAssignAcademicUserId] = useState('');
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const [exportSubmitting, setExportSubmitting] = useState(false);
-  const [exportRange, setExportRange] = useState<[Dayjs, Dayjs] | null>(null);
+  const [exportRange, setExportRange] = useState<DateRangeValue>(null);
   const [exportStatus, setExportStatus] = useState<string>('');
   const [exportPaidStatus, setExportPaidStatus] = useState<string>('');
 
@@ -169,8 +170,8 @@ export function OrderTable({ title, description, scope, status, showStatusFilter
       if (exportStatus) filter.status = exportStatus;
       if (exportPaidStatus) filter.paidStatus = exportPaidStatus;
       if (exportRange) {
-        filter.from = exportRange[0].startOf('day').toISOString();
-        filter.to = exportRange[1].endOf('day').toISOString();
+        filter.from = exportRange.start.startOf('day').toISOString();
+        filter.to = exportRange.end.endOf('day').toISOString();
       }
       const result = await createExport({ exportType: 'orders', filter });
 
@@ -477,10 +478,11 @@ export function OrderTable({ title, description, scope, status, showStatusFilter
             <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 4 }}>
               时间范围
             </Typography.Text>
-            <DatePicker.RangePicker
+            <QuickRangePicker
               value={exportRange}
-              onChange={(range) => setExportRange((range as [Dayjs, Dayjs]) || null)}
+              onChange={setExportRange}
               style={{ width: '100%' }}
+              pickerProps={{ style: { width: '100%' } }}
             />
           </div>
         </Space>

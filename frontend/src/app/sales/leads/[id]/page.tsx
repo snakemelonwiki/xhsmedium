@@ -86,6 +86,7 @@ type CloseDealFormValues = {
   guaranteeType?: string;
   paymentStage?: string;
   clientRequirementNote?: string;
+  remark?: string;
 };
 
 type FollowFormValues = {
@@ -150,6 +151,19 @@ export default function SalesLeadDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.id]);
 
+  // v1.3 / SA-12: 当客资已"已添加通过"时，自动滚动到订单跟进区；
+  // 销售填写完"标记成交"后 lead 状态推进到 ADDED_SUCCESS，后端 / 订单列表页会同步刷新。
+  useEffect(() => {
+    if (!lead) return;
+    if (lead.status === LeadStatus.ADDED_SUCCESS) {
+      // 找到订单/教务交付区作为锚点（Descriptions 中 orderInfo 行）
+      const target = document.querySelector('[data-anchor="order-followup"]');
+      if (target) {
+        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }
+  }, [lead?.status, lead?.id]);
+
   async function submitFollow(values: FollowFormValues) {
     await run(async () => {
       try {
@@ -207,6 +221,7 @@ export default function SalesLeadDetailPage() {
           guaranteeType: values.guaranteeType ?? null,
           paymentStage: values.paymentStage ?? null,
           clientRequirementNote: values.clientRequirementNote ?? null,
+          remark: values.remark ?? null,
         });
         message.success(`已标记成交，订单编号 ${result.orderCode || result.orderId || ''}`);
         setCloseDealOpen(false);
@@ -332,17 +347,23 @@ export default function SalesLeadDetailPage() {
             {
               key: 'orderInfo',
               label: '订单 / 教务交付进度',
-              children: order
-                ? [
-                    order.serviceType ? `产品：${order.serviceType}` : null,
-                    order.amount ? `金额：${order.amount}元` : null,
-                    order.paidStatus ? `付款：${paidStatusMeta(order.paidStatus).label}` : null,
-                    order.orderStatus ? `订单状态：${orderStatusMeta(order.orderStatus).label}` : null,
-                    order.handoverStatus ? `交接：${handoverStatusMeta(order.handoverStatus).label}` : null,
-                  ]
-                    .filter(Boolean)
-                    .join(' | ')
-                : '暂无订单',
+              // v1.3 / SA-12: 锚点 — "已添加"状态时滚到此处
+              labelStyle: { background: '#fafafa' },
+              children: (
+                <div data-anchor="order-followup">
+                  {order
+                    ? [
+                        order.serviceType ? `产品：${order.serviceType}` : null,
+                        order.amount ? `金额：${order.amount}元` : null,
+                        order.paidStatus ? `付款：${paidStatusMeta(order.paidStatus).label}` : null,
+                        order.orderStatus ? `订单状态：${orderStatusMeta(order.orderStatus).label}` : null,
+                        order.handoverStatus ? `交接：${handoverStatusMeta(order.handoverStatus).label}` : null,
+                      ]
+                        .filter(Boolean)
+                        .join(' | ')
+                    : '暂无订单'}
+                </div>
+              ),
             },
             { key: 'status', label: '客资状态', children: <StatusTag kind="leadStatus" code={lead?.status ?? LeadStatus.ASSIGNED} /> },
             { key: 'addStatus', label: '添加状态', children: <StatusTag kind="addStatus" code={lead?.addStatus ?? LeadAddStatus.NOT_ADDED} /> },
@@ -557,11 +578,35 @@ export default function SalesLeadDetailPage() {
                 ]}
               />
             </Form.Item>
-            <Form.Item name="amount" label="成交金额（元）" rules={[{ required: true, message: '请输入成交金额' }]}>
-              <InputNumber min={0} precision={2} style={{ width: '100%' }} placeholder="0.00" />
+            <Form.Item
+              name="amount"
+              label="成交金额（元）"
+              rules={[
+                { required: true, message: '请输入成交金额' },
+                {
+                  validator: (_rule, value) => {
+                    if (value === undefined || value === null || value === '') {
+                      return Promise.reject(new Error('请输入成交金额'));
+                    }
+                    const num = Number(value);
+                    if (!Number.isFinite(num)) {
+                      return Promise.reject(new Error('成交金额必须为数字'));
+                    }
+                    if (num <= 0) {
+                      return Promise.reject(new Error('订单金额必填且必须大于0'));
+                    }
+                    return Promise.resolve();
+                  },
+                },
+              ]}
+            >
+              <InputNumber min={0.01} precision={2} style={{ width: '100%' }} placeholder="0.00" />
             </Form.Item>
             <Form.Item name="paymentStage" label="付款阶段" className="full-row">
               <Input placeholder="如：定金 / 中期 / 尾款" />
+            </Form.Item>
+            <Form.Item name="remark" label="成交备注" className="full-row">
+              <Input.TextArea rows={2} placeholder="可补充成交背景、客户特殊要求等" />
             </Form.Item>
           </div>
           <Space>

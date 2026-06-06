@@ -350,6 +350,34 @@ export async function listMyDeals(query: {
   return { ...paged, page, pageSize: limit, items: paged.items };
 }
 
+/**
+ * v1.3 / SA-12: 销售"改派" — 将客资转给另一个销售。
+ * 后端会做权限校验（当前销售本人 / 主管 / admin / owner），
+ * 写入 operation_logs.REASSIGN，并通知新销售。
+ */
+export async function reassignLead(
+  id: string,
+  body: { newAssigneeId: string; reason?: string },
+) {
+  return apiClient.post<{ ok: boolean; lead?: SalesLead }>(`/leads/${id}/reassign`, body);
+}
+
+/**
+ * v1.3 / SA-12: 获取"改派"弹窗可选销售列表（角色 = sales 的活跃用户）。
+ * 简易实现：拉一次 /users 列表并按 role=sales 过滤；后端若无此端点则兜底返回空数组。
+ */
+export async function listReassignCandidates(): Promise<Array<{ id: string; name: string }>> {
+  try {
+    const payload = await apiClient.get<unknown>('/users', { query: { role: 'sales', active: 1, limit: 200 } });
+    const arr = Array.isArray(payload) ? payload : (payload as any)?.items || [];
+    return (arr as Array<Record<string, unknown>>)
+      .map((u) => ({ id: String(u.id || ''), name: String(u.name || u.username || u.id || '') }))
+      .filter((u) => u.id);
+  } catch {
+    return [];
+  }
+}
+
 const EMPTY_SALES_HOME_SUMMARY: SalesHomeSummary = {
   newAssigned: 0,
   pendingAdd: 0,

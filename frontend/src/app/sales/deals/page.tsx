@@ -5,7 +5,6 @@ import {
   Alert,
   Button,
   Card,
-  DatePicker,
   Empty,
   Pagination,
   Select,
@@ -17,12 +16,13 @@ import {
   message,
 } from 'antd';
 import type { TableColumnsType } from 'antd';
-import type { Dayjs } from 'dayjs';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
 import { listMyDeals } from '@/shared/api/leads';
 import { formatDateTime } from '@/shared/utils/date-format';
+import { QuickRangePicker } from '@/shared/components/date';
+import type { DateRangeValue } from '@/shared/components/date';
 
 const PRODUCT_TYPE_OPTIONS = [
   { label: '全部产品', value: '' },
@@ -60,7 +60,7 @@ const orderStatusMeta: Record<string, { label: string; color: string }> = {
 type Filters = {
   status: string;
   productType: string;
-  dateRange: [Dayjs, Dayjs] | null;
+  dateRange: DateRangeValue;
 };
 
 const EMPTY_FILTERS: Filters = {
@@ -86,8 +86,8 @@ export default function SalesDealsPage() {
       const result = await listMyDeals({
         status: filters.status || undefined,
         productType: filters.productType || undefined,
-        startDate: filters.dateRange?.[0]?.startOf('day').toISOString() || undefined,
-        endDate: filters.dateRange?.[1]?.endOf('day').toISOString() || undefined,
+        startDate: filters.dateRange?.start.startOf('day').toISOString() || undefined,
+        endDate: filters.dateRange?.end.endOf('day').toISOString() || undefined,
         page,
         pageSize,
       });
@@ -107,7 +107,7 @@ export default function SalesDealsPage() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters.status, filters.productType, filters.dateRange?.[0]?.valueOf(), filters.dateRange?.[1]?.valueOf()]);
+  }, [filters.status, filters.productType, filters.dateRange?.start.valueOf(), filters.dateRange?.end.valueOf()]);
 
   const columns: TableColumnsType<Record<string, unknown>> = [
     {
@@ -171,7 +171,15 @@ export default function SalesDealsPage() {
       dataIndex: 'amount',
       key: 'amount',
       width: 120,
-      render: (value: unknown) => (value ? `¥ ${value}` : '-'),
+      render: (value: unknown) => {
+        // v1.3 / BF-09 close-deal-amount: 成交金额必填且 > 0。
+        // 历史脏数据可能为 0 / null / '' / undefined，统一展示「未填写」+ 红色警告，
+        // 提示销售手动补录（不自动填充，避免误判金额）。
+        if (value === null || value === undefined || value === '' || Number(value) === 0) {
+          return <Typography.Text type="danger">未填写</Typography.Text>;
+        }
+        return `¥ ${value}`;
+      },
     },
     {
       title: '负责教务',
@@ -229,9 +237,9 @@ export default function SalesDealsPage() {
             style={{ width: 140 }}
             placeholder="订单状态"
           />
-          <DatePicker.RangePicker
+          <QuickRangePicker
             value={filters.dateRange}
-            onChange={(range) => setFilters((prev) => ({ ...prev, dateRange: (range as [Dayjs, Dayjs]) || null }))}
+            onChange={(range) => setFilters((prev) => ({ ...prev, dateRange: range }))}
           />
           <Button icon={<ReloadOutlined />} onClick={load} loading={loading}>刷新</Button>
         </Space>

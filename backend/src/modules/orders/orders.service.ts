@@ -134,6 +134,20 @@ export class OrdersService {
     if (!salesUserId) {
       throw new BadRequestException('sales user required');
     }
+    // v1.3 / BF-09 close-deal-amount: 订单金额必填且 > 0。
+    // 老接口允许 amount 为 null / 0，导致成交订单无金额（财务对账、补单均受影响）。
+    // 强校验：缺失、null、空字符串、0、负数 一律拒绝。
+    const rawAmount = dto.amount;
+    let amountNum: number | null = null;
+    if (rawAmount !== undefined && rawAmount !== null && rawAmount !== '') {
+      const parsed = typeof rawAmount === 'number' ? rawAmount : Number(rawAmount);
+      if (Number.isFinite(parsed) && parsed > 0) {
+        amountNum = parsed;
+      }
+    }
+    if (amountNum === null) {
+      throw new BadRequestException('订单金额必填且必须大于0');
+    }
     const orderId = makeId();
     const orderFinanceId = makeId();
     let leadContact = '';
@@ -164,7 +178,8 @@ export class OrdersService {
       //   下不稳定,仍可能漏判。raw SQL 100% 绕开 TypeORM 1.0 这条 bug 路径,且语义
       //   与 insert/update 等价（带参数化,无 SQL 注入风险）。
       const remark = this.composeRemark(dto);
-      const amountStr = dto.amount != null && dto.amount !== '' ? String(dto.amount) : null;
+      // 上面已经校验 amountNum > 0；统一以 string 形式落库。
+      const amountStr = String(amountNum);
       await manager.query(
         `UPDATE leads
          SET process_status = ?, deal_status = ?, status = ?, updated_at = CURRENT_TIMESTAMP

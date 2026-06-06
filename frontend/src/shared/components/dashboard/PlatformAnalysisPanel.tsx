@@ -21,6 +21,7 @@ import {
   Typography,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
+import { useRouter } from 'next/navigation';
 import type {
   EfficiencyAccount,
   PersonalRankingsResponse,
@@ -394,3 +395,111 @@ export function PlatformAnalysisPanel({ rankings, platformDist, loading }: Platf
 }
 
 export default PlatformAnalysisPanel;
+
+// ---------------------------------------------------------------------------
+// PostTitleCell — shared cell renderer for the "来源作品" column.
+//
+// Bug spec (v1.3 P1-3):
+//   "来源作品只显示几个字，不要显示成分行，触碰后悬浮框显示原名，点击可跳转至对应作品"
+//
+// Behavior:
+//   - Truncates the title to `maxChars` (default 8) followed by "..." when
+//     the original length exceeds the cap. Short titles are rendered as-is.
+//   - On hover, shows an antd Tooltip with the full title (no tooltip when
+//     the title is already short enough to fit).
+//   - On click, navigates to /admin/posts/{postId}. When `postId` is missing
+//     or falsy, the cell falls back to plain non-interactive text.
+//   - Safe under React strict mode (no side effects, no refs, no subscriptions).
+//
+// P2 imports:
+//   import { PostTitleCell } from '@/shared/components/dashboard/PlatformAnalysisPanel';
+//   (A barrel re-export at @/shared/components/dashboard/index.ts can be added
+//    by a separate task — currently no such index file exists in the repo.)
+// ---------------------------------------------------------------------------
+
+export interface PostTitleCellProps {
+  /** Full post title (may be empty/undefined). */
+  title?: string | null;
+  /** Post id used to build the navigation href. When missing, cell is read-only. */
+  postId?: string | number | null;
+  /** Maximum characters to display before truncating with "...". Default 8. */
+  maxChars?: number;
+  /** Optional override for the navigation href. */
+  href?: string;
+  /** Optional extra className on the wrapping span. */
+  className?: string;
+}
+
+const DEFAULT_MAX_CHARS = 8;
+
+function truncate(s: string, maxChars: number): string {
+  if (maxChars <= 0) return '';
+  // Use Array.from to count Unicode code points rather than UTF-16 code units,
+  // so a single emoji / CJK surrogate pair is treated as one character.
+  const codePoints = Array.from(s);
+  if (codePoints.length <= maxChars) return s;
+  return codePoints.slice(0, maxChars).join('') + '...';
+}
+
+export function PostTitleCell({
+  title,
+  postId,
+  maxChars = DEFAULT_MAX_CHARS,
+  href,
+  className,
+}: PostTitleCellProps) {
+  const router = useRouter();
+  const safeTitle = typeof title === 'string' ? title : '';
+  const hasPostId = postId !== undefined && postId !== null && postId !== '';
+  const truncated = truncate(safeTitle, maxChars);
+  const isTruncated = truncated !== safeTitle;
+
+  // Click handler — uses router.push so it respects the Next.js app router
+  // and works inside nested layouts. We stop propagation so the click does
+  // not also trigger the surrounding Table row's row-selection behavior.
+  const handleClick = (e: React.MouseEvent<HTMLSpanElement>) => {
+    e.stopPropagation();
+    if (!hasPostId) return;
+    const target = href || `/admin/posts/${encodeURIComponent(String(postId))}`;
+    router.push(target);
+  };
+
+  // Common span styling — single-line, no wrap, clickable only when hasPostId.
+  const baseStyle: React.CSSProperties = {
+    cursor: hasPostId ? 'pointer' : 'default',
+    color: hasPostId ? '#1677ff' : undefined,
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    display: 'inline-block',
+    maxWidth: '100%',
+  };
+
+  // When the title fits within the cap, skip the tooltip to avoid visual noise.
+  const content = (
+    <span
+      onClick={hasPostId ? handleClick : undefined}
+      className={className}
+      style={baseStyle}
+      role={hasPostId ? 'link' : undefined}
+      tabIndex={hasPostId ? 0 : undefined}
+      onKeyDown={
+        hasPostId
+          ? (e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                handleClick(e as unknown as React.MouseEvent<HTMLSpanElement>);
+              }
+            }
+          : undefined
+      }
+    >
+      {truncated || '-'}
+    </span>
+  );
+
+  if (isTruncated && safeTitle) {
+    return <Tooltip title={safeTitle}>{content}</Tooltip>;
+  }
+  return content;
+}

@@ -652,6 +652,42 @@ export class LeadsController {
     }
   }
 
+  /**
+   * v1.3 / SA-12: 销售 / 主管 改派客资归属销售。
+   * body: { newAssigneeId: string, reason?: string }
+   * 权限：当前 lead 的 assigned_sales_user_id === actorUserId，或 actor.role ∈ {supervisor, admin, owner}。
+   * 副作用：更新 leads.assigned_sales_user_id / _name / updated_at；写 operation_logs REASSIGN；通知新销售。
+   */
+  @Post(':id/reassign')
+  @UseGuards(DebounceGuard)
+  async reassign(
+    @Param('id') id: string,
+    @Body() body: { newAssigneeId: string; reason?: string; actorUserId?: string },
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    const session = (req as any).session;
+    const actorUserId = getSessionUserId(req) || body?.actorUserId || '';
+    const actorRole = session?.role || '';
+    const newAssigneeId = body?.newAssigneeId ? String(body.newAssigneeId) : '';
+    if (!newAssigneeId) {
+      return res.status(400).json({ ok: false, message: 'newAssigneeId is required' });
+    }
+    try {
+      const result = await this.leadsService.reassignLead({
+        leadId: id,
+        newAssigneeId,
+        reason: body?.reason || '',
+        actorUserId,
+        actorRole,
+      });
+      return res.json({ ok: true, lead: result });
+    } catch (err: any) {
+      const status = err?.status || 422;
+      return res.status(status).json({ ok: false, message: err?.message || 'reassign failed' });
+    }
+  }
+
   @Delete(':id')
   async remove(@Param('id') id: string, @Req() req: Request, @Res() res: Response) {
     const session = (req as any).session;

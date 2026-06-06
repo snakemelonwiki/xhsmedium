@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { Lead } from '../../entities/lead.entity';
@@ -1044,6 +1044,90 @@ export class LeadsService {
     if (role === 'admin' || role === 'owner') return true;
     if (role === 'sales') return Boolean(actor?.actorUserId && row.assignedSalesUserId === actor.actorUserId);
     return Boolean(actor?.actorEmployeeId && row.employeeId === actor.actorEmployeeId);
+  }
+
+  /**
+   * v1.3 / SA-12: 改派客资归属销售。
+   * 权限：当前 assigned_sales_user_id === actorUserId，或 actorRole ∈ {supervisor, admin, owner}。
+   * 副作用：更新 leads.assigned_sales_user_id/_name/updated_at；写 operation_logs.REASSIGN；通知新销售。
+   * 注：表里实际的列是 assigned_sales_user_id / assigned_sales_user_name，没有独立的 assigned_at；
+   *     updated_at 由 TypeORM 自动维护。
+   */
+  async reassignLead(params: {
+    leadId: string;
+    newAssigneeId: string;
+    reason?: string;
+    actorUserId?: string;
+    actorRole?: string;
+  }): Promise<any> {
+    const { leadId, newAssigneeId, reason = '', actorUserId = '', actorRole = '' } = params;
+    if (!leadId) throw new BadRequestException('leadId required');
+    if (!newAssigneeId) throw new BadRequestException('newAssigneeId required');
+
+    const lead = await this.leadRepository.findOne({ where: { id: leadId } });
+    if (!lead) throw new NotFoundException('lead not found');
+
+    // 权限校验：本人 / supervisor / admin / owner
+    const isSelf = Boolean(actorUserId && lead.assignedSalesUserId === actorUserId);
+    const isPrivileged = actorRole === 'supervisor' || actorRole === 'admin' || actorRole === 'owner';
+    if (!isSelf && !isPrivileged) {
+      throw new ForbiddenException('only the current assignee or a supervisor/admin/owner can reassign this lead');
+    }
+    if (lead.assignedSalesUserId === newAssigneeId) {
+      throw new BadRequestException('newAssigneeId is the same as current assignee');
+    }
+
+    // 解析新销售姓名（失败时用空字符串，不阻断改派）
+    const newSales = await this.userRepository.findOne({ where: { id: newAssigneeId } });
+    const newAssigneeName = newSales?.username || '';
+
+    const before = {
+      assignedSalesUserId: lead.assignedSalesUserId,
+      assignedSalesUserName: lead.assignedSalesUserName,
+    };
+    lead.assignedSalesUserId = newAssigneeId;
+    lead.assignedSalesUserName = newAssigneeName;
+    await this.leadRepository.save(lead);
+
+    // 写操作日志（best-effort）
+    try {
+      const { OPERATION_LOG_ACTIONS, OPERATION_LOG_TARGET_TYPES, stringifyDetail } = await import('../../shared/operation-logs.constants');
+      await this.operationLogsService.log({
+        userId: actorUserId,
+        action: OPERATION_LOG_ACTIONS.REASSIGN,
+        targetType: OPERATION_LOG_TARGET_TYPES.LEAD,
+        targetId: leadId,
+        detail: stringifyDetail({
+          fromUserId: before.assignedSalesUserId,
+          fromUserName: before.assignedSalesUserName,
+          toUserId: newAssigneeId,
+          toUserName: newAssigneeName,
+          reason: reason || null,
+        }),
+      });
+    } catch (logErr) {
+      // eslint-disable-next-line no-console
+      console.error('[leads] reassign operation log failed', (logErr as any)?.message || logErr);
+    }
+
+    // 通知新销售（best-effort）
+    try {
+      await this.notificationsService.create({
+        receiverIds: [newAssigneeId],
+        senderId: actorUserId || null,
+        portType: 'sales',
+        typeCode: NOTIFICATION_TYPES.LEAD_ASSIGNED,
+        title: '客资已改派给您',
+        content: `客资 ${lead.contactInfo || ''} 已从 ${before.assignedSalesUserName || before.assignedSalesUserId || '未分配'} 改派给您，请尽快跟进`,
+        relatedId: leadId,
+        relatedType: 'lead',
+      });
+    } catch (notifErr) {
+      // eslint-disable-next-line no-console
+      console.error('[leads] reassign notification failed', (notifErr as any)?.message || notifErr);
+    }
+
+    return this.mapLead(lead);
   }
 
   async listFollowRecords(leadId: string, limit = 50, offset = 0): Promise<any[]> {

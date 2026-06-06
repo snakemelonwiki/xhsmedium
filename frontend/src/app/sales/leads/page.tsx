@@ -1,11 +1,13 @@
 'use client';
 
 import {
+  CopyOutlined,
   EditOutlined,
   FileTextOutlined,
   FireOutlined,
   ReloadOutlined,
   SearchOutlined,
+  SwapOutlined,
   TagOutlined,
 } from '@ant-design/icons';
 import {
@@ -36,6 +38,7 @@ import { useEffect, useMemo, useState } from 'react';
 
 import {
   listSalesLeads,
+  reassignLead,
   updateLeadDealStatus,
   updateLeadIntentionLevel,
   type CloseLeadDealPayload,
@@ -43,6 +46,8 @@ import {
 import { ReminderButton } from '@/shared/components/notifications/ReminderButton';
 import { StatusTag } from '@/shared/components/status';
 import { formatDateTime } from '@/shared/utils/date-format';
+import { QuickRangePicker } from '@/shared/components/date';
+import type { DateRangeValue } from '@/shared/components/date';
 import {
   LeadAddStatus,
   LeadProcessStatus,
@@ -106,8 +111,7 @@ type Filters = {
   status: string;
   addStatus: string;
   intentionLevel: string;
-  startDate: string;
-  endDate: string;
+  dateRange: DateRangeValue;
   search: string;
 };
 
@@ -115,8 +119,7 @@ const EMPTY_FILTERS: Filters = {
   status: '',
   addStatus: '',
   intentionLevel: '',
-  startDate: '',
-  endDate: '',
+  dateRange: null,
   search: '',
 };
 
@@ -167,6 +170,9 @@ export default function SalesLeadsPage() {
   const [dealStatusOpen, setDealStatusOpen] = useState<SalesLead | null>(null);
   const [intentionOpen, setIntentionOpen] = useState<SalesLead | null>(null);
   const [closeDealOpen, setCloseDealOpen] = useState<SalesLead | null>(null);
+  const [reassignOpen, setReassignOpen] = useState<SalesLead | null>(null);
+  const [reassignForm] = Form.useForm<{ newAssigneeId: string; reason?: string }>();
+  const [reassignCandidates, setReassignCandidates] = useState<Array<{ id: string; name: string }>>([]);
 
   const [followForm] = Form.useForm<FollowFormValues>();
   const [dealStatusForm] = Form.useForm<DealStatusFormValues>();
@@ -200,7 +206,7 @@ export default function SalesLeadsPage() {
   useEffect(() => {
     loadLeads(1, pageSize, filters);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters.status, filters.addStatus, filters.intentionLevel, filters.startDate, filters.endDate, filters.search]);
+  }, [filters.status, filters.addStatus, filters.intentionLevel, filters.dateRange?.start.valueOf(), filters.dateRange?.end.valueOf(), filters.search]);
 
   const sortedItems = useMemo(() => {
     // 今日未添加置顶
@@ -340,7 +346,89 @@ export default function SalesLeadsPage() {
     }
   }
 
+  async function copyWechat(lead: SalesLead) {
+    const value = (lead.contact || '').trim();
+    if (!value) return;
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(value);
+      } else {
+        // Fallback for older browsers
+        const textarea = document.createElement('textarea');
+        textarea.value = value;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+      }
+      message.success('微信已复制');
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '复制失败');
+    }
+  }
+
+  function openReassign(lead: SalesLead) {
+    setReassignOpen(lead);
+    reassignForm.resetFields();
+    // Fetch candidates list lazily (filter out current assignee)
+    void (async () => {
+      try {
+        const { listReassignCandidates } = await import('@/shared/api/leads');
+        const list = await listReassignCandidates();
+        const filtered = list.filter((u) => String(u.id) !== String(lead.sales?.id || ''));
+        setReassignCandidates(filtered);
+      } catch (err) {
+        message.warning(err instanceof Error ? err.message : '加载可选销售失败');
+        setReassignCandidates([]);
+      }
+    })();
+  }
+
+  async function submitReassign() {
+    if (!reassignOpen) return;
+    const values = await reassignForm.validateFields().catch(() => null);
+    if (!values) return;
+    setSubmitting(true);
+    try {
+      await reassignLead(String(reassignOpen.id), {
+        newAssigneeId: values.newAssigneeId,
+        reason: values.reason,
+      });
+      message.success('改派成功');
+      setReassignOpen(null);
+      reassignForm.resetFields();
+      await loadLeads();
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '改派失败');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   const columns = useMemo<TableColumnsType<SalesLead>>(() => [
+    {
+      // v1.3 / SA-12: 一键复制微信（contactInfo），空值禁用 + tooltip
+      title: '微信',
+      key: 'copyWechat',
+      width: 72,
+      fixed: 'left',
+      render: (_v, lead) => {
+        const hasWechat = Boolean((lead.contact || '').trim());
+        return (
+          <Tooltip title={hasWechat ? `复制微信：${lead.contact}` : '该客资暂未填写微信'}>
+            <Button
+              size="small"
+              type="text"
+              icon={<CopyOutlined />}
+              onClick={() => copyWechat(lead)}
+              disabled={!hasWechat}
+            />
+          </Tooltip>
+        );
+      },
+    },
     {
       title: '客户',
       key: 'customer',
@@ -414,18 +502,24 @@ export default function SalesLeadsPage() {
       key: 'followAction',
       width: 180,
       ellipsis: true,
+      // v1.3 / SA-13: 精简客资列表 — 暂时隐藏 "跟进措施"，需要时从详情查看
+      hidden: true,
       render: (_v, lead) => lead.followAction || '-',
     },
     {
       title: '下次跟进',
       key: 'nextFollow',
       width: 150,
+      // v1.3 / SA-13: 精简 — 暂时隐藏
+      hidden: true,
       render: (_v, lead) => lead.nextFollowAt ? formatDateTime(lead.nextFollowAt) : '-',
     },
     {
       title: '最近跟进',
       key: 'latestFollow',
       width: 150,
+      // v1.3 / SA-13: 精简 — 暂时隐藏
+      hidden: true,
       render: (_v, lead) => lead.latestFollowAt ? formatDateTime(lead.latestFollowAt) : '-',
     },
     {
@@ -444,6 +538,8 @@ export default function SalesLeadsPage() {
       title: '订单状态',
       key: 'dealStatus',
       width: 100,
+      // v1.3 / SA-13: 精简 — 订单信息已统一在 /sales/orders 页面查看
+      hidden: true,
       render: (_v, lead) => {
         const code = (lead.dealStatus as DealStatusCode) || 'not_deal';
         const meta = dealStatusMeta[code] || { label: code, color: 'default' };
@@ -453,7 +549,7 @@ export default function SalesLeadsPage() {
     {
       title: '操作',
       key: 'actions',
-      width: 360,
+      width: 380,
       fixed: 'right',
       render: (_v, lead) => (
         <Space size={4} wrap>
@@ -490,6 +586,14 @@ export default function SalesLeadsPage() {
             disabled={lead.dealStatus === 'deal_done'}
           >
             标记成交
+          </Button>
+          {/* v1.3 / SA-12: 改派 — 调整当前销售归属（主管/销售本人都可发起） */}
+          <Button
+            size="small"
+            icon={<SwapOutlined />}
+            onClick={() => openReassign(lead)}
+          >
+            改派
           </Button>
           {lead.sales?.id ? (
             <ReminderButton
@@ -549,6 +653,10 @@ export default function SalesLeadsPage() {
             onChange={(value) => setFilters((prev) => ({ ...prev, intentionLevel: value }))}
             style={{ width: 130 }}
             placeholder="意向度"
+          />
+          <QuickRangePicker
+            value={filters.dateRange}
+            onChange={(range) => setFilters((prev) => ({ ...prev, dateRange: range }))}
           />
           <Button icon={<ReloadOutlined />} onClick={() => loadLeads()} loading={loading}>
             刷新
@@ -754,6 +862,31 @@ export default function SalesLeadsPage() {
           />
         </Form>
       </Modal>
+
+      {/* 改派（SA-12） */}
+      <Modal
+        title={reassignOpen ? `改派客资 · ${reassignOpen.customerName}` : '改派客资'}
+        open={Boolean(reassignOpen)}
+        onCancel={() => { setReassignOpen(null); reassignForm.resetFields(); }}
+        onOk={submitReassign}
+        confirmLoading={submitting}
+        destroyOnClose
+        okText="确认改派"
+      >
+        <Form form={reassignForm} layout="vertical" preserve={false}>
+          <Form.Item name="newAssigneeId" label="新归属销售" rules={[{ required: true, message: '请选择新销售' }]}>
+            <Select
+              showSearch
+              placeholder="选择接手的销售"
+              optionFilterProp="label"
+              options={reassignCandidates.map((u) => ({ label: u.name, value: u.id }))}
+            />
+          </Form.Item>
+          <Form.Item name="reason" label="改派原因">
+            <Input.TextArea rows={3} placeholder="可选：说明改派背景（将写入操作日志）" />
+          </Form.Item>
+        </Form>
+      </Modal>
     </Space>
   );
 }
@@ -763,8 +896,8 @@ function buildListQuery(filters: Filters) {
     status: filters.status || undefined,
     addStatus: filters.addStatus || undefined,
     intentionLevel: filters.intentionLevel || undefined,
-    startDate: filters.startDate || undefined,
-    endDate: filters.endDate || undefined,
+    startDate: filters.dateRange ? filters.dateRange.start.startOf('day').toISOString() : undefined,
+    endDate: filters.dateRange ? filters.dateRange.end.endOf('day').toISOString() : undefined,
     search: filters.search || undefined,
   };
 }
