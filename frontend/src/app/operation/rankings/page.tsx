@@ -29,20 +29,47 @@ import type { DateRangeValue } from '@/shared/components/date';
 import type { ContentPost } from '@/shared/types/content';
 
 type RankingType = 'posts' | 'leads' | 'traffic';
-type Period = 'today' | 'week' | 'month' | 'total';
+/**
+ * v1.3 / OP-7：保留 Period enum 作为后端兜底入参；前端 QuickRangePicker
+ * 选中的精确区间会同时以 from / to 透传给后端，service 端走 range 优先。
+ * 命中预设 → 对应 Period；用户手动改 RangePicker(命中不到)→ from/to 直接落库。
+ */
+type Period = 'today' | 'week' | 'month' | 'total' | '7d' | '14d' | '30d' | '90d' | '1y' | '3y';
 
 /**
  * 把 QuickRangePicker 输出的 {start,end} 反推为后端 enum。
- * 命中预设 → 对应 Period；用户手动改 RangePicker(命中不到)→ 取"时长最接近"的预设。
- * 后端只支持 4 个枚举；其他粒度（3/6/9 天、3/5 周、3/6 月、近 3 年）会被退化解释。
+ * 命中预设 → 对应 Period；命中不到（用户手动改了 RangePicker）→ 返回 null，
+ * 调用方应走 from / to 透传，service 端 range 优先。
  */
-function derivePeriod(range: DateRangeValue): Period {
+function derivePeriod(range: DateRangeValue): Period | null {
   if (!range) return 'today';
   const days = Math.max(0, range.end.diff(range.start, 'day'));
   if (days <= 1) return 'today';
-  if (days <= 7) return 'week';
-  if (days <= 31) return 'month';
-  return 'total';
+  if (days <= 7) return '7d';
+  if (days <= 14) return '14d';
+  if (days <= 30) return '30d';
+  if (days <= 90) return '90d';
+  if (days <= 366) return '1y';
+  if (days <= 365 * 3 + 1) return '3y';
+  // 命中不到任何预设：返回 null 让调用方走 from/to 透传
+  return null;
+}
+
+/**
+ * v1.3 / OP-7：把 range 序列化为后端接受的 query。
+ * - 命中预设：只发 period；
+ * - 未命中（手动选了 RangePicker 任意区间）：同时发 from / to，service 端 range 优先。
+ * 返回值类型为 Record<string, string | number> 便于直接传给 apiClient。
+ */
+function buildRangeQuery(range: DateRangeValue): { period: Period | null; from?: string; to?: string } {
+  const period = derivePeriod(range);
+  if (period) return { period };
+  if (!range) return { period: 'today' };
+  return {
+    period: null,
+    from: range.start.format('YYYY-MM-DD'),
+    to: range.end.format('YYYY-MM-DD'),
+  };
 }
 
 interface RankingRow {
@@ -123,7 +150,10 @@ export default function OperationRankingsPage() {
   const [page, setPage] = useState(1);
   const [type, setType] = useState<RankingType>('posts');
   const [range, setRange] = useState<DateRangeValue>(null);
-  const period: Period = derivePeriod(range);
+  // 当前选区对应的后端入参：{ period?, from?, to? }，未命中预设时 period 为 null
+  const rangeQuery = useMemo(() => buildRangeQuery(range), [range]);
+  // 顶部摘要卡仍需要后端 Period enum 兜底（来自 first preset match 或 'today'）
+  const period: Period = rangeQuery.period ?? 'today';
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string>();
@@ -135,14 +165,24 @@ export default function OperationRankingsPage() {
   const [topLoading, setTopLoading] = useState(false);
   const pageSize = 20;
 
-  const load = useCallback(async (nextPage = page, nextType = type, nextPeriod = period) => {
+  const load = useCallback(async (nextPage = page, nextType = type, nextRangeQuery = rangeQuery) => {
     setLoading(true);
     setError(undefined);
     try {
       const limit = pageSize;
       const offset = (nextPage - 1) * limit;
+      const query: Record<string, string | number> = {
+        type: nextType,
+        limit,
+        offset,
+      };
+      if (nextRangeQuery.period) query.period = nextRangeQuery.period;
+      else {
+        if (nextRangeQuery.from) query.from = nextRangeQuery.from;
+        if (nextRangeQuery.to) query.to = nextRangeQuery.to;
+      }
       const payload = await apiClient.get<{ items?: RankingRow[]; total?: number }>('/rankings/operations', {
-        query: { type: nextType, period: nextPeriod, limit, offset },
+        query,
       });
       const rows = payload?.items ?? [];
       const totalCount = payload?.total ?? rows.length;
@@ -156,20 +196,30 @@ export default function OperationRankingsPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, type, period]);
+  }, [page, type, rangeQuery]);
 
   /**
    * v1.3 OP-7：加载三榜 Top 3 用于顶部三卡展示。
    * 并行拉取三种 type 的 limit=3 数据，period 与下方主榜保持一致。
    */
-  const loadTop3 = useCallback(async (nextPeriod = period) => {
+  const loadTop3 = useCallback(async (nextRangeQuery = rangeQuery) => {
     setTopLoading(true);
     try {
       const results = await Promise.all(
         TYPE_OPTIONS.map(async (opt) => {
           try {
+            const query: Record<string, string | number> = {
+              type: opt.value,
+              limit: 3,
+              offset: 0,
+            };
+            if (nextRangeQuery.period) query.period = nextRangeQuery.period;
+            else {
+              if (nextRangeQuery.from) query.from = nextRangeQuery.from;
+              if (nextRangeQuery.to) query.to = nextRangeQuery.to;
+            }
             const payload = await apiClient.get<{ items?: RankingRow[] }>('/rankings/operations', {
-              query: { type: opt.value, period: nextPeriod, limit: 3, offset: 0 },
+              query,
             });
             return { key: opt.value, rows: payload?.items ?? [] };
           } catch {
@@ -188,28 +238,28 @@ export default function OperationRankingsPage() {
     } finally {
       setTopLoading(false);
     }
-  }, [period]);
+  }, [rangeQuery]);
 
   useEffect(() => {
-    void load(1, type, period);
+    void load(1, type, rangeQuery);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    void loadTop3(period);
+    void loadTop3(rangeQuery);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [period]);
 
   function changeType(nextType: RankingType) {
     setType(nextType);
-    void load(1, nextType, period);
+    void load(1, nextType, rangeQuery);
   }
 
   function changeRange(next: DateRangeValue) {
     setRange(next);
-    const nextPeriod = derivePeriod(next);
-    void load(1, type, nextPeriod);
-    void loadTop3(nextPeriod);
+    const nextRangeQuery = buildRangeQuery(next);
+    void load(1, type, nextRangeQuery);
+    void loadTop3(nextRangeQuery);
   }
 
   async function handleExport() {

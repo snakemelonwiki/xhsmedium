@@ -7,8 +7,20 @@ import { getSessionUserId } from '../../common/session.utils';
 /** 支持的榜单类型 */
 const RANKING_TYPES = ['posts', 'leads', 'traffic', 'study'];
 
-/** 支持的榜单周期 */
-const RANKING_PERIODS = ['today', 'week', 'month', 'total', '7d', '14d', '30d'];
+/** 支持的榜单周期。
+ *  v1.3 / OP-7：补齐 90d / 1y / 3y，覆盖 QuickRangePicker RANGE_PRESETS_FULL
+ *  全部 12 个预设。如有未列出的预设（用户手动选了 RangePicker 任意区间），
+ *  请同时传 from / to，由 service 端走 options.range 优先级。
+ */
+const RANKING_PERIODS = ['today', 'week', 'month', 'total', '7d', '14d', '30d', '90d', '1y', '3y'];
+
+/** ISO 日期串（YYYY-MM-DD）宽松校验。用于 from/to 透传时的兜底。 */
+function isValidDate(s: any): s is string {
+  if (typeof s !== 'string') return false;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const t = new Date(s);
+  return !isNaN(t.getTime());
+}
 
 @Controller('rankings')
 export class RankingsController {
@@ -24,10 +36,14 @@ export class RankingsController {
     @Query('offset') offset?: string,
     @Query('platform') platform?: string,
     @Query('period') period?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
   ) {
     const targetDate = date || todayString();
     const normalizedType = RANKING_TYPES.includes(type || '') ? type : 'posts';
     const normalizedPeriod = RANKING_PERIODS.includes(period || '') ? period : 'today';
+    const range = isValidDate(from) || isValidDate(to) ? { from, to } : undefined;
+    const options = { platform, period: normalizedPeriod, range };
     const wantsPaging = limit !== undefined || offset !== undefined;
     if (wantsPaging) {
       const result = await this.rankingsService.getRankingsPaged(
@@ -35,18 +51,19 @@ export class RankingsController {
         targetDate,
         Number(limit) || 20,
         Number(offset) || 0,
-        { platform, period: normalizedPeriod },
+        options,
       );
       return res.json(result);
     }
-    const rows = await this.rankingsService.getRankings(normalizedType, targetDate, { platform, period: normalizedPeriod });
+    const rows = await this.rankingsService.getRankings(normalizedType, targetDate, options);
     return res.json(rows);
   }
 
   /**
    * A端运营排行榜契约别名，统一承载作品数、客资数、流量和学习榜入口。
    * 支持的 type: posts / leads / traffic / study
-   * 支持的 period: today / week / month / total / 7d / 14d / 30d
+   * 支持的 period: today / week / month / total / 7d / 14d / 30d / 90d / 1y / 3y
+   * 支持 from / to 透传：与 period 互斥，from/to 优先。
    */
   @Get('operations')
   async getOperationRankings(
@@ -56,15 +73,18 @@ export class RankingsController {
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
     @Query('platform') platform?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
   ) {
     const normalizedType = RANKING_TYPES.includes(type || '') ? type : 'posts';
     const normalizedPeriod = RANKING_PERIODS.includes(period || '') ? period : 'today';
+    const range = isValidDate(from) || isValidDate(to) ? { from, to } : undefined;
     const result = await this.rankingsService.getRankingsPaged(
       normalizedType,
       todayString(),
       Number(limit) || 20,
       Number(offset) || 0,
-      { platform, period: normalizedPeriod },
+      { platform, period: normalizedPeriod, range },
     );
     return res.json(result);
   }

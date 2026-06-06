@@ -32,9 +32,9 @@ export class RankingsService {
   async getRankings(
     type: string,
     date: string,
-    options: { period?: string; platform?: string } = {},
+    options: { period?: string; platform?: string; range?: { from?: string; to?: string } } = {},
   ): Promise<any[]> {
-    const range = this.resolveDateRange(date, options.period);
+    const range = this.resolveDateRange(date, options.period, options.range);
     const rows = await this.dashboardService.rankingRows(date, {
       from: range.from,
       to: range.to,
@@ -144,7 +144,7 @@ export class RankingsService {
     date: string,
     limit: number,
     offset: number,
-    options: { period?: string; platform?: string } = {},
+    options: { period?: string; platform?: string; range?: { from?: string; to?: string } } = {},
   ): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
     // TODO: 当前为内存分页，getRankings 会全量加载 posts + leads。当数据量增长时，
     // 需要将聚合逻辑下沉到 SQL，避免全表加载后再 slice。后续可改为纯 SQL 聚合或缓存。
@@ -157,8 +157,20 @@ export class RankingsService {
   /**
    * 解析周期参数。
    * 支持: today / week / month / total / 7d / 14d / 30d
+   * 额外支持: 90d / 1y / 3y
+   * 最高优先级：options.range = { from, to }（由前端 QuickRangePicker 直接传日期范围，
+   *   覆盖所有 enum 推断，避免 derivePeriod 退化）。
    */
-  private resolveDateRange(date: string, period?: string): { from?: string; to?: string } {
+  private resolveDateRange(
+    date: string,
+    period?: string,
+    range?: { from?: string; to?: string },
+  ): { from?: string; to?: string } {
+    // 1. 显式日期范围最高优先
+    if (range?.from || range?.to) {
+      return { from: range.from, to: range.to };
+    }
+
     const p = String(period || '').trim().toLowerCase();
     const to = new Date(date);
     if (isNaN(to.getTime())) {
@@ -184,6 +196,12 @@ export class RankingsService {
       from.setDate(from.getDate() - 29);
       return { from: from.toISOString().slice(0, 10), to: today };
     }
+    // v1.3 / OP-7：排行榜接入 QuickRangePicker 12 预设后端补齐 90d / 1y / 3y
+    if (p === '90d' || p === '90') {
+      const from = new Date(to);
+      from.setDate(from.getDate() - 89);
+      return { from: from.toISOString().slice(0, 10), to: today };
+    }
 
     // 本周
     if (['week', 'thisweek', '本周'].includes(p)) {
@@ -196,6 +214,18 @@ export class RankingsService {
     // 本月
     if (['month', 'thismonth', '本月'].includes(p)) {
       const from = new Date(to.getFullYear(), to.getMonth(), 1);
+      return { from: from.toISOString().slice(0, 10), to: today };
+    }
+
+    // 本年 / 近 1 年（前端 thisYear / 1y 都映射到这里）
+    if (['thisyear', '1y', '本年', '近 1 年'].includes(p)) {
+      const from = new Date(to.getFullYear(), 0, 1);
+      return { from: from.toISOString().slice(0, 10), to: today };
+    }
+    // 近 3 年
+    if (p === '3y' || p === '近 3 年') {
+      const from = new Date(to);
+      from.setFullYear(from.getFullYear() - 3);
       return { from: from.toISOString().slice(0, 10), to: today };
     }
 
