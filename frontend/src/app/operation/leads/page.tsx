@@ -1,15 +1,19 @@
 'use client';
 
-import { BellOutlined, DownloadOutlined, EyeOutlined } from '@ant-design/icons';
+import { DownloadOutlined, EyeOutlined } from '@ant-design/icons';
 import { ProTable, type ProColumns } from '@ant-design/pro-components';
-import { Button, Card, Empty, Input, message, Modal, Select, Segmented, Space, Spin, Typography } from 'antd';
+import { Button, Card, Empty, Input, message, Modal, Select, Space, Spin, Typography } from 'antd';
 import type { TablePaginationConfig } from 'antd';
+import dayjs from 'dayjs';
 import { useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 
 import { createExport, downloadExportUrl, getExport } from '@/shared/api/exports';
 import { getLeadDetail, listCollaborationTasks, listLeadFollowRecords, listSalesLeads } from '@/shared/api/leads';
 import { getAdminLeadsStats } from '@/shared/api/admin';
+import { QuickRangePicker, RANGE_PRESETS_FULL } from '@/shared/components/date';
+import type { DateRangeValue } from '@/shared/components/date';
+import { PostTitleCell } from '@/shared/components/dashboard/PlatformAnalysisPanel';
 import { ReminderButton } from '@/shared/components/notifications/ReminderButton';
 import { LeadTimeline } from '@/shared/components/leads';
 import { StatusTag } from '@/shared/components/status';
@@ -19,10 +23,8 @@ import type { LeadTimelineItem, SalesLead } from '@/shared/types/leads';
 
 import { buildOperationLeadsExportFilter } from './exportFilter';
 
-type Period = 'today' | 'week' | 'month' | 'all' | 'custom';
-
 type LeadFilters = {
-  period: Period;
+  dateRange: DateRangeValue;
   from?: string;
   to?: string;
   platform?: string;
@@ -54,7 +56,7 @@ export default function OperationLeadsPage() {
   const [items, setItems] = useState<SalesLead[]>([]);
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
-  const [filters, setFilters] = useState<LeadFilters>({ period: 'all' });
+  const [filters, setFilters] = useState<LeadFilters>({ dateRange: null });
   const [pagination, setPagination] = useState({ current: 1, pageSize: 20, total: 0 });
 
   const [detailLead, setDetailLead] = useState<SalesLead | null>(null);
@@ -67,8 +69,17 @@ export default function OperationLeadsPage() {
   useEffect(() => {
     const urlFrom = searchParams.get('from');
     const urlTo = searchParams.get('to');
+    const accountId = searchParams.get('accountId') || undefined;
     if (urlFrom && urlTo) {
-      setFilters({ period: 'custom', from: urlFrom, to: urlTo });
+      setFilters((prev) => ({
+        ...prev,
+        dateRange: { start: dayjs(urlFrom), end: dayjs(urlTo) },
+        from: urlFrom,
+        to: urlTo,
+        sourceAccount: accountId ?? prev.sourceAccount,
+      }));
+    } else if (accountId) {
+      setFilters((prev) => ({ ...prev, sourceAccount: accountId }));
     }
   }, [searchParams]);
 
@@ -107,21 +118,10 @@ export default function OperationLeadsPage() {
     if (src.sourcePost) query.search = src.sourcePost;
     if (src.sourceAccount) query.sourceAccountId = src.sourceAccount;
 
-    const now = new Date();
-    if (src.period === 'today') {
-      const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-      query.from = start.toISOString().slice(0, 10);
-      query.to = now.toISOString().slice(0, 10);
-    } else if (src.period === 'week') {
-      const start = new Date(now);
-      start.setDate(now.getDate() - 7);
-      query.from = start.toISOString().slice(0, 10);
-      query.to = now.toISOString().slice(0, 10);
-    } else if (src.period === 'month') {
-      const start = new Date(now.getFullYear(), now.getMonth(), 1);
-      query.from = start.toISOString().slice(0, 10);
-      query.to = now.toISOString().slice(0, 10);
-    } else if (src.period === 'custom' && src.from && src.to) {
+    if (src.dateRange) {
+      query.from = `${src.dateRange.start.format('YYYY-MM-DD')} 00:00:00`;
+      query.to = `${src.dateRange.end.format('YYYY-MM-DD')} 23:59:59`;
+    } else if (src.from && src.to) {
       query.from = `${src.from} 00:00:00`;
       query.to = `${src.to} 23:59:59`;
     }
@@ -233,8 +233,14 @@ export default function OperationLeadsPage() {
     },
     {
       title: '来源作品',
-      width: 150,
-      render: (_, record) => record.source?.postTitle || record.source?.postId || '-',
+      width: 120,
+      render: (_, record) => (
+        <PostTitleCell
+          title={record.source?.postTitle || (record.source?.postId ? `作品 ${record.source.postId}` : '')}
+          postId={record.source?.postId}
+          maxChars={8}
+        />
+      ),
     },
     {
       title: '来源账号',
@@ -315,19 +321,17 @@ export default function OperationLeadsPage() {
           <Typography.Paragraph type="secondary">回看自己录入客资的分配、添加、跟进和协同状态。</Typography.Paragraph>
         </div>
         <Space wrap>
-          <Segmented
-            value={filters.period}
-            onChange={(value) => {
-              const next = { ...filters, period: value as Period };
+          <QuickRangePicker
+            value={filters.dateRange}
+            onChange={(dateRange) => {
+              const next = { ...filters, dateRange, from: undefined, to: undefined };
               setFilters(next);
               void load(1, pagination.pageSize, next);
             }}
-            options={[
-              { label: '今日', value: 'today' },
-              { label: '本周', value: 'week' },
-              { label: '本月', value: 'month' },
-              { label: '全部', value: 'all' },
-            ]}
+            presets={RANGE_PRESETS_FULL}
+            variant="select"
+            selectWidth={120}
+            selectPlaceholder="快捷时间"
           />
           <Select
             allowClear

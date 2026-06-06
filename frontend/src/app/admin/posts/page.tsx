@@ -11,13 +11,11 @@ import {
 import {
   Button,
   Card,
-  DatePicker,
   Empty,
   Image,
   Input,
   Modal,
   Pagination,
-  Segmented,
   Select,
   Space,
   Spin,
@@ -30,16 +28,16 @@ import {
 } from 'antd';
 import type { TablePaginationConfig } from 'antd/es/table/interface';
 import type { ColumnsType, TableProps } from 'antd/es/table';
-import dayjs, { type Dayjs } from 'dayjs';
+import dayjs from 'dayjs';
+import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 
 import { apiClient } from '@/shared/api/apiClient';
 import { createExport, downloadExportUrl, getExport } from '@/shared/api/exports';
-import { QuickRangePicker } from '@/shared/components/date/QuickRangePicker';
-import { RANGE_PRESETS_FULL } from '@/shared/utils/date-range';
+import { QuickRangePicker, RANGE_PRESETS_FULL } from '@/shared/components/date';
+import { normalizePostMetric } from '@/shared/utils/post-metrics';
 import { buildPostExportFilter, getPostDetailDisplay } from './postDetail';
 
-const { RangePicker } = DatePicker;
 const DEFAULT_PAGE_SIZE = 15;
 const PAGE_SIZE_OPTIONS = [15, 30, 50, 100];
 
@@ -66,14 +64,6 @@ const EMPTY_FILTERS: Filters = {
   isLeadPost: '',
   keyword: '',
 };
-
-const PERIOD_OPTIONS: { label: string; value: PeriodKey }[] = [
-  { label: '今日', value: 'today' },
-  { label: '本周', value: 'week' },
-  { label: '本月', value: 'month' },
-  { label: '累计', value: 'all' },
-  { label: '自定义', value: 'custom' },
-];
 
 const platformOptions = [
   { label: '全部平台', value: '' },
@@ -126,6 +116,14 @@ function resolvePeriodRange(
     default:
       return { from: undefined, to: undefined };
   }
+}
+
+function getPeriodLabel(period: PeriodKey): string {
+  if (period === 'today') return '今日';
+  if (period === 'week') return '本周';
+  if (period === 'month') return '本月';
+  if (period === 'custom') return '自定义';
+  return '累计';
 }
 
 type Post = {
@@ -190,7 +188,6 @@ export default function AdminPostsPage() {
   const [exportConfirmOpen, setExportConfirmOpen] = useState(false);
   const [exportCountdown, setExportCountdown] = useState(5);
   const [pickPendingId, setPickPendingId] = useState<string | null>(null);
-  const [customRangeValue, setCustomRangeValue] = useState<[Dayjs, Dayjs] | null>(null);
 
   // 导出确认弹窗倒计时
   useEffect(() => {
@@ -282,12 +279,12 @@ export default function AdminPostsPage() {
         supervisorSuggestion: p.supervisorSuggestion ?? p.supervisor_suggestion,
         isSupervisorPicked: Number(p.isSupervisorPicked ?? p.is_supervisor_picked ?? 0),
         metrics: {
-          traffic: Number(p.traffic ?? 0),
-          likes: Number(p.likes ?? 0),
-          comments: Number(p.comments ?? 0),
-          favorites: Number(p.favorites ?? 0),
-          shares: Number(p.shares ?? 0),
-          leadsCount: Number(p.leadsCount ?? p.lead_count ?? p.leads_count ?? 0),
+          traffic: normalizePostMetric(p.traffic),
+          likes: normalizePostMetric(p.likes),
+          comments: normalizePostMetric(p.comments),
+          favorites: normalizePostMetric(p.favorites),
+          shares: normalizePostMetric(p.shares),
+          leadsCount: normalizePostMetric(p.leadsCount ?? p.lead_count ?? p.leads_count),
         },
       }));
 
@@ -341,41 +338,6 @@ export default function AdminPostsPage() {
     sort.field,
     sort.order,
   ]);
-
-  function handlePeriodChange(value: PeriodKey | string) {
-    const v = value as PeriodKey;
-    if (v === 'custom') {
-      // 切到自定义时，如果还没有值，默认给一个最近 30 天的范围
-      if (!customRangeValue) {
-        const today = dayjs();
-        const start = today.subtract(29, 'day');
-        setCustomRangeValue([start, today]);
-        setFilters((prev) => ({ ...prev, period: v, customRange: [start.format('YYYY-MM-DD'), today.format('YYYY-MM-DD')] }));
-      } else {
-        setFilters((prev) => ({
-          ...prev,
-          period: v,
-          customRange: [customRangeValue[0].format('YYYY-MM-DD'), customRangeValue[1].format('YYYY-MM-DD')],
-        }));
-      }
-    } else {
-      setFilters((prev) => ({ ...prev, period: v, customRange: null }));
-    }
-  }
-
-  function handleCustomRangeChange(values: [Dayjs | null, Dayjs | null] | null) {
-    if (!values || !values[0] || !values[1]) {
-      setCustomRangeValue(null);
-      setFilters((prev) => ({ ...prev, customRange: null }));
-      return;
-    }
-    setCustomRangeValue([values[0]!, values[1]!]);
-    setFilters((prev) => ({
-      ...prev,
-      period: 'custom',
-      customRange: [values[0]!.format('YYYY-MM-DD'), values[1]!.format('YYYY-MM-DD')],
-    }));
-  }
 
   /**
    * v1.3 SUP-1: 主管标记 / 取消标记优秀作品。
@@ -555,38 +517,50 @@ export default function AdminPostsPage() {
 
   const columns: ColumnsType<Post> = [
     {
-      title: '封面',
-      dataIndex: 'coverThumbUrl',
-      width: 70,
-      render: (url?: string) =>
-        url ? (
-          <Image
-            src={url}
-            alt="封面"
-            width={50}
-            height={50}
-            style={{ objectFit: 'cover', borderRadius: 4 }}
-            preview={{ mask: <EyeOutlined /> }}
-          />
-        ) : (
-          <div style={{ width: 50, height: 50, background: '#f0f0f0', borderRadius: 4 }} />
-        ),
-    },
-    {
-      title: '标题',
+      title: '作品',
       dataIndex: 'title',
-      width: 200,
-      render: (v: string, r: Post) =>
-        r.postUrl ? (
-          <a href={r.postUrl} target="_blank" rel="noreferrer">
-            {v}
-          </a>
-        ) : (
-          v
-        ),
+      width: 340,
+      render: (v: string, r: Post) => (
+        <Space size={10} align="start">
+          {r.coverThumbUrl || r.coverImageUrl ? (
+            <Image
+              src={r.coverThumbUrl || r.coverImageUrl}
+              alt="封面"
+              width={92}
+              height={66}
+              style={{ objectFit: 'cover', borderRadius: 6, flex: '0 0 auto' }}
+              preview={{ mask: <EyeOutlined /> }}
+            />
+          ) : (
+            <div style={{ width: 92, height: 66, background: '#f0f0f0', borderRadius: 6, flex: '0 0 auto' }} />
+          )}
+          <Space direction="vertical" size={2} style={{ minWidth: 0 }}>
+            {r.postUrl ? (
+              <a href={r.postUrl} target="_blank" rel="noreferrer">
+                <Typography.Text strong ellipsis style={{ maxWidth: 220 }}>{v}</Typography.Text>
+              </a>
+            ) : (
+              <Typography.Text strong ellipsis style={{ maxWidth: 220 }}>{v}</Typography.Text>
+            )}
+            <Typography.Text type="secondary" ellipsis style={{ maxWidth: 220, fontSize: 12 }}>
+              {r.copywriting || r.note || '暂无文案'}
+            </Typography.Text>
+            {Number(r.isSupervisorPicked || 0) === 1 ? <Tag color="gold">优秀作品</Tag> : null}
+          </Space>
+        </Space>
+      ),
     },
     { title: '平台', dataIndex: 'platform', width: 80 },
-    { title: '账号', dataIndex: 'accountName', width: 100, render: (v?: string) => v || '-' },
+    {
+      title: '账号',
+      dataIndex: 'accountName',
+      width: 110,
+      render: (v?: string, record?: Post) => record?.accountId ? (
+        <Link href={`/admin/accounts?id=${encodeURIComponent(record.accountId)}`}>
+          {v || record.accountId}
+        </Link>
+      ) : (v || '-'),
+    },
     { title: '员工', dataIndex: 'employeeName', width: 90, render: (v?: string) => v || '-' },
     { title: '类型', dataIndex: 'postType', width: 80 },
     {
@@ -657,13 +631,16 @@ export default function AdminPostsPage() {
     {
       title: '操作',
       key: 'action',
-      width: 220,
+      width: 170,
       fixed: 'right',
       render: (_: unknown, row: Post) => {
         const isPicked = Number(row.isSupervisorPicked || 0) === 1;
         const isPending = pickPendingId === row.id;
         return (
-          <Space size={4}>
+          <Space size={4} wrap>
+            <Button size="small" icon={<EyeOutlined />} onClick={() => openDetail(row)}>
+              详情
+            </Button>
             <Button
               size="small"
               type={isPicked ? 'primary' : 'default'}
@@ -672,9 +649,6 @@ export default function AdminPostsPage() {
               onClick={() => void togglePick(row)}
             >
               {isPicked ? '已标记优秀' : '标记优秀作品'}
-            </Button>
-            <Button size="small" icon={<EyeOutlined />} onClick={() => openDetail(row)}>
-              详情
             </Button>
           </Space>
         );
@@ -708,49 +682,13 @@ export default function AdminPostsPage() {
         </Space>
       </div>
 
-      {/* 时间筛选（OP-21）：复用 QuickRangePicker 12 个预设 + 累计按钮 + 自定义 RangePicker */}
-      <Card size="small">
-        <Space size={12} wrap align="center">
-          <Button
-            type={filters.period === 'all' ? 'primary' : 'default'}
-            size="small"
-            onClick={() => {
-              setCustomRangeValue(null);
-              setFilters((prev) => ({ ...prev, period: 'all', customRange: null }));
-            }}
-          >
-            累计
-          </Button>
-          <QuickRangePicker
-            value={customRangeValue ? { start: customRangeValue[0], end: customRangeValue[1] } : null}
-            variant="select"
-            presets={RANGE_PRESETS_FULL}
-            onChange={(v) => {
-              if (!v || !v.start || !v.end) {
-                setCustomRangeValue(null);
-                setFilters((prev) => ({ ...prev, period: 'all', customRange: null }));
-                return;
-              }
-              setCustomRangeValue([v.start, v.end]);
-              setFilters((prev) => ({
-                ...prev,
-                period: 'custom',
-                customRange: [v.start.format('YYYY-MM-DD'), v.end.format('YYYY-MM-DD')],
-              }));
-            }}
-            selectPlaceholder="选择时间段"
-            selectWidth={140}
-          />
-        </Space>
-      </Card>
-
       {/* 筛选栏 */}
       <Card size="small">
-        <Space size={12} wrap>
+        <Space size={8} wrap align="center">
           <Input.Search
             allowClear
             placeholder="搜索标题/文案"
-            style={{ width: 200 }}
+            style={{ width: 180 }}
             value={filters.keyword}
             onChange={(e) => setFilters((prev) => ({ ...prev, keyword: e.target.value }))}
             onSearch={(v) => setFilters((prev) => ({ ...prev, keyword: v }))}
@@ -786,6 +724,26 @@ export default function AdminPostsPage() {
             onChange={(value) => setFilters((prev) => ({ ...prev, isLeadPost: value }))}
             style={{ width: 140 }}
             placeholder="获客贴"
+          />
+          <QuickRangePicker
+            value={filters.period === 'custom' && filters.customRange
+              ? { start: dayjs(filters.customRange[0]), end: dayjs(filters.customRange[1]) }
+              : null}
+            onChange={(range) => {
+              if (!range) {
+                setFilters((prev) => ({ ...prev, period: 'all', customRange: null }));
+                return;
+              }
+              setFilters((prev) => ({
+                ...prev,
+                period: 'custom',
+                customRange: [range.start.format('YYYY-MM-DD'), range.end.format('YYYY-MM-DD')],
+              }));
+            }}
+            presets={RANGE_PRESETS_FULL}
+            variant="select"
+            selectWidth={120}
+            selectPlaceholder="快捷时间"
           />
         </Space>
       </Card>
@@ -999,7 +957,7 @@ export default function AdminPostsPage() {
                 (() => {
                   const { from, to } = resolvePeriodRange(filters.period, filters.customRange);
                   if (from || to) {
-                    const periodLabel = PERIOD_OPTIONS.find((p) => p.value === filters.period)?.label || '自定义';
+                    const periodLabel = getPeriodLabel(filters.period);
                     return { label: '时间范围', value: `${periodLabel} (${from || '-'} 至 ${to || '-'})` };
                   }
                   return null;

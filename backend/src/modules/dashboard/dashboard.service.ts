@@ -919,11 +919,12 @@ export class DashboardService {
     fromDate.setDate(todayDate.getDate() - days + 1);
     const from = options.from || fromDate.toISOString().slice(0, 10);
     const to = options.to || today;
+    const platform = this.normalizePlatform(options.platform) || undefined;
 
-    const cacheKey = `dashboard:all-accounts-timeseries:${employeeId}:${options.platform || ''}:${from}:${to}:${options.sort || 'leadCount'}`;
+    const cacheKey = `dashboard:all-accounts-timeseries:${employeeId}:${platform || ''}:${from}:${to}:${options.sort || 'leadCount'}`;
     const cached = this.cache.get<any>(cacheKey);
     if (cached !== undefined) return cached;
-    const result = await this.computeAllAccountsTimeSeries(employeeId, from, to, options.platform, options.sort);
+    const result = await this.computeAllAccountsTimeSeries(employeeId, from, to, platform, options.sort);
     this.cache.set(cacheKey, result, CACHE_TTL_MS);
     return result;
   }
@@ -1342,8 +1343,8 @@ export class DashboardService {
   private normalizePlatform(p?: string): string | null {
     const raw = String(p || '').trim().toLowerCase();
     if (!raw) return null;
-    if (raw === 'xhs' || raw === '小红书') return '小红书';
-    if (raw === 'douyin' || raw === '抖音') return '抖音';
+    if (raw === 'xhs' || raw === 'xiaohongshu' || raw === '小红书') return '小红书';
+    if (raw === 'dy' || raw === 'douyin' || raw === '抖音') return '抖音';
     return null;
   }
 

@@ -32,6 +32,7 @@ import {
   Typography,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
+import dayjs from 'dayjs';
 import type {
   EfficiencyAccount,
   PersonalMetric,
@@ -41,8 +42,9 @@ import type {
   PersonalRankingSort,
   PersonalRankingsResponse,
 } from '@/shared/api/content';
+import { QuickRangePicker, RANGE_PRESETS_FULL, type DateRangeValue } from '@/shared/components/date';
 import type { PlatformDistributionItem, PlatformTrend, PlatformTrendPoint } from '@/shared/types/content';
-import { useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 
 import { useEchartsChart, useEchartsRender } from './useEchartsChart';
 import { usePersonalDashboardData } from './usePersonalDashboardData';
@@ -56,11 +58,11 @@ import styles from './PersonalDashboardBoard.module.css';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 declare const echarts: any;
 
-const METRIC_OPTIONS: { label: string; value: PersonalMetric; description: string }[] = [
-  { label: '总流量', value: 'totalTraffic', description: '所有作品 likes+comments+favorites 之和' },
-  { label: '总获客', value: 'totalLeads', description: '所有作品关联的客资数' },
-  { label: '获客效率', value: 'efficiency', description: '客资数 / 作品数' },
-  { label: '获客贴效率', value: 'leadEfficiency', description: '客资数 / 获客贴数（is_lead_post=1）' },
+export type OverviewMetricMode = 'traffic' | 'leads';
+
+const METRIC_MODE_OPTIONS: { label: string; value: OverviewMetricMode; metric: PersonalMetric }[] = [
+  { label: '流量筛选', value: 'traffic', metric: 'totalTraffic' },
+  { label: '获客筛选', value: 'leads', metric: 'totalLeads' },
 ];
 
 const RANKING_SORT_OPTIONS: { label: string; value: PersonalRankingSort }[] = [
@@ -75,13 +77,6 @@ const PLATFORM_OPTIONS: { label: string; value: PersonalPlatform }[] = [
   { label: '全部', value: 'all' },
   { label: '小红书', value: 'xiaohongshu' },
   { label: '抖音', value: 'douyin' },
-];
-
-const PERIOD_OPTIONS: { label: string; value: PersonalPeriod }[] = [
-  { label: '今日', value: 'today' },
-  { label: '本周', value: 'week' },
-  { label: '本月', value: 'month' },
-  { label: '累计', value: 'all' },
 ];
 
 const OVERVIEW_CARDS: Array<{
@@ -99,6 +94,35 @@ const OVERVIEW_CARDS: Array<{
   { key: 'monthLeadPostCount', title: '本月获客贴数', hint: 'is_lead_post = 1', color: '#13c2c2', icon: <TrophyOutlined /> },
 ];
 
+const OVERVIEW_CARD_KEYS_BY_MODE: Record<OverviewMetricMode, Array<keyof PersonalOverviewResponse['overview']>> = {
+  traffic: ['monthPostCount', 'monthTraffic', 'monthLeadPostCount'],
+  leads: ['monthLeadCount', 'monthLeadPostCount', 'totalLeads'],
+};
+
+const DEFAULT_RANGE_VALUE: DateRangeValue = {
+  start: dayjs().startOf('month'),
+  end: dayjs(),
+};
+
+export function buildPersonalDashboardRangeQuery(range: DateRangeValue): {
+  period?: PersonalPeriod;
+  from?: string;
+  to?: string;
+} {
+  if (!range) {
+    return { period: 'month', from: undefined, to: undefined };
+  }
+  return {
+    period: undefined,
+    from: range.start.format('YYYY-MM-DD'),
+    to: range.end.format('YYYY-MM-DD'),
+  };
+}
+
+export function getOverviewCardKeys(mode: OverviewMetricMode): Array<keyof PersonalOverviewResponse['overview']> {
+  return OVERVIEW_CARD_KEYS_BY_MODE[mode];
+}
+
 export interface PersonalDashboardBoardProps {
   /** 不传时查当前运营（运营端），传值时查指定员工（主管端） */
   employeeId?: string;
@@ -107,13 +131,15 @@ export interface PersonalDashboardBoardProps {
 }
 
 export function PersonalDashboardBoard({ employeeId, showRefreshButton = true }: PersonalDashboardBoardProps) {
-  const [metric, setMetric] = useState<PersonalMetric>('totalTraffic');
+  const [metricMode, setMetricMode] = useState<OverviewMetricMode>('traffic');
   const [platform, setPlatform] = useState<PersonalPlatform>('all');
-  const [period, setPeriod] = useState<PersonalPeriod>('month');
+  const [dateRange, setDateRange] = useState<DateRangeValue>(DEFAULT_RANGE_VALUE);
   // OP-19 趋势周期：日/周/月（独立于上面 period）
   const [trendPeriod, setTrendPeriod] = useState<'day' | 'week' | 'month'>('day');
   // 三大效率榜排序字段：默认按获客数降序
   const [rankingSort, setRankingSort] = useState<PersonalRankingSort>('leadCount');
+  const metric = METRIC_MODE_OPTIONS.find((item) => item.value === metricMode)?.metric ?? 'totalTraffic';
+  const rangeQuery = useMemo(() => buildPersonalDashboardRangeQuery(dateRange), [dateRange]);
 
   const {
     overview,
@@ -128,7 +154,9 @@ export function PersonalDashboardBoard({ employeeId, showRefreshButton = true }:
   } = usePersonalDashboardData({
     metric,
     platform,
-    period,
+    period: rangeQuery.period ?? 'month',
+    from: rangeQuery.from,
+    to: rangeQuery.to,
     trendPeriod,
     rankingSort,
     employeeId,
@@ -142,7 +170,7 @@ export function PersonalDashboardBoard({ employeeId, showRefreshButton = true }:
     if (rank === null || rank === undefined) {
       return <Empty description="暂无足够数据" image={Empty.PRESENTED_IMAGE_SIMPLE} />;
     }
-    const metricLabel = METRIC_OPTIONS.find((m) => m.value === overview.metrics)?.label ?? '指标';
+    const metricLabel = METRIC_MODE_OPTIONS.find((m) => m.metric === overview.metrics)?.label ?? '指标';
     return (
       <div className={styles.rankCard}>
         <div className={styles.rankHead}>
@@ -167,10 +195,12 @@ export function PersonalDashboardBoard({ employeeId, showRefreshButton = true }:
 
   const overviewCardsNode = useMemo(() => {
     if (!overview) return null;
+    const cardKeys = new Set(getOverviewCardKeys(metricMode));
+    const cards = OVERVIEW_CARDS.filter((card) => cardKeys.has(card.key));
     return (
       <Row gutter={[12, 12]}>
-        {OVERVIEW_CARDS.map((card) => (
-          <Col key={card.key} xs={12} md={8} lg={4}>
+        {cards.map((card) => (
+          <Col key={card.key} xs={24} md={8}>
             <Card size="small" loading={loadingOverview} className={styles.overviewCard}>
               <Space size={4} align="center" className={styles.overviewCardHead}>
                 <span style={{ color: card.color, fontSize: 16 }}>{card.icon}</span>
@@ -188,7 +218,7 @@ export function PersonalDashboardBoard({ employeeId, showRefreshButton = true }:
         ))}
       </Row>
     );
-  }, [overview, loadingOverview]);
+  }, [overview, loadingOverview, metricMode]);
 
   const rankingTabItems = useMemo(() => {
     const makeColumns = (
@@ -308,9 +338,9 @@ export function PersonalDashboardBoard({ employeeId, showRefreshButton = true }:
             <Space size={4} align="center">
               <Typography.Text type="secondary">指标</Typography.Text>
               <Segmented
-                value={metric}
-                onChange={(v) => setMetric(v as PersonalMetric)}
-                options={METRIC_OPTIONS.map((m) => ({ label: m.label, value: m.value }))}
+                value={metricMode}
+                onChange={(v) => setMetricMode(v as OverviewMetricMode)}
+                options={METRIC_MODE_OPTIONS}
               />
             </Space>
             <Space size={4} align="center">
@@ -323,10 +353,15 @@ export function PersonalDashboardBoard({ employeeId, showRefreshButton = true }:
             </Space>
             <Space size={4} align="center">
               <Typography.Text type="secondary">时间</Typography.Text>
-              <Segmented
-                value={period}
-                onChange={(v) => setPeriod(v as PersonalPeriod)}
-                options={PERIOD_OPTIONS}
+              <QuickRangePicker
+                value={dateRange}
+                onChange={setDateRange}
+                presets={RANGE_PRESETS_FULL}
+                variant="select"
+                selectPlaceholder="选择月份/区间"
+                selectWidth={150}
+                allowClear={false}
+                pickerProps={{ size: 'small' }}
               />
             </Space>
           </Space>
@@ -408,7 +443,7 @@ export function PersonalDashboardBoard({ employeeId, showRefreshButton = true }:
       </Row>
 
       {/* 三类型作品占比饼图（基于 platformDist：作品 / 流量 / 客资 三扇区 + 平台单选） */}
-      <PostTypeSharePieCard items={platformDist} loading={loadingDualPlatform} />
+      <PostTypeSharePieCard items={platformDist} loading={loadingDualPlatform} platform={platform} onPlatformChange={setPlatform} />
 
       {/* v1.3 双平台数据分析面板（顶部 3 概览卡 + 3 榜单 Top 8） */}
       <PlatformAnalysisPanel
@@ -651,10 +686,10 @@ function PlatformTrendLineChart({ trend, loading }: { trend?: PlatformTrend; loa
 // 这里用三个独立数值分别占各自总和的方式呈现，tooltip 各自展示绝对值）。
 type PostTypeSharePlatform = 'all' | '小红书' | '抖音';
 
-const POST_TYPE_SHARE_PLATFORM_OPTIONS: { label: string; value: PostTypeSharePlatform }[] = [
+const POST_TYPE_SHARE_PLATFORM_OPTIONS: { label: string; value: PersonalPlatform }[] = [
   { label: '全部', value: 'all' },
-  { label: '小红书', value: '小红书' },
-  { label: '抖音', value: '抖音' },
+  { label: '小红书', value: 'xiaohongshu' },
+  { label: '抖音', value: 'douyin' },
 ];
 
 const POST_TYPE_SHARE_COLORS: Record<string, string> = {
@@ -666,12 +701,16 @@ const POST_TYPE_SHARE_COLORS: Record<string, string> = {
 function PostTypeSharePieCard({
   items,
   loading,
+  platform,
+  onPlatformChange,
 }: {
   items: PlatformDistributionItem[];
   loading: boolean;
+  platform: PersonalPlatform;
+  onPlatformChange: (next: PersonalPlatform) => void;
 }) {
-  const [scope, setScope] = useState<PostTypeSharePlatform>('小红书');
   const { containerRef, chartRef, echartsReady } = useEchartsChart();
+  const scope = mapPersonalPlatformToSharePlatform(platform);
 
   // 聚合：按 scope 过滤后，求三个指标的总和
   const aggregated = useMemo(() => {
@@ -748,8 +787,8 @@ function PostTypeSharePieCard({
         <Radio.Group
           optionType="button"
           buttonStyle="solid"
-          value={scope}
-          onChange={(e) => setScope(e.target.value as PostTypeSharePlatform)}
+          value={platform}
+          onChange={(e) => onPlatformChange(e.target.value as PersonalPlatform)}
           options={POST_TYPE_SHARE_PLATFORM_OPTIONS}
         />
       }
@@ -759,6 +798,12 @@ function PostTypeSharePieCard({
       </Skeleton>
     </Card>
   );
+}
+
+function mapPersonalPlatformToSharePlatform(platform: PersonalPlatform): PostTypeSharePlatform {
+  if (platform === 'xiaohongshu') return '小红书';
+  if (platform === 'douyin') return '抖音';
+  return 'all';
 }
 
 export default PersonalDashboardBoard;

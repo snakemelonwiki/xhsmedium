@@ -4,7 +4,6 @@ import {
   Alert,
   Button,
   Card,
-  DatePicker,
   Empty,
   InputNumber,
   Modal,
@@ -19,7 +18,6 @@ import {
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { ReloadOutlined } from '@ant-design/icons';
-import dayjs from 'dayjs';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
@@ -27,15 +25,16 @@ import { useEffect, useState } from 'react';
 import { listSourceAccounts, type CatalogOption } from '@/shared/api/catalog';
 import { createExport, downloadExportUrl, getExport } from '@/shared/api/exports';
 import { listPosts, refreshPostMetrics, getPostDetail } from '@/shared/api/content';
+import { QuickRangePicker, RANGE_PRESETS_FULL } from '@/shared/components/date';
+import type { DateRangeValue } from '@/shared/components/date';
 import type { ContentPost } from '@/shared/types/content';
+import { normalizePostMetric } from '@/shared/utils/post-metrics';
 
 type PostFilters = {
   platform?: string;
   accountId?: string;
   postType?: string;
-  isCustomerPost?: boolean;
-  from?: string;
-  to?: string;
+  dateRange?: DateRangeValue;
   likesMin?: number;
   likesMax?: number;
   leadsMin?: number;
@@ -63,6 +62,7 @@ export default function OperationPostsPage() {
   const searchParams = useSearchParams();
   const fromParam = searchParams.get('from') || undefined;
   const toParam = searchParams.get('to') || undefined;
+  const accountParam = searchParams.get('accountId') || undefined;
 
   const [items, setItems] = useState<ContentPost[]>([]);
   const [accounts, setAccounts] = useState<CatalogOption[]>([]);
@@ -86,12 +86,31 @@ export default function OperationPostsPage() {
       const params: any = {
         page: nextPage,
         pageSize,
-        ...nextFilters,
       };
+      for (const [key, value] of Object.entries(nextFilters)) {
+        if (key !== 'dateRange' && value !== undefined && value !== null && value !== '') {
+          params[key] = value;
+        }
+      }
       if (fromParam) params.from = fromParam;
       if (toParam) params.to = toParam;
+      if (accountParam && !params.accountId) params.accountId = accountParam;
+      if (nextFilters.dateRange) {
+        params.from = nextFilters.dateRange.start.format('YYYY-MM-DD');
+        params.to = nextFilters.dateRange.end.format('YYYY-MM-DD');
+      }
       const result = await listPosts(params);
-      setItems(result.items);
+      setItems(result.items.map((post) => ({
+        ...post,
+        metrics: {
+          traffic: normalizePostMetric(post.metrics.traffic),
+          likes: normalizePostMetric(post.metrics.likes),
+          comments: normalizePostMetric(post.metrics.comments),
+          favorites: normalizePostMetric(post.metrics.favorites),
+          shares: normalizePostMetric(post.metrics.shares),
+          leadsCount: normalizePostMetric(post.metrics.leadsCount),
+        },
+      })));
       setTotal(result.total);
       setPage(result.page);
     } catch (err) {
@@ -131,8 +150,14 @@ export default function OperationPostsPage() {
     setExporting(true);
     try {
       const filterJson: any = { ...filters };
+      delete filterJson.dateRange;
       if (fromParam) filterJson.from = fromParam;
       if (toParam) filterJson.to = toParam;
+      if (accountParam && !filterJson.accountId) filterJson.accountId = accountParam;
+      if (filters.dateRange) {
+        filterJson.from = filters.dateRange.start.format('YYYY-MM-DD');
+        filterJson.to = filters.dateRange.end.format('YYYY-MM-DD');
+      }
       const created = await createExport({
         exportType: 'posts',
         filter: filterJson,
@@ -184,7 +209,13 @@ export default function OperationPostsPage() {
   useEffect(() => {
     load(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fromParam, toParam]);
+  }, [fromParam, toParam, accountParam]);
+
+  useEffect(() => {
+    if (accountParam) {
+      setFilters((prev) => ({ ...prev, accountId: accountParam }));
+    }
+  }, [accountParam]);
 
   useEffect(() => {
     listSourceAccounts()
@@ -198,39 +229,37 @@ export default function OperationPostsPage() {
     load(1, next);
   }
 
-  function handleDateRangeChange(dates: any) {
-    const next = {
-      ...filters,
-      from: dates && dates[0] ? dayjs(dates[0]).format('YYYY-MM-DD') : undefined,
-      to: dates && dates[1] ? dayjs(dates[1]).format('YYYY-MM-DD') : undefined,
-    };
+  function handleDateRangeChange(dateRange: DateRangeValue) {
+    const next = { ...filters, dateRange };
     setFilters(next);
     load(1, next);
   }
 
-  const isCustomerPost = filters.postType === '获客贴';
-
   const columns: ColumnsType<ContentPost> = [
     {
-      title: '封面',
-      width: 80,
-      render: (_, record) =>
-        record.coverThumbUrl || record.coverImageUrl ? (
-          <img
-            src={record.coverThumbUrl || record.coverImageUrl}
-            alt={record.title}
-            style={{ width: 60, height: 40, objectFit: 'cover', borderRadius: 4 }}
-          />
-        ) : (
-          <div style={{ width: 60, height: 40, background: '#f0f0f0', borderRadius: 4 }} />
-        ),
-    },
-    {
-      title: '标题',
-      dataIndex: 'title',
-      width: 200,
-      ellipsis: true,
-      render: (title: string) => <Typography.Text ellipsis style={{ maxWidth: 180 }}>{title}</Typography.Text>,
+      title: '作品',
+      width: 320,
+      render: (_, record) => (
+        <Space size={10} align="start">
+          {record.coverThumbUrl || record.coverImageUrl ? (
+            <img
+              src={record.coverThumbUrl || record.coverImageUrl}
+              alt={record.title}
+              style={{ width: 88, height: 64, objectFit: 'cover', borderRadius: 6, flex: '0 0 auto' }}
+            />
+          ) : (
+            <div style={{ width: 88, height: 64, background: '#f0f0f0', borderRadius: 6, flex: '0 0 auto' }} />
+          )}
+          <Space direction="vertical" size={2} style={{ minWidth: 0 }}>
+            <Typography.Text strong ellipsis style={{ maxWidth: 210 }}>
+              {record.title || '未命名作品'}
+            </Typography.Text>
+            <Typography.Text type="secondary" ellipsis style={{ maxWidth: 210, fontSize: 12 }}>
+              {record.copywriting || record.note || '暂无文案'}
+            </Typography.Text>
+          </Space>
+        </Space>
+      ),
     },
     {
       title: '平台',
@@ -243,7 +272,11 @@ export default function OperationPostsPage() {
     {
       title: '账号',
       width: 120,
-      render: (_, record) => record.accountName || record.accountId || '-',
+      render: (_, record) => record.accountId ? (
+        <Link href={`/operation/accounts?id=${encodeURIComponent(String(record.accountId))}`}>
+          {record.accountName || record.accountId}
+        </Link>
+      ) : (record.accountName || '-'),
     },
     {
       title: '类型',
@@ -377,10 +410,13 @@ export default function OperationPostsPage() {
             options={postTypeOptions}
             onChange={(value) => applyFilter('postType', value || undefined)}
           />
-          <DatePicker.RangePicker
-            allowClear
-            style={{ width: 260 }}
+          <QuickRangePicker
+            value={filters.dateRange ?? null}
             onChange={handleDateRangeChange}
+            presets={RANGE_PRESETS_FULL}
+            variant="select"
+            selectWidth={120}
+            selectPlaceholder="快捷时间"
           />
           <InputNumber
             aria-label="最低点赞"

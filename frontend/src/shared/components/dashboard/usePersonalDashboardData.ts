@@ -60,6 +60,8 @@ export interface UsePersonalDashboardParams {
   metric: PersonalMetric;
   platform: PersonalPlatform;
   period: PersonalPeriod;
+  from?: string;
+  to?: string;
   /** v1.3 OP-19 趋势周期：日/周/月（独立于 period） */
   trendPeriod: 'day' | 'week' | 'month';
   rankingSort: PersonalRankingSort;
@@ -87,7 +89,7 @@ export interface UsePersonalDashboardResult {
  * 集中（避免三处各自 `setError` 不一致）。
  */
 export function usePersonalDashboardData(params: UsePersonalDashboardParams): UsePersonalDashboardResult {
-  const { metric, platform, period, trendPeriod, rankingSort, employeeId } = params;
+  const { metric, platform, period, from, to, trendPeriod, rankingSort, employeeId } = params;
 
   const [overview, setOverview] = useState<PersonalOverviewResponse | undefined>();
   const [rankings, setRankings] = useState<PersonalRankingsResponse | undefined>();
@@ -103,7 +105,7 @@ export function usePersonalDashboardData(params: UsePersonalDashboardParams): Us
     setLoadingOverview(true);
     setError(undefined);
     try {
-      const data = await getPersonalOverview({ metrics: metric, platform, period, employeeId });
+      const data = await getPersonalOverview({ metrics: metric, platform, period, from, to, employeeId });
       setOverview(data);
     } catch (err) {
       setOverview(undefined);
@@ -111,12 +113,12 @@ export function usePersonalDashboardData(params: UsePersonalDashboardParams): Us
     } finally {
       setLoadingOverview(false);
     }
-  }, [metric, platform, period, employeeId]);
+  }, [metric, platform, period, from, to, employeeId]);
 
   const loadRankings = useCallback(async () => {
     setLoadingRankings(true);
     try {
-      const data = await getPersonalRankings({ platform, period, employeeId, sort: rankingSort });
+      const data = await getPersonalRankings({ platform, period, from, to, employeeId, sort: rankingSort });
       setRankings(data);
     } catch (err) {
       setRankings(undefined);
@@ -124,13 +126,16 @@ export function usePersonalDashboardData(params: UsePersonalDashboardParams): Us
     } finally {
       setLoadingRankings(false);
     }
-  }, [platform, period, employeeId, rankingSort]);
+  }, [platform, period, from, to, employeeId, rankingSort]);
 
   // v1.3 OP-18/19 双平台数据：使用 period 计算的 from/to
   const dualRange = useMemo(() => {
+    if (from && to) {
+      return { from, to };
+    }
     const range = resolvePeriodRange(period);
     return { from: range.from, to: range.to };
-  }, [period]);
+  }, [period, from, to]);
 
   const loadDualPlatform = useCallback(async () => {
     setLoadingDualPlatform(true);

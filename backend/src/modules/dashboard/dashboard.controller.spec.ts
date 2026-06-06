@@ -32,7 +32,7 @@ describe('DashboardController A端看板契约', () => {
     const userRepo = {} as any;
     const controller = new DashboardController(service, userRepo as Repository<User>);
     const res = response();
-    const req = { session: { role: 'admin' } } as any;
+    const req = { session: { userId: 'admin-1', role: 'admin' } } as any;
 
     await controller.getSupervisorEmployee('emp-2', req, res, '2026-06-01', '2026-06-30');
 
@@ -90,13 +90,13 @@ describe('DashboardController A端看板契约', () => {
     const controller = new DashboardController(service, userRepo as Repository<User>);
     // 销售/教务角色仍应被拒绝
     const salesRes = response();
-    const salesReq = { session: { role: 'sales' } } as any;
+    const salesReq = { session: { userId: 'sales-1', role: 'sales' } } as any;
     await controller.getSupervisorEmployeeOverview('emp-2', salesReq, salesRes, 'totalLeads', 'all', 'month');
     expect(salesRes.status).toHaveBeenCalledWith(403);
 
     // admin 角色允许
     const adminRes = response();
-    const adminReq = { session: { role: 'admin' } } as any;
+    const adminReq = { session: { userId: 'admin-1', role: 'admin' } } as any;
     await controller.getSupervisorEmployeeOverview('emp-2', adminReq, adminRes, 'totalLeads', 'all', 'month');
     expect(service.getPersonalOverview).toHaveBeenCalledWith('emp-2', {
       metrics: 'totalLeads',
@@ -282,5 +282,25 @@ describe('DashboardService 账号时间序列日期格式回归', () => {
     // 反例断言：Date 对象情况下 postCount 必然是 0（因为 daysMap.has('Fri May 22') 永远 false）
     expect(day.postCount).toBe(0);
     expect(day.posts).toHaveLength(0);
+  });
+
+  it('全部账号时间序列的平台过滤兼容 xiaohongshu/douyin 简写', async () => {
+    const accountRepo = {
+      query: jest.fn().mockResolvedValue([]),
+    } as any;
+    const cache = { get: jest.fn().mockReturnValue(undefined), set: jest.fn() } as any;
+    const { DashboardService } = require('./dashboard.service');
+    const svc = new (DashboardService as any)({}, {}, {}, accountRepo, {}, cache);
+
+    await svc.getAllAccountsTimeSeries('emp-1', {
+      from: '2026-06-01',
+      to: '2026-06-30',
+      platform: 'xiaohongshu',
+    });
+
+    expect(accountRepo.query).toHaveBeenCalledWith(
+      expect.any(String),
+      ['2026-06-01', '2026-06-30', '2026-06-01', '2026-06-30', 'emp-1', '小红书'],
+    );
   });
 });

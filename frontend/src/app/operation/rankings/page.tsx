@@ -26,9 +26,10 @@ import { createExport, downloadExportUrl, getExport } from '@/shared/api/exports
 import { apiClient } from '@/shared/api/apiClient';
 import { QuickRangePicker, RANGE_PRESETS_FULL } from '@/shared/components/date';
 import type { DateRangeValue } from '@/shared/components/date';
-import type { ContentPost } from '@/shared/types/content';
 
-type RankingType = 'posts' | 'leads' | 'traffic';
+import { getOperationRankingMetricKeys, MAIN_RANKING_TYPE_OPTIONS, type MainRankingType } from './rankingTable';
+
+type RankingType = MainRankingType | 'traffic';
 /**
  * v1.3 / OP-7：保留 Period enum 作为后端兜底入参；前端 QuickRangePicker
  * 选中的精确区间会同时以 from / to 透传给后端，service 端走 range 优先。
@@ -76,8 +77,11 @@ interface RankingRow {
   id: string;
   employeeId?: string;
   name: string;
+  accountCount?: number;
   postCount: number;
   leadCount: number;
+  xhsPostCount?: number;
+  douyinPostCount?: number;
   sourcePostCount?: number;
   validRate?: number;
   likes?: number;
@@ -87,11 +91,11 @@ interface RankingRow {
   todayPosts?: number;
   todayLeads?: number;
   todayTraffic?: number;
+  todayDeals?: number;
 }
 
-const TYPE_OPTIONS = [
-  { label: '作品数榜', value: 'posts' },
-  { label: '客资榜', value: 'leads' },
+const TOP_CARD_TYPE_OPTIONS: Array<{ label: string; value: RankingType }> = [
+  ...MAIN_RANKING_TYPE_OPTIONS,
   { label: '流量榜', value: 'traffic' },
 ];
 
@@ -111,7 +115,7 @@ const TOP_CARDS: Array<{
 }> = [
   {
     key: 'posts',
-    title: '作品数榜 · Top 3',
+    title: '作品数 · Top 3',
     description: '本期作品数前三名',
     color: '#1677ff',
     bg: '#e6f4ff',
@@ -120,7 +124,7 @@ const TOP_CARDS: Array<{
   },
   {
     key: 'leads',
-    title: '客资榜 · Top 3',
+    title: '客资数 · Top 3',
     description: '本期客资数前三名',
     color: '#52c41a',
     bg: '#f6ffed',
@@ -129,7 +133,7 @@ const TOP_CARDS: Array<{
   },
   {
     key: 'traffic',
-    title: '流量榜 · Top 3',
+    title: '流量 · Top 3',
     description: '本期流量（点赞+评论+收藏）前三名',
     color: '#fa8c16',
     bg: '#fff7e6',
@@ -148,7 +152,7 @@ export default function OperationRankingsPage() {
   const [items, setItems] = useState<RankingRow[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
-  const [type, setType] = useState<RankingType>('posts');
+  const [type, setType] = useState<MainRankingType>('posts');
   const [range, setRange] = useState<DateRangeValue>(null);
   // 当前选区对应的后端入参：{ period?, from?, to? }，未命中预设时 period 为 null
   const rangeQuery = useMemo(() => buildRangeQuery(range), [range]);
@@ -165,7 +169,7 @@ export default function OperationRankingsPage() {
   const [topLoading, setTopLoading] = useState(false);
   const pageSize = 20;
 
-  const load = useCallback(async (nextPage = page, nextType = type, nextRangeQuery = rangeQuery) => {
+  const load = useCallback(async (nextPage = page, nextType: MainRankingType = type, nextRangeQuery = rangeQuery) => {
     setLoading(true);
     setError(undefined);
     try {
@@ -206,7 +210,7 @@ export default function OperationRankingsPage() {
     setTopLoading(true);
     try {
       const results = await Promise.all(
-        TYPE_OPTIONS.map(async (opt) => {
+        TOP_CARD_TYPE_OPTIONS.map(async (opt) => {
           try {
             const query: Record<string, string | number> = {
               type: opt.value,
@@ -250,7 +254,7 @@ export default function OperationRankingsPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [period]);
 
-  function changeType(nextType: RankingType) {
+  function changeType(nextType: MainRankingType) {
     setType(nextType);
     void load(1, nextType, rangeQuery);
   }
@@ -310,9 +314,7 @@ export default function OperationRankingsPage() {
   const itemsWithGap = useMemo(() => {
     if (items.length === 0) return [];
     const getValue = (item: RankingRow) => {
-      if (type === 'leads') return item.leadCount;
-      if (type === 'traffic') return item.traffic ?? item.likes ?? 0;
-      return item.postCount;
+      return type === 'leads' ? numberValue(item.leadCount) : numberValue(item.postCount);
     };
     return items.map((item, index) => {
       const currentValue = getValue(item);
@@ -327,7 +329,7 @@ export default function OperationRankingsPage() {
     });
   }, [items, type]);
 
-  // 根据类型生成列配置
+  // 合并后的运营主榜固定展示同一组指标，type 仅作为排序口径。
   const columns: ColumnsType<RankingRow> = useMemo(() => {
     const baseColumns: ColumnsType<RankingRow> = [
       {
@@ -352,70 +354,26 @@ export default function OperationRankingsPage() {
       },
     ];
 
-    if (type === 'posts') {
-      return [
-        ...baseColumns,
-        {
-          title: '本期作品数',
+    const metricColumns: ColumnsType<RankingRow> = getOperationRankingMetricKeys(type).map((key) => {
+      const configs: Record<string, ColumnsType<RankingRow>[number]> = {
+        accountCount: { title: '账号数', dataIndex: 'accountCount', width: 90 },
+        postCount: {
+          title: '作品数',
           dataIndex: 'postCount',
-          sorter: (a, b) => a.postCount - b.postCount,
-          render: (val: number) => <Typography.Text strong>{val}</Typography.Text>,
+          width: 100,
+          sorter: (a, b) => numberValue(a.postCount) - numberValue(b.postCount),
+          render: (val: number) => <Typography.Text strong={type === 'posts'}>{numberValue(val)}</Typography.Text>,
         },
-        {
-          title: '与上一名差距',
-          dataIndex: 'gap',
-          render: (gap: number) => {
-            if (gap === 0) return '-';
-            return <Tag color="orange">{gap}</Tag>;
-          },
-        },
-      ];
-    }
+        xhsPostCount: { title: '小红书作品数', dataIndex: 'xhsPostCount', width: 130, render: numberValue },
+        douyinPostCount: { title: '抖音作品数', dataIndex: 'douyinPostCount', width: 120, render: numberValue },
+        todayDeals: { title: '成交数', dataIndex: 'todayDeals', width: 100, render: numberValue },
+      };
+      return configs[key];
+    });
 
-    if (type === 'leads') {
-      return [
-        ...baseColumns,
-        {
-          title: '客资数',
-          dataIndex: 'leadCount',
-          sorter: (a, b) => a.leadCount - b.leadCount,
-          render: (val: number) => <Typography.Text strong>{val}</Typography.Text>,
-        },
-        {
-          title: '来源作品数',
-          dataIndex: 'sourcePostCount',
-          render: (val?: number) => val ?? '-',
-        },
-        {
-          title: '有效率',
-          dataIndex: 'validRate',
-          render: (val?: number) => {
-            if (val === undefined || val === null) return '-';
-            return `${(val * 100).toFixed(1)}%`;
-          },
-        },
-        {
-          title: '与上一名差距',
-          dataIndex: 'gap',
-          render: (gap: number) => {
-            if (gap === 0) return '-';
-            return <Tag color="orange">{gap}</Tag>;
-          },
-        },
-      ];
-    }
-
-    // traffic
     return [
       ...baseColumns,
-      {
-        title: '流量（赞+评+藏）',
-        dataIndex: 'traffic',
-        sorter: (a, b) => (a.traffic ?? a.likes ?? 0) - (b.traffic ?? b.likes ?? 0),
-        render: (val?: number, record?: RankingRow) => (
-          <Typography.Text strong>{val ?? record?.likes ?? 0}</Typography.Text>
-        ),
-      },
+      ...metricColumns,
       {
         title: '与上一名差距',
         dataIndex: 'gap',
@@ -473,9 +431,12 @@ export default function OperationRankingsPage() {
                   <Button
                     type="link"
                     size="small"
-                    onClick={() => changeType(card.key)}
+                    onClick={() => {
+                      if (card.key !== 'traffic') changeType(card.key);
+                    }}
+                    disabled={card.key === 'traffic'}
                   >
-                    查看完整榜
+                    {card.key === 'traffic' ? '仅展示 Top 3' : '按此排序'}
                   </Button>
                 }
                 style={{ background: card.bg, borderColor: card.color }}
@@ -523,9 +484,9 @@ export default function OperationRankingsPage() {
       <Card>
         <div className="toolbar-row" style={{ marginBottom: 16 }}>
           <Segmented
-            options={TYPE_OPTIONS}
+            options={MAIN_RANKING_TYPE_OPTIONS}
             value={type}
-            onChange={(val) => changeType(val as RankingType)}
+            onChange={(val) => changeType(val as MainRankingType)}
           />
           <Space>
             <Button

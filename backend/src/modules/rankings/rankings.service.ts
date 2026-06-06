@@ -50,9 +50,10 @@ export class RankingsService {
       (l) => !platformFilter || l.platform === platformFilter,
     );
 
-    // 作品数榜：排除删除、重复、无效作品（通过 postsService.findAll 已过滤）
-    if (type === 'posts') {
+    // 统一主榜基础指标：账号数/作品数/平台作品数/成交数同表展示，type 只决定排序口径。
+    const mergedMetricRows = () => {
       const postCountByEmployee: Record<string, { total: number; xhs: number; douyin: number }> = {};
+      const leadCountByEmployee: Record<string, number> = {};
       for (const post of posts) {
         if (!postCountByEmployee[post.employeeId]) {
           postCountByEmployee[post.employeeId] = { total: 0, xhs: 0, douyin: 0 };
@@ -61,30 +62,28 @@ export class RankingsService {
         if (post.platform === '小红书') postCountByEmployee[post.employeeId].xhs++;
         if (post.platform === '抖音') postCountByEmployee[post.employeeId].douyin++;
       }
-      return rows
-        .map((r) => ({
-          ...r,
-          postCount: postCountByEmployee[r.employeeId]?.total || 0,
-          xhsPostCount: postCountByEmployee[r.employeeId]?.xhs || 0,
-          douyinPostCount: postCountByEmployee[r.employeeId]?.douyin || 0,
-        }))
-        .sort((a, b) => b.postCount - a.postCount);
-    }
-
-    // 客资榜：排除重复、无联系方式且不可跟进客资
-    if (type === 'leads') {
-      const leadCountByEmployee: Record<string, number> = {};
       for (const lead of leads) {
         // 排除无效客资（无联系方式且不可跟进）
         if (!lead.contactInfo && lead.status === 'invalid') continue;
         leadCountByEmployee[lead.employeeId] = (leadCountByEmployee[lead.employeeId] || 0) + 1;
       }
-      return rows
-        .map((r) => ({
-          ...r,
-          leadCount: leadCountByEmployee[r.employeeId] || 0,
-        }))
-        .sort((a, b) => b.leadCount - a.leadCount);
+      return rows.map((r) => ({
+        ...r,
+        postCount: postCountByEmployee[r.employeeId]?.total || 0,
+        xhsPostCount: postCountByEmployee[r.employeeId]?.xhs || 0,
+        douyinPostCount: postCountByEmployee[r.employeeId]?.douyin || 0,
+        leadCount: leadCountByEmployee[r.employeeId] || 0,
+      }));
+    };
+
+    // 作品数榜：排除删除、重复、无效作品（通过 postsService.findAll 已过滤）
+    if (type === 'posts') {
+      return mergedMetricRows().sort((a, b) => b.postCount - a.postCount);
+    }
+
+    // 客资榜：排除重复、无联系方式且不可跟进客资
+    if (type === 'leads') {
+      return mergedMetricRows().sort((a, b) => b.leadCount - a.leadCount);
     }
 
     // 流量榜：按 SUM(likes+comments+favorites) 排序

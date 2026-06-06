@@ -41,37 +41,37 @@
 ### 2.2 运营排行榜
 
 - [x] 账号数、作品数、小红书作品数、抖音作品数、区间成交 → **列名口径**统一为"成交数" — commit `168c49d` 在 `admin/rankings/page.tsx` 把 `columns[4].title` 由 "区间成交" 改为 "成交数"（dataIndex 仍 `todayDeals`）。剩余"账号数/小红书作品/抖音作品并入同一榜单"按 P1 待办保留，本期未做。
-- [ ] 上述 5 项指标需要在两个榜单（客资榜 / 作品榜）**统一显示**，合并为同一榜单
-- [ ] 榜单左上角保留"按客资 / 按作品"的**筛选切换**（不是两个独立榜单）
+- [x] 上述 5 项指标需要在两个榜单（客资榜 / 作品榜）**统一显示**，合并为同一榜单 — 2026-06-06 验收修复：`frontend/src/app/operation/rankings/page.tsx` 主榜固定展示账号数、作品数、小红书作品数、抖音作品数、成交数；`backend/src/modules/rankings/rankings.service.ts` 在 `posts/leads` 两个排序口径下统一补齐 `postCount/xhsPostCount/douyinPostCount/leadCount`。新增 `rankingTable.test.ts` 与 `rankings.service.spec.ts` 覆盖。
+- [x] 榜单左上角保留"按客资 / 按作品"的**筛选切换**（不是两个独立榜单） — 2026-06-06 验收修复：主榜只保留 `按作品 / 按客资` Segmented，切换仅改变排序口径；流量榜保留为顶部 Top3 概览，不再作为独立主表。
 - [x] 时间筛选需支持**按月**、**按年**维度（确认 `QuickRangePicker` 是否已接入） — commit `3965ac1` 前后端联动：① 后端 `RANKING_PERIODS` 扩到 10 项（增 `90d / 1y / 3y`），`resolveDateRange` 新增对应分支；② controller `from / to` 透传，range 优先于 period 推断；③ 前端 `derivePeriod` 细分到 10 档，未命中返回 `null` 走 `from/to` 透传；④ 新增 `buildRangeQuery()` 统一序列化。QuickRangePicker 全 12 预设（天 1/3/6、周 1/3/6、月 1/3/6、年 1/3）现在全部按精确粒度生效，不再被旧 enum 退化。
 
 ### 2.3 个人看板
 
 - [x] 顶部左右两个看板区**只展示其中一个**（避免视觉冗余），由右上角平台选择器控制 — commit `168c49d` 在 `PlatformAnalysisPanel.tsx` 取消左右双列布局（`PLATFORM_BUCKETS.map` 拆 2 列 → 1 列满宽），顶部 Radio.Group 单选平台，默认小红书
-- [ ] 顶部数据卡片的指标**可在"客资"与"流量"之间切换**（目前只展示客资相关）
-- [ ] 下方时间筛选区应与顶部时间筛选**联动**（共享同一时间区间）
+- [x] 顶部数据卡片的指标**可在"客资"与"流量"之间切换**（目前只展示客资相关） — 2026-06-06 验收修复：`PersonalDashboardBoard.tsx` 顶部指标收敛为"流量筛选 / 获客筛选"，概览卡按模式切换展示。
+- [x] 下方时间筛选区应与顶部时间筛选**联动**（共享同一时间区间） — 2026-06-06 验收修复：`usePersonalDashboardData.ts` 支持 `from/to` 并透传给 overview、rankings、平台分布、趋势接口；`PersonalDashboardBoard.test.ts` 覆盖区间序列化。
 - [x] 新增"双平台 × 三类型作品占比"饼状图（可选平台） — commit `168c49d` 在 `PersonalDashboardBoard.tsx` 新增 `PostTypeSharePieCard`：基于 `platformDist` 聚合 作品/流量/客资 三扇区，平台单选 Radio.Group（全部/小红书/抖音），默认小红书；位置在双平台趋势图之上
-- [ ] **指标筛选位置调整**：左侧筛选区目前"位置放错"——只保留"流量筛选 / 获客筛选"两项，并下移到上方"要求 1"所在的同一筛选区
-- [ ] 右侧时间筛选需支持按月切换各个月份
-- [ ] 作品看板：仍无法按时间筛选（确认 `QuickRangePicker` 是否已接入）
-- [ ] 作品看板"全平台"无法切换抖音/小红书（其他全平台看板需一并检查）
+- [x] **指标筛选位置调整**：左侧筛选区目前"位置放错"——只保留"流量筛选 / 获客筛选"两项，并下移到上方"要求 1"所在的同一筛选区 — 2026-06-06 验收修复：指标筛选已合并到 `PersonalDashboardBoard.tsx` 顶部筛选区。
+- [x] 右侧时间筛选需支持按月切换各个月份 — 2026-06-06 验收修复：个人看板接入 `QuickRangePicker + RANGE_PRESETS_FULL`，支持月/年预设与自定义区间。
+- [x] 作品看板：仍无法按时间筛选（确认 `QuickRangePicker` 是否已接入） — 2026-06-06 验收修复：`operation/posts/page.tsx`、`admin/posts/page.tsx` 接入 `QuickRangePicker`，请求和导出均透传日期区间。
+- [x] 作品看板"全平台"无法切换抖音/小红书（其他全平台看板需一并检查） — 2026-06-06 验收修复：个人看板平台筛选联动三类型占比与平台分布；账号时间序列后端补齐 `xiaohongshu/xhs/douyin/dy/中文` 归一化，避免单平台筛不到数据。
 - [x] **双平台作品量趋势图改为折线图**（原为柱状图） — commit `78bedb5` 在 `frontend/src/shared/components/dashboard/PersonalDashboardBoard.tsx` 把 `PlatformTrendBarChart`（type: 'bar'）改为 `PlatformTrendLineChart`（type: 'line' + smooth + symbol circle + axisPointer 'line'），更贴合"趋势"语义
 - [x] **平台列过滤统一为同一平台**（不再跨平台错位） — commit `168c49d` 在 `buildPlatformRows(rankings, metricField, bucket)` 增加第 3 参 `bucket`，过滤时统一用 `mapPlatformToKey` 归一化平台字段（兼容 `xiaohongshu/小红书/xhs` 与 `douyin/抖音/dy`），避免"小红书列里出现抖音账号"
 
 ### 2.4 客资看板
 
-- [ ] 来源作品列：只显示几个字（截断），不要换行；hover 悬浮框显示完整作品名；点击跳转到对应作品详情
-- [ ] 时间筛选：当前页面无法直接按月/年筛选，需手动选起止日期（先确认 `QuickRangePicker` 是否已接入）
+- [x] 来源作品列：只显示几个字（截断），不要换行；hover 悬浮框显示完整作品名；点击跳转到对应作品详情 — 2026-06-06 验收修复：`admin/leads/page.tsx`、`operation/leads/page.tsx` 已复用 `PostTitleCell`。
+- [x] 时间筛选：当前页面无法直接按月/年筛选，需手动选起止日期（先确认 `QuickRangePicker` 是否已接入） — 2026-06-06 验收修复：`admin/leads/page.tsx`、`operation/leads/page.tsx` 已接入 `QuickRangePicker + RANGE_PRESETS_FULL`。
 
 ### 2.5 运营端 — 作品管理
 
-- [ ] "最下面未完成录入"区块应删除
-- [ ] 列表下方出现**负数**展示（数据/计算口径异常）
+- [x] "最下面未完成录入"区块应删除 — 2026-06-06 验收：在 `admin/posts`、`operation/posts`、`operation/gallery`、`operation/today-tasks` 相关页面未再检索到"未完成录入"区块。
+- [x] 列表下方出现**负数**展示（数据/计算口径异常） — 2026-06-06 验收修复：新增 `frontend/src/shared/utils/post-metrics.ts`，作品列表指标展示统一做非负归一化；`post-metrics.test.ts` 覆盖负数与非法数值。
 - [ ] "优秀作品"和"客资"的**筛选阈值应由主管端配置**（目前写死）
-- [ ] 打开账号时直接定位到对应账号，并**高亮/明显标识**当前账号
+- [x] 打开账号时直接定位到对应账号，并**高亮/明显标识**当前账号 — 2026-06-06 验收修复：`admin/accounts/page.tsx` 支持 `?id=` 精准查并高亮；`operation/accounts/page.tsx` 在既有精准查基础上补高亮。
 - [x] "主管推荐"改名为"推荐作品"；所有人均可**选择平台后一键粘贴链接**录入推荐作品
 - [x] 同步主管端口的修改（运营端与主管端两处同步更新）— 2026-06-06 实现：① 前端 `operation/posts/new/page.tsx` 手动录入默认值 `postType='获客贴'`、Select 选项 3 个改中文"获客贴/话题贴/素人贴"（值同步为中文），initialValue 同步；② `schema.sql` `posts.post_type` 注释追加"获客贴/话题贴/素人贴（历史值：图文=note/视频=video/获客贴=lead_post/营销贴/讨论帖/人设贴）"，`post_metrics.traffic` 注释改为"仅获客贴（历史口径同义：营销贴）"；③ `scripts/seed-demo-data.js` / `deploy/seed-demo-data.js` 三类（素人贴/话题贴/获客贴）→ 单一"获客贴"，title 池/互动/流量数值/lead 触发条件全部按获客贴；④ `scripts/migrate-from-legacy.js` / `deploy/migrate-from-legacy.js` `mapPost` 兜底 postType "素人贴"→"获客贴"；⑤ `scripts/e2e-verify-fetch-metrics.js` 插入测试 post 时 `'素人贴'` → `'获客贴'`；⑥ 后端 `reminders.service.ts` 节点超时定时日志暂关（注释掉 `operationLogs.log`），避免噪声
-- [ ] 提供一份"链接录入格式参考案例"（占位说明/示例弹窗）
+- [x] 提供一份"链接录入格式参考案例"（占位说明/示例弹窗） — 已验收既有实现：`operation/posts/new/page.tsx` 已有 PC/移动端、小红书/抖音 4 个示例和移动端粘贴提示（见已完成区 #10）。
 - [x] 来源作品列：只显示几个字（截断），不要换行；hover 悬浮框显示完整作品名；点击跳转到对应作品详情（与客资看板同要求） — commit `64ccbd5` 在 `PlatformAnalysisPanel.tsx` 引入 `PostTitleCell` 组件（截断 8 字 + Tooltip + 跳转 `/admin/posts/{postId}`）。P2 后续在 `admin/accounts/page.tsx` 等页面**导入并使用**该组件即可，无需重写
 - [x] **学习榜单 → 账号管理深链精准查**（学习榜 + 主管推荐榜两列） — commit `168c49d`：① 后端 `AccountsController` 新增 `Query('id')` + `AccountsService.findByIdForPaged(id, employeeId)` 带员工范围隔离（运营越权返回空）；② 前端 `operation/accounts/page.tsx` 读 `useSearchParams().get('id')` 走精准查 + 搜索框 placeholder 提示支持 ID 精准查 + 清空搜索自动移除 URL 参数；③ `operation/rankings/study/page.tsx` 标题 >8 字走 Tooltip 截断 8 字 + "…"、账号列从纯文本改为 `Button type=link` 跳 `?id=`，学习榜与主管推荐榜两处同步
 - [x] **pageSize 统一为 15**（与 P0 销售域看板对齐） — commit `168c49d`：① `admin/posts/page.tsx` `DEFAULT_PAGE_SIZE` 20→15、`PAGE_SIZE_OPTIONS` [20,50,100]→[15,30,50,100]；② `operation/posts/page.tsx` 写死 20→动态 state=15；③ `operation/gallery/page.tsx` 12→15 + 顺手删"全部员工"筛选（listAdminEmployees 拉取 + state + 渲染）
@@ -99,11 +99,11 @@
 
 - [x] **时间筛选与数据展示**
   - [x] 当前页面无法直接按月/年筛选，需手动选起止日期（确认 `QuickRangePicker` 是否已接入） — commit `64ccbd5` 在 `sales/leads`、`sales/deals`、`academic/orders/OrderTable` 接入 `QuickRangePicker`。运营端 4 个页面（`operation/rankings`、`operation/dashboard`、`operation/posts`、`admin/leads`）待 P2 subagent 接入
-  - [ ] 单平台的数据筛选功能异常，无法正常显示
-- [ ] **界面布局与信息展示**
-  - "全部作品"页面信息展示臃肿，封面/标题/文案应**置于更突出位置**
-  - "标记为优秀作品"按钮**位置不佳**，需移至更合适位置
-  - "高级筛选"区域**过宽**，需紧凑化布局
+  - [x] 单平台的数据筛选功能异常，无法正常显示 — 2026-06-06 验收修复：`DashboardService.normalizePlatform` 补齐 `xiaohongshu/xhs/douyin/dy/中文` 归一化，全部账号时间序列接口使用归一化后的平台过滤；回归测试覆盖。
+- [x] **界面布局与信息展示**
+  - [x] "全部作品"页面信息展示臃肿，封面/标题/文案应**置于更突出位置** — 2026-06-06 验收修复：`admin/posts/page.tsx`、`operation/posts/page.tsx` 合并作品列，突出封面、标题、文案。
+  - [x] "标记为优秀作品"按钮**位置不佳**，需移至更合适位置 — 2026-06-06 验收修复：主管端作品页将优秀标记调整到操作区，同时保留金色"优秀作品"标识。
+  - [x] "高级筛选"区域**过宽**，需紧凑化布局 — 2026-06-06 验收修复：主管端作品页筛选栏收紧控件宽度并接入 QuickRangePicker。
 - [x] **作品录入输入框加 PC/移动端格式参考案例** — commit `109689b` 在 `frontend/src/app/operation/posts/new/page.tsx` 的"作品链接" Form.Item 加 extra 提示块，4 个示例（小红书 PC / 小红书移动端 / 抖音 PC / 抖音移动端）+ 移动端常见中文提示文案警示。引导用户只取 URL 部分粘贴。
 - [x] **新增作品与数据来源**
   - 新增作品时系统应**自动解析并填充**封面、标题、文案等信息（依赖抓取服务 `ParserService`），而非让用户手动截图/输入

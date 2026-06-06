@@ -30,6 +30,9 @@ import { apiClient } from '@/shared/api/apiClient';
 import { getAdminLeadsStats, listAdminEmployees, listAdminLeads } from '@/shared/api/admin';
 import { listSourceAccounts, listSourcePosts, listAssignableSalesUsers, type CatalogOption } from '@/shared/api/catalog';
 import { createExport, downloadExportUrl, getExport } from '@/shared/api/exports';
+import { QuickRangePicker, RANGE_PRESETS_FULL } from '@/shared/components/date';
+import type { DateRangeValue } from '@/shared/components/date';
+import { PostTitleCell } from '@/shared/components/dashboard/PlatformAnalysisPanel';
 import { getStatusMeta } from '@/shared/constants/status';
 import type { AdminEmployee } from '@/shared/types/admin';
 import type { AdminLeadsStats } from '@/shared/api/admin';
@@ -113,6 +116,11 @@ const dealStatusOptions = [
 function formatDayjs(value: Dayjs | null | undefined): string {
   if (!value) return '';
   return value.format('YYYY-MM-DD');
+}
+
+function buildDateRangeValue(startDate: string, endDate: string): DateRangeValue {
+  if (!startDate || !endDate) return null;
+  return { start: dayjs(startDate), end: dayjs(endDate) };
 }
 
 function formatDate(value?: string): string {
@@ -494,7 +502,14 @@ export default function AdminLeadsPage() {
     { title: '客户昵称', dataIndex: 'customerName', width: 120, render: (v: string) => v || '未命名客户' },
     { title: '联系方式', dataIndex: 'contact', width: 130, render: (v?: string) => maskContact(v) },
     { title: '平台', dataIndex: 'platform', width: 80 },
-    { title: '来源作品', dataIndex: 'sourcePostTitle', width: 150, render: (v?: string) => v || '-' },
+    {
+      title: '来源作品',
+      dataIndex: 'sourcePostTitle',
+      width: 120,
+      render: (v?: string, record?: Lead) => (
+        <PostTitleCell title={v} postId={record?.postId} maxChars={8} />
+      ),
+    },
     { title: '来源账号', dataIndex: 'sourceAccountName', width: 100, render: (v?: string) => v || '-' },
     { title: '所属运营', dataIndex: 'operatorName', width: 90, render: (v?: string) => v || '-' },
     { title: '分配销售', dataIndex: 'salesName', width: 90, render: (v?: string) => v || '-' },
@@ -676,6 +691,18 @@ export default function AdminLeadsPage() {
             onChange={(value) => setFilters((prev) => ({ ...prev, addStatus: value }))}
             style={{ width: 140 }}
             placeholder="添加状态"
+          />
+          <QuickRangePicker
+            value={buildDateRangeValue(filters.startDate, filters.endDate)}
+            onChange={(range) => setFilters((prev) => ({
+              ...prev,
+              startDate: range?.start.format('YYYY-MM-DD') ?? '',
+              endDate: range?.end.format('YYYY-MM-DD') ?? '',
+            }))}
+            presets={RANGE_PRESETS_FULL}
+            variant="select"
+            selectWidth={120}
+            selectPlaceholder="快捷时间"
           />
         </Space>
       </Card>

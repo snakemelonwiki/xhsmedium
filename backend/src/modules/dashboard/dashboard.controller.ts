@@ -91,6 +91,7 @@ export class DashboardController {
   ) {
     const userId = getSessionUserId(req);
     if (!userId) return res.status(401).json({ message: '未登录' });
+    if (!this.isSupervisorRole(req)) return res.status(403).json({ message: '无权查看其他员工数据' });
     const data = await this.dashboardService.getPersonalOverview(id, { metrics, platform, period, from, to });
     return res.json(data);
   }
@@ -130,6 +131,7 @@ export class DashboardController {
   ) {
     const userId = getSessionUserId(req);
     if (!userId) return res.status(401).json({ message: '未登录' });
+    if (!this.isSupervisorRole(req)) return res.status(403).json({ message: '无权查看其他员工数据' });
     const data = await this.dashboardService.getPersonalRankings(id, { platform, period, from, to, sort });
     return res.json(data);
   }
@@ -161,6 +163,7 @@ export class DashboardController {
   ) {
     const userId = getSessionUserId(req);
     if (!userId) return res.status(401).json({ message: '未登录' });
+    if (!this.isSupervisorRole(req)) return res.status(403).json({ message: '无权查看其他员工数据' });
     const data = await this.dashboardService.getPersonalToday(id, { platform, date });
     return res.json(data);
   }
@@ -179,6 +182,7 @@ export class DashboardController {
   ) {
     const userId = getSessionUserId(req);
     if (!userId) return res.status(401).json({ message: '未登录' });
+    if (!this.isSupervisorRole(req)) return res.status(403).json({ message: '无权查看其他员工数据' });
     const data = await this.dashboardService.getPersonalDashboard(id, { from, to });
     return res.json(data);
   }

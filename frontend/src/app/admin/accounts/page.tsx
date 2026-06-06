@@ -17,6 +17,7 @@ import {
   message,
 } from 'antd';
 import type { TableColumnsType, TablePaginationConfig } from 'antd';
+import { useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
 import { listAdminAccounts, listAdminEmployees, saveAdminAccount } from '@/shared/api/admin';
@@ -61,6 +62,8 @@ function getStatusTagColor(value?: string): string {
 }
 
 export default function AdminAccountsPage() {
+  const searchParams = useSearchParams();
+  const pinnedAccountId = searchParams.get('id') ?? '';
   const [items, setItems] = useState<Account[]>([]);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
@@ -90,15 +93,23 @@ export default function AdminAccountsPage() {
 
   const [exporting, setExporting] = useState(false);
 
-  async function load(page = pagination.current, pageSize = pagination.pageSize, nextKeyword = keyword, nextPlatform = filterPlatform) {
+  async function load(
+    page = pagination.current,
+    pageSize = pagination.pageSize,
+    nextKeyword = keyword,
+    nextPlatform = filterPlatform,
+    id: string = pinnedAccountId,
+  ) {
     setLoading(true);
     try {
-      const result = await listAdminAccounts({
-        page,
-        pageSize,
-        keyword: nextKeyword.trim() || undefined,
-        platform: nextPlatform || undefined,
-      });
+      const result = await listAdminAccounts(id
+        ? { page, pageSize, id }
+        : {
+            page,
+            pageSize,
+            keyword: nextKeyword.trim() || undefined,
+            platform: nextPlatform || undefined,
+          });
       setItems(result.items as Account[]);
       setPagination({ current: result.page, pageSize: result.pageSize, total: result.total });
     } catch {
@@ -118,12 +129,23 @@ export default function AdminAccountsPage() {
 
   // 初始加载
   useEffect(() => {
+    if (pinnedAccountId) {
+      setKeyword(pinnedAccountId);
+      setFilterPlatform('');
+      setFilterEmployeeId('');
+      setFilterStatus('');
+    }
+  }, [pinnedAccountId]);
+
+  // 初始加载
+  useEffect(() => {
     void load(1, 20);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [pinnedAccountId]);
 
   // 平台筛选变化：服务端过滤，重新拉取（分页重置到第 1 页）
   useEffect(() => {
+    if (pinnedAccountId) return;
     void load(1, pagination.pageSize, keyword, filterPlatform);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filterPlatform]);
@@ -325,7 +347,9 @@ export default function AdminAccountsPage() {
         <Space>
           <Input.Search
             allowClear
-            placeholder="搜索账号名、UID、定位"
+            value={keyword}
+            placeholder="搜索账号名、UID、定位（支持账号ID）"
+            onChange={(e) => setKeyword(e.target.value)}
             onSearch={handleSearch}
             style={{ width: 220 }}
           />
@@ -385,6 +409,7 @@ export default function AdminAccountsPage() {
           columns={columns}
           dataSource={filteredItems}
           loading={loading}
+          rowClassName={(record) => (pinnedAccountId && record.id === pinnedAccountId ? 'ant-table-row-selected' : '')}
           pagination={{ ...pagination, showSizeChanger: true, showTotal: (t) => `共 ${t} 条` }}
           onChange={handleTableChange}
           scroll={{ x: 1200 }}
