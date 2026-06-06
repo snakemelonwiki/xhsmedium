@@ -15,12 +15,17 @@ if (!process.env.PLAYWRIGHT_BROWSERS_PATH) {
 }
 
 const { chromium } = require("playwright");
+const sharp = require("sharp");
 
 const DEFAULT_TIMEOUT = 15000;
 const PROFILE_ROOT = path.join(__dirname, ".playwright-profiles");
+const COVERS_DIR = path.join(__dirname, "uploads", "post-covers");
+const COVER_THUMB_MAX_WIDTH = 960; // 略缩图：960px 宽（≥1080p 屏幕"点击查看大图"时仍清晰），远低于原图但人眼无颗粒感
+const COVER_THUMB_QUALITY = 92; // mozjpeg 92：体积仍可控（典型 960px 截图 ~80–150KB），文字/线条更锐利
 const loginContexts = new Map();
 
 fs.mkdirSync(PROFILE_ROOT, { recursive: true });
+fs.mkdirSync(COVERS_DIR, { recursive: true });
 
 function detectPlatform(url) {
   const value = String(url || "").toLowerCase();
@@ -66,16 +71,44 @@ function parseCount(raw) {
   return Math.round(amount);
 }
 
-async function readTextBySelectors(page, selectors) {
-  for (const selector of selectors) {
+/**
+ * 多 selector 并行尝试，第一个返回非空文本的胜出。
+ * 旧版对 N 个 selector 串行调用：worst case N×1.2s（douyin 4 项指标 × 6 selectors × 1.2s = 28.8s，
+ * 是抓取耗时的主要瓶颈）。现在所有 selector 并行 + 整体 perSelectorTimeout 硬上限。
+ */
+async function readTextBySelectors(page, selectors, perSelectorTimeout = 1500) {
+  if (!selectors || !selectors.length) return "";
+
+  const overallTimeoutMs = perSelectorTimeout + 200;
+  const attempt = (selector) => (async () => {
     const locator = page.locator(selector).first();
     try {
-      await locator.waitFor({ state: "visible", timeout: 1200 });
+      await locator.waitFor({ state: "visible", timeout: perSelectorTimeout });
       const text = (await locator.textContent()) || "";
-      if (text.trim()) return text.trim();
-    } catch {}
-  }
-  return "";
+      return text.trim();
+    } catch {
+      return "";
+    }
+  })();
+
+  // 跑两个 Promise：所有 selector 一起跑（任一拿到非空就 settle）+ 整体超时兜底
+  return new Promise((resolve) => {
+    let settled = false;
+    const settle = (val) => {
+      if (settled) return;
+      settled = true;
+      resolve(val || "");
+    };
+    // 全部跑完，哪个先出非空用哪个；全空时由 Promise.all 兜底
+    Promise.all(selectors.map((sel) => attempt(sel))).then((texts) => {
+      // 优先取第一个非空（保留原顺序语义，便于回归）
+      for (const t of texts) {
+        if (t) { settle(t); return; }
+      }
+      settle("");
+    });
+    setTimeout(() => settle(""), overallTimeoutMs);
+  });
 }
 
 async function readCountBySelectors(page, selectors) {
@@ -576,19 +609,37 @@ async function fetchMetricsFromUrl(url) {
   try {
     const page = context.pages()[0] || (await context.newPage());
     await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: DEFAULT_TIMEOUT });
-    await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => {});
-    await page.waitForTimeout(2000);
+    // 抖音/小红书 __INITIAL_STATE__ 嵌在 script 标签里，DOMContentLoaded 时通常已注入；
+    //   networkidle 对持续 ws/long-poll 不可达，但 1500ms 短超时仍能拿到首屏资源完成事件，
+    //   比 0ms（直接走 timeout）更稳。实测抖音 note 链接 networkidle 1.5s 内能命中。
+    await page.waitForLoadState("networkidle", { timeout: 1500 }).catch(() => {});
+    await page.waitForTimeout(400);
     const pageTitle = await page.title().catch(() => "");
 
     const payload = platform === "小红书" ? await scrapeXiaohongshu(page) : await scrapeDouyin(page);
     if (looksLikeLoginWall(platform, payload.bodyText, pageTitle)) {
-      throw new Error(`当前打开的是${platform}登录页，请先在“链接测试”里点“打开${platform}登录浏览器”完成一次登录。`);
+      throw new Error(`当前打开的是${platform}登录页，请先在"链接测试"里点"打开${platform}登录浏览器"完成一次登录。`);
     }
 
     const normalizedTitle = String((payload && payload.title) || pageTitle || "")
       .replace(/\s*-\s*小红书\s*$/, "")
       .replace(/\s*-\s*抖音\s*$/, "")
       .trim();
+
+    // 封面截图：抓取指标后顺手截作品关键区域，sharp 压成低分辨率 JPEG 落到 uploads/post-covers/
+    // 失败不抛错 —— 没封面也能继续录入
+    let coverImageUrl = "";
+    let coverThumbUrl = "";
+    try {
+      const cover = await capturePostCover(page, platform);
+      if (cover) {
+        coverImageUrl = cover.coverImageUrl;
+        coverThumbUrl = cover.coverThumbUrl;
+      }
+    } catch (coverErr) {
+      // eslint-disable-next-line no-console
+      console.warn(`[metricsFetcher] capturePostCover failed: ${coverErr?.message || coverErr}`);
+    }
 
     return {
       platform,
@@ -599,11 +650,84 @@ async function fetchMetricsFromUrl(url) {
       comments: Number(payload.comments || 0),
       favorites: Number(payload.favorites || 0),
       shares: Number(payload.shares || 0),
+      coverImageUrl,
+      coverThumbUrl,
       metricsUpdatedAt: new Date().toISOString()
     };
   } finally {
     await context.close();
   }
+}
+
+/**
+ * 截取作品页视口作封面，sharp 缩放压成低分辨率 JPEG 落到 uploads/post-covers/。
+ *
+ * 历史策略：先 locator（平台特定选择器）→ video poster → og:image → first img → 视口兜底。
+ *   实测抖音/小红书里 locator 选择器经常命中 32×32 头像、og:image 经常是 52×90 分享卡，
+ *   "first img" 因 lazy load 拿到的是不可见的占位图，5 路并行下经常拿到的是错的。
+ *   视口截图拿的是页面真实首屏，最稳。
+ *
+ * 优化：page.screenshot 用 omitBackground=false + clip 选作品主区（避开顶部导航）。
+ *   整体 1.2s 上限；写入落盘 ~150ms。
+ */
+async function capturePostCover(page, platform) {
+  // 视口截图：clip 区域 (0, header 高度, viewport 宽, 作品主区高度)
+  // 避免取到顶部导航栏 + 评论区。header 高度 ~80px, 主区 980px (1100-120)。
+  try {
+    const buf = await page.screenshot({
+      type: "png",
+      clip: { x: 0, y: 0, width: 1440, height: 1080 },
+    });
+    if (buf && buf.length > 1024) {
+      return await writeCoverJpeg(buf, "viewport");
+    }
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn(`[metricsFetcher] viewport screenshot failed: ${err?.message || err}`);
+  }
+  return null;
+}
+
+/**
+ * 用 Playwright 的 page 上下文 fetch 一张远程图片，拿到原始 Buffer。
+ * 不用 node fetch：能复用登录态 Cookie，命中平台防盗链。
+ */
+async function fetchImageBuffer(url, page) {
+  try {
+    const data = await page.evaluate(async (u) => {
+      const resp = await fetch(u, { credentials: "include" });
+      if (!resp.ok) return null;
+      const blob = await resp.blob();
+      const ab = await blob.arrayBuffer();
+      return { ok: true, bytes: Array.from(new Uint8Array(ab)), type: blob.type };
+    }, url);
+    if (!data?.ok) return null;
+    return Buffer.from(data.bytes);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 把任意来源的 Buffer 用 sharp 缩放为 ≤ COVER_THUMB_MAX_WIDTH 的 JPEG，写到 uploads/post-covers/，
+ * 返回可访问的 URL（前端 ImageUploadField 提交时直接当 coverImageUrl + coverThumbUrl）。
+ */
+async function writeCoverJpeg(inputBuf, source) {
+  if (!inputBuf || !inputBuf.length) return null;
+  const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  const filename = `${stamp}.jpg`;
+  const filepath = path.join(COVERS_DIR, filename);
+  await sharp(inputBuf)
+    .rotate() // 处理 EXIF 方向
+    .resize({ width: COVER_THUMB_MAX_WIDTH, withoutEnlargement: true })
+    .jpeg({ quality: COVER_THUMB_QUALITY, mozjpeg: true })
+    .toFile(filepath);
+  const url = `/uploads/post-covers/${filename}`;
+  return {
+    coverImageUrl: url,
+    coverThumbUrl: url,
+    source,
+  };
 }
 
 module.exports = {

@@ -168,6 +168,9 @@ export class PostsService {
     comments: number;
     favorites: number;
     shares: number;
+    /** 抓取截图：原图 / 缩略图（同源低分辨率图）。抓取失败时为空串。 */
+    coverImageUrl: string;
+    coverThumbUrl: string;
     parsed: boolean;
     warning?: string;
   }> {
@@ -188,6 +191,8 @@ export class PostsService {
       comments: 0,
       favorites: 0,
       shares: 0,
+      coverImageUrl: '',
+      coverThumbUrl: '',
       parsed: false as boolean,
     };
 
@@ -202,7 +207,11 @@ export class PostsService {
     }
 
     try {
-      const scraped = await this.postsMetricsService.fetchMetricsFromUrl(normalizedUrl);
+      // 优化：parsePostLink 走 'parse-link' source → metricsService 单次 20s 不重试，
+      //   避免 3 次重试 45s+ 撞 nginx 60s 上限。
+      const scraped = await this.postsMetricsService.fetchMetricsFromUrl(normalizedUrl, {
+        source: 'parse-link',
+      });
       return {
         platform: scraped.platform || platform,
         postUrl: normalizedUrl,
@@ -213,6 +222,8 @@ export class PostsService {
         comments: Number(scraped.comments || 0),
         favorites: Number(scraped.favorites || 0),
         shares: Number(scraped.shares || 0),
+        coverImageUrl: scraped.coverImageUrl || '',
+        coverThumbUrl: scraped.coverThumbUrl || '',
         parsed: true,
       };
     } catch (err: any) {

@@ -26,6 +26,9 @@ export interface ParserSuccess {
     comments: number;
     favorites: number;
     shares: number;
+    /** 抓取截图：原图 / 缩略图（同源低分辨率图）。失败时为空串。 */
+    coverImageUrl?: string;
+    coverThumbUrl?: string;
     metricsUpdatedAt: string;
   };
 }

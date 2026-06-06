@@ -22,6 +22,7 @@ import { getAccountTimeseries, getAllAccountsTimeseries } from '@/shared/api/con
 import type { AccountInfo } from '@/shared/api/content';
 import { readAuthenticatedUser } from '@/shared/auth/auth';
 import type { AccountTimeseries, AccountTimeseriesDay, AccountTimeseriesPost } from '@/shared/types/content';
+import { mapPlatformToKey } from '@/shared/utils/platform-key';
 
 type Account = {
   id: string;
@@ -450,13 +451,12 @@ function PlatformDots({ posts }: { posts: AccountTimeseriesPost[] }) {
 
 function pickPlatformDotColor(platform?: string): string {
   if (!platform) return '#bfbfbf';
-  const lower = String(platform).toLowerCase();
-  // 小红书：红；抖音：黑
-  if (lower.includes('小红书') || lower === 'xiaohongshu' || lower.includes('xhslink')) {
-    return '#ff2442';
-  }
-  if (lower.includes('抖音') || lower === 'douyin' || lower.includes('iesdouyin')) {
-    return '#161616';
-  }
+  // 小红书：红；抖音：黑；中英文/dy/xhs 全部兼容（统一走 platform-key）
+  const key = mapPlatformToKey(platform);
+  if (key === 'xiaohongshu') return '#ff2442';
+  if (key === 'douyin') return '#161616';
+  // 兜底：URL 域名
+  if (platform.includes('xhslink')) return '#ff2442';
+  if (platform.includes('iesdouyin')) return '#161616';
   return '#bfbfbf';
 }

@@ -10,6 +10,9 @@ export interface ScrapedMetrics {
   comments: number;
   favorites: number;
   shares?: number;
+  /** 抓取时同步截的封面（低分辨率 jpeg，可直接当 coverImageUrl + coverThumbUrl） */
+  coverImageUrl?: string;
+  coverThumbUrl?: string;
   /**
    * 抓取时间戳。
    * 用 Date 类型以匹配 postsService.updateMetrics 的入参约束（DB 写入要 Date），
@@ -47,9 +50,15 @@ export class PostsMetricsService {
     const normalizedUrl = String(url || '').trim();
     if (!normalizedUrl) throw new Error('作品链接不能为空');
 
+    // 优化：retry 2→0，单次 15s→20s。
+    // 旧 retry=2 总耗时 45s+，叠加 ScrapingLock 8s 间隔 → 单次 parse-link 最坏 60s+，
+    // 容易撞 nginx 60s 上限返回 500。改为不重试：单次 20s 抓不到就让用户手动点重试。
+    // 注意：metrics 刷新场景（fetch-metrics / refresh-metrics）仍用 retry=2 保留重试，
+    // 因为那是非交互链路，多花点时间换成功率合理。parse-link 走 source='parse-link' 短路。
+    const isInteractive = (opts.source || 'fetch-metrics') === 'parse-link';
     const result = await this.parserService.parse(normalizedUrl, {
-      retry: 2,
-      timeout: 15000,
+      retry: isInteractive ? 0 : 2,
+      timeout: isInteractive ? 20_000 : 15_000,
       source: opts.source || 'fetch-metrics',
       postId: opts.postId,
     });
@@ -65,6 +74,8 @@ export class PostsMetricsService {
       comments: Number(d.comments || 0),
       favorites: Number(d.favorites || 0),
       shares: Number(d.shares || 0),
+      coverImageUrl: d.coverImageUrl || '',
+      coverThumbUrl: d.coverThumbUrl || '',
       // parser-core 给的是 ISO 字符串，转 Date 喂给 updateMetrics；JSON 序列化时再变回 ISO
       metricsUpdatedAt: d.metricsUpdatedAt ? new Date(d.metricsUpdatedAt) : new Date(),
     };

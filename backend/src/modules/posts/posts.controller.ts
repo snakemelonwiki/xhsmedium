@@ -124,8 +124,32 @@ export class PostsController {
     if (!postUrl) {
       return res.status(400).json({ ok: false, message: '作品链接不能为空' });
     }
-    const data = await this.postsService.parsePostLink(postUrl, { fetch: body?.fetch !== false });
-    return res.json({ ok: true, data });
+    // 兜底 try/catch：service 层 parsePostLink 内部已 try/catch，但 NestJS 装饰器 / JSON 序列化
+    //   抛错时仍会冒泡到 500。这里再包一层，任何 5xx 都降级为 200 + warning 响应，
+    //   前端能识别 `parsed:false + warning` 走兜底，而不是直接看到 500。
+    try {
+      const data = await this.postsService.parsePostLink(postUrl, { fetch: body?.fetch !== false });
+      return res.json({ ok: true, data });
+    } catch (err: any) {
+      // eslint-disable-next-line no-console
+      console.warn(`[posts] parse-link fatal: ${err?.message || err}`);
+      return res.json({
+        ok: true,
+        data: {
+          platform: '',
+          postUrl,
+          title: '',
+          likes: 0,
+          comments: 0,
+          favorites: 0,
+          shares: 0,
+          coverImageUrl: '',
+          coverThumbUrl: '',
+          parsed: false,
+          warning: err?.message || '解析服务暂时不可用，请稍后重试',
+        },
+      });
+    }
   }
 
   /**

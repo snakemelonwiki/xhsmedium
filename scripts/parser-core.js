@@ -90,6 +90,8 @@ async function fetchWithRetry(url, { retry = 3, timeout = 20000, log = () => {} 
           comments: Number(data.comments || 0),
           favorites: Number(data.favorites || 0),
           shares: Number(data.shares || 0),
+          coverImageUrl: data.coverImageUrl || "",
+          coverThumbUrl: data.coverThumbUrl || "",
           metricsUpdatedAt: data.metricsUpdatedAt || new Date().toISOString(),
         },
       };

@@ -24,6 +24,8 @@
 | 10 | 运营端-作品录入 | 链接输入框加 PC/移动端格式参考案例 | commit `109689b`：`operation/posts/new/page.tsx` 作品链接 Form.Item 加 extra 提示块，4 个示例（小红书 PC/移动端 + 抖音 PC/移动端）+ 移动端中文提示文案警示 |
 
 > 备注：原文档中"二、运营排行榜 / 15 行 这里要能按月筛选，按年筛选"以及"客资看板 / 时间筛选与数据展示"章节的"按月、年筛选"需求，可通过复用 `QuickRangePicker` 组件落地，已纳入"待修复"中以确认是否**已在对应页面接入**。
+>
+> **2026-06-06 更新**：新增"自动解析封面/标题/文案"已落地（见 2.7 已完成项），原 P3 排期项已删除。同步把"平台字符串兼容 douyin/抖音/xhs"的小问题修了，详见 2.7 子项 ⑦。
 
 ---
 
@@ -97,8 +99,9 @@
   - "标记为优秀作品"按钮**位置不佳**，需移至更合适位置
   - "高级筛选"区域**过宽**，需紧凑化布局
 - [x] **作品录入输入框加 PC/移动端格式参考案例** — commit `109689b` 在 `frontend/src/app/operation/posts/new/page.tsx` 的"作品链接" Form.Item 加 extra 提示块，4 个示例（小红书 PC / 小红书移动端 / 抖音 PC / 抖音移动端）+ 移动端常见中文提示文案警示。引导用户只取 URL 部分粘贴。
-- [ ] **新增作品与数据来源**
+- [x] **新增作品与数据来源**
   - 新增作品时系统应**自动解析并填充**封面、标题、文案等信息（依赖抓取服务 `ParserService`），而非让用户手动截图/输入
+  - 2026-06-06 实现：① 后端 `metricsFetcher.js` 抓取指标后顺手用 `page.locator(...).screenshot()` 截取关键区域，sharp 压缩为 ≤720px jpeg（mozjpeg 90）落到 `uploads/post-covers/`；② `scripts/parser-core.js` `fetchWithRetry` 透出 `coverImageUrl + coverThumbUrl`；③ 后端 `ParserSuccess` / `ScrapedMetrics` / `parsePostLink` 透到前端；④ 前端 `operation/posts/new/page.tsx` 在 `parsePostUrl` 成功时 `setFieldsValue({ coverImageUrl })` 自动回填 + `latestThumbRef` 同步；⑤ 缩略图 `<Image preview>` 默认支持点击放大，旁加 "查看大图" 按钮（`window.open` 兜底）；⑥ 缩略图外层加 `cursor: pointer` + a11y `role/tabIndex/aria-label` 提示；⑦ 顺手把抖音/小红书平台字符串兼容（`douyin / 抖音 / xiaohongshu / 小红书 / xhs / dy`）抽到共享工具 `frontend/src/shared/utils/platform-key.ts`，修复"抖音解析正常但没回填到表单"的 bug（mapPlatformToKey 之前只严格匹配 `lower === 'douyin'`，碰到 `抖音`/大小写变体时偶发失配）。
 
 ---
 
@@ -126,7 +129,7 @@
 | **P2** | 来源作品截断 + hover + 跳转 | 通用体验优化 |
 | **P2** | 优秀作品/客资阈值由主管端配置 | 需新增配置接口 |
 | **P2** | 全部作品页布局 + 优秀按钮位置 + 高级筛选紧凑化 | 纯前端体验优化 |
-| **P3** | 新增作品自动解析（封面/标题/文案） | 依赖抓取服务稳定性 |
+| **P3** | ~~新增作品自动解析（封面/标题/文案）~~ — **已完成**（2026-06-06） | 抓取服务链路已落地 |
 
 ---
 

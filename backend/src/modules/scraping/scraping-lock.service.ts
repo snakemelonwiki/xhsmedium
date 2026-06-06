@@ -22,8 +22,12 @@ export class ScrapingLockService {
   private queued = 0;
   /** 上一次成功结束的时间（ms epoch） */
   private lastFinishedAt = 0;
-  /** 最小间隔（ms） */
-  private readonly minGapMs = 8000;
+  /** 最小间隔（ms）—— 默认 3s（旧值 8s 偏长，单次 parse-link 链路 30s+8s=38s 太重）。
+   *  生产环境怕风控可设 SCRAPING_LOCK_MIN_GAP_MS=8000。*/
+  private readonly minGapMs = (() => {
+    const raw = Number(process.env.SCRAPING_LOCK_MIN_GAP_MS || 3000);
+    return Number.isFinite(raw) && raw >= 0 ? raw : 3000;
+  })();
   /** 队列上限 */
   private readonly maxQueue = 20;
 

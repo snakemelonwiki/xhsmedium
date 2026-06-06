@@ -8,6 +8,7 @@ import { apiClient } from '@/shared/api/apiClient';
 import { listAssignableSalesUsers, listSourceAccounts, listSourcePosts, type CatalogOption } from '@/shared/api/catalog';
 import { DraftFormShell, ImageUploadField, clearDraft, saveDraft } from '@/shared/components/forms';
 import { useSubmitLock } from '@/shared/hooks/useSubmitLock';
+import { mapPlatformToKey } from '@/shared/utils/platform-key';
 
 const DRAFT_KEY = 'operation.leads.new';
 
@@ -286,8 +287,8 @@ function parseLeadText(raw: string): Record<string, string> {
 
     // 来源: 提取平台和账号名
     if (/来源|平台/.test(keyNorm)) {
-      if (/抖音|douyin/i.test(valueNorm)) result.platform = 'douyin';
-      if (/小红书|xiaohongshu|xhs/i.test(valueNorm)) result.platform = 'xiaohongshu';
+      const key = mapPlatformToKey(valueNorm);
+      if (key) result.platform = key;
 
       // 提取账号名（支持中文括号（）和英文括号()）
       const accountMatch = valueNorm.match(/[（(]([^)）]+)[)）]/);
@@ -329,8 +330,8 @@ function parseLeadText(raw: string): Record<string, string> {
   const wechat = text.match(/(?:微信|wx|wechat)[:：\s]*([a-zA-Z][-_a-zA-Z0-9]{5,19})/i)?.[1];
   const nickname = text.match(/(?:昵称|客户|姓名)[:：\s]*([^\s,，;；]+)/)?.[1];
 
-  if (/抖音|douyin/i.test(text)) result.platform = 'douyin';
-  if (/小红书|xiaohongshu|xhs/i.test(text)) result.platform = 'xiaohongshu';
+  const platformKey = mapPlatformToKey(text);
+  if (platformKey) result.platform = platformKey;
   if (/微信|wechat/i.test(text)) result.platform = 'xiaohongshu';
   if (phone || wechat) result.contactInfo = phone || wechat || '';
   if (nickname) result.nickname = nickname;

@@ -9,6 +9,10 @@ import { useEffect, useRef, useState } from 'react';
 import { apiClient } from '@/shared/api/apiClient';
 import { ImageUploadField } from '@/shared/components/forms';
 import { useSubmitLock } from '@/shared/hooks/useSubmitLock';
+import {
+  mapPlatformToKey,
+  inferPlatformFromUrl,
+} from '@/shared/utils/platform-key';
 
 type EntryType = 'link' | 'manual';
 
@@ -23,6 +27,12 @@ export default function OperationPostNewPage() {
   const { submitting, run } = useSubmitLock();
   const router = useRouter();
   const latestThumbRef = useRef<string>('');
+  /**
+   * 解析请求 in-flight 序号：每次粘贴/回车/按钮触发解析都 +1，
+   * 响应回来时如果序号对不上（用户在中途又粘贴了新 URL）就丢弃旧响应，
+   * 避免"小红书指标被抖音 URL 解析覆盖"或"老 URL 兜底标题盖住新标题"。
+   */
+  const parseSeqRef = useRef(0);
   const [accountOptions, setAccountOptions] = useState<AccountOption[]>([]);
   const [parsing, setParsing] = useState(false);
   const [submittingCheck, setSubmittingCheck] = useState(false);
@@ -62,32 +72,56 @@ export default function OperationPostNewPage() {
       message.warning('请先粘贴作品链接');
       return;
     }
+    // 每次新解析都 +1，响应回来时校验序号，过期响应直接丢弃
+    const mySeq = ++parseSeqRef.current;
     setParsing(true);
     try {
-      const payload = await apiClient.post<{
-        ok?: boolean;
-        data?: {
-          platform?: string;
-          postUrl?: string;
-          title?: string;
-          authorName?: string;
-          authorId?: string;
-          likes?: number;
-          comments?: number;
-          favorites?: number;
-          shares?: number;
-          parsed?: boolean;
-          warning?: string;
-        };
-      }>('/posts/parse-link', { postUrl: rawUrl });
+      // 后端抓取链路走 Playwright（无头浏览器 + sharp 截图），
+      //   实测 13s，但网络抖动/重试时可能拉到 30~60s。给个 90s 客户端超时，
+      //   超时后抛 AbortError 被外层 try/catch 当成"解析失败"走域名兜底。
+      const ac = new AbortController();
+      const timeoutId = window.setTimeout(() => ac.abort(), 90_000);
+      let payload: any;
+      try {
+        payload = await apiClient.post<{
+          ok?: boolean;
+          data?: {
+            platform?: string;
+            postUrl?: string;
+            title?: string;
+            authorName?: string;
+            authorId?: string;
+            likes?: number;
+            comments?: number;
+            favorites?: number;
+            shares?: number;
+            /** 抓取截图：原图 / 缩略图（同源低分辨率图）。无封面时为空串。 */
+            coverImageUrl?: string;
+            coverThumbUrl?: string;
+            parsed?: boolean;
+            warning?: string;
+          };
+        }>('/posts/parse-link', { postUrl: rawUrl }, { signal: ac.signal });
+      } finally {
+        window.clearTimeout(timeoutId);
+      }
 
       const data = payload?.data;
+      // 防御：后端可能返 ok:true 但 data 是 undefined（旧版本接口），
+      //  也可能 data 里没 coverImageUrl（抓取失败但识别到平台）。
+      if (!data) {
+        message.warning('后端返回数据为空，请重试');
+        return;
+      }
+      // 过期响应：用户在中途又粘贴了新的 URL，丢掉这次旧结果
+      if (mySeq !== parseSeqRef.current) {
+        return;
+      }
       const nextValues: Record<string, string | number> = {};
 
-      // 平台：后端返回 '小红书'/'抖音'，需要映射到表单值 xiaohongshu/douyin
-      const platformKey = mapPlatformToKey(data?.platform) || (rawUrl.match(/douyin\.com|iesdouyin\.com/i)
-        ? 'douyin'
-        : rawUrl.match(/xiaohongshu\.com|xhslink\.com/i) ? 'xiaohongshu' : '');
+      // 平台：后端可能返回 '小红书'/'抖音'（中文）/ 'xiaohongshu'/'douyin'（英文），
+      //   都要映射到表单值 xiaohongshu/douyin。同时用 URL 兜底识别。
+      const platformKey = mapPlatformToKey(data?.platform) || inferPlatformFromUrl(rawUrl);
       if (platformKey) {
         nextValues.platform = platformKey;
       }
@@ -109,11 +143,24 @@ export default function OperationPostNewPage() {
       //   再粘贴 URL B → !指标A=true 时跳过回填，旧指标一直留着，看起来"没覆盖"。
       //   粘贴新 URL 即代表要录入新帖子，指标也应该是新帖子的；用户如果想保留旧值，
       //   不应该再粘贴新 URL（或者用手动录入入口）。
-      if (data?.parsed) {
+      //
+      // 修复 (2026-06-06)：原本"指标+封面"都包在 if (data?.parsed) 里，
+      //   但后端某些路径可能没设 parsed 字段（如登录墙/旧版 controller），导致封面/指标
+      //   全部不写。现在改为：parsed===true 才覆盖指标；封面单独看 coverImageUrl 是否存在，
+      //   只要有图就回填（哪怕 parsed=false，至少封面能用）。
+      if (data?.parsed === true) {
         if (data.likes !== undefined) nextValues.likes = data.likes;
         if (data.comments !== undefined) nextValues.comments = data.comments;
         if (data.favorites !== undefined) nextValues.favorites = data.favorites;
         if (data.shares !== undefined) nextValues.shares = data.shares;
+      }
+      // 封面截图：只要后端返回了 coverImageUrl，就回填到表单。
+      //   coverThumbUrl 通过 latestThumbRef 一并带上（与手工上传走同一条提交路径）。
+      //   之前用户要自己截图再上传；现在 Playwright 在后端抓完指标顺手截一张并 sharp 压成
+      //   ≤720px jpeg，前端无需任何额外操作。
+      if (data.coverImageUrl) {
+        nextValues.coverImageUrl = data.coverImageUrl;
+        latestThumbRef.current = data.coverThumbUrl || data.coverImageUrl;
       }
 
       // 兜底标题
@@ -123,24 +170,34 @@ export default function OperationPostNewPage() {
       form.setFieldsValue(nextValues);
 
       if (data?.parsed) {
-        message.success('已根据链接回填标题与指标');
+        const hasCover = !!(data.coverImageUrl);
+        message.success(
+          hasCover
+            ? '已根据链接回填标题、指标与封面'
+            : '已根据链接回填标题与指标',
+        );
       } else if (data?.warning) {
         message.warning(`已识别平台，但未抓取到指标：${data.warning}`);
       } else {
         message.success('已根据链接回填平台和标题');
       }
     } catch (err) {
+      // 过期响应：用户在中途又粘贴了新的 URL，旧的 catch 兜底也别写表单
+      if (mySeq !== parseSeqRef.current) {
+        return;
+      }
       // 后端解析失败时前端兜底
       const nextValues: Record<string, string> = {};
-      if (/douyin\.com|iesdouyin\.com/i.test(rawUrl)) {
-        nextValues.platform = 'douyin';
-      } else if (/xiaohongshu\.com|xhslink\.com/i.test(rawUrl)) {
-        nextValues.platform = 'xiaohongshu';
+      const inferred = inferPlatformFromUrl(rawUrl);
+      if (inferred) {
+        nextValues.platform = inferred;
       }
       if (!form.getFieldValue('title')) {
         nextValues.title = inferTitleFromUrl(rawUrl);
       }
       form.setFieldsValue(nextValues);
+      // 兜底时也清掉旧的封面（避免用户看到上一个 URL 的封面残留）
+      latestThumbRef.current = '';
       message.warning('后端解析失败，已根据域名自动识别平台');
     } finally {
       setParsing(false);
@@ -412,14 +469,4 @@ function inferTitleFromUrl(rawUrl: string): string {
   }
 }
 
-/**
- * 后端平台值（'小红书'/'抖音'）转表单值（'xiaohongshu'/'douyin'）。
- * 兼容旧接口：若后端已返回小写英文键值则原样返回。
- */
-function mapPlatformToKey(platform: string | undefined): '' | 'xiaohongshu' | 'douyin' {
-  if (!platform) return '';
-  const lower = String(platform).toLowerCase();
-  if (lower === 'xiaohongshu' || lower.includes('小红书')) return 'xiaohongshu';
-  if (lower === 'douyin' || lower.includes('抖音')) return 'douyin';
-  return '';
-}
+// mapPlatformToKey 已从 @/shared/utils/platform-key 导入，不再在页面内重复定义

@@ -1,6 +1,6 @@
 'use client';
 
-import { DeleteOutlined, UploadOutlined } from '@ant-design/icons';
+import { DeleteOutlined, EyeOutlined, UploadOutlined } from '@ant-design/icons';
 import { Button, Image, Space, Upload, message } from 'antd';
 import type { UploadProps } from 'antd';
 import { useState } from 'react';
@@ -34,6 +34,7 @@ const previewFrameStyle = {
   border: '1px solid #e5e8ef',
   borderRadius: 8,
   background: '#ffffff',
+  cursor: 'pointer',
 } as const;
 
 const previewImageStyle = {
@@ -112,17 +113,47 @@ export function ImageUploadField({
       {value ? (
         <Space size={12} align="start">
           <Space direction="vertical" size={8} align="start">
-            <div style={previewFrameStyle}>
-              <Image src={value} alt="已上传图片" style={previewImageStyle} />
+            {/*
+              antd <Image> 默认 preview=true：点击缩略图即弹出大图预览。
+              显式包一层 .ant-image + 提供 a11y role，确保链接解析后 setFieldsValue
+              触发的 value 变更也能立即看到可点击的预览（避免 ImageUploadField 因
+              受控 value 切换时机导致 antd 注册的 preview handler 没及时挂上）。
+            */}
+            <div
+              style={previewFrameStyle}
+              role="button"
+              tabIndex={0}
+              aria-label="点击查看封面大图"
+            >
+              <Image
+                src={value}
+                alt="已上传图片"
+                style={previewImageStyle}
+                preview={{ mask: '点击查看大图' }}
+              />
             </div>
             <div style={{ fontSize: 12, color: '#999' }}>封面（{thumbMaxWidth}px）</div>
           </Space>
-          <Button size="small" danger icon={<DeleteOutlined />} onClick={() => {
-            onChange?.('');
-            if (!disableThumb) onThumbChange?.('');
-          }}>
-            删除
-          </Button>
+          <Space direction="vertical" size={6}>
+            <Button
+              size="small"
+              type="link"
+              icon={<EyeOutlined />}
+              onClick={() => {
+                // 显式兜底：万一 antd Image 内部 preview 没触发，提供一个独立入口
+                // 让用户从新窗口打开原图（兜底 URL 来自当前 value）
+                window.open(value, '_blank', 'noopener,noreferrer');
+              }}
+            >
+              查看大图
+            </Button>
+            <Button size="small" danger icon={<DeleteOutlined />} onClick={() => {
+              onChange?.('');
+              if (!disableThumb) onThumbChange?.('');
+            }}>
+              删除
+            </Button>
+          </Space>
         </Space>
       ) : null}
 

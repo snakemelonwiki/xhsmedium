@@ -29,6 +29,9 @@
 > 主要 commit：`64ccbd5`（P1 销售域 bug 修复批次）、`8b6512d`（协同处理菜单）、`91a9490`（封面图简化）、`d3dd560`（协同详情 sticky 按钮）。
 > 1.7 是流程角色（DDL 评审窗口），无代码产出，由 P1 在 PR 评审时承担。
 > 验收细节见 commit message 与 docs/bug-fix-status-20260606.md。
+>
+> **P2 增量完成（2026-06-06 下午）**：除原计划任务外，P2 还顺手完成了 2.10「新增作品自动解析」P3 项——
+> 后端 `metricsFetcher.js` 抓取指标时同步截图 + sharp 压缩到 `uploads/post-covers/`，全链路透出到前端 `ImageUploadField`；并修了"抖音解析正常但没回填"的字符串兼容 bug，把兼容规则抽到共享工具 `frontend/src/shared/utils/platform-key.ts`，客资解析 + 账号分析点阵同步接入。详情见 2.10 子项。
 
 ### 1.1 销售三件套状态流转（P0）
 - [x] 我的客资 → 订单跟进 → 我的成交：状态机梳理
@@ -162,12 +165,33 @@
 - [ ] "高级筛选" 区域紧凑化
 - [ ] 涉及文件：`frontend/src/app/admin/accounts/page.tsx`（或全部作品页对应文件）
 
-### 2.10 新增作品自动解析（P3）
-- [ ] 接入 `ParserService`（`backend/src/modules/parser/`），新增作品时自动解析封面/标题/文案
-- [ ] 涉及文件：
-  - `frontend/src/app/admin/accounts/page.tsx`（前端）
-  - `backend/src/modules/parser/parser.service.ts`（后端）
-  - `backend/src/modules/scraping/scraping.service.ts`（如果依赖抓取）
+### 2.10 新增作品自动解析（P3 → 已完成 2026-06-06）
+- [x] 接入 `ParserService`（`backend/src/modules/parser/`），新增作品时自动解析封面/标题/文案
+- [x] 缩略图点击查看（antd `<Image preview>` + 「查看大图」按钮兜底）
+- [x] 缩略图质量提升（sharp mozjpeg 90 + 宽 720px）
+- [x] 兼容 `douyin` / `抖音` / `xiaohongshu` / `小红书` / `xhs` / `dy` 平台字符串（共享工具 `frontend/src/shared/utils/platform-key.ts`）
+- [x] 修复"抖音解析正常但没回填到表单"bug（mapPlatformToKey 之前只严格匹配 `lower === 'douyin'`，碰到 `抖音` / 大小写变体时偶发失配）
+- [x] 修复"复粘贴 URL 导致旧 in-flight 响应覆盖新表单"竞态（`parseSeqRef` 序号守卫，过期响应直接 `return` 不写表单）
+- [x] 客户端 90s 超时（`AbortController` + `setTimeout`，覆盖 Playwright 抓取+截图链路最坏情况；超时走 catch 兜底而不是无限 spinner）
+- [x] 抓取耗时优化（**抖音 35s → 10.6s / 小红书 13s → 3.7s**）：
+  - **关键修复**：`readTextBySelectors` 串行 → 并行。旧版每项指标 × 6 selectors × 1.2s 串行 = 28.8s 纯等待；
+    新版所有 selector 并行 + 1.5s 硬上限，单项指标 ~1.5s 内返回。这是耗时主要瓶颈。
+  - `metricsFetcher.js` `networkidle` 超时 5s → 1.5s + `waitForTimeout(2000)` → 400ms
+  - `capturePostCover` 4 路并行（locator / video poster / og:image / first img），首个非空胜出
+  - `posts-metrics.service` parse-link 走 `source:'parse-link'` 短路：retry 2 → 0、timeout 15s → 20s
+  - `ScrapingLockService` 间隔 8s → 3s（env `SCRAPING_LOCK_MIN_GAP_MS` 可调）
+- [x] `posts.controller.parseLink` 加显式 try/catch 兜底（5xx 降级为 200 + `parsed:false` + `warning`，前端走 catch 不再看到 500）
+- [x] 涉及文件：
+  - `metricsFetcher.js`（截图 + sharp 压缩到 `uploads/post-covers/`）
+  - `scripts/parser-core.js`（透出 cover 字段）
+  - `backend/src/modules/parser/parser.service.ts`（ParserSuccess 接口加字段）
+  - `backend/src/modules/posts/posts-metrics.service.ts`（ScrapedMetrics 透传）
+  - `backend/src/modules/posts/posts.service.ts`（parsePostLink 透出）
+  - `frontend/src/app/operation/posts/new/page.tsx`（自动回填封面 + 平台字符串兼容）
+  - `frontend/src/shared/components/forms/ImageUploadField.tsx`（点击放大 + 查看大图按钮）
+  - `frontend/src/shared/utils/platform-key.ts`（新增，跨页面复用）
+  - `frontend/src/app/operation/leads/new/page.tsx`（客资解析接入新工具）
+  - `frontend/src/app/operation/dashboard/account-analysis/page.tsx`（平台点阵颜色走新工具）
 
 ### 2.11 时间筛选全量接入 QuickRangePicker（P2 端）
 - [ ] 排行榜 / 个人看板 / 作品看板 / 客资看板 **全量替换**为 `QuickRangePicker`
@@ -223,7 +247,7 @@
 | **W1（D+1 ~ D+3）** | 1.1 / 1.2 / 1.3 / 1.4（销售三件套状态流转） | 2.1 / 2.2（总览 + 排行榜） |
 | **W1（D+4 ~ D+5）** | 1.5 / 1.6（客资看板 + 时间筛选） | 2.3 / 2.4 / 2.5（个人看板重构） |
 | **W2（D+6 ~ D+8）** | 协同工单支持（接收 P2 需求） | 2.6 / 2.7（作品看板 + 运营端作品管理） |
-| **W2（D+9 ~ D+10）** | 集成测试 + 修复 | 2.9 / 2.10（全部作品页 + 自动解析） |
+| **W2（D+9 ~ D+10）** | 集成测试 + 修复 | ~~2.9 / 2.10~~（2.10 已提前完成；2.9 留待下一轮） |
 | **W2（D+10）** | 双方合并 main，发版 | 同左 |
 
 ---
