@@ -14,6 +14,12 @@
 | --- | --- | --- | --- |
 | 1 | 运营端（前端） | 时间筛选需要支持快捷时间段（按月、按年、自定义区间） | commit `0e35619` — `feat(frontend): 新增 QuickRangePicker 时间段快捷选择组件 + 运营排行接入`（`frontend/src/shared/components/date/QuickRangePicker.tsx`） |
 | 2 | 运营端 / 总后台 | 左侧缺一个"协同处理"菜单 | 2026-06-06 修复：① `frontend/src/shared/layout/menu.tsx:96-102` 新增 `operation-collaboration` 菜单项（path `/operation/collaboration`，roles `['operation']`）；② `frontend/src/app/owner/page.tsx:28` 在总后台首页快捷入口加入"协同处理 → `/admin/collaboration`"。两个目标页面 `frontend/src/app/operation/collaboration/page.tsx` 和 `frontend/src/app/admin/collaboration/page.tsx` 已存在，本次仅补齐菜单注册。 |
+| 3 | 运营端-今日任务 | 删除"未完成录入"卡 + 未读消息超长不破版 + 发送提醒字数限制 100 | commit `c85f4b6`：① `today-tasks/page.tsx` 删除"未完成录入"卡 + 清理 imports；② `NotificationBell.tsx` 下拉 maxWidth 360 + ellipsis；③ `ReminderButton.tsx` `maxLength` 500→100 |
+| 4 | 运营端-运营排行榜 | "与上一名差距"统一显示正数 | commit `2eeb13c`：3 个 type 分支（posts/leads/traffic）render 去掉硬编码 `-` 前缀；计算 `Math.max(0, prev - cur)` 兜底 |
+| 5 | 主管端-异常提醒 | "员工低更新数"点击跳转个人看板 | commit `78e4b23`：`admin/dashboard/page.tsx:124` 把 `EXCEPTION_CARDS.lowUpdateEmployees.href` 从 `/admin/employees` 改为 `/admin/personal` |
+| 6 | 运营端-作品录入 | 封面图简化为单份低分辨率图（OSS 占用减半） | commit `91a9490`：`ImageUploadField.tsx` 上传时只生成低分辨率 Blob，coverImageUrl/coverThumbUrl 共用同一 URL |
+| 7 | 运营端-协同详情 | "处理协同"按钮常驻顶部，去掉半截问题 | commit `d3dd560`：`operation/collaboration/page.tsx` 把按钮作为 sticky 顶栏塞进 Modal body，footer 改 null |
+| 8 | 运营排行榜时间筛选 | QuickRangePicker 全 12 预设（天/周/月/年）精确生效 | commit `3965ac1`：后端 `RANKING_PERIODS` 扩到 10 项 + 新增 90d/1y/3y 分支 + from/to 透传；前端 `derivePeriod` 细分到 10 档 + `buildRangeQuery()` 走 from/to 兜底 |
 
 > 备注：原文档中"二、运营排行榜 / 15 行 这里要能按月筛选，按年筛选"以及"客资看板 / 时间筛选与数据展示"章节的"按月、年筛选"需求，可通过复用 `QuickRangePicker` 组件落地，已纳入"待修复"中以确认是否**已在对应页面接入**。
 
@@ -31,7 +37,7 @@
 - [ ] 账号数、作品数、小红书作品数、抖音作品数、区间成交 → 统一改名为"成交数"（口径统一为"成交数"）
 - [ ] 上述 5 项指标需要在两个榜单（客资榜 / 作品榜）**统一显示**，合并为同一榜单
 - [ ] 榜单左上角保留"按客资 / 按作品"的**筛选切换**（不是两个独立榜单）
-- [ ] 时间筛选需支持**按月**、**按年**维度（确认 `QuickRangePicker` 是否已接入）
+- [x] 时间筛选需支持**按月**、**按年**维度（确认 `QuickRangePicker` 是否已接入） — commit `3965ac1` 前后端联动：① 后端 `RANKING_PERIODS` 扩到 10 项（增 `90d / 1y / 3y`），`resolveDateRange` 新增对应分支；② controller `from / to` 透传，range 优先于 period 推断；③ 前端 `derivePeriod` 细分到 10 档，未命中返回 `null` 走 `from/to` 透传；④ 新增 `buildRangeQuery()` 统一序列化。QuickRangePicker 全 12 预设（天 1/3/6、周 1/3/6、月 1/3/6、年 1/3）现在全部按精确粒度生效，不再被旧 enum 退化。
 
 ### 2.3 个人看板
 

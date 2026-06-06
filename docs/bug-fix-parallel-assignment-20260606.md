@@ -98,7 +98,12 @@
 ### 2.2 运营排行榜榜单合并与指标统一（P1）
 - [ ] 指标统一改名为"成交数"（账号数/作品数/小红书作品/抖音作品/成交数 统一口径）
 - [ ] 两个 Tab 合并为一个榜单，左上角"按客资 / 按作品"作为筛选器
-- [x] 时间筛选接入 `QuickRangePicker`（按月/按年预设） — 早已在 `operation/rankings/page.tsx:390-396` 完成接入：`variant="select"` + `RANGE_PRESETS_FULL`（12 个预设）+ `selectWidth=140` + 自定义 `derivePeriod()`（line 39）把 `{start,end}` 反推为 `Period` 后端 enum。首个 commit 是 `0e35619 feat(frontend): 新增 QuickRangePicker 时间段快捷选择组件 + 运营排行接入`。
+- [x] 时间筛选接入 `QuickRangePicker`（按月/按年预设） — 2026-06-06 进一步扩到全 12 预设生效（commit `3965ac1`）：
+  - 后端 `RANKING_PERIODS` 扩到 10 项（增 `90d / 1y / 3y`），`resolveDateRange` 新增对应分支
+  - controller `from / to` 透传，range 优先于 period 推断
+  - 前端 `derivePeriod` 细分到 10 档，未命中返回 `null` 走 `from/to`
+  - 新增 `buildRangeQuery()` 统一序列化；`load` / `loadTop3` 改用 `rangeQuery`
+  - 最早接入 commit：`0e35619 feat(frontend): 新增 QuickRangePicker 时间段快捷选择组件 + 运营排行接入`
 - [ ] 涉及文件：
   - `frontend/src/app/operation/rankings/page.tsx`
   - `frontend/src/app/operation/rankings/study/page.tsx`
