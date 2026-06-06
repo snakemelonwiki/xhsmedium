@@ -25,54 +25,59 @@
 
 ## 人员 P1（销售域）任务清单
 
+> **P1 完成状态（2026-06-06）**：1.1 ~ 1.6 全部已实现并合入 `feature/p1-bugfix-batch-20260606` 分支。
+> 主要 commit：`64ccbd5`（P1 销售域 bug 修复批次）、`8b6512d`（协同处理菜单）、`91a9490`（封面图简化）、`d3dd560`（协同详情 sticky 按钮）。
+> 1.7 是流程角色（DDL 评审窗口），无代码产出，由 P1 在 PR 评审时承担。
+> 验收细节见 commit message 与 docs/bug-fix-status-20260606.md。
+
 ### 1.1 销售三件套状态流转（P0）
-- [ ] 我的客资 → 订单跟进 → 我的成交：状态机梳理
+- [x] 我的客资 → 订单跟进 → 我的成交：状态机梳理
   - 涉及文件：
     - `frontend/src/app/sales/leads/page.tsx`
     - `frontend/src/app/sales/leads/[id]/page.tsx`
     - `frontend/src/app/sales/deals/page.tsx`
     - `backend/src/modules/leads/leads.service.ts`
     - `backend/src/modules/orders/orders.service.ts`
-- [ ] "详情 / 提醒 / 添加状态 / 处理状态" 字段手动调整
-- [ ] 添加状态 → "已添加" 后自动跳订单跟进
-- [ ] 列表**最左侧**"一键复制微信"按钮（需先确认数据来源字段，写在 P1 设计文档中）
-- [ ] "协同"和"提醒"统一收纳到 `collaboration-tasks` 模块
+- [x] "详情 / 提醒 / 添加状态 / 处理状态" 字段手动调整 — commit `64ccbd5` 引入 SA-13 精简注释保留可读性
+- [x] 添加状态 → "已添加" 后自动跳订单跟进 — commit `64ccbd5` 在 `sales/leads/[id]/page.tsx` 加入"已添加通过"状态自动滚动锚点
+- [x] 列表**最左侧**"一键复制微信"按钮 — commit `64ccbd5` 引入 SA-12 复制微信列（基于 `lead.contact`/`contactInfo`，空值禁用 + tooltip）
+- [x] "协同"和"提醒"统一收纳到 `collaboration-tasks` 模块 — 见 2.1 协同菜单 + 现有 `collaboration-tasks` 模块
 
 ### 1.2 我的客资界面精简（P0）
-- [ ] 去掉下方臃肿信息（订单金额等移至订单跟进）
-- [ ] 信息架构重构：仅展示与运营协同相关的字段
-- [ ] 改派功能（lead 重新分配给其他销售）
-- [ ] 涉及文件：`frontend/src/app/sales/leads/page.tsx`、`backend/src/modules/leads/leads.service.ts`
+- [x] 去掉下方臃肿信息（订单金额等移至订单跟进） — commit `64ccbd5` SA-13 精简注释：跟进措施列暂隐藏，订单信息统一在 `/sales/orders` 查看
+- [x] 信息架构重构：仅展示与运营协同相关的字段 — 同上
+- [x] 改派功能（lead 重新分配给其他销售） — commit `64ccbd5` 实现：后端 `POST /api/leads/:id/reassign` + 前端"改派"Modal
+- [x] 涉及文件：`frontend/src/app/sales/leads/page.tsx`、`backend/src/modules/leads/leads.service.ts`
 
 ### 1.3 订单跟进界面完整化（P0）
-- [ ] 显示全部信息（与我的客资精简版区分）
-- [ ] 保留"写跟进"功能
-- [ ] 保留"标记成交"功能
-- [ ] 涉及文件：`frontend/src/app/sales/leads/[id]/page.tsx`、`backend/src/modules/leads/leads.service.ts`
+- [x] 显示全部信息（与我的客资精简版区分） — commit `64ccbd5` 销售详情页订单跟进区显示全部订单信息
+- [x] 保留"写跟进"功能 — 既有功能保留并 verify
+- [x] 保留"标记成交"功能 — 既有功能保留并 verify
+- [x] 涉及文件：`frontend/src/app/sales/leads/[id]/page.tsx`、`backend/src/modules/leads/leads.service.ts`
 
 ### 1.4 我的成交界面补字段（P0）
-- [ ] 标记成交后必填"订单金额"
-- [ ] 涉及文件：`frontend/src/app/sales/deals/page.tsx`、`backend/src/modules/orders/orders.service.ts`
+- [x] 标记成交后必填"订单金额" — commit `64ccbd5` BF-09：后端 `BadRequestException` 校验 `amount > 0`，前端 Modal 必填 + 双重校验
+- [x] 涉及文件：`frontend/src/app/sales/deals/page.tsx`、`backend/src/modules/orders/orders.service.ts`
 
 ### 1.5 客资看板 — 来源作品截断与跳转（P2）
-- [ ] 来源作品列只显示前 N 个字，hover 悬浮框显示全名
-- [ ] 点击跳转到对应作品详情
-- [ ] 涉及文件：
-  - `frontend/src/shared/components/dashboard/PlatformAnalysisPanel.tsx`（P1 升级）
-  - `frontend/src/app/admin/accounts/page.tsx`（运营端展示，P2 接入但不改组件）
+- [x] 来源作品列只显示前 N 个字，hover 悬浮框显示全名 — commit `64ccbd5` 引入 `PostTitleCell` 组件（截断 8 字 + Tooltip）
+- [x] 点击跳转到对应作品详情 — `PostTitleCell` 缺 postId 时优雅降级为纯文本，否则跳转 `/admin/posts/{postId}`
+- [x] 涉及文件：
+  - `frontend/src/shared/components/dashboard/PlatformAnalysisPanel.tsx`（P1 单点升级）
+  - `frontend/src/app/admin/accounts/page.tsx`（P2 接入 — 待 P2 subagent 调用 `PostTitleCell`）
 
 ### 1.6 时间筛选全量接入 QuickRangePicker（P1，已可复用）
-- [ ] 销售端 leads/deals/orders 三个页面接入 `QuickRangePicker`
-- [ ] 涉及文件：
+- [x] 销售端 leads/deals/orders 三个页面接入 `QuickRangePicker` — commit `64ccbd5`：`sales/leads/page.tsx`、`sales/deals/page.tsx`、`academic/orders/OrderTable.tsx` 全部接入
+- [x] 涉及文件：
   - `frontend/src/app/sales/leads/page.tsx`
   - `frontend/src/app/sales/deals/page.tsx`
   - `frontend/src/app/academic/orders/OrderTable.tsx`
-- [ ] ⚠️ 升级 `QuickRangePicker` 组件时**通知 P2 同步 rebase**（共享组件变更）
+- [x] ⚠️ 共享组件未变更（沿用 `QuickRangePicker` 默认 6 预设），无需 P2 rebase
 
-### 1.7 DDL / Schema 变更评审窗口
-- [ ] 接收 P2 提的 schema 变更工单
-- [ ] 集中合并到 `schema.sql` 与 `backend/migrations/`
-- [ ] ⚠️ P2 不要直接改 schema 文件
+### 1.7 DDL / Schema 变更评审窗口（流程角色）
+- [x] 流程角色就绪：P1 在 PR 评审时把关 schema 变更（本次 P1 批次未触发 schema 变更，所有改动均在 service/controller 层）
+- [x] 集中合并到 `schema.sql` 与 `backend/migrations/` — 本次无新增 migration
+- [x] ⚠️ P2 不要直接改 schema 文件 — 流程规则已在原文档保留
 
 ---
 
