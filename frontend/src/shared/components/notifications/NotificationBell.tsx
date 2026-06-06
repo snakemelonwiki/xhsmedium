@@ -38,8 +38,8 @@ export function NotificationBell(_props: NotificationBellProps = {}) {
   );
 
   const overlay = (
-    <div className="notification-panel">
-      <Space direction="vertical" size={12} className="page-stack">
+    <div className="notification-panel" style={{ maxWidth: 360 }}>
+      <Space direction="vertical" size={12} className="page-stack" style={{ width: '100%' }}>
         <div className="notification-panel-header">
           <Typography.Text strong>消息提醒</Typography.Text>
           <Button size="small" type="link" onClick={refresh} loading={loading}>刷新</Button>
@@ -53,12 +53,22 @@ export function NotificationBell(_props: NotificationBellProps = {}) {
                 className="notification-item"
                 onClick={() => openNotification(item)}
               >
-                <Space direction="vertical" size={4}>
-                  <Space>
+                <Space direction="vertical" size={4} style={{ width: '100%', maxWidth: 320 }}>
+                  <Space size={4} style={{ width: '100%' }}>
                     <StatusTag kind="notificationType" code={item.notificationType} />
-                    <Typography.Text strong>{item.title}</Typography.Text>
+                    <Typography.Text strong ellipsis={{ tooltip: item.title }} style={{ flex: 1, minWidth: 0 }}>
+                      {item.title}
+                    </Typography.Text>
                   </Space>
-                  {item.content ? <Typography.Text type="secondary">{item.content}</Typography.Text> : null}
+                  {item.content ? (
+                    <Typography.Text
+                      type="secondary"
+                      ellipsis={{ tooltip: item.content }}
+                      style={{ display: 'block' }}
+                    >
+                      {item.content}
+                    </Typography.Text>
+                  ) : null}
                 </Space>
               </List.Item>
             )}

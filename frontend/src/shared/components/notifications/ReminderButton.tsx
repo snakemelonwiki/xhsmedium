@@ -163,14 +163,14 @@ export function ReminderButton({
               label="提醒内容"
               rules={[
                 { required: true, message: '提醒内容不能为空' },
-                { max: 500, message: '提醒内容最多 500 字' },
+                { max: 100, message: '提醒内容最多 100 字' },
               ]}
             >
               <Input.TextArea
                 rows={4}
-                placeholder="请输入提醒内容（最多 500 字）"
+                placeholder="请输入提醒内容（最多 100 字）"
                 showCount
-                maxLength={500}
+                maxLength={100}
               />
             </Form.Item>
             <Form.Item label="优先级">

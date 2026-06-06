@@ -3,10 +3,7 @@
 import {
   BellOutlined,
   DatabaseOutlined,
-  FileTextOutlined,
-  FormOutlined,
   ProjectOutlined,
-  ShopOutlined,
   UsergroupAddOutlined,
 } from '@ant-design/icons';
 import { Badge, Card, Col, List, Row, Segmented, Skeleton, Space, Statistic, Tag, Typography } from 'antd';
@@ -284,8 +281,8 @@ export default function OperationTodayTasksPage() {
           </Card>
         </Col>
 
-        {/* 未读消息（OP-6 拆分为独立卡） */}
-        <Col span={12}>
+        {/* 未读消息（OP-6 拆分为独立卡，2026-06-06 优化：消息超长不破版） */}
+        <Col span={24}>
           <Card
             title={
               <Space>
@@ -305,10 +302,24 @@ export default function OperationTodayTasksPage() {
                 renderItem={(item) => (
                   <List.Item>
                     <List.Item.Meta
-                      title={<Typography.Text strong>{item.title}</Typography.Text>}
+                      title={
+                        <Typography.Text
+                          strong
+                          ellipsis={{ tooltip: item.title }}
+                          style={{ display: 'block', maxWidth: '100%' }}
+                        >
+                          {item.title}
+                        </Typography.Text>
+                      }
                       description={
-                        <Space direction="vertical" size={0}>
-                          <span>{item.content || '-'}</span>
+                        <Space direction="vertical" size={0} style={{ width: '100%' }}>
+                          <Typography.Text
+                            type="secondary"
+                            ellipsis={{ tooltip: item.content || '' }}
+                            style={{ display: 'block', maxWidth: '100%' }}
+                          >
+                            {item.content || '-'}
+                          </Typography.Text>
                           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                             {item.createdAt}
                           </Typography.Text>
@@ -321,37 +332,6 @@ export default function OperationTodayTasksPage() {
             ) : (
               <Typography.Text type="secondary">暂无未读消息</Typography.Text>
             )}
-          </Card>
-        </Col>
-      </Row>
-
-      <Row gutter={16}>
-        {/* 未完成录入 */}
-        <Col span={24}>
-          <Card
-            title={
-              <Space>
-                <FileTextOutlined />
-                未完成录入
-              </Space>
-            }
-          >
-            <Space direction="vertical" style={{ width: '100%' }}>
-              <Typography.Paragraph type="secondary" style={{ marginBottom: 8 }}>
-                快速进入录入页面，继续未完成的录入工作。
-              </Typography.Paragraph>
-              <Space wrap>
-                <Link href="/operation/posts/new">
-                  <Tag color="blue" icon={<FormOutlined />}>作品录入</Tag>
-                </Link>
-                <Link href="/operation/leads/new">
-                  <Tag color="green" icon={<UsergroupAddOutlined />}>客资录入</Tag>
-                </Link>
-                <Link href="/operation/posts">
-                  <Tag color="purple" icon={<ShopOutlined />}>我的作品</Tag>
-                </Link>
-              </Space>
-            </Space>
           </Card>
         </Col>
       </Row>
