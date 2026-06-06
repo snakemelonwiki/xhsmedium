@@ -24,7 +24,7 @@
 ### 2.1 总览页（老板/总后台首页）
 
 - [x] 左侧缺一个"协同处理"入口/面板 — 2026-06-06 已在 `menu.tsx` 与 `owner/page.tsx` 补齐（见已完成区 #2）
-- [ ] 员工低更新数点击后应跳转至个人看板（而非当前页面或无响应）
+- [x] 员工低更新数点击后应跳转至个人看板（而非当前页面或无响应） — commit `78e4b23` 在 `admin/dashboard/page.tsx:124` 把 `EXCEPTION_CARDS.lowUpdateEmployees.href` 改为 `/admin/personal`（个人看板）。其余 3 张异常卡跳转不变。
 
 ### 2.2 运营排行榜
 

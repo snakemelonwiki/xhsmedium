@@ -88,7 +88,8 @@
   - `frontend/src/shared/layout/menu.tsx:96-102` 新增 `operation-collaboration` 菜单（path `/operation/collaboration`，roles `['operation']`）
   - `frontend/src/app/owner/page.tsx:28` 在 owner 总后台首页快捷入口加入"协同处理 → /admin/collaboration"
   - 两个目标页面 `operation/collaboration/page.tsx` 和 `admin/collaboration/page.tsx` 已存在，本次仅注册菜单
-- [ ] 员工低更新数点击 → 跳转到该员工个人看板
+- [x] 员工低更新数点击 → 跳转到该员工个人看板 — commit `78e4b23` 在 `admin/dashboard/page.tsx:124` 把 `EXCEPTION_CARDS.lowUpdateEmployees.href` 从 `/admin/employees` 改为 `/admin/personal`。其余 3 张异常卡（协同超时 / 客资积压 / 账号异常）保持原样。
+  - 可选增强：跳转时带 `?lowUpdate=1` 让个人看板预筛——未做，等产品确认 UX
 - [ ] 时间筛选接入 `QuickRangePicker`（P1 升级后直接调用）
 - [ ] 涉及文件：
   - `frontend/src/app/owner/page.tsx`（已部分改动，2026-06-06）
