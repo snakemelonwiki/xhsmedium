@@ -52,7 +52,7 @@ function buildSummary(db, date) {
 function buildDistribution(db, date) {
   const posts = db.posts.filter((item) => item.publishedAt === date);
   const total = posts.length || 1;
-  return ["素人贴", "话题贴", "获客贴"].map((type) => {
+  return ["获客贴"].map((type) => {
     const count = posts.filter((item) => item.postType === type).length;
     return {
       type,
@@ -171,24 +171,13 @@ function main() {
   ];
 
   const dates = ["2026-04-24", "2026-04-25", "2026-04-26", "2026-04-27", "2026-04-28", "2026-04-29", TODAY];
-  const postTypes = ["素人贴", "话题贴", "获客贴"];
-  const titleMap = {
-    素人贴: [
-      "读研第三年，我终于不再硬扛了",
-      "为什么论文改到最后，最想删的是自己",
-      "今天又被审稿意见扎了一下"
-    ],
-    话题贴: [
-      "导师最让你崩溃的一句话是什么",
-      "审稿人让补实验，到底该不该补",
-      "你会为了毕业去投水刊吗"
-    ],
-    获客贴: [
-      "期刊加急见刊，有需要的来聊",
-      "申博前想补一篇论文的同学可以看看",
-      "主编急收稿，这几个方向最近比较稳"
-    ]
-  };
+  // v1.3：作品类型统一为获客贴，demo seed 也只生成获客贴以便验证运营默认口径
+  const postType = "获客贴";
+  const titleOptions = [
+    "期刊加急见刊，有需要的来聊",
+    "申博前想补一篇论文的同学可以看看",
+    "主编急收稿，这几个方向最近比较稳"
+  ];
   const xhsUrls = [
     "https://www.xiaohongshu.com/explore/69c63f5e0000000023021886",
     "https://www.xiaohongshu.com/explore/69cba931000000002302722d",
@@ -207,18 +196,17 @@ function main() {
     accountPool.forEach((group, employeeIndex) => {
       const accounts = group.accounts.slice(0, 2);
       accounts.forEach((account, accountIndex) => {
-        const postType = postTypes[(dateIndex + employeeIndex + accountIndex) % postTypes.length];
-        const titleOptions = titleMap[postType];
         const title = `${titleOptions[(dateIndex + employeeIndex) % titleOptions.length]} ${SEED_TAG}`;
         const platform = account.platform;
         const postUrl = platform === "小红书"
           ? xhsUrls[(dateIndex + accountIndex) % xhsUrls.length]
           : douyinUrls[(dateIndex + accountIndex) % douyinUrls.length];
         const coverImageUrl = coverPool[(dateIndex * 7 + employeeIndex * 3 + accountIndex) % coverPool.length] || "";
-        const likes = postType === "素人贴" ? 18 + dateIndex * 2 + employeeIndex : 9 + dateIndex + employeeIndex;
-        const comments = postType === "话题贴" ? 11 + employeeIndex : 3 + accountIndex + dateIndex;
-        const favorites = postType === "获客贴" ? 6 + dateIndex : 4 + employeeIndex;
-        const traffic = postType === "获客贴" ? 120 + dateIndex * 25 + employeeIndex * 30 + accountIndex * 10 : 0;
+        // 获客贴专用互动/流量数值（按用户口径统一为获客贴）
+        const likes = 6 + dateIndex;
+        const comments = 3 + accountIndex + dateIndex;
+        const favorites = 6 + dateIndex;
+        const traffic = 120 + dateIndex * 25 + employeeIndex * 30 + accountIndex * 10;
         const createdHour = 2 + employeeIndex;
         const createdMinute = 10 + accountIndex * 7 + dateIndex;
         const createdAt = makeIso(date, createdHour, createdMinute);
@@ -245,7 +233,7 @@ function main() {
 
         seededPosts.push(post);
 
-        const shouldCreateLead = postType === "获客贴" && ((dateIndex + employeeIndex + accountIndex) % 2 === 0);
+        const shouldCreateLead = (dateIndex + employeeIndex + accountIndex) % 2 === 0;
         if (shouldCreateLead) {
           const statuses = ["新客资", "跟进中", "已成交"];
           const status = statuses[(dateIndex + employeeIndex) % statuses.length];
@@ -306,7 +294,7 @@ function main() {
     },
     {
       title: "有新的作品录入",
-      message: `${accountPool[2]?.employee.name || "运营"}补录了话题贴数据`,
+      message: `${accountPool[2]?.employee.name || "运营"}补录了获客贴数据`,
       audienceRoles: ["admin", "sales", "staff"]
     },
     {

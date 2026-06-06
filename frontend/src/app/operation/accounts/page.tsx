@@ -27,7 +27,7 @@ import {
   message,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 
 import { apiClient } from '@/shared/api/apiClient';
@@ -95,6 +95,9 @@ const PLATFORM_OPTIONS = [
  */
 export default function OperationAccountsPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  /** 学习榜单等场景深链：?id=xxx 精准按主键查该账号（不走 search 模糊匹配） */
+  const pinnedAccountId = searchParams.get('id') ?? '';
   const { unreadCount } = useNotifications();
   const [user, setUser] = useState(() => typeof window === 'undefined' ? null : readAuthenticatedUser());
 
@@ -118,18 +121,29 @@ export default function OperationAccountsPage() {
   const [suggestionsAccount, setSuggestionsAccount] = useState<Account | null>(null);
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
 
-  async function load(nextPage = page, nextPageSize = pageSize, pf = platform, kw = keyword) {
+  async function load(
+    nextPage = page,
+    nextPageSize = pageSize,
+    pf = platform,
+    kw = keyword,
+    id: string = pinnedAccountId,
+  ) {
     setLoading(true);
     try {
       const query: Record<string, string | number> = {
         limit: nextPageSize,
         offset: (nextPage - 1) * nextPageSize,
       };
-      if (pf) query.platform = pf;
-      if (kw) query.search = kw;
-      // 运营只能看自己的账号
-      if (user?.employeeId) {
-        query.employeeId = user.employeeId;
+      // 深链 ?id=xxx：按主键精准查，不走 search 模糊匹配
+      if (id) {
+        query.id = id;
+      } else {
+        if (pf) query.platform = pf;
+        if (kw) query.search = kw;
+        // 运营只能看自己的账号
+        if (user?.employeeId) {
+          query.employeeId = user.employeeId;
+        }
       }
 
       const payload = await apiClient.get<any>('/accounts', { query });
@@ -151,10 +165,32 @@ export default function OperationAccountsPage() {
     setUser(readAuthenticatedUser());
   }, []);
 
+  // 深链 ?id=xxx：把 ID 同步到搜索输入框（让用户可见），并触发首次精准查询
+  useEffect(() => {
+    if (pinnedAccountId) {
+      setKeyword(pinnedAccountId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pinnedAccountId]);
+
   useEffect(() => {
     void load(1, 20);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.employeeId]);
+
+  /**
+   * 用户在搜索框内清空时：移除 URL 的 ?id= 参数，回到全列表。
+   * （使用 allowClear 触发的 onChange 此时 v === ''）
+   */
+  function handleKeywordChange(v: string) {
+    setKeyword(v);
+    if (pinnedAccountId && v === '') {
+      const next = new URLSearchParams(Array.from(searchParams.entries()));
+      next.delete('id');
+      const qs = next.toString();
+      router.replace(qs ? `/operation/accounts?${qs}` : '/operation/accounts');
+    }
+  }
 
   const handleEdit = useCallback((record: Account) => {
     setEditingAccount(record);
@@ -343,10 +379,10 @@ export default function OperationAccountsPage() {
           />
           <Input.Search
             allowClear
-            placeholder="搜索账号名 / UID"
+            placeholder="搜索账号名 / UID（支持输入账号ID精准查询）"
             style={{ width: 240 }}
             value={keyword}
-            onChange={(e) => setKeyword(e.target.value)}
+            onChange={(e) => handleKeywordChange(e.target.value)}
             onSearch={(v) => load(1, pageSize, platform, v)}
           />
         </Space>

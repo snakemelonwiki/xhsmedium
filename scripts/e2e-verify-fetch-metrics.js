@@ -49,7 +49,7 @@ async function main() {
     postIds.push(id);
     await conn.execute(
       `INSERT INTO posts (id, platform, account_id, employee_id, title, post_url, post_type, traffic, likes, comments, favorites, shares, published_at, is_supervisor_picked)
-       VALUES (?, '小红书', ?, ?, ?, ?, '素人贴', 0, 0, 0, 0, 0, CURDATE(), 0)`,
+       VALUES (?, '小红书', ?, ?, ?, ?, '获客贴', 0, 0, 0, 0, 0, CURDATE(), 0)`,
       [id, ACCOUNT_ID, EMPLOYEE_ID, `[E2E ${i + 1}] ${path.basename(TEST_URLS[i])}`, TEST_URLS[i]],
     );
     console.log(`  inserted id=${id} url=${TEST_URLS[i].slice(0, 80)}...`);

@@ -306,7 +306,7 @@ export default function OperationPostNewPage() {
                 if (val === 'link') {
                   // 链接录入：保留 postUrl
                 } else if (val === 'manual') {
-                  form.setFieldsValue({ postUrl: '', platform: 'xiaohongshu', postType: 'note' });
+                  form.setFieldsValue({ postUrl: '', platform: 'xiaohongshu', postType: '获客贴' });
                 }
               }}
               options={[
@@ -325,12 +325,12 @@ export default function OperationPostNewPage() {
                 ]}
               />
             </Form.Item>
-            <Form.Item name="postType" label="作品类型" initialValue="note">
+            <Form.Item name="postType" label="作品类型" initialValue="获客贴">
               <Select
                 options={[
-                  { label: '图文', value: 'note' },
-                  { label: '视频', value: 'video' },
-                  { label: '获客贴', value: 'lead_post' },
+                  { label: '获客贴', value: '获客贴' },
+                  { label: '话题贴', value: '话题贴' },
+                  { label: '素人贴', value: '素人贴' },
                 ]}
               />
             </Form.Item>

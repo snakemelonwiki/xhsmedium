@@ -68,11 +68,17 @@ export class AccountsController {
     @Query('search') search?: string,
     @Query('q') q?: string,
     @Query('platform') platform?: string,
+    @Query('id') id?: string,
   ) {
     const wantsPaging = limit !== undefined || offset !== undefined;
     const nextKeyword = keyword || search || q || '';
     const nextPlatform = (platform || '').trim();
     const scopedEmployeeId = this.resolveScopedEmployeeId(req);
+    // 精准按主键查一条（学习榜单等深链 ?id=xxx 场景）；不走 search 模糊匹配
+    if (id) {
+      const result = await this.accountsService.findByIdForPaged(id, scopedEmployeeId);
+      return res.json(result);
+    }
     if (wantsPaging) {
       const result = await this.accountsService.findAllPaged(
         Number(limit) || 20,

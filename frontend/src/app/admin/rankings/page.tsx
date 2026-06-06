@@ -85,7 +85,7 @@ export default function AdminRankingsPage() {
     { title: '区间作品', dataIndex: 'todayPosts', width: 100 },
     { title: '区间客资', dataIndex: 'todayLeads', width: 100 },
     { title: '区间流量', dataIndex: 'todayTraffic', width: 100 },
-    { title: '区间成交', dataIndex: 'todayDeals', width: 100 },
+    { title: '成交数', dataIndex: 'todayDeals', width: 100 },
   ];
 
   async function handleExport() {

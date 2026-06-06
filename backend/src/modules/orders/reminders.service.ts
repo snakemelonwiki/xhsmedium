@@ -309,20 +309,20 @@ export class RemindersService {
         this.recentlyNotified.set(order.id, now);
         notified += 1;
 
-        // 写操作日志（system 触发）
-        try {
-          await this.operationLogs.log({
-            userId: 'system',
-            action: 'status_change',
-            targetType: 'order',
-            targetId: order.id,
-            detail: `节点超时通知 (${daysSinceLastFollow} 天无进展)`,
-          });
-        } catch (logErr: any) {
-          this.logger.warn(
-            `order node timeout log failed (order=${order.id}): ${logErr?.message || logErr}`,
-          );
-        }
+        // 写操作日志（system 触发）—— 暂时注释掉定时写数据进去
+        // try {
+        //   await this.operationLogs.log({
+        //     userId: 'system',
+        //     action: 'status_change',
+        //     targetType: 'order',
+        //     targetId: order.id,
+        //     detail: `节点超时通知 (${daysSinceLastFollow} 天无进展)`,
+        //   });
+        // } catch (logErr: any) {
+        //   this.logger.warn(
+        //     `order node timeout log failed (order=${order.id}): ${logErr?.message || logErr}`,
+        //   );
+        // }
       } catch (err: any) {
         failed += 1;
         this.logger.error(

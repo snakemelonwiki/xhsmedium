@@ -19,6 +19,7 @@ import {
   Col,
   Empty,
   Progress,
+  Radio,
   Row,
   Segmented,
   Skeleton,
@@ -406,6 +407,9 @@ export function PersonalDashboardBoard({ employeeId, showRefreshButton = true }:
         </Col>
       </Row>
 
+      {/* 三类型作品占比饼图（基于 platformDist：作品 / 流量 / 客资 三扇区 + 平台单选） */}
+      <PostTypeSharePieCard items={platformDist} loading={loadingDualPlatform} />
+
       {/* v1.3 双平台数据分析面板（顶部 3 概览卡 + 3 榜单 Top 8） */}
       <PlatformAnalysisPanel
         rankings={rankings}
@@ -635,6 +639,125 @@ function PlatformTrendLineChart({ trend, loading }: { trend?: PlatformTrend; loa
     <Skeleton loading={loading} active>
       <div ref={containerRef} className={styles.trendChartBox} />
     </Skeleton>
+  );
+}
+
+// ============ 三类型作品占比饼图（作品 / 流量 / 客资 + 平台单选） ============
+// 数据源：PersonalDashboardBoard 透传下来的 platformDist（已按个人看板的 period/platform 过滤）
+// - 选项：全部 / 小红书 / 抖音
+// - 单选选"小红书"时，只把 platformDist 中 platform === '小红书' 的行累加成 3 个扇区值
+// - 三扇区：作品（postCount）/ 流量（traffic）/ 客资（leadCount）
+// 选"全部"则把小红书 + 抖音累加（注意三个指标量纲不同，仅作整体分布观察，不宜直接相加作百分比基数；
+// 这里用三个独立数值分别占各自总和的方式呈现，tooltip 各自展示绝对值）。
+type PostTypeSharePlatform = 'all' | '小红书' | '抖音';
+
+const POST_TYPE_SHARE_PLATFORM_OPTIONS: { label: string; value: PostTypeSharePlatform }[] = [
+  { label: '全部', value: 'all' },
+  { label: '小红书', value: '小红书' },
+  { label: '抖音', value: '抖音' },
+];
+
+const POST_TYPE_SHARE_COLORS: Record<string, string> = {
+  作品: '#1890ff',
+  流量: '#fa541c',
+  客资: '#52c41a',
+};
+
+function PostTypeSharePieCard({
+  items,
+  loading,
+}: {
+  items: PlatformDistributionItem[];
+  loading: boolean;
+}) {
+  const [scope, setScope] = useState<PostTypeSharePlatform>('小红书');
+  const { containerRef, chartRef, echartsReady } = useEchartsChart();
+
+  // 聚合：按 scope 过滤后，求三个指标的总和
+  const aggregated = useMemo(() => {
+    const filtered = scope === 'all' ? items : items.filter((it) => it.platform === scope);
+    let post = 0;
+    let traffic = 0;
+    let lead = 0;
+    for (const it of filtered) {
+      post += Number(it.postCount) || 0;
+      traffic += Number(it.traffic) || 0;
+      lead += Number(it.leadCount) || 0;
+    }
+    return { post, traffic, lead };
+  }, [items, scope]);
+
+  const data = useMemo(
+    () => [
+      { name: '作品', value: aggregated.post, color: POST_TYPE_SHARE_COLORS.作品 },
+      { name: '流量', value: aggregated.traffic, color: POST_TYPE_SHARE_COLORS.流量 },
+      { name: '客资', value: aggregated.lead, color: POST_TYPE_SHARE_COLORS.客资 },
+    ],
+    [aggregated],
+  );
+
+  const isEmpty = data.every((d) => d.value === 0);
+
+  useEchartsRender<typeof data>({
+    ready: echartsReady,
+    containerRef,
+    chartRef,
+    data,
+    isEmpty: (d) => d.every((it) => it.value === 0),
+    emptyHTML: '<div class="' + styles.pieChartBoxEmpty + '">暂无数据</div>',
+    buildOption: (d) => ({
+      title: {
+        text: '三类型占比（作品 / 流量 / 客资）',
+        textStyle: { fontSize: 14, fontWeight: 'normal' },
+        left: 'center',
+      },
+      tooltip: {
+        trigger: 'item',
+        formatter: (params: any) => `${params.name}：${params.value.toLocaleString()}（${params.percent}%）`,
+      },
+      legend: { bottom: 0 },
+      color: d.map((it) => it.color),
+      series: [
+        {
+          type: 'pie',
+          radius: ['40%', '70%'],
+          data: d.map((it) => ({ name: it.name, value: it.value })),
+          label: {
+            show: true,
+            formatter: (p: any) => `${p.name}\n${p.value.toLocaleString()}`,
+          },
+        },
+      ],
+    }),
+    deps: [data, isEmpty, echartsReady, containerRef, chartRef],
+  });
+
+  return (
+    <Card
+      size="small"
+      title={
+        <Space size={6} align="center">
+          <PieChartOutlined />
+          <Typography.Text strong>三类型作品占比</Typography.Text>
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            作品 / 流量 / 客资（{scope === 'all' ? '全部平台' : scope}）
+          </Typography.Text>
+        </Space>
+      }
+      extra={
+        <Radio.Group
+          optionType="button"
+          buttonStyle="solid"
+          value={scope}
+          onChange={(e) => setScope(e.target.value as PostTypeSharePlatform)}
+          options={POST_TYPE_SHARE_PLATFORM_OPTIONS}
+        />
+      }
+    >
+      <Skeleton loading={loading} active>
+        <div ref={containerRef} className={styles.pieChartBox} />
+      </Skeleton>
+    </Card>
   );
 }
 

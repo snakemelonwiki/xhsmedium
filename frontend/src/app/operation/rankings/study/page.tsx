@@ -26,6 +26,7 @@ import {
   Table,
   Tabs,
   Tag,
+  Tooltip,
   Typography,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
@@ -404,6 +405,19 @@ export default function StudyRankingsPage() {
     router.push(`/operation/posts?accountId=${encodeURIComponent(post.accountId)}`);
   }
 
+  /**
+   * 跳转到账号管理页，并只查看该条账号。
+   * accounts 页读 ?id= 后会在客户端把列表只保留这一行，并展示清除按钮。
+   * 接受 AccountStat 或 LearningPost，统一从 accountId 字段读账号 ID。
+   */
+  function viewAccountDetail(record: { accountId?: string }) {
+    if (!record.accountId) {
+      message.warning('该账号缺少 ID');
+      return;
+    }
+    router.push(`/operation/accounts?id=${encodeURIComponent(record.accountId)}`);
+  }
+
   async function viewPostDetail(post: LearningPost) {
     setDetailVisible(true);
     setDetailLoading(true);
@@ -436,17 +450,23 @@ export default function StudyRankingsPage() {
     {
       title: '作品',
       width: 240,
-      render: (_: unknown, record: LearningPost) => (
-        <Space direction="vertical" size={4}>
+      render: (_: unknown, record: LearningPost) => {
+        const truncated = record.title.length > 8 ? `${record.title.slice(0, 8)}…` : record.title;
+        const node = (
           <Typography.Text strong ellipsis style={{ maxWidth: 220 }}>
-            {record.title}
+            {truncated}
           </Typography.Text>
-          <Space wrap>
-            <Tag color={record.platform.includes('抖') ? 'blue' : 'red'}>{record.platform}</Tag>
-            <Tag>{record.postType || '未分类'}</Tag>
+        );
+        return (
+          <Space direction="vertical" size={4}>
+            {record.title.length > 8 ? <Tooltip title={record.title}>{node}</Tooltip> : node}
+            <Space wrap>
+              <Tag color={record.platform.includes('抖') ? 'blue' : 'red'}>{record.platform}</Tag>
+              <Tag>{record.postType || '未分类'}</Tag>
+            </Space>
           </Space>
-        </Space>
-      ),
+        );
+      },
     },
     {
       title: '封面',
@@ -488,7 +508,15 @@ export default function StudyRankingsPage() {
       width: 140,
       render: (_: unknown, record: LearningPost) => (
         <Space direction="vertical" size={0}>
-          <Typography.Text>{record.accountName || '未知账号'}</Typography.Text>
+          <Button
+            type="link"
+            size="small"
+            style={{ padding: 0, height: 'auto' }}
+            disabled={!record.accountId}
+            onClick={() => viewAccountDetail(record)}
+          >
+            {record.accountName || '未知账号'}
+          </Button>
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
             {record.employeeName || '未知运营'}
           </Typography.Text>
@@ -546,7 +574,7 @@ export default function StudyRankingsPage() {
       dataIndex: 'accountName',
       width: 160,
       render: (name: string, record: AccountStat) => (
-        <Button type="link" size="small" onClick={() => router.push(`/operation/posts?accountId=${encodeURIComponent(record.accountId)}`)}>
+        <Button type="link" size="small" onClick={() => viewAccountDetail(record)}>
           {name}
         </Button>
       ),
@@ -614,18 +642,24 @@ export default function StudyRankingsPage() {
     {
       title: '作品',
       width: 240,
-      render: (_: unknown, record: LearningPost) => (
-        <Space direction="vertical" size={4}>
+      render: (_: unknown, record: LearningPost) => {
+        const truncated = record.title.length > 8 ? `${record.title.slice(0, 8)}…` : record.title;
+        const node = (
           <Typography.Text strong ellipsis style={{ maxWidth: 220 }}>
-            {record.title}
+            {truncated}
           </Typography.Text>
-          <Space wrap>
-            <Tag color="gold">主管推荐</Tag>
-            <Tag color={record.platform.includes('抖') ? 'blue' : 'red'}>{record.platform}</Tag>
-            <Tag>{record.postType || '未分类'}</Tag>
+        );
+        return (
+          <Space direction="vertical" size={4}>
+            {record.title.length > 8 ? <Tooltip title={record.title}>{node}</Tooltip> : node}
+            <Space wrap>
+              <Tag color="gold">主管推荐</Tag>
+              <Tag color={record.platform.includes('抖') ? 'blue' : 'red'}>{record.platform}</Tag>
+              <Tag>{record.postType || '未分类'}</Tag>
+            </Space>
           </Space>
-        </Space>
-      ),
+        );
+      },
     },
     {
       title: '封面',
@@ -667,7 +701,15 @@ export default function StudyRankingsPage() {
       width: 140,
       render: (_: unknown, record: LearningPost) => (
         <Space direction="vertical" size={0}>
-          <Typography.Text>{record.accountName || '未知账号'}</Typography.Text>
+          <Button
+            type="link"
+            size="small"
+            style={{ padding: 0, height: 'auto' }}
+            disabled={!record.accountId}
+            onClick={() => viewAccountDetail(record)}
+          >
+            {record.accountName || '未知账号'}
+          </Button>
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
             {record.employeeName || '未知运营'}
           </Typography.Text>

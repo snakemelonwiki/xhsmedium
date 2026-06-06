@@ -48,6 +48,29 @@ export class AccountsService {
     };
   }
 
+  /**
+   * 按主键精准查一条（带员工范围隔离）。用于学习榜单等深链 ?id=xxx 的"只看该账号"场景。
+   * - 命中且在员工范围内：返回 items=[该条], total=1
+   * - 未命中或越权（运营只能查自己 employeeId 下的账号）：返回 items=[], total=0
+   */
+  async findByIdForPaged(
+    id: string,
+    employeeId?: string,
+  ): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
+    if (!id) {
+      return { items: [], total: 0, limit: 0, offset: 0 };
+    }
+    const row = await this.findById(id);
+    if (!row) {
+      return { items: [], total: 0, limit: 0, offset: 0 };
+    }
+    if (employeeId !== undefined && row.employeeId !== employeeId) {
+      return { items: [], total: 0, limit: 0, offset: 0 };
+    }
+    const items = await this.attachEmployeeNames([this.mapAccount(row)]);
+    return { items, total: 1, limit: 1, offset: 0 };
+  }
+
   private mapAccount(r: Account): any {
     return {
       id: r.id,

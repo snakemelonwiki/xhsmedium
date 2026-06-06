@@ -11,6 +11,7 @@ import {
   Col,
   Empty,
   Progress,
+  Radio,
   Row,
   Skeleton,
   Space,
@@ -22,11 +23,13 @@ import {
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useRouter } from 'next/navigation';
+import { useState } from 'react';
 import type {
   EfficiencyAccount,
   PersonalRankingsResponse,
 } from '@/shared/api/content';
 import type { PlatformDistributionItem } from '@/shared/types/content';
+import { mapPlatformToKey } from '@/shared/utils/platform-key';
 
 export interface PlatformAnalysisPanelProps {
   rankings?: PersonalRankingsResponse;
@@ -55,6 +58,13 @@ const PLATFORM_BUCKETS: PlatformBucket[] = [
   { platform: '抖音', color: 'blue', matchKey: '抖音' },
 ];
 
+type PlatformKey = '小红书' | '抖音';
+
+const PLATFORM_RADIO_OPTIONS: { label: string; value: PlatformKey }[] = PLATFORM_BUCKETS.map((b) => ({
+  label: b.platform,
+  value: b.platform,
+}));
+
 const TOP_N = 8;
 
 function pickDist(
@@ -78,6 +88,7 @@ interface AccountMetricRow extends EfficiencyAccount {
 function buildPlatformRows(
   rankings: PersonalRankingsResponse | undefined,
   metricField: 'leadCount' | 'efficiency' | 'leadEfficiency',
+  bucket: PlatformBucket,
   sortDir: 'desc' | 'asc' = 'desc',
 ): AccountMetricRow[] {
   if (!rankings) return [];
@@ -91,6 +102,10 @@ function buildPlatformRows(
   } else {
     list = rankings.accounts.leadEfficiency;
   }
+  // 过滤掉平台不匹配的账号：后端 EfficiencyAccount.platform 是 'xiaohongshu'/'douyin'/'小红书'/'抖音' 等
+  // 统一用 mapPlatformToKey 归一化后与 bucket 平台比对，避免抖音卡片下出现小红书账号
+  const bucketKey = mapPlatformToKey(bucket.platform);
+  list = list.filter((a) => mapPlatformToKey(a.platform) === bucketKey);
   // 截断到 TopN
   const sliced = list.slice(0, TOP_N);
   return sliced.map((a, idx) => ({
@@ -189,9 +204,9 @@ function PlatformColumn({ bucket, rankings, dist, loading }: PlatformColumnProps
   const leadEfficiencyDisplay = leadCount > 0 ? Math.min(100, leadCount * 5) : 0;
 
   // 3 个榜单
-  const leadRows = buildPlatformRows(rankings, 'leadCount');
-  const effRows = buildPlatformRows(rankings, 'efficiency');
-  const leadEffRows = buildPlatformRows(rankings, 'leadEfficiency');
+  const leadRows = buildPlatformRows(rankings, 'leadCount', bucket);
+  const effRows = buildPlatformRows(rankings, 'efficiency', bucket);
+  const leadEffRows = buildPlatformRows(rankings, 'leadEfficiency', bucket);
 
   const leadColumns = buildRankingColumns('leadCount', '客资数', 0, '#52c41a');
   const effColumns = buildRankingColumns('efficiency', '效率 (客/作品)', 2, '#fa541c');
@@ -360,6 +375,9 @@ function PlatformColumn({ bucket, rankings, dist, loading }: PlatformColumnProps
  */
 export function PlatformAnalysisPanel({ rankings, platformDist, loading }: PlatformAnalysisPanelProps) {
   const hasData = Boolean(rankings) || Boolean(platformDist && platformDist.length > 0);
+  const [activePlatform, setActivePlatform] = useState<PlatformKey>('小红书');
+  const activeBucket =
+    PLATFORM_BUCKETS.find((b) => b.platform === activePlatform) ?? PLATFORM_BUCKETS[0];
 
   return (
     <Card
@@ -373,21 +391,28 @@ export function PlatformAnalysisPanel({ rankings, platformDist, loading }: Platf
           </Typography.Text>
         </Space>
       }
+      extra={
+        <Radio.Group
+          optionType="button"
+          buttonStyle="solid"
+          value={activePlatform}
+          onChange={(e) => setActivePlatform(e.target.value as PlatformKey)}
+          options={PLATFORM_RADIO_OPTIONS}
+        />
+      }
     >
       {!hasData && !loading ? (
         <Empty description="暂无可分析的数据" />
       ) : (
         <Row gutter={[12, 12]}>
-          {PLATFORM_BUCKETS.map((bucket) => (
-            <Col key={bucket.platform} xs={24} md={12}>
-              <PlatformColumn
-                bucket={bucket}
-                rankings={rankings}
-                dist={platformDist}
-                loading={Boolean(loading)}
-              />
-            </Col>
-          ))}
+          <Col xs={24} md={24}>
+            <PlatformColumn
+              bucket={activeBucket}
+              rankings={rankings}
+              dist={platformDist}
+              loading={Boolean(loading)}
+            />
+          </Col>
         </Row>
       )}
     </Card>

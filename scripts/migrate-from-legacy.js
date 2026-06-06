@@ -182,7 +182,7 @@ function mapPost(p) {
     cover_image_url: p.coverImageUrl || null,
     cover_thumb_url: p.coverThumbUrl || null,
     post_url: p.postUrl || null,
-    post_type: p.postType || "素人贴",
+    post_type: p.postType || "获客贴",
     traffic: Number(p.traffic || 0),
     likes: Number(p.likes || 0),
     comments: Number(p.comments || 0),

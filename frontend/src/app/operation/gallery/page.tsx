@@ -19,7 +19,6 @@ import { HeartOutlined, EyeOutlined, StarFilled } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { useEffect, useState } from 'react';
 
-import { listAdminEmployees } from '@/shared/api/admin';
 import { listSourceAccounts, type CatalogOption } from '@/shared/api/catalog';
 import { listGalleryPosts, togglePostFavorite } from '@/shared/api/content';
 import type { ContentPost } from '@/shared/types/content';
@@ -58,7 +57,6 @@ export default function OperationGalleryPage() {
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [filters, setFilters] = useState<GalleryFilters>({});
-  const [employees, setEmployees] = useState<{ id: string; name: string }[]>([]);
   const [accounts, setAccounts] = useState<CatalogOption[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
@@ -66,7 +64,7 @@ export default function OperationGalleryPage() {
   // Detail modal state
   const [detailModal, setDetailModal] = useState<{ open: boolean; post?: ContentPost }>({ open: false });
 
-  const pageSize = 12;
+  const pageSize = 15;
 
   async function load(nextPage = page, nextFilters = filters) {
     setLoading(true);
@@ -104,11 +102,6 @@ export default function OperationGalleryPage() {
   }, []);
 
   useEffect(() => {
-    listAdminEmployees({ pageSize: 200 })
-      .then((result) => {
-        setEmployees(result.items.map((e) => ({ id: e.id, name: e.name })));
-      })
-      .catch(() => setEmployees([]));
     listSourceAccounts()
       .then(setAccounts)
       .catch(() => setAccounts([]));
@@ -192,17 +185,6 @@ export default function OperationGalleryPage() {
             value={filters.postType || undefined}
             options={typeOptions}
             onChange={(value) => applyFilter('postType', value || undefined)}
-          />
-          <Select
-            allowClear
-            showSearch
-            aria-label="筛选员工"
-            placeholder="全部员工"
-            optionFilterProp="label"
-            style={{ width: 160 }}
-            value={filters.employeeId || undefined}
-            options={employees.map((e) => ({ label: e.name, value: e.id }))}
-            onChange={(value) => applyFilter('employeeId', value || undefined)}
           />
           <Select
             allowClear

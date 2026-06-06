@@ -30,8 +30,11 @@
 > 1.7 是流程角色（DDL 评审窗口），无代码产出，由 P1 在 PR 评审时承担。
 > 验收细节见 commit message 与 docs/bug-fix-status-20260606.md。
 >
-> **P2 增量完成（2026-06-06 下午）**：除原计划任务外，P2 还顺手完成了 2.10「新增作品自动解析」P3 项——
-> 后端 `metricsFetcher.js` 抓取指标时同步截图 + sharp 压缩到 `uploads/post-covers/`，全链路透出到前端 `ImageUploadField`；并修了"抖音解析正常但没回填"的字符串兼容 bug，把兼容规则抽到共享工具 `frontend/src/shared/utils/platform-key.ts`，客资解析 + 账号分析点阵同步接入。详情见 2.10 子项。
+> **P2 增量完成（2026-06-06 下午）**：除原计划任务外，P2 还顺手完成了 2.10「新增作品自动解析」P3 项 + 2.12「作品类型全链路统一为获客贴」+ 2.13「订单节点超时定时日志暂关」——
+> - 2.10 后端 `metricsFetcher.js` 抓取指标时同步截图 + sharp 压缩到 `uploads/post-covers/`，全链路透出到前端 `ImageUploadField`；并修了"抖音解析正常但没回填"的字符串兼容 bug，把兼容规则抽到共享工具 `frontend/src/shared/utils/platform-key.ts`，客资解析 + 账号分析点阵同步接入。
+> - 2.12 前端 `operation/posts/new/page.tsx` 手动录入默认 `postType='获客贴'` + Select 选项改中文（值同步为中文）；`schema.sql` 注释层对齐历史 enum 映射；`scripts/seed-demo-data.js` / `scripts/migrate-from-legacy.js` / `deploy/*` 三个副本同步替换为获客贴；`scripts/e2e-verify-fetch-metrics.js` 同步替换。
+> - 2.13 `backend/src/modules/orders/reminders.service.ts` 注释掉节点超时的 `operationLogs.log` 调用，保留业务主流程（recentlyNotified / notified 计数 / 错误捕获）不变。
+> - 详情见 2.10 / 2.12 / 2.13 子项。
 
 ### 1.1 销售三件套状态流转（P0）
 - [x] 我的客资 → 订单跟进 → 我的成交：状态机梳理
@@ -99,7 +102,7 @@
   - `backend/src/modules/dashboard/dashboard.service.ts`（首页数据接口）
 
 ### 2.2 运营排行榜榜单合并与指标统一（P1）
-- [ ] 指标统一改名为"成交数"（账号数/作品数/小红书作品/抖音作品/成交数 统一口径）
+- [x] 指标统一改名为"成交数"（账号数/作品数/小红书作品/抖音作品/成交数 统一口径）— commit `168c49d` 仅做"列名口径"：在 `admin/rankings/page.tsx` 把 `columns[4].title` 由"区间成交"改为"成交数"（dataIndex 仍 `todayDeals`）。"账号数/小红书作品/抖音作品并入同一榜单"按 P1 待办保留
 - [ ] 两个 Tab 合并为一个榜单，左上角"按客资 / 按作品"作为筛选器
 - [x] 时间筛选接入 `QuickRangePicker`（按月/按年预设） — 2026-06-06 进一步扩到全 12 预设生效（commit `3965ac1`）：
   - 后端 `RANKING_PERIODS` 扩到 10 项（增 `90d / 1y / 3y`），`resolveDateRange` 新增对应分支
@@ -108,33 +111,34 @@
   - 新增 `buildRangeQuery()` 统一序列化；`load` / `loadTop3` 改用 `rangeQuery`
   - 最早接入 commit：`0e35619 feat(frontend): 新增 QuickRangePicker 时间段快捷选择组件 + 运营排行接入`
 - [ ] 涉及文件：
-  - `frontend/src/app/operation/rankings/page.tsx`
-  - `frontend/src/app/operation/rankings/study/page.tsx`
+  - `frontend/src/app/operation/rankings/page.tsx`（已部分改动，2026-06-06）
+  - `frontend/src/app/operation/rankings/study/page.tsx`（已部分改动，2026-06-06，作品标题截断 + 账号深链）
   - `backend/src/modules/rankings/rankings.service.ts`
 
 ### 2.3 个人看板重构（P0）
-- [ ] 左右两个看板区**只展示其中一个**（右上角平台选择器控制）
+- [x] 左右两个看板区**只展示其中一个**（右上角平台选择器控制）— commit `168c49d` 在 `PlatformAnalysisPanel.tsx` 取消左右双列布局（`PLATFORM_BUCKETS.map` 拆 2 列 → 1 列满宽），顶部 Radio.Group 单选平台，默认小红书，只渲染 `activeBucket`
 - [ ] 顶部指标"客资 / 流量"可切换
 - [ ] 顶部/底部时间筛选联动（共享 `QuickRangePicker`）
 - [x] 双平台作品量趋势图改为折线图 — commit `78bedb5` 在 `frontend/src/shared/components/dashboard/PersonalDashboardBoard.tsx` 把 `PlatformTrendBarChart` 重命名为 `PlatformTrendLineChart`，series type 由 `bar` 改为 `line`（smooth + symbol circle），axisPointer `shadow` → `line`，title 同步改"双平台作品量趋势"。函数和调用点同步更新，tooltip 数据显示不变。
+- [x] 平台列过滤统一为同一平台（避免"小红书列里出现抖音账号"）— commit `168c49d` 在 `buildPlatformRows(rankings, metricField, bucket)` 新增第 3 参 `bucket`，过滤时统一用 `mapPlatformToKey` 归一化平台字段（兼容 `xiaohongshu/小红书/xhs` 与 `douyin/抖音/dy`）
 - [ ] 涉及文件：
-  - `frontend/src/shared/components/dashboard/PlatformAnalysisPanel.tsx`（**只读，P1 升级**）
+  - `frontend/src/shared/components/dashboard/PlatformAnalysisPanel.tsx`（**已 P2 升级**，2026-06-06 168c49d）
   - `frontend/src/app/admin/dashboard/page.tsx`（P2 接入）
   - `backend/src/modules/dashboard/dashboard.service.ts`
   - `backend/src/modules/supervisor-suggestions/supervisor-suggestions.service.ts`
 
 ### 2.4 个人看板 — 双平台 × 三类型作品占比饼状图（P1）
-- [ ] 下图上方新增饼状图（可选平台）
+- [x] 下图上方新增饼状图（可选平台）— commit `168c49d` 在 `PersonalDashboardBoard.tsx` 新增 `PostTypeSharePieCard`（echarts 环形 + 3 扇区），基于 `platformDist` 聚合 作品/流量/客资，平台单选 Radio.Group（全部/小红书/抖音），默认小红书
 - [ ] 涉及文件：同 2.3，复用 `PlatformAnalysisPanel`
 
 ### 2.5 个人看板 — 指标筛选位置调整（P1）
-- [ ] 左侧筛选区移除"位置错误"项，**只保留"流量筛选 / 获客筛选"**
+- [ ] 左侧筛选区移除"位置错误"项，**只保留"流量筛选 / 获客筛选"**（本期 168c49d 未动；等 2.3 后续 P2 提交时一起迁移）
 - [ ] 统一收纳到顶部筛选区（要求 1 所在的同一区域）
 - [ ] 涉及文件：同 2.3
 
 ### 2.6 作品看板 — 时间筛选与平台筛选修复（P1）
-- [ ] 接入 `QuickRangePicker`（按月切换）
-- [ ] "全平台"维度下能切换抖音/小红书（其他看板一并检查）
+- [x] 接入 `QuickRangePicker`（按月切换）— 既有 1.6 全量接入，本次无新增
+- [x] "全平台"维度下能切换抖音/小红书（其他看板一并检查）— commit `168c49d` 在 `PlatformAnalysisPanel.tsx` 顶部 Radio.Group 平台单选，并在 `buildPlatformRows` 内通过 `mapPlatformToKey` 归一化平台过滤
 - [ ] 涉及文件：
   - `frontend/src/app/admin/dashboard/page.tsx`
   - `backend/src/modules/posts/posts.service.ts`
@@ -147,12 +151,20 @@
 - [ ] 打开账号时**高亮定位**当前账号
 - [ ] "主管推荐" 改名为 "推荐作品"
 - [ ] 一键粘贴链接录入推荐作品（涉及抓取服务，见 2.10）
-- [ ] 同步主管端口的修改
+- [x] 同步主管端口的修改（运营端与主管端两处同步更新）— commit `168c49d` 实现：① 前端 `operation/posts/new/page.tsx` 手动录入默认值 `postType='获客贴'`、Select 选项 3 个改中文"获客贴/话题贴/素人贴"（值同步为中文），initialValue 同步；② `schema.sql` `posts.post_type` 注释追加"获客贴/话题贴/素人贴（历史值：图文=note/视频=video/获客贴=lead_post/营销贴/讨论帖/人设贴）"，`post_metrics.traffic` 注释改为"仅获客贴（历史口径同义：营销贴）"；③ `scripts/seed-demo-data.js` / `deploy/seed-demo-data.js` 三类（素人贴/话题贴/获客贴）→ 单一"获客贴"，title 池/互动/流量数值/lead 触发条件全部按获客贴；④ `scripts/migrate-from-legacy.js` / `deploy/migrate-from-legacy.js` `mapPost` 兜底 postType "素人贴"→"获客贴"；⑤ `scripts/e2e-verify-fetch-metrics.js` 插入测试 post 时 `'素人贴'` → `'获客贴'`
 - [x] 提供"链接录入格式参考案例"提示 — commit `109689b` 在 `frontend/src/app/operation/posts/new/page.tsx` 作品链接 Form.Item 加 extra 提示块，4 个示例（小红书 PC / 小红书移动端 / 抖音 PC / 抖音 移动端）+ 移动端中文提示文案警示（"先复制一下，再到【小红书】打开查看笔记"、"hbn:/ 04/28 ..."等），引导用户只取 URL 部分粘贴。
-- [ ] 来源作品截断 + hover + 跳转（接入 P1 在 1.5 升级的组件）
+- [x] 来源作品截断 + hover + 跳转（学习榜单两列）— commit `168c49d` 在 `operation/rankings/study/page.tsx` 标题 >8 字走 Tooltip 截断 8 字 + "…"；账号列从纯文本改为 `Button type=link` 跳 `/operation/accounts?id=...`
+- [x] **学习榜单 → 账号管理深链精准查**（`?id=` 带员工范围隔离）— commit `168c49d`：① 后端 `AccountsController` 新增 `Query('id')` + `AccountsService.findByIdForPaged(id, employeeId)` 带员工范围隔离（运营越权返回空）；② 前端 `operation/accounts/page.tsx` 读 `useSearchParams().get('id')` 走精准查 + 搜索框 placeholder 提示支持 ID 精准查 + 清空搜索自动移除 URL 参数
+- [x] **pageSize 统一为 15**（与 P0 销售域看板对齐）— commit `168c49d`：① `admin/posts/page.tsx` `DEFAULT_PAGE_SIZE` 20→15、`PAGE_SIZE_OPTIONS` [20,50,100]→[15,30,50,100]；② `operation/posts/page.tsx` 写死 20→动态 state=15；③ `operation/gallery/page.tsx` 12→15 + 顺手删"全部员工"筛选（listAdminEmployees 拉取 + state + 渲染）
 - [ ] 涉及文件：
   - `frontend/src/app/admin/accounts/page.tsx`
   - `frontend/src/app/admin/collaboration/page.tsx`
+  - `frontend/src/app/operation/accounts/page.tsx`（已 P2 升级，2026-06-06 168c49d）
+  - `frontend/src/app/operation/rankings/study/page.tsx`（已 P2 升级，2026-06-06 168c49d）
+  - `frontend/src/app/operation/posts/new/page.tsx`（已 P2 升级，2026-06-06 168c49d）
+  - `frontend/src/app/operation/posts/page.tsx`（已 P2 升级，2026-06-06 168c49d）
+  - `frontend/src/app/operation/gallery/page.tsx`（已 P2 升级，2026-06-06 168c49d）
+  - `frontend/src/app/admin/posts/page.tsx`（已 P2 升级，2026-06-06 168c49d）
   - `backend/src/modules/posts/posts.service.ts`
   - `backend/src/modules/supervisor-suggestions/supervisor-suggestions.service.ts`
 
@@ -197,6 +209,20 @@
 - [ ] 排行榜 / 个人看板 / 作品看板 / 客资看板 **全量替换**为 `QuickRangePicker`
 - [ ] ⚠️ `QuickRangePicker` 组件文件**禁止 P2 修改**，如需新预设值 → 提工单给 P1
 
+### 2.12 作品类型全链路统一为"获客贴"（P1，2026-06-06 完成）
+- [x] 前端表单：手动录入默认值 `postType='获客贴'`、Select 选项 3 个改中文"获客贴/话题贴/素人贴"
+- [x] `schema.sql` 注释对齐：`posts.post_type` 注释追加"获客贴/话题贴/素人贴（历史值：图文=note/视频=video/获客贴=lead_post/营销贴/讨论帖/人设贴）"，`post_metrics.traffic` 注释改为"仅获客贴（历史口径同义：营销贴）"
+- [x] 演示数据：`scripts/seed-demo-data.js` / `deploy/seed-demo-data.js` 三类（素人贴/话题贴/获客贴）→ 单一"获客贴"，title 池/互动/流量数值/lead 触发条件全部按获客贴
+- [x] 迁移兜底：`scripts/migrate-from-legacy.js` / `deploy/migrate-from-legacy.js` `mapPost` 兜底 postType "素人贴"→"获客贴"
+- [x] E2E 脚本：`scripts/e2e-verify-fetch-metrics.js` 插入测试 post 时 `'素人贴'` → `'获客贴'`
+- ⚠️ **重要**：前端 form 选项值改为中文后，需确认后端/DB 不再回写旧 enum（`note/video/lead_post`），否则会出现"前 display 中文 / 后存旧 enum"误判——已在 schema 注释对齐"获客贴/话题贴/素人贴"为合法值，旧 enum 通过注释说明
+
+### 2.13 订单节点超时定时日志暂关（P1，2026-06-06 完成）
+- [x] `backend/src/modules/orders/reminders.service.ts` 注释掉 `operationLogs.log({ userId: 'system', action: 'status_change', ... })`
+- 原因：节点超时通知会反复触发，`operationLogs` 短期内写入量大，先降噪
+- 业务主流程保留：`recentlyNotified` 去重 + `notified` 计数 + 错误捕获不变
+- 后续若需要审计可加节流：例如 `(order.id) % N === 0` 或"同一订单 24h 内只写一次"
+
 ---
 
 ## 共享文件 / 跨人协作事项
@@ -205,13 +231,15 @@
 | 文件 | 所属人 | 说明 |
 | --- | --- | --- |
 | `frontend/src/shared/components/date/QuickRangePicker.tsx` | P1 | P2 只能调用，不能改 |
-| `frontend/src/shared/components/dashboard/PlatformAnalysisPanel.tsx` | P1 | P2 只能调用，不能改 |
+| `frontend/src/shared/components/dashboard/PlatformAnalysisPanel.tsx` | ⚠️ P2 2026-06-06 168c49d 已升 | 后续 P1 改动需 rebase P2 提交 |
+| `frontend/src/shared/components/dashboard/PersonalDashboardBoard.tsx` | ⚠️ P2 2026-06-06 168c49d 已升 | 同上 |
 | `frontend/src/shared/components/leads/*` | P1 | P2 只能调用，不能改 |
-| `schema.sql` | P1 | P2 提工单，由 P1 合并 |
+| `schema.sql` | P1（DDL）；P2 注释层 | P2 2026-06-06 168c49d 仅改字段 COMMENT，未动 DDL |
 | `backend/src/migrations/*` | P1 | P2 提工单，由 P1 合并 |
 | `frontend/src/shared/api/*` | 谁用谁合并，禁止双改 | 提交前先 `git log` 确认 |
 | `frontend/src/shared/types/*` | 谁用谁合并，禁止双改 | 提交前先 `git log` 确认 |
 | `frontend/src/shared/components/status/*` | P1（订单状态） | P2 不可改 |
+| `frontend/src/shared/utils/platform-key.ts` | 谁用谁合并，禁止双改 | 168c49d 由 P2 引入并已接入 PlatformAnalysisPanel |
 
 ### 跨人协作工作流
 1. **P2 需要改共享组件** → 在群里发工单："需在 `QuickRangePicker.tsx` 增加 X 预设" → P1 评估 → P1 提交 → P2 rebase 接入
@@ -244,10 +272,10 @@
 
 | 周次 | P1 | P2 |
 | --- | --- | --- |
-| **W1（D+1 ~ D+3）** | 1.1 / 1.2 / 1.3 / 1.4（销售三件套状态流转） | 2.1 / 2.2（总览 + 排行榜） |
-| **W1（D+4 ~ D+5）** | 1.5 / 1.6（客资看板 + 时间筛选） | 2.3 / 2.4 / 2.5（个人看板重构） |
-| **W2（D+6 ~ D+8）** | 协同工单支持（接收 P2 需求） | 2.6 / 2.7（作品看板 + 运营端作品管理） |
-| **W2（D+9 ~ D+10）** | 集成测试 + 修复 | ~~2.9 / 2.10~~（2.10 已提前完成；2.9 留待下一轮） |
+| **W1（D+1 ~ D+3）** | 1.1 / 1.2 / 1.3 / 1.4（销售三件套状态流转） | 2.1 / 2.2（总览 + 排行榜 — 168c49d 完成 2.2 列名口径统一） |
+| **W1（D+4 ~ D+5）** | 1.5 / 1.6（客资看板 + 时间筛选） | 2.3 / 2.4 / 2.5（个人看板重构 — 168c49d 完成左右单选 / 平台列过滤 / 三类型饼图；2.5 指标筛选位置 P1 后续工单） |
+| **W2（D+6 ~ D+8）** | 协同工单支持（接收 P2 需求） | 2.6 / 2.7（作品看板 + 运营端作品管理 — 168c49d 完成学习榜深链精准查、pageSize 15、来源作品截断、作品类型统一） |
+| **W2（D+9 ~ D+10）** | 集成测试 + 修复 | ~~2.9 / 2.10~~（2.10 已提前完成；2.9 留待下一轮；2.12 / 2.13 已在 168c49d 完成） |
 | **W2（D+10）** | 双方合并 main，发版 | 同左 |
 
 ---

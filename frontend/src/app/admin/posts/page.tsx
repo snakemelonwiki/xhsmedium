@@ -38,8 +38,8 @@ import { createExport, downloadExportUrl, getExport } from '@/shared/api/exports
 import { buildPostExportFilter, getPostDetailDisplay } from './postDetail';
 
 const { RangePicker } = DatePicker;
-const DEFAULT_PAGE_SIZE = 20;
-const PAGE_SIZE_OPTIONS = [20, 50, 100];
+const DEFAULT_PAGE_SIZE = 15;
+const PAGE_SIZE_OPTIONS = [15, 30, 50, 100];
 
 type PeriodKey = 'today' | 'week' | 'month' | 'all' | 'custom';
 

@@ -69,6 +69,7 @@ export default function OperationPostsPage() {
   const [filters, setFilters] = useState<PostFilters>({});
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(15);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
   const [exporting, setExporting] = useState(false);
@@ -77,8 +78,6 @@ export default function OperationPostsPage() {
   const [metricsModal, setMetricsModal] = useState<{ open: boolean; postId?: string; loading?: boolean; history?: any[] }>({ open: false });
   // Supervisor suggestion modal state
   const [suggestionModal, setSuggestionModal] = useState<{ open: boolean; post?: ContentPost }>({ open: false });
-
-  const pageSize = 20;
 
   async function load(nextPage = page, nextFilters = filters) {
     setLoading(true);
