@@ -111,6 +111,8 @@ export class OrdersService {
     private readonly orderFinanceRepository: Repository<OrderFinance>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
+    @InjectRepository(Lead)
+    private readonly leadRepository: Repository<Lead>,
     @InjectDataSource()
     private readonly dataSource: DataSource,
     private readonly notificationsService: NotificationsService,
@@ -382,7 +384,17 @@ export class OrdersService {
     if ((qb as any)._earlyReturnEmpty) return [];
 
     const rows = await qb.getMany();
-    return rows.map((r) => this.mapOrder(r));
+    const [namesById, leadSnapshots] = await Promise.all([
+      this.lookupDisplayNamesForIds(rows.flatMap((r) => [r.salesUserId, r.academicUserId])),
+      this.lookupLeadSnapshotsForIds(rows.map((r) => r.leadId)),
+    ]);
+    return rows.map((r) => ({
+      ...this.mapOrder(r, {
+        salesUserName: r.salesUserId ? namesById.get(r.salesUserId) || null : null,
+        academicUserName: r.academicUserId ? namesById.get(r.academicUserId) || null : null,
+      }),
+      ...(leadSnapshots.get(r.leadId) || {}),
+    }));
   }
 
   /**
@@ -540,8 +552,18 @@ export class OrdersService {
 
     qb.skip(safeOffset).take(safeLimit);
     const [rows, total] = await qb.getManyAndCount();
+    const [namesById, leadSnapshots] = await Promise.all([
+      this.lookupDisplayNamesForIds(rows.flatMap((r) => [r.salesUserId, r.academicUserId])),
+      this.lookupLeadSnapshotsForIds(rows.map((r) => r.leadId)),
+    ]);
     return {
-      items: rows.map((r) => this.mapOrder(r)),
+      items: rows.map((r) => ({
+        ...this.mapOrder(r, {
+          salesUserName: r.salesUserId ? namesById.get(r.salesUserId) || null : null,
+          academicUserName: r.academicUserId ? namesById.get(r.academicUserId) || null : null,
+        }),
+        ...(leadSnapshots.get(r.leadId) || {}),
+      })),
       total,
       limit: safeLimit,
       offset: safeOffset,
@@ -656,13 +678,17 @@ export class OrdersService {
         }
       }
     }
-    const followRecords = await this.orderFollowRepository.find({
-      where: { orderId: id },
-      order: { createdAt: 'DESC' },
-    });
+    const [followRecords, lead] = await Promise.all([
+      this.orderFollowRepository.find({
+        where: { orderId: id },
+        order: { createdAt: 'DESC' },
+      }),
+      this.leadRepository.findOne({ where: { id: order.leadId } }),
+    ]);
     const names = await this.lookupUserNames([order.salesUserId, order.academicUserId]);
     return {
       ...this.mapOrder(order, names),
+      ...(lead ? this.mapLeadFollowSnapshot(lead) : {}),
       followRecords: followRecords.map((r) => this.mapFollowRecord(r)),
     };
   }
@@ -1278,6 +1304,38 @@ export class OrdersService {
     };
   }
 
+  private async lookupLeadSnapshotsForIds(
+    leadIdsInput: Array<string | null | undefined>,
+  ): Promise<Map<string, any>> {
+    const leadIds = Array.from(new Set(leadIdsInput.filter((v): v is string => !!v)));
+    const result = new Map<string, any>();
+    if (leadIds.length === 0) return result;
+
+    const rows = await this.leadRepository.find({
+      where: leadIds.map((id) => ({ id })),
+    });
+    for (const lead of rows) {
+      result.set(lead.id, this.mapLeadFollowSnapshot(lead));
+    }
+    return result;
+  }
+
+  private mapLeadFollowSnapshot(lead: Lead): any {
+    return {
+      clientDegree: lead.clientDegree,
+      clientMajorResearch: lead.clientMajorResearch,
+      clientTimeRequirement: lead.clientTimeRequirement,
+      objectionPoint: lead.objectionPoint,
+      dealStatus: lead.dealStatus,
+      dealAmount: lead.dealAmount,
+      followAction: lead.followAction,
+      followActionAt: lead.followActionAt,
+      requirementNote: lead.requirementNote,
+      intentionLevel: lead.intentionLevel,
+      nextFollowAt: lead.nextFollowTime,
+    };
+  }
+
   private mapOrder(row: Order, names: { salesUserName?: string | null; academicUserName?: string | null } = {}): any {
     return {
       id: row.id,
@@ -1299,24 +1357,51 @@ export class OrdersService {
   }
 
   /**
-   * 批量查 users 表，把 userId 列表映射成 { id -> username }。
-   * 用于给订单详情 / 我的成交返回「销售」「教务」的真实姓名，避免前端显示裸 ID。
-   * 注意：跨表 collation 不一致（orders=unicode_ci vs users=0900_ai_ci），
-   *       用 IN-list 主键查询走 PK 不会触发 collation 冲突。
+   * Resolve order user display names. Historical data may store either users.id
+   * or employees.id in orders.academic_user_id, so support both shapes.
+   * Employee real name wins over login username.
    */
+  private async lookupDisplayNamesForIds(
+    idsInput: Array<string | null | undefined>,
+  ): Promise<Map<string, string>> {
+    const ids = Array.from(new Set(idsInput.filter((v): v is string => !!v)));
+    const result = new Map<string, string>();
+    if (ids.length === 0) return result;
+
+    const placeholders = ids.map(() => '?').join(',');
+    const userRows: Array<{ id: string; username: string | null; employee_name: string | null }> =
+      await this.orderRepository.manager.query(
+        'SELECT u.id, u.username, e.name AS employee_name ' +
+        'FROM users u ' +
+        'LEFT JOIN employees e ON e.id COLLATE utf8mb4_unicode_ci = u.employee_id COLLATE utf8mb4_unicode_ci ' +
+        `WHERE u.id IN (${placeholders})`,
+        ids,
+      );
+    for (const row of userRows) {
+      const name = row.employee_name || row.username;
+      if (row.id && name) result.set(row.id, name);
+    }
+
+    const missingIds = ids.filter((id) => !result.has(id));
+    if (missingIds.length > 0) {
+      const employeePlaceholders = missingIds.map(() => '?').join(',');
+      const employeeRows: Array<{ id: string; name: string | null }> =
+        await this.orderRepository.manager.query(
+          `SELECT id, name FROM employees WHERE id IN (${employeePlaceholders})`,
+          missingIds,
+        );
+      for (const row of employeeRows) {
+        if (row.id && row.name) result.set(row.id, row.name);
+      }
+    }
+
+    return result;
+  }
+
   private async lookupUserNames(
     userIds: Array<string | null | undefined>,
   ): Promise<{ salesUserName: string | null; academicUserName: string | null }> {
-    const ids = Array.from(new Set(userIds.filter((v): v is string => !!v)));
-    if (ids.length === 0) {
-      return { salesUserName: null, academicUserName: null };
-    }
-    const users = await this.userRepository.find({
-      where: ids.map((id) => ({ id })),
-      select: { id: true, username: true },
-    });
-    const byId = new Map<string, string>();
-    for (const u of users) byId.set(u.id, u.username);
+    const byId = await this.lookupDisplayNamesForIds(userIds);
     return {
       salesUserName: byId.get(userIds[0] || '') ?? null,
       academicUserName: byId.get(userIds[1] || '') ?? null,

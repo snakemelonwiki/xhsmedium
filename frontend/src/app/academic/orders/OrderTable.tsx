@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 
 import { listOrders, updateOrder } from '@/shared/api/orders';
+import { updateLeadDealStatus } from '@/shared/api/leads';
 import { createExport, downloadExportUrl, getExport, type ExportFilter } from '@/shared/api/exports';
 import { readStoredUser } from '@/shared/auth/auth';
 import type { OrderItem, OrderScope, OrderStatusCode } from '@/shared/types/orders';
@@ -14,6 +15,22 @@ import { HANDOVER_STATUS_OPTIONS, HandoverStatusCode, handoverStatusMeta, orderS
 import { formatDateTime } from '@/shared/utils/date-format';
 import { QuickRangePicker } from '@/shared/components/date';
 import type { DateRangeValue } from '@/shared/components/date';
+
+const dealStatusOptions = [
+  { label: '未成交', value: 'not_deal' },
+  { label: '待成交', value: 'deal_pending' },
+  { label: '已成交', value: 'deal_done' },
+  { label: '已退款', value: 'refunded' },
+  { label: '无效', value: 'invalid' },
+];
+
+const dealStatusMeta: Record<string, { label: string; color: string }> = {
+  not_deal: { label: '未成交', color: 'default' },
+  deal_pending: { label: '待成交', color: 'orange' },
+  deal_done: { label: '已成交', color: 'green' },
+  refunded: { label: '已退款', color: 'magenta' },
+  invalid: { label: '无效', color: 'red' },
+};
 
 const orderStatusOptions: { label: string; value: OrderStatusCode }[] = [
   { label: '待领取', value: 'to_receive' },
@@ -44,6 +61,12 @@ interface OrderTableProps {
 // 列表渲染使用集中 helper（v1.3 P0 修复后），避免和 enums.ts 重复维护。
 function renderOrderStatus(status: string) {
   const meta = orderStatusMeta(status);
+  return <Tag color={meta.color}>{meta.label}</Tag>;
+}
+
+function renderDealStatus(status?: string | null) {
+  const code = status || 'not_deal';
+  const meta = dealStatusMeta[code] || { label: code, color: 'default' };
   return <Tag color={meta.color}>{meta.label}</Tag>;
 }
 
@@ -118,6 +141,23 @@ export function OrderTable({ title, description, scope, status, showStatusFilter
       message.error(text);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function patchDealStatus(order: OrderItem, dealStatus: string, successText: string) {
+    if (!order.leadId) {
+      message.error('订单缺少关联客资，无法更新成交状态');
+      return;
+    }
+    setUpdatingId(order.id);
+    try {
+      await updateLeadDealStatus(String(order.leadId), { dealStatus: dealStatus as any });
+      message.success(successText);
+      await loadOrders();
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '成交状态更新失败');
+    } finally {
+      setUpdatingId('');
     }
   }
 
@@ -285,7 +325,7 @@ export function OrderTable({ title, description, scope, status, showStatusFilter
       title: '操作',
       key: 'actions',
       fixed: 'right',
-      width: actionMode === 'admin' ? 150 : 210,
+      width: actionMode === 'sales' ? 320 : (actionMode === 'admin' ? 150 : 210),
       render: (_value, record) => {
         if (actionMode === 'admin') {
           return (

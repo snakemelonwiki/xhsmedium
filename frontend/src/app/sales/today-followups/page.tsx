@@ -49,7 +49,7 @@ export default function SalesTodayFollowupsPage() {
             <CalendarOutlined /> 当日待跟进
           </Typography.Title>
           <Typography.Paragraph type="secondary">
-            仅显示今天（nextFollowTime ≤ 今天 23:59:59）且未关闭的客资，按下次跟进时间升序。
+            仅显示今天且未关闭的客资，按下次跟进时间升序。
           </Typography.Paragraph>
         </div>
         <Space>

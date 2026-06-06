@@ -33,6 +33,17 @@ export interface OrderItem {
   materialStatus?: string | null;
   teacher?: string | null;
   salesSummary?: string | null;
+  dealStatus?: string | null;
+  dealAmount?: string | null;
+  clientDegree?: string | null;
+  clientMajorResearch?: string | null;
+  clientTimeRequirement?: string | null;
+  objectionPoint?: string | null;
+  followAction?: string | null;
+  followActionAt?: string | null;
+  requirementNote?: string | null;
+  intentionLevel?: string | null;
+  nextFollowAt?: string | null;
   createdAt?: string;
   updatedAt?: string;
 }

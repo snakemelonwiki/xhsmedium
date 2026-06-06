@@ -104,11 +104,19 @@ export default function OperationFavoritesPage() {
       cancelText: '再想想',
       okButtonProps: { danger: true },
       onOk: async () => {
+        // 乐观更新：先在本地 state 中移除该项，避免后端 list 走分页/缓存时短暂"还在"造成用户错觉。
+        const removedId = item.id;
+        setItems((prev) => prev.filter((it) => it.id !== removedId));
+        setTotal((prev) => Math.max(0, prev - 1));
         try {
           await removeFavorite(item.targetType, item.targetId);
           message.success('已取消收藏');
+          // 后台再拉一次，保证和后端真实数据一致（处理"分页/总数变化"边界）。
           await load(page, tab);
         } catch (err) {
+          // 失败时回滚本地移除
+          setItems((prev) => (prev.some((it) => it.id === removedId) ? prev : [...prev, item]));
+          setTotal((prev) => prev + 1);
           message.error(err instanceof Error ? err.message : '取消收藏失败');
         }
       },

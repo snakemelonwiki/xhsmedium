@@ -35,6 +35,8 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { apiClient } from '@/shared/api/apiClient';
 import { createExport, downloadExportUrl, getExport } from '@/shared/api/exports';
+import { QuickRangePicker } from '@/shared/components/date/QuickRangePicker';
+import { RANGE_PRESETS_FULL } from '@/shared/utils/date-range';
 import { buildPostExportFilter, getPostDetailDisplay } from './postDetail';
 
 const { RangePicker } = DatePicker;
@@ -706,21 +708,39 @@ export default function AdminPostsPage() {
         </Space>
       </div>
 
-      {/* 时间筛选（OP-21）：今日 / 本周 / 本月 / 累计 / 自定义 */}
+      {/* 时间筛选（OP-21）：复用 QuickRangePicker 12 个预设 + 累计按钮 + 自定义 RangePicker */}
       <Card size="small">
         <Space size={12} wrap align="center">
-          <Segmented
-            value={filters.period}
-            onChange={handlePeriodChange}
-            options={PERIOD_OPTIONS}
+          <Button
+            type={filters.period === 'all' ? 'primary' : 'default'}
+            size="small"
+            onClick={() => {
+              setCustomRangeValue(null);
+              setFilters((prev) => ({ ...prev, period: 'all', customRange: null }));
+            }}
+          >
+            累计
+          </Button>
+          <QuickRangePicker
+            value={customRangeValue ? { start: customRangeValue[0], end: customRangeValue[1] } : null}
+            variant="select"
+            presets={RANGE_PRESETS_FULL}
+            onChange={(v) => {
+              if (!v || !v.start || !v.end) {
+                setCustomRangeValue(null);
+                setFilters((prev) => ({ ...prev, period: 'all', customRange: null }));
+                return;
+              }
+              setCustomRangeValue([v.start, v.end]);
+              setFilters((prev) => ({
+                ...prev,
+                period: 'custom',
+                customRange: [v.start.format('YYYY-MM-DD'), v.end.format('YYYY-MM-DD')],
+              }));
+            }}
+            selectPlaceholder="选择时间段"
+            selectWidth={140}
           />
-          {filters.period === 'custom' ? (
-            <RangePicker
-              value={customRangeValue}
-              onChange={handleCustomRangeChange}
-              allowClear={false}
-            />
-          ) : null}
         </Space>
       </Card>
 

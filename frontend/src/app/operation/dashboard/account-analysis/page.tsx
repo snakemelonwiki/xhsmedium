@@ -340,24 +340,7 @@ function AccountCalendarGrid({ days }: { days: AccountTimeseriesDay[] }) {
             <Tooltip
               key={d.date}
               title={
-                <div>
-                  <div style={{ fontWeight: 600 }}>{d.date}</div>
-                  <div>作品：{d.postCount}</div>
-                  <div>客资：{d.leadCount}</div>
-                  <div>流量：{d.traffic}</div>
-                  {d.posts.length > 0 ? (
-                    <div style={{ marginTop: 4 }}>
-                      {d.posts.map((p: AccountTimeseriesPost) => (
-                        <div key={p.postId} style={{ fontSize: 11 }}>
-                          · {p.title || p.postId}
-                          {p.platform ? `（${p.platform}）` : ''}
-                          {`（${p.leadCount}客 / ${p.traffic}流量）`}
-                          {p.isLead ? ' ⭐' : ''}
-                        </div>
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
+                <PostGroupedTooltip date={d.date} posts={d.posts} postCount={d.postCount} leadCount={d.leadCount} traffic={d.traffic} />
               }
             >
               <div
@@ -459,4 +442,68 @@ function pickPlatformDotColor(platform?: string): string {
   if (platform.includes('xhslink')) return '#ff2442';
   if (platform.includes('iesdouyin')) return '#161616';
   return '#bfbfbf';
+}
+
+// 作品录入可选的 3 种类型（与 frontend/src/app/operation/posts/new/page.tsx:331 保持一致）。
+const POST_TYPE_GROUPS: { type: string; label: string; color: string }[] = [
+  { type: '获客贴', label: '获客贴', color: '#fa8c16' },
+  { type: '话题贴', label: '话题贴', color: '#1677ff' },
+  { type: '素人贴', label: '素人贴', color: '#52c41a' },
+];
+
+/**
+ * 鼠标悬停 tooltip：按"获客贴 / 话题贴 / 素人贴"三栏分组展示。
+ * - 顶部仍保留日期 + 当日总作品/客资/流量 4 行汇总
+ * - 下方三栏各列该类型作品，标题 · 平台 · 客资 · 流量；高获客作品 ⭐ 标记
+ * - 未知类型归入"其他"以防遗漏
+ */
+function PostGroupedTooltip({
+  date,
+  posts,
+  postCount,
+  leadCount,
+  traffic,
+}: {
+  date: string;
+  posts: AccountTimeseriesPost[];
+  postCount: number;
+  leadCount: number;
+  traffic: number;
+}) {
+  const known = new Set(POST_TYPE_GROUPS.map((g) => g.type));
+  const otherPosts = posts.filter((p) => !known.has(p.type));
+  const groups: { type: string; label: string; color: string; posts: AccountTimeseriesPost[] }[] = POST_TYPE_GROUPS
+    .map((g) => ({ ...g, posts: posts.filter((p) => p.type === g.type) }))
+    .filter((g) => g.posts.length > 0);
+  if (otherPosts.length > 0) {
+    groups.push({ type: '__other__', label: '其他', color: '#8c8c8c', posts: otherPosts });
+  }
+  return (
+    <div style={{ minWidth: 200 }}>
+      <div style={{ fontWeight: 600, marginBottom: 4 }}>{date}</div>
+      <div style={{ fontSize: 12 }}>作品：{postCount}</div>
+      <div style={{ fontSize: 12 }}>客资：{leadCount}</div>
+      <div style={{ fontSize: 12 }}>流量：{traffic}</div>
+      {groups.length > 0 ? (
+        <div style={{ marginTop: 6, borderTop: '1px dashed rgba(255,255,255,0.3)', paddingTop: 4 }}>
+          {groups.map((g) => (
+            <div key={g.type} style={{ marginBottom: 4 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, fontWeight: 600 }}>
+                <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 2, background: g.color }} />
+                {g.label} · {g.posts.length} 篇
+              </div>
+              {g.posts.map((p) => (
+                <div key={p.postId} style={{ fontSize: 11, paddingLeft: 12 }}>
+                  · {p.title || p.postId}
+                  {p.platform ? `（${p.platform}）` : ''}
+                  {`（${p.leadCount}客 / ${p.traffic}流量）`}
+                  {p.isLead ? ' ⭐' : ''}
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
 }

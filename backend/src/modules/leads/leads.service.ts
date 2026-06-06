@@ -1084,9 +1084,17 @@ export class LeadsService {
     const before = {
       assignedSalesUserId: lead.assignedSalesUserId,
       assignedSalesUserName: lead.assignedSalesUserName,
+      isDispatched: lead.isDispatched,
     };
     lead.assignedSalesUserId = newAssigneeId;
     lead.assignedSalesUserName = newAssigneeName;
+    // v1.3 / SA-12 修复：主管从"已分流池"改派客资给销售时，is_dispatched 必须从 1 翻回 0，
+    // 否则销售端"我的客资"因 WHERE is_dispatched=0 永远查不到这条记录。
+    // 仅在原状态为"已分流"(1)时翻转；未分流(0) 保持原样。
+    const wasDispatched = (lead.isDispatched as unknown) === 1 || (lead.isDispatched as unknown) === '1' || (lead.isDispatched as unknown) === true;
+    if (wasDispatched) {
+      lead.isDispatched = 0;
+    }
     await this.leadRepository.save(lead);
 
     // 写操作日志（best-effort）

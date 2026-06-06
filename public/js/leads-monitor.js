@@ -109,7 +109,7 @@ function renderLeadsMonitor() {
       </div>
     </div>
     <div class="panel">
-      <div class="filters filters-toolbar">
+      <div class="filters filters-toolbar leads-filter-grid">
         <select id="leadMonitorModeInput">
           <option value="day" ${state.leadMonitorMode === "day" ? "selected" : ""}>按天</option>
           <option value="week" ${state.leadMonitorMode === "week" ? "selected" : ""}>按周</option>
@@ -244,7 +244,7 @@ function renderSalesLeads() {
       </div>
     </div>
     <div class="panel">
-      <div class="filters filters-toolbar">
+      <div class="filters filters-toolbar leads-filter-grid">
         <select id="leadMonitorModeInput">
           <option value="day" ${state.leadMonitorMode === "day" ? "selected" : ""}>按天</option>
           <option value="week" ${state.leadMonitorMode === "week" ? "selected" : ""}>按周</option>
@@ -383,7 +383,7 @@ function renderSalesFollowupBoard() {
       </div>
     </div>
     <div class="panel">
-      <div class="filters filters-toolbar">
+      <div class="filters filters-toolbar leads-filter-grid">
         <select id="leadMonitorModeInput">
           <option value="day" ${state.leadMonitorMode === "day" ? "selected" : ""}>按天</option>
           <option value="week" ${state.leadMonitorMode === "week" ? "selected" : ""}>按周</option>
@@ -1108,7 +1108,7 @@ function renderStaffLeadsBoard() {
       </div>
     </div>
     <div class="panel">
-      <div class="filters filters-toolbar">
+      <div class="filters filters-toolbar leads-filter-grid">
         <select id="leadMonitorModeInput">
           <option value="day" ${state.leadMonitorMode === "day" ? "selected" : ""}>按天</option>
           <option value="week" ${state.leadMonitorMode === "week" ? "selected" : ""}>按周</option>
@@ -1263,14 +1263,19 @@ function renderLeadMonitorCard(item) {
             <strong>联系方式</strong>
             <span>${item.contactInfo || "-"}</span>
           </button>
-          <div><strong>IP</strong><span>${item.ip || "-"}</span></div>
+          ${isSales ? "" : `<div><strong>IP</strong><span>${item.ip || "-"}</span></div>`}
           <div>
             <strong>分配销售</strong>
-            ${isAdminLike
-              ? `<select class="lead-inline-select js-lead-sales-assign" data-id="${item.id}">
-                  <option value="">未分配</option>
-                  ${salesUsers.map((user) => `<option value="${escapeHtmlAttribute(user.id || "")}" data-name="${escapeHtmlAttribute(user.username || "")}" ${(item.assignedSalesUserId === user.id || (!item.assignedSalesUserId && assignedSalesName === user.username)) ? "selected" : ""}>${user.username}</option>`).join("")}
-                </select>`
+            ${isAdminLike || state.user?.role === "supervisor" || state.user?.role === "operation"
+              ? `<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+                  ${isAdminLike
+                    ? `<select class="lead-inline-select js-lead-sales-assign" data-id="${item.id}">
+                        <option value="">未分配</option>
+                        ${salesUsers.map((user) => `<option value="${escapeHtmlAttribute(user.id || "")}" data-name="${escapeHtmlAttribute(user.username || "")}" ${(item.assignedSalesUserId === user.id || (!item.assignedSalesUserId && assignedSalesName === user.username)) ? "selected" : ""}>${user.username}</option>`).join("")}
+                      </select>`
+                    : `<span>${assignedSalesName || "未分配"}</span>`}
+                  <button class="ghost js-lead-reassign" data-id="${item.id}" data-current="${escapeHtmlAttribute(item.assignedSalesUserId || "")}" data-name="${escapeHtmlAttribute(item.nickname || item.contactInfo || item.id)}" type="button">改派</button>
+                </div>`
               : `<span>${assignedSalesName}</span>`}
           </div>
           <div>

@@ -55,9 +55,15 @@ function renderEmployees() {
       </div>
       <div class="panel">
         <h3>创建员工登录账号</h3>
+        ${(() => {
+          const unboundEmployees = state.employees.filter((item) => !item.loginUsername);
+          if (unboundEmployees.length === 0) {
+            return `<div class="empty">所有员工均已绑定登录账号，无需再创建。</div>`;
+          }
+          return `
         <form id="staffUserForm" class="form-grid">
           <select name="employeeId" required>
-            ${state.employees.map((item) => `<option value="${item.id}">${item.name}</option>`).join("")}
+            ${unboundEmployees.map((item) => `<option value="${item.id}">${item.name}</option>`).join("")}
           </select>
           <input name="username" placeholder="登录用户名" required />
           <input name="password" placeholder="初始密码" required />
@@ -67,6 +73,8 @@ function renderEmployees() {
           </select>
           <button class="primary full" type="submit">保存登录账号</button>
         </form>
+          `;
+        })()}
       </div>
     </section>
     <div class="panel">

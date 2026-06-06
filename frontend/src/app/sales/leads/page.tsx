@@ -1,8 +1,6 @@
 'use client';
 
 import {
-  CopyOutlined,
-  EditOutlined,
   FileTextOutlined,
   FireOutlined,
   ReloadOutlined,
@@ -14,12 +12,10 @@ import {
   Alert,
   Button,
   Card,
-  Checkbox,
   DatePicker,
   Empty,
   Form,
   Input,
-  InputNumber,
   Modal,
   Pagination,
   Select,
@@ -39,9 +35,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   listSalesLeads,
   reassignLead,
-  updateLeadDealStatus,
   updateLeadIntentionLevel,
-  type CloseLeadDealPayload,
 } from '@/shared/api/leads';
 import { ReminderButton } from '@/shared/components/notifications/ReminderButton';
 import { StatusTag } from '@/shared/components/status';
@@ -53,15 +47,12 @@ import {
   LeadProcessStatus,
   LeadStatus,
 } from '@/shared/constants/lead-status-enums';
-import type { DealStatusCode, IntentionLevelCode, SalesLead } from '@/shared/types/leads';
-
-const { RangePicker } = DatePicker;
+import type { IntentionLevelCode, SalesLead } from '@/shared/types/leads';
 
 const statusOptions = [
   { label: '全部状态', value: '' },
   { label: '新分配', value: LeadStatus.ASSIGNED },
   { label: '跟进中', value: LeadStatus.IN_FOLLOWUP },
-  { label: '已成交', value: 'deal_done' },
   { label: '无效', value: LeadStatus.INVALID },
 ];
 
@@ -82,22 +73,6 @@ const intentionLevelOptions = [
   { label: '无效', value: 'invalid' },
   { label: '待判断', value: 'pending' },
 ];
-
-const dealStatusOptions: { label: string; value: DealStatusCode }[] = [
-  { label: '未成交', value: 'not_deal' },
-  { label: '待成交', value: 'deal_pending' },
-  { label: '已成交', value: 'deal_done' },
-  { label: '已退款', value: 'refunded' },
-  { label: '无效', value: 'invalid' },
-];
-
-const dealStatusMeta: Record<DealStatusCode, { label: string; color: string }> = {
-  not_deal: { label: '未成交', color: 'default' },
-  deal_pending: { label: '待成交', color: 'orange' },
-  deal_done: { label: '已成交', color: 'green' },
-  refunded: { label: '已退款', color: 'magenta' },
-  invalid: { label: '无效', color: 'red' },
-};
 
 const intentionLevelMeta: Record<IntentionLevelCode, { label: string; color: string }> = {
   high: { label: '高', color: 'red' },
@@ -134,11 +109,6 @@ type FollowFormValues = {
   nextFollowTime?: Dayjs | null;
 };
 
-type DealStatusFormValues = {
-  dealStatus: DealStatusCode;
-  dealAmount?: number | string | null;
-};
-
 type IntentionFormValues = {
   intentionLevel: IntentionLevelCode;
 };
@@ -167,17 +137,13 @@ export default function SalesLeadsPage() {
 
   // 行内操作
   const [followOpen, setFollowOpen] = useState<SalesLead | null>(null);
-  const [dealStatusOpen, setDealStatusOpen] = useState<SalesLead | null>(null);
   const [intentionOpen, setIntentionOpen] = useState<SalesLead | null>(null);
-  const [closeDealOpen, setCloseDealOpen] = useState<SalesLead | null>(null);
   const [reassignOpen, setReassignOpen] = useState<SalesLead | null>(null);
   const [reassignForm] = Form.useForm<{ newAssigneeId: string; reason?: string }>();
   const [reassignCandidates, setReassignCandidates] = useState<Array<{ id: string; name: string }>>([]);
 
   const [followForm] = Form.useForm<FollowFormValues>();
-  const [dealStatusForm] = Form.useForm<DealStatusFormValues>();
   const [intentionForm] = Form.useForm<IntentionFormValues>();
-  const [closeDealForm] = Form.useForm<CloseLeadDealPayload & { clientRequirementNote?: string }>();
 
   const [submitting, setSubmitting] = useState(false);
 
@@ -266,35 +232,6 @@ export default function SalesLeadsPage() {
     }
   }
 
-  function openDealStatus(lead: SalesLead) {
-    setDealStatusOpen(lead);
-    dealStatusForm.setFieldsValue({
-      dealStatus: (lead.dealStatus as DealStatusCode) || 'not_deal',
-      dealAmount: lead.dealAmount || undefined,
-    });
-  }
-
-  async function submitDealStatus() {
-    if (!dealStatusOpen) return;
-    const values = await dealStatusForm.validateFields().catch(() => null);
-    if (!values) return;
-    setSubmitting(true);
-    try {
-      await updateLeadDealStatus(String(dealStatusOpen.id), {
-        dealStatus: values.dealStatus,
-        dealAmount: values.dealAmount ?? null,
-      });
-      message.success('成交状态已更新');
-      setDealStatusOpen(null);
-      dealStatusForm.resetFields();
-      await loadLeads();
-    } catch (err) {
-      message.error(err instanceof Error ? err.message : '更新成交状态失败');
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
   function openIntention(lead: SalesLead) {
     setIntentionOpen(lead);
     intentionForm.setFieldsValue({
@@ -317,30 +254,6 @@ export default function SalesLeadsPage() {
       await loadLeads();
     } catch (err) {
       message.error(err instanceof Error ? err.message : '更新意向程度失败');
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  function openCloseDeal(lead: SalesLead) {
-    setCloseDealOpen(lead);
-    closeDealForm.resetFields();
-  }
-
-  async function submitCloseDeal() {
-    if (!closeDealOpen) return;
-    const values = await closeDealForm.validateFields().catch(() => null);
-    if (!values) return;
-    setSubmitting(true);
-    try {
-      const { closeLeadDeal } = await import('@/shared/api/leads');
-      const result = await closeLeadDeal(String(closeDealOpen.id), values);
-      message.success(`已标记成交，订单号 ${result.orderCode || result.orderId || ''}`);
-      setCloseDealOpen(null);
-      closeDealForm.resetFields();
-      await loadLeads();
-    } catch (err) {
-      message.error(err instanceof Error ? err.message : '成交提交失败');
     } finally {
       setSubmitting(false);
     }
@@ -409,31 +322,8 @@ export default function SalesLeadsPage() {
 
   const columns = useMemo<TableColumnsType<SalesLead>>(() => [
     {
-      // v1.3 / SA-12: 一键复制微信（contactInfo），空值禁用 + tooltip
-      title: '微信',
-      key: 'copyWechat',
-      width: 72,
-      fixed: 'left',
-      render: (_v, lead) => {
-        const hasWechat = Boolean((lead.contact || '').trim());
-        return (
-          <Tooltip title={hasWechat ? `复制微信：${lead.contact}` : '该客资暂未填写微信'}>
-            <Button
-              size="small"
-              type="text"
-              icon={<CopyOutlined />}
-              onClick={() => copyWechat(lead)}
-              disabled={!hasWechat}
-            />
-          </Tooltip>
-        );
-      },
-    },
-    {
       title: '客户',
       key: 'customer',
-      width: 200,
-      fixed: 'left',
       render: (_v, lead) => (
         <Space direction="vertical" size={0}>
           <Space size={6}>
@@ -442,7 +332,17 @@ export default function SalesLeadsPage() {
               <Tag color="red" icon={<FireOutlined />}>今日未添加</Tag>
             ) : null}
           </Space>
-          <Typography.Text type="secondary">{lead.contact || '暂无联系方式'}</Typography.Text>
+          {(lead.contact || '').trim() ? (
+            <Typography.Text
+              type="secondary"
+              copyable={{ tooltips: ['复制联系方式', '已复制'], onCopy: () => copyWechat(lead) }}
+              style={{ cursor: 'pointer' }}
+            >
+              {lead.contact}
+            </Typography.Text>
+          ) : (
+            <Typography.Text type="secondary">暂无联系方式</Typography.Text>
+          )}
         </Space>
       ),
     },
@@ -451,12 +351,16 @@ export default function SalesLeadsPage() {
       dataIndex: 'ip',
       key: 'ip',
       width: 120,
+      // 我的客资以协同加好友为主，IP/地区挪到详情查看
+      hidden: true,
       render: (value?: string) => value || '-',
     },
     {
       title: '客户学历',
       key: 'clientDegree',
       width: 100,
+      // 我的客资以协同加好友为主，学历信息挪到详情查看
+      hidden: true,
       render: (_v, lead) => lead.clientDegree || '-',
     },
     {
@@ -464,6 +368,8 @@ export default function SalesLeadsPage() {
       key: 'requirement',
       width: 200,
       ellipsis: true,
+      // 我的客资以协同加好友为主，客户需求挪到详情查看
+      hidden: true,
       render: (_v, lead) => lead.requirementNote || lead.note || '-',
     },
     {
@@ -471,6 +377,8 @@ export default function SalesLeadsPage() {
       key: 'major',
       width: 180,
       ellipsis: true,
+      // 我的客资以协同加好友为主，专业方向挪到详情查看
+      hidden: true,
       render: (_v, lead) => lead.clientMajorResearch || '-',
     },
     {
@@ -478,6 +386,8 @@ export default function SalesLeadsPage() {
       key: 'timeRequirement',
       width: 140,
       ellipsis: true,
+      // 我的客资以协同加好友为主，时间要求挪到详情查看
+      hidden: true,
       render: (_v, lead) => lead.clientTimeRequirement || '-',
     },
     {
@@ -485,12 +395,13 @@ export default function SalesLeadsPage() {
       key: 'objectionPoint',
       width: 160,
       ellipsis: true,
+      // 我的客资以协同加好友为主，异议点挪到详情查看
+      hidden: true,
       render: (_v, lead) => lead.objectionPoint || '-',
     },
     {
       title: '意向程度',
       key: 'intentionLevel',
-      width: 90,
       render: (_v, lead) => {
         const code = (lead.intentionLevel as IntentionLevelCode) || 'pending';
         const meta = intentionLevelMeta[code] || { label: code, color: 'default' };
@@ -525,90 +436,63 @@ export default function SalesLeadsPage() {
     {
       title: '添加状态',
       key: 'addStatus',
-      width: 110,
       render: (_v, lead) => <StatusTag kind="addStatus" code={lead.addStatus ?? LeadAddStatus.NOT_ADDED} />,
     },
     {
       title: '处理状态',
       key: 'processStatus',
-      width: 100,
       render: (_v, lead) => <StatusTag kind="processStatus" code={lead.processStatus ?? LeadProcessStatus.NOT_CONTACTED} />,
-    },
-    {
-      title: '订单状态',
-      key: 'dealStatus',
-      width: 100,
-      // v1.3 / SA-13: 精简 — 订单信息已统一在 /sales/orders 页面查看
-      hidden: true,
-      render: (_v, lead) => {
-        const code = (lead.dealStatus as DealStatusCode) || 'not_deal';
-        const meta = dealStatusMeta[code] || { label: code, color: 'default' };
-        return <Tag color={meta.color}>{meta.label}</Tag>;
-      },
     },
     {
       title: '操作',
       key: 'actions',
-      width: 380,
-      fixed: 'right',
       render: (_v, lead) => (
-        <Space size={4} wrap>
-          <Tooltip title="查看客资详情">
-            <Button size="small" onClick={() => router.push(`/sales/leads/${lead.id}`)}>详情</Button>
-          </Tooltip>
-          <Button
-            size="small"
-            type="primary"
-            ghost
-            icon={<FileTextOutlined />}
-            onClick={() => openFollow(lead)}
-          >
-            写跟进
-          </Button>
-          <Button
-            size="small"
-            icon={<EditOutlined />}
-            onClick={() => openDealStatus(lead)}
-          >
-            成交状态
-          </Button>
-          <Button
-            size="small"
-            icon={<TagOutlined />}
-            onClick={() => openIntention(lead)}
-          >
-            意向程度
-          </Button>
-          <Button
-            size="small"
-            type="primary"
-            onClick={() => openCloseDeal(lead)}
-            disabled={lead.dealStatus === 'deal_done'}
-          >
-            标记成交
-          </Button>
-          {/* v1.3 / SA-12: 改派 — 调整当前销售归属（主管/销售本人都可发起） */}
-          <Button
-            size="small"
-            icon={<SwapOutlined />}
-            onClick={() => openReassign(lead)}
-          >
-            改派
-          </Button>
-          {lead.sales?.id ? (
-            <ReminderButton
+        <Space direction="vertical" size={4} style={{ width: '100%' }}>
+          <Space size={4} wrap>
+            <Tooltip title="查看客资详情">
+              <Button size="small" onClick={() => router.push(`/sales/leads/${lead.id}`)}>详情</Button>
+            </Tooltip>
+            <Button
               size="small"
-              recipientId={String(lead.sales.id)}
-              recipientName={lead.sales?.name}
-              recipientRole="operation"
-              relatedType="lead"
-              relatedId={String(lead.id)}
-              relatedTitle={lead.customerName || lead.leadCode}
-              content={`客资 ${lead.customerName || lead.id} 需要运营协助`}
+              type="primary"
+              ghost
+              icon={<FileTextOutlined />}
+              onClick={() => openFollow(lead)}
             >
-              提醒
-            </ReminderButton>
-          ) : null}
+              写跟进
+            </Button>
+          </Space>
+          <Space size={4} wrap>
+            <Button
+              size="small"
+              icon={<TagOutlined />}
+              onClick={() => openIntention(lead)}
+            >
+              意向程度
+            </Button>
+            {/* v1.3 / SA-12: 改派 — 调整当前销售归属（主管/销售本人都可发起） */}
+            <Button
+              size="small"
+              icon={<SwapOutlined />}
+              onClick={() => openReassign(lead)}
+            >
+              改派
+            </Button>
+            {lead.sales?.id ? (
+              <ReminderButton
+                size="small"
+                recipientId={String(lead.sales.id)}
+                recipientName={lead.sales?.name}
+                recipientRole="operation"
+                relatedType="lead"
+                relatedId={String(lead.id)}
+                relatedTitle={lead.customerName || lead.leadCode}
+                content={`客资 ${lead.customerName || lead.id} 需要运营协助`}
+              >
+                提醒
+              </ReminderButton>
+            ) : null}
+          </Space>
         </Space>
       ),
     },
@@ -674,7 +558,7 @@ export default function SalesLeadsPage() {
               columns={columns}
               dataSource={sortedItems}
               pagination={false}
-              scroll={{ x: 1700 }}
+              scroll={{ x: 'max-content' }}
               size="middle"
             />
           ) : (
@@ -751,25 +635,6 @@ export default function SalesLeadsPage() {
         </Form>
       </Modal>
 
-      {/* 更新成交状态（SA-3） */}
-      <Modal
-        title={dealStatusOpen ? `更新成交状态 · ${dealStatusOpen.customerName}` : '更新成交状态'}
-        open={Boolean(dealStatusOpen)}
-        onCancel={() => { setDealStatusOpen(null); dealStatusForm.resetFields(); }}
-        onOk={submitDealStatus}
-        confirmLoading={submitting}
-        destroyOnClose
-      >
-        <Form form={dealStatusForm} layout="vertical" preserve={false}>
-          <Form.Item name="dealStatus" label="成交状态" rules={[{ required: true, message: '请选择成交状态' }]}>
-            <Select options={dealStatusOptions} />
-          </Form.Item>
-          <Form.Item name="dealAmount" label="成交金额（元）">
-            <InputNumber min={0} precision={2} style={{ width: '100%' }} placeholder="0.00" />
-          </Form.Item>
-        </Form>
-      </Modal>
-
       {/* 更新意向程度（SA-3） */}
       <Modal
         title={intentionOpen ? `更新意向程度 · ${intentionOpen.customerName}` : '更新意向程度'}
@@ -791,75 +656,6 @@ export default function SalesLeadsPage() {
               ]}
             />
           </Form.Item>
-        </Form>
-      </Modal>
-
-      {/* 成交弹窗（SA-8） */}
-      <Modal
-        title={closeDealOpen ? `标记成交 · ${closeDealOpen.customerName}` : '标记成交'}
-        open={Boolean(closeDealOpen)}
-        onCancel={() => { setCloseDealOpen(null); closeDealForm.resetFields(); }}
-        onOk={submitCloseDeal}
-        confirmLoading={submitting}
-        width={680}
-        destroyOnClose
-        okText="提交成交"
-      >
-        <Form form={closeDealForm} layout="vertical" preserve={false}>
-          <div className="form-grid">
-            <Form.Item name="clientRequirementNote" label="客户要求备注" className="full-row">
-              <Input.TextArea rows={2} placeholder="客户原始诉求、特殊情况等" />
-            </Form.Item>
-            <Form.Item name="productType" label="产品类型" rules={[{ required: true, message: '请选择产品类型' }]}>
-              <Select
-                placeholder="选择产品类型"
-                options={[
-                  { label: '专利', value: '专利' },
-                  { label: '期刊论文', value: '期刊论文' },
-                  { label: '硕士毕业论文', value: '硕士毕业论文' },
-                  { label: '博士毕业论文', value: '博士毕业论文' },
-                  { label: '基金', value: '基金' },
-                  { label: 'EI 会议', value: 'EI会议' },
-                  { label: '普刊', value: '普刊' },
-                  { label: '国际会议', value: '国际会议' },
-                ]}
-              />
-            </Form.Item>
-            <Form.Item name="serviceType" label="服务类型" rules={[{ required: true, message: '请选择服务类型' }]}>
-              <Select
-                placeholder="选择服务类型"
-                options={[
-                  { label: '辅导', value: '辅导' },
-                  { label: '全流程', value: '全流程' },
-                  { label: '润色', value: '润色' },
-                  { label: '返修', value: '返修' },
-                  { label: '代投', value: '代投' },
-                ]}
-              />
-            </Form.Item>
-            <Form.Item name="guaranteeType" label="保障类型">
-              <Select
-                allowClear
-                placeholder="选择保障类型"
-                options={[
-                  { label: '保录', value: '保录' },
-                  { label: '保盲审', value: '保盲审' },
-                  { label: '不保', value: '不保' },
-                ]}
-              />
-            </Form.Item>
-            <Form.Item name="amount" label="成交金额（元）" rules={[{ required: true, message: '请输入成交金额' }]}>
-              <InputNumber min={0} precision={2} style={{ width: '100%' }} placeholder="0.00" />
-            </Form.Item>
-            <Form.Item name="paymentStage" label="付款阶段" className="full-row">
-              <Input placeholder="如：定金 / 中期 / 尾款" />
-            </Form.Item>
-          </div>
-          <Alert
-            type="info"
-            showIcon
-            message="订单编号（ORD-YYYYMMDD-XXXXX）由系统自动生成，无需手动填写。"
-          />
         </Form>
       </Modal>
 

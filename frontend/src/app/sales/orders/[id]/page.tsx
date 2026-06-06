@@ -34,6 +34,27 @@ const expectedHelperLabels: Record<string, string> = {
   other: '其它',
 };
 
+const intentionLevelLabels: Record<string, string> = {
+  high: '高',
+  mid: '中',
+  low: '低',
+  invalid: '无效',
+  pending: '待判断',
+};
+
+function hasSalesFollowSnapshot(order?: OrderItem) {
+  return Boolean(
+    order?.clientDegree ||
+    order?.clientMajorResearch ||
+    order?.clientTimeRequirement ||
+    order?.objectionPoint ||
+    order?.followAction ||
+    order?.requirementNote ||
+    order?.intentionLevel ||
+    order?.nextFollowAt
+  );
+}
+
 const abnormalStatusMeta: Record<string, { label: string; color: string }> = {
   open: { label: '待处理', color: 'red' },
   handling: { label: '处理中', color: 'orange' },
@@ -108,6 +129,28 @@ export default function SalesOrderDetailPage() {
                 { key: 'remark', label: '备注', children: emptyText(order?.remark) },
               ]}
             />
+          </Card>
+
+          <Card title="销售写跟进信息">
+            {hasSalesFollowSnapshot(order) ? (
+              <Descriptions
+                bordered
+                column={{ xs: 1, md: 2 }}
+                items={[
+                  { key: 'clientDegree', label: '客户学历', children: emptyText(order?.clientDegree) },
+                  { key: 'clientMajorResearch', label: '专业 / 研究方向', children: emptyText(order?.clientMajorResearch) },
+                  { key: 'clientTimeRequirement', label: '时间要求', children: emptyText(order?.clientTimeRequirement) },
+                  { key: 'intentionLevel', label: '意向程度', children: order?.intentionLevel ? (intentionLevelLabels[order.intentionLevel] ?? order.intentionLevel) : '-' },
+                  { key: 'objectionPoint', label: '异议点', children: emptyText(order?.objectionPoint) },
+                  { key: 'followAction', label: '跟进措施', children: emptyText(order?.followAction) },
+                  { key: 'requirementNote', label: '客户需求', children: emptyText(order?.requirementNote) },
+                  { key: 'nextFollowAt', label: '下次跟进', children: formatDateTime(order?.nextFollowAt) },
+                  { key: 'followActionAt', label: '跟进措施时间', children: formatDateTime(order?.followActionAt) },
+                ]}
+              />
+            ) : (
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无销售写跟进信息" />
+            )}
           </Card>
 
           <Card title="异常反馈">

@@ -329,18 +329,33 @@ function renderSalesOrders() {
   const tabsHtml = tabs.map(([code, label]) => `
     <button class="js-sales-orders-tab ${state.salesOrdersFilter === code ? "active" : ""}" data-status="${code}" type="button">${label}</button>
   `).join("");
+  // 销售成交通用 processStatus 选项（与 lead detail 共用同一套值），含"已成交"快捷
+  const dealStatusOptions = [
+    { value: "", label: "全部成交状态" },
+    { value: "not_contacted", label: "未联系" },
+    { value: "chatting", label: "沟通中" },
+    { value: "quoted", label: "已报价" },
+    { value: "closed", label: "已成交" },
+    { value: "invalid", label: "无效" }
+  ];
   return `
     <div class="sales-orders-page">
       <div class="page-header page-header-rich">
         <div>
           <h2>订单跟进</h2>
-          <p class="page-desc">查看你标记成交的订单，按状态聚合，进入详情可以查看节点跟进时间线。</p>
+          <p class="page-desc">查看你标记成交的订单，按状态聚合，可直接在列表行修改客资成交状态 / 一键成单。</p>
         </div>
         <div class="toolbar toolbar-end">
           <button id="exportSalesOrdersBtn" type="button">导出 Excel</button>
         </div>
       </div>
       <div class="panel">
+        <div class="filters filters-toolbar">
+          <select id="salesOrdersDealStatusFilter" class="js-sales-orders-deal-filter">
+            ${dealStatusOptions.map((o) => `<option value="${o.value}" ${(state.salesOrdersDealStatusFilter || "") === o.value ? "selected" : ""}>${o.label}</option>`).join("")}
+          </select>
+          <button class="ghost" id="salesOrdersClearDealFilterBtn" type="button">清空</button>
+        </div>
         <div class="order-status-tabs">${tabsHtml}</div>
         <div class="table-wrap">
           <table>
@@ -353,11 +368,12 @@ function renderSalesOrders() {
                 <th>教务</th>
                 <th>订单状态</th>
                 <th>付款状态</th>
+                <th>成交状态</th>
                 <th>创建时间</th>
                 <th>操作</th>
               </tr>
             </thead>
-            <tbody id="salesOrdersTbody"><tr><td colspan="9"><div class="empty">加载中…</div></td></tr></tbody>
+            <tbody id="salesOrdersTbody"><tr><td colspan="10"><div class="empty">加载中…</div></td></tr></tbody>
           </table>
         </div>
         <div id="salesOrdersPager" class="pag-container"></div>
@@ -371,13 +387,26 @@ function renderSalesOrdersTableBody(items) {
   const tbody = document.getElementById("salesOrdersTbody");
   if (!tbody) return;
   if (!items || !items.length) {
-    tbody.innerHTML = `<tr><td colspan="9"><div class="empty">暂无符合条件的订单。</div></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="10"><div class="empty">暂无符合条件的订单。</div></td></tr>`;
     return;
   }
+  // 销售成交状态可选值（与 lead.processStatus 对齐）
+  const dealOptions = [
+    { value: "not_contacted", label: "未联系" },
+    { value: "applied", label: "已发送申请" },
+    { value: "pending", label: "待通过" },
+    { value: "passed", label: "已通过" },
+    { value: "chatting", label: "沟通中" },
+    { value: "quoted", label: "已报价" },
+    { value: "closed", label: "已成交" },
+    { value: "invalid", label: "无效" }
+  ];
   tbody.innerHTML = items.map((o) => {
     const lead = findLeadByIdLite(o.leadId);
     const leadCode = lead ? formatLeadCode(lead.leadCode) : (o.leadId || "-");
     const academicName = findOrderUserLabel(o.academicUserId);
+    const dealStatus = lead?.processStatus || "not_contacted";
+    const isClosed = dealStatus === "closed";
     return `
       <tr class="js-sales-order-open" data-id="${escapeHtmlAttribute(o.id || "")}" style="cursor:pointer;">
         <td>${shortOrderId(o.id)}</td>
@@ -387,19 +416,35 @@ function renderSalesOrdersTableBody(items) {
         <td>${escapeHtml(academicName)}</td>
         <td>${getOrderStatusLabel(o.orderStatus)}</td>
         <td>${getPaidStatusLabel(o.paidStatus)}</td>
+        <td>
+          <select class="lead-chip-select js-sales-order-deal-status" data-lead-id="${escapeHtmlAttribute(o.leadId || "")}" data-order-id="${escapeHtmlAttribute(o.id || "")}">
+            ${dealOptions.map((opt) => `<option value="${opt.value}" ${dealStatus === opt.value ? "selected" : ""}>${opt.label}</option>`).join("")}
+          </select>
+        </td>
         <td>${o.createdAt ? formatDate(o.createdAt) : "-"}</td>
-        <td><button class="ghost js-sales-order-open-btn" data-id="${escapeHtmlAttribute(o.id || "")}" type="button">详情</button></td>
+        <td>
+          <button class="${isClosed ? "ghost" : "primary"} js-sales-order-close-deal" data-lead-id="${escapeHtmlAttribute(o.leadId || "")}" data-order-id="${escapeHtmlAttribute(o.id || "")}" ${isClosed ? "disabled" : ""} type="button">${isClosed ? "已成交" : "一键成交"}</button>
+          <button class="ghost js-sales-order-open-btn" data-id="${escapeHtmlAttribute(o.id || "")}" type="button">详情</button>
+        </td>
       </tr>
     `;
   }).join("");
   // 重新绑定点击（列表 innerHTML 重写后旧绑定丢失）
   document.querySelectorAll("#salesOrdersTbody .js-sales-order-open").forEach((el) => el.addEventListener("click", (event) => {
-    if (event.target.closest("button")) return;
+    if (event.target.closest("button,select")) return;
     openSalesOrderDetail(el.dataset.id);
   }));
   document.querySelectorAll("#salesOrdersTbody .js-sales-order-open-btn").forEach((el) => el.addEventListener("click", (event) => {
     event.stopPropagation();
     openSalesOrderDetail(el.dataset.id);
+  }));
+  document.querySelectorAll("#salesOrdersTbody .js-sales-order-deal-status").forEach((el) => el.addEventListener("change", (event) => {
+    event.stopPropagation();
+    salesUpdateLeadDealStatus(el.dataset.leadId, el.dataset.orderId, el.value);
+  }));
+  document.querySelectorAll("#salesOrdersTbody .js-sales-order-close-deal").forEach((el) => el.addEventListener("click", (event) => {
+    event.stopPropagation();
+    salesOneClickCloseDeal(el.dataset.leadId, el.dataset.orderId);
   }));
 }
 
@@ -409,32 +454,91 @@ function mountSalesOrdersPagination() {
   setupPagination("salesOrdersPager", {
     pageSize: 20,
     fetchPage: async (page, pageSize) => {
+      // 成交状态过滤在客户端做：后端 GET /api/orders 暂未透出 dealStatus，
+      // 但订单行内可通过关联 lead.processStatus 判定，逐页请求后由本地二次过滤。
       const params = new URLSearchParams();
       params.set("scope", "mine");
       if (state.user?.id) params.set("actorUserId", state.user.id);
       params.set("actorRole", "sales");
       if (state.salesOrdersFilter) params.set("status", state.salesOrdersFilter);
-      params.set("limit", String(pageSize));
+      params.set("limit", String(pageSize * 4)); // 多拉一些，留给本地过滤
       params.set("offset", String((page - 1) * pageSize));
       const res = await api(`/api/orders?${params.toString()}`);
-      const items = Array.isArray(res?.items) ? res.items : (Array.isArray(res) ? res : []);
-      const total = Number(res?.total ?? items.length);
-      return { items, total };
+      const rawItems = Array.isArray(res?.items) ? res.items : (Array.isArray(res) ? res : []);
+      const totalAll = Number(res?.total ?? rawItems.length);
+      const want = state.salesOrdersDealStatusFilter || "";
+      const filtered = want
+        ? rawItems.filter((o) => {
+            const lead = findLeadByIdLite(o.leadId);
+            return (lead?.processStatus || "not_contacted") === want;
+          })
+        : rawItems;
+      // 本地过滤后总数会变,简单按"过滤后剩余/原始"估算
+      return { items: filtered.slice(0, pageSize), total: want ? filtered.length : totalAll };
     },
     renderItems: (items) => renderSalesOrdersTableBody(items),
   });
+}
+
+// 销售端：列表行直接改客资成交状态（PATCH /api/leads/:id/deal-status）
+async function salesUpdateLeadDealStatus(leadId, orderId, dealStatus) {
+  if (!leadId || !dealStatus) return;
+  try {
+    await api(`/api/leads/${encodeURIComponent(leadId)}/deal-status`, {
+      method: "PATCH",
+      body: JSON.stringify({ dealStatus })
+    });
+    setFlash("success", "成交状态已更新", "");
+    // 同步本地 lead 缓存,避免下次渲染回滚
+    const lead = (state.leads || []).find((l) => l && l.id === leadId);
+    if (lead) lead.processStatus = dealStatus;
+  } catch (e) {
+    setFlash("warn", "更新失败", e?.message || "请稍后重试");
+  }
+  renderApp();
+}
+
+// 销售端：列表行一键成交 → POST /api/leads/:id/close-deal
+async function salesOneClickCloseDeal(leadId, orderId) {
+  if (!leadId) return;
+  if (!confirm("确认将该客资标记为已成交？\n（如果已存在订单，会同步刷新订单状态）")) return;
+  try {
+    const res = await api(`/api/leads/${encodeURIComponent(leadId)}/close-deal`, {
+      method: "POST",
+      body: JSON.stringify({})
+    });
+    setFlash("success", "已成交", res?.orderCode ? `订单 ${res.orderCode} 已生成` : "已生成订单");
+    // 同步 lead.processStatus
+    const lead = (state.leads || []).find((l) => l && l.id === leadId);
+    if (lead) lead.processStatus = "closed";
+    if (typeof refreshPagination === "function") {
+      refreshPagination("salesOrdersPager");
+    } else {
+      renderApp();
+    }
+  } catch (e) {
+    setFlash("warn", "成交失败", e?.message || "请稍后重试");
+    renderApp();
+  }
+}
+
+// 适配后端 { items, total, limit, offset } 结构：拿到真正的 records 数组
+function unwrapFollowRecords(raw) {
+  if (Array.isArray(raw)) return raw;
+  if (raw && Array.isArray(raw.items)) return raw.items;
+  return [];
 }
 
 async function loadSalesOrderDetail(id) {
   if (!id) return;
   state.salesOrderDetailLoading = true;
   try {
-    const [order, records] = await Promise.all([
+    const [order, recordsRaw] = await Promise.all([
       api(`/api/orders/${encodeURIComponent(id)}`).catch(() => null),
-      api(`/api/orders/${encodeURIComponent(id)}/follow-records`).catch(() => [])
+      api(`/api/orders/${encodeURIComponent(id)}/follow-records`).catch(() => ({ items: [] }))
     ]);
     state.salesOrderDetail = order || null;
-    state.salesOrderFollowRecords = Array.isArray(records) ? records : [];
+    state.salesOrderFollowRecords = unwrapFollowRecords(recordsRaw);
   } finally {
     state.salesOrderDetailLoading = false;
     renderApp();
@@ -480,6 +584,34 @@ function renderOrderTimelineSection(records, loading) {
   `;
 }
 
+// 最新跟进高亮卡：取 records 第一条（API 默认倒序），无数据时给出空态。
+// 节点类型 / 内容 / 操作人 / 时间 / 下次提醒，五要素齐全。
+function renderLatestFollowCard(records, loading) {
+  if (loading || records === null) {
+    return `<section class="detail-section latest-follow"><h3>最新跟进</h3><div class="empty">加载中…</div></section>`;
+  }
+  if (!records || !records.length) {
+    return `<section class="detail-section latest-follow"><h3>最新跟进</h3><div class="empty">暂无跟进信息</div></section>`;
+  }
+  const r = records[0];
+  const operator = r.actorName || r.actorUserName || r.creatorName || findOrderUserLabel(r.actorUserId || r.userId || r.createdBy);
+  return `
+    <section class="detail-section latest-follow latest-follow-card">
+      <h3>最新跟进</h3>
+      <div class="latest-follow-grid">
+        <div class="field"><strong>节点类型</strong><span>${escapeHtml(r.nodeType || "-")}</span></div>
+        <div class="field"><strong>操作人</strong><span>${escapeHtml(operator || "-")}</span></div>
+        <div class="field"><strong>时间</strong><span>${r.createdAt ? formatDate(r.createdAt) : "-"}</span></div>
+        ${r.nextRemindAt ? `<div class="field"><strong>下次提醒</strong><span>${formatNextFollowTime(r.nextRemindAt)}</span></div>` : ""}
+        <div class="field full-row">
+          <strong>跟进内容</strong>
+          <p class="latest-follow-content">${escapeHtml(String(r.content || "")) || "-"}</p>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
 function renderSalesOrderDetail() {
   const id = state.salesOrderDetailId;
   if (!id) return `<div class="empty">未选中订单。<button class="ghost js-back-sales-orders" type="button">返回订单列表</button></div>`;
@@ -511,13 +643,14 @@ function renderSalesOrderDetail() {
   }
   const lead = findLeadByIdLite(order.leadId);
   const leadCode = lead ? formatLeadCode(lead.leadCode) : (order.leadId || "-");
-  const academicName = findOrderUserLabel(order.academicUserId);
+  const salesName = order.salesUserName || findOrderUserLabel(order.salesUserId);
+  const academicName = order.academicUserName || findOrderUserLabel(order.academicUserId);
   return `
     <div class="sales-order-detail-page">
       <div class="page-header page-header-rich">
         <div>
           <h2>订单详情 · ${shortOrderId(order.id)}</h2>
-          <p class="page-desc">该订单的基础信息、关联客资和教务负责人都在下方，跟进节点会同步反映给主管端。</p>
+          <p class="page-desc">该订单的基础信息、关联客资和销售 / 教务负责人都在下方，跟进节点会同步反映给主管端。</p>
         </div>
         <div class="toolbar toolbar-end">
           <button class="ghost js-back-sales-orders" type="button">返回订单列表</button>
@@ -531,21 +664,18 @@ function renderSalesOrderDetail() {
           <div class="field"><strong>付款状态</strong><span>${getPaidStatusLabel(order.paidStatus)}</span></div>
           <div class="field"><strong>服务类型</strong><span>${escapeHtml(order.serviceType || "-")}</span></div>
           <div class="field"><strong>金额</strong><span>${formatOrderAmount(order.amount)}</span></div>
+          <div class="field"><strong>销售</strong><span>${escapeHtml(salesName)}</span></div>
           <div class="field"><strong>教务负责人</strong><span>${escapeHtml(academicName)}</span></div>
           <div class="field"><strong>关联客资</strong><span>${leadCode}</span></div>
           <div class="field"><strong>备注</strong><span>${escapeHtml(order.remark || "-")}</span></div>
           <div class="field"><strong>创建时间</strong><span>${order.createdAt ? formatDate(order.createdAt) : "-"}</span></div>
         </div>
       </section>
+      ${renderLatestFollowCard(records, state.salesOrderDetailLoading)}
       ${renderOrderTimelineSection(records, state.salesOrderDetailLoading)}
     </div>
   `;
 }
-
-
-// ===========================================================================
-// 任务 3：主管端订单看板
-// ===========================================================================
 // 注：列表数据走 paginationjs 分页器在 mount 后异步拉取，
 // 渲染时不预先加载全量。保留 state.adminOrdersFilter 给筛选交互用。
 function renderAdminOrders() {
@@ -691,12 +821,12 @@ async function loadAdminOrderDetail(id) {
   if (!id) return;
   state.adminOrderDetailLoading = true;
   try {
-    const [order, records] = await Promise.all([
+    const [order, recordsRaw] = await Promise.all([
       api(`/api/orders/${encodeURIComponent(id)}`).catch(() => null),
-      api(`/api/orders/${encodeURIComponent(id)}/follow-records`).catch(() => [])
+      api(`/api/orders/${encodeURIComponent(id)}/follow-records`).catch(() => ({ items: [] }))
     ]);
     state.adminOrderDetail = order || null;
-    state.adminOrderFollowRecords = Array.isArray(records) ? records : [];
+    state.adminOrderFollowRecords = unwrapFollowRecords(recordsRaw);
   } finally {
     state.adminOrderDetailLoading = false;
     renderApp();
@@ -798,6 +928,7 @@ function renderAdminOrderDetail() {
           <div class="field"><strong>创建时间</strong><span>${order.createdAt ? formatDate(order.createdAt) : "-"}</span></div>
         </div>
       </section>
+      ${renderLatestFollowCard(records, state.adminOrderDetailLoading)}
       ${renderOrderTimelineSection(records, state.adminOrderDetailLoading)}
     </div>
   `;
@@ -969,12 +1100,12 @@ async function loadAcademicOrderDetail(id) {
   if (!id) return;
   state.academicOrderDetailLoading = true;
   try {
-    const [order, records] = await Promise.all([
+    const [order, recordsRaw] = await Promise.all([
       api(`/api/orders/${encodeURIComponent(id)}`).catch(() => null),
-      api(`/api/orders/${encodeURIComponent(id)}/follow-records`).catch(() => [])
+      api(`/api/orders/${encodeURIComponent(id)}/follow-records`).catch(() => ({ items: [] }))
     ]);
     state.academicOrderDetail = order || null;
-    state.academicOrderFollowRecords = Array.isArray(records) ? records : [];
+    state.academicOrderFollowRecords = unwrapFollowRecords(recordsRaw);
   } finally {
     state.academicOrderDetailLoading = false;
     renderApp();
@@ -1125,6 +1256,7 @@ function renderAcademicOrderDetail() {
           <div class="field"><strong>备注</strong><span>${escapeHtml(order.remark || "-")}</span></div>
         </div>
       </section>
+      ${renderLatestFollowCard(records, state.academicOrderDetailLoading)}
       <section class="detail-section">
         <div class="section-head" style="display:flex;justify-content:space-between;align-items:center;">
           <h3 style="margin:0;">节点跟进时间线</h3>
@@ -1335,6 +1467,16 @@ function bindOrdersViewsEvents() {
     document.querySelectorAll(".js-sales-orders-tab").forEach((b) => b.classList.toggle("active", b === el));
     refreshPagination("salesOrdersPager");
   }));
+  document.getElementById("salesOrdersDealStatusFilter")?.addEventListener("change", (event) => {
+    state.salesOrdersDealStatusFilter = event.target.value || "";
+    refreshPagination("salesOrdersPager");
+  });
+  document.getElementById("salesOrdersClearDealFilterBtn")?.addEventListener("click", () => {
+    state.salesOrdersDealStatusFilter = "";
+    const sel = document.getElementById("salesOrdersDealStatusFilter");
+    if (sel) sel.value = "";
+    refreshPagination("salesOrdersPager");
+  });
   document.querySelectorAll(".js-sales-order-open").forEach((el) => {
     el.addEventListener("click", (event) => {
       // 避免重复触发：内部按钮点击时同样进入详情
