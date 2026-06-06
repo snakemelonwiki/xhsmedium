@@ -36,12 +36,26 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createExport, downloadExportUrl, getExport } from '@/shared/api/exports';
 import { apiClient } from '@/shared/api/apiClient';
 import { getPostDetail, togglePostFavorite } from '@/shared/api/content';
+import { QuickRangePicker, RANGE_PRESETS_FULL } from '@/shared/components/date';
+import type { DateRangeValue } from '@/shared/components/date';
 import type { ContentPost } from '@/shared/types/content';
 
 type StudyPeriod = '7' | '14' | '30';
 type StudyTab = 'posts' | 'accounts' | 'picks';
 /** v1.3 OP-8：学习榜单维度切换 */
 type StudyDimension = 'traffic' | 'leads' | 'composite';
+
+/**
+ * 把 QuickRangePicker 输出的 {start,end} 反推为后端 days 数字字符串。
+ * 后端只支持 7/14/30；其他粒度（3/6/9 天、3/5 周、3/6 月、近 3 年）会被退化解释。
+ */
+function deriveStudyPeriod(range: DateRangeValue): StudyPeriod {
+  if (!range) return '7';
+  const days = Math.max(0, range.end.diff(range.start, 'day'));
+  if (days <= 7) return '7';
+  if (days <= 14) return '14';
+  return '30';
+}
 
 interface LearningPost {
   id: string;
@@ -86,13 +100,6 @@ interface AccountStat {
   topPostLeads?: number;
 }
 
-const PERIOD_OPTIONS = [
-  { label: '近 7 天', value: '7' },
-  { label: '近 14 天', value: '14' },
-  { label: '近 30 天', value: '30' },
-];
-
-/** v1.3 OP-8：维度切换器 */
 const DIMENSION_OPTIONS: Array<{ label: string; value: StudyDimension }> = [
   { label: '流量优先', value: 'traffic' },
   { label: '客资优先', value: 'leads' },
@@ -161,7 +168,8 @@ function mapLearningPost(raw: Record<string, unknown>): LearningPost {
 
 export default function StudyRankingsPage() {
   const router = useRouter();
-  const [period, setPeriod] = useState<StudyPeriod>('7');
+  const [range, setRange] = useState<DateRangeValue>(null);
+  const period: StudyPeriod = deriveStudyPeriod(range);
   const [dimension, setDimension] = useState<StudyDimension>('composite');
   const [tab, setTab] = useState<StudyTab>('posts');
   const [loading, setLoading] = useState(false);
@@ -308,8 +316,8 @@ export default function StudyRankingsPage() {
     void loadPicks(30);
   }, [loadPicks]);
 
-  function changePeriod(nextPeriod: StudyPeriod) {
-    setPeriod(nextPeriod);
+  function changeRange(next: DateRangeValue) {
+    setRange(next);
   }
 
   function changeDimension(nextDim: StudyDimension) {
@@ -709,10 +717,12 @@ export default function StudyRankingsPage() {
             value={dimension}
             onChange={(val) => changeDimension(val as StudyDimension)}
           />
-          <Segmented
-            options={PERIOD_OPTIONS}
-            value={period}
-            onChange={(val) => changePeriod(val as StudyPeriod)}
+          <QuickRangePicker
+            value={range}
+            onChange={changeRange}
+            variant="select"
+            presets={RANGE_PRESETS_FULL}
+            selectWidth={140}
           />
           <Button icon={<DownloadOutlined />} loading={exporting} onClick={handleExport}>
             导出

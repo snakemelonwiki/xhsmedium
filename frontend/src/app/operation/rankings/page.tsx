@@ -24,10 +24,26 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { createExport, downloadExportUrl, getExport } from '@/shared/api/exports';
 import { apiClient } from '@/shared/api/apiClient';
+import { QuickRangePicker, RANGE_PRESETS_FULL } from '@/shared/components/date';
+import type { DateRangeValue } from '@/shared/components/date';
 import type { ContentPost } from '@/shared/types/content';
 
 type RankingType = 'posts' | 'leads' | 'traffic';
 type Period = 'today' | 'week' | 'month' | 'total';
+
+/**
+ * 把 QuickRangePicker 输出的 {start,end} 反推为后端 enum。
+ * 命中预设 → 对应 Period；用户手动改 RangePicker(命中不到)→ 取"时长最接近"的预设。
+ * 后端只支持 4 个枚举；其他粒度（3/6/9 天、3/5 周、3/6 月、近 3 年）会被退化解释。
+ */
+function derivePeriod(range: DateRangeValue): Period {
+  if (!range) return 'today';
+  const days = Math.max(0, range.end.diff(range.start, 'day'));
+  if (days <= 1) return 'today';
+  if (days <= 7) return 'week';
+  if (days <= 31) return 'month';
+  return 'total';
+}
 
 interface RankingRow {
   id: string;
@@ -45,13 +61,6 @@ interface RankingRow {
   todayLeads?: number;
   todayTraffic?: number;
 }
-
-const PERIOD_OPTIONS = [
-  { label: '今日', value: 'today' },
-  { label: '本周', value: 'week' },
-  { label: '本月', value: 'month' },
-  { label: '累计', value: 'total' },
-];
 
 const TYPE_OPTIONS = [
   { label: '作品数榜', value: 'posts' },
@@ -113,7 +122,8 @@ export default function OperationRankingsPage() {
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [type, setType] = useState<RankingType>('posts');
-  const [period, setPeriod] = useState<Period>('today');
+  const [range, setRange] = useState<DateRangeValue>(null);
+  const period: Period = derivePeriod(range);
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string>();
@@ -195,8 +205,9 @@ export default function OperationRankingsPage() {
     void load(1, nextType, period);
   }
 
-  function changePeriod(nextPeriod: Period) {
-    setPeriod(nextPeriod);
+  function changeRange(next: DateRangeValue) {
+    setRange(next);
+    const nextPeriod = derivePeriod(next);
     void load(1, type, nextPeriod);
     void loadTop3(nextPeriod);
   }
@@ -374,10 +385,12 @@ export default function OperationRankingsPage() {
           </Typography.Paragraph>
         </div>
         <Space wrap>
-          <Segmented
-            options={PERIOD_OPTIONS}
-            value={period}
-            onChange={(val) => changePeriod(val as Period)}
+          <QuickRangePicker
+            value={range}
+            onChange={changeRange}
+            variant="select"
+            presets={RANGE_PRESETS_FULL}
+            selectWidth={140}
           />
           <Button
             type="link"
