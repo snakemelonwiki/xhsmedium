@@ -113,6 +113,7 @@
 - [ ] 左右两个看板区**只展示其中一个**（右上角平台选择器控制）
 - [ ] 顶部指标"客资 / 流量"可切换
 - [ ] 顶部/底部时间筛选联动（共享 `QuickRangePicker`）
+- [x] 双平台作品量趋势图改为折线图 — commit `78bedb5` 在 `frontend/src/shared/components/dashboard/PersonalDashboardBoard.tsx` 把 `PlatformTrendBarChart` 重命名为 `PlatformTrendLineChart`，series type 由 `bar` 改为 `line`（smooth + symbol circle），axisPointer `shadow` → `line`，title 同步改"双平台作品量趋势"。函数和调用点同步更新，tooltip 数据显示不变。
 - [ ] 涉及文件：
   - `frontend/src/shared/components/dashboard/PlatformAnalysisPanel.tsx`（**只读，P1 升级**）
   - `frontend/src/app/admin/dashboard/page.tsx`（P2 接入）

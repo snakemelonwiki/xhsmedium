@@ -20,6 +20,7 @@
 | 6 | 运营端-作品录入 | 封面图简化为单份低分辨率图（OSS 占用减半） | commit `91a9490`：`ImageUploadField.tsx` 上传时只生成低分辨率 Blob，coverImageUrl/coverThumbUrl 共用同一 URL |
 | 7 | 运营端-协同详情 | "处理协同"按钮常驻顶部，去掉半截问题 | commit `d3dd560`：`operation/collaboration/page.tsx` 把按钮作为 sticky 顶栏塞进 Modal body，footer 改 null |
 | 8 | 运营排行榜时间筛选 | QuickRangePicker 全 12 预设（天/周/月/年）精确生效 | commit `3965ac1`：后端 `RANKING_PERIODS` 扩到 10 项 + 新增 90d/1y/3y 分支 + from/to 透传；前端 `derivePeriod` 细分到 10 档 + `buildRangeQuery()` 走 from/to 兜底 |
+| 9 | 主管端-个人看板 | 双平台作品量趋势图由柱状图改为折线图 | commit `78bedb5`：`PersonalDashboardBoard.tsx` 把 `PlatformTrendBarChart` 改名为 `PlatformTrendLineChart`，series type `bar` → `line`（smooth + symbol circle + symbolSize 6），axisPointer `shadow` → `line`，title 与外层 Card 标题保持一致 |
 
 > 备注：原文档中"二、运营排行榜 / 15 行 这里要能按月筛选，按年筛选"以及"客资看板 / 时间筛选与数据展示"章节的"按月、年筛选"需求，可通过复用 `QuickRangePicker` 组件落地，已纳入"待修复"中以确认是否**已在对应页面接入**。
 
@@ -49,6 +50,7 @@
 - [ ] 右侧时间筛选需支持按月切换各个月份
 - [ ] 作品看板：仍无法按时间筛选（确认 `QuickRangePicker` 是否已接入）
 - [ ] 作品看板"全平台"无法切换抖音/小红书（其他全平台看板需一并检查）
+- [x] **双平台作品量趋势图改为折线图**（原为柱状图） — commit `78bedb5` 在 `frontend/src/shared/components/dashboard/PersonalDashboardBoard.tsx` 把 `PlatformTrendBarChart`（type: 'bar'）改为 `PlatformTrendLineChart`（type: 'line' + smooth + symbol circle + axisPointer 'line'），更贴合"趋势"语义
 
 ### 2.4 客资看板
 
