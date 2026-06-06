@@ -13,14 +13,14 @@ import { UploadTargetModal, type UploadTargetChoice } from './UploadTargetModal'
 type ImageUploadFieldProps = {
   /** 主图 URL（Form.Item 绑定的 value） */
   value?: string;
-  /** 缩略图 URL（提交时一并落库） */
+  /** 缩略图 URL（提交时一并落库；与 value 同一份低分辨率图） */
   thumbUrl?: string;
   onChange?: (url: string) => void;
   onThumbChange?: (url: string) => void;
   bucket: string;
-  /** 关掉缩略图（仅当调用方不需要 coverThumbUrl 时） */
+  /** 关掉缩略图回调（仅当调用方不需要 coverThumbUrl 时） */
   disableThumb?: boolean;
-  /** 缩略图目标宽 */
+  /** 缩略图目标宽（原图直接复用同一份低分辨率图，所以此值即最终图宽） */
   thumbMaxWidth?: number;
 };
 
@@ -40,18 +40,6 @@ const previewImageStyle = {
   maxWidth: 164,
   maxHeight: 240,
   objectFit: 'contain',
-} as const;
-
-const thumbPreviewStyle = {
-  width: 120,
-  minHeight: 80,
-  display: 'inline-flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  padding: 4,
-  border: '1px dashed #d9d9d9',
-  borderRadius: 6,
-  background: '#fafafa',
 } as const;
 
 export function ImageUploadField({
@@ -88,23 +76,12 @@ export function ImageUploadField({
   async function doUpload(file: File, choice: UploadTargetChoice) {
     setUploading(true);
     try {
-      const main: UploadResult = await uploadFile(file, bucket, { storage: choice.storage });
-      onChange?.(main.url);
-
-      if (!disableThumb) {
-        try {
-          const blob = await makeThumbnail(file, { maxWidth: thumbMaxWidth, quality: 0.8 });
-          const thumb = await uploadFile(blob, bucket, {
-            storage: choice.storage,
-            keyPrefix: 'thumb_',
-          });
-          onThumbChange?.(thumb.url);
-        } catch (err) {
-          // 缩略图失败不阻塞主图；告警但允许提交
-          message.warning(`缩略图生成失败：${err instanceof Error ? err.message : '未知错误'}`);
-          onThumbChange?.('');
-        }
-      }
+      // v1.3 简化：客户端直接压缩到 thumbMaxWidth，仅上传一份低分辨率图。
+      // coverImageUrl 和 coverThumbUrl 共用同一份 URL。
+      const blob = await makeThumbnail(file, { maxWidth: thumbMaxWidth, quality: 0.8 });
+      const result: UploadResult = await uploadFile(blob, bucket, { storage: choice.storage });
+      onChange?.(result.url);
+      if (!disableThumb) onThumbChange?.(result.url);
 
       message.success(
         choice.storage === 'oss' ? '图片已上传到阿里云 OSS' : '图片已上传到本机',
@@ -138,16 +115,8 @@ export function ImageUploadField({
             <div style={previewFrameStyle}>
               <Image src={value} alt="已上传图片" style={previewImageStyle} />
             </div>
-            <div style={{ fontSize: 12, color: '#999' }}>原图</div>
+            <div style={{ fontSize: 12, color: '#999' }}>封面（{thumbMaxWidth}px）</div>
           </Space>
-          {!disableThumb && thumbUrl ? (
-            <Space direction="vertical" size={8} align="start">
-              <div style={thumbPreviewStyle}>
-                <Image src={thumbUrl} alt="缩略图" style={{ maxWidth: 112, maxHeight: 72, objectFit: 'cover' }} />
-              </div>
-              <div style={{ fontSize: 12, color: '#999' }}>缩略图（{thumbMaxWidth}px）</div>
-            </Space>
-          ) : null}
           <Button size="small" danger icon={<DeleteOutlined />} onClick={() => {
             onChange?.('');
             if (!disableThumb) onThumbChange?.('');
