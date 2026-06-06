@@ -729,7 +729,7 @@ export default function AdminLeadsPage() {
         title="高级筛选"
         open={advancedOpen}
         onCancel={() => setAdvancedOpen(false)}
-        width={640}
+        width={520}
         destroyOnClose
         footer={[
           <Button key="reset" onClick={resetAdvanced}>清空</Button>,
@@ -738,57 +738,77 @@ export default function AdminLeadsPage() {
         ]}
       >
         <Form form={advancedForm} layout="vertical" preserve={false}>
-          <Form.Item label="平台" name="platform">
-            <Select options={platformOptions} placeholder="全部平台" allowClear />
-          </Form.Item>
-          <Form.Item label="运营" name="operatorId">
-            <Select
-              options={employeeOptions}
-              placeholder="全部运营"
-              allowClear
-              showSearch
-              optionFilterProp="label"
-            />
-          </Form.Item>
-          <Form.Item label="销售" name="salesId">
-            <Select
-              options={salesOptions}
-              placeholder="全部销售"
-              allowClear
-              showSearch
-              optionFilterProp="label"
-            />
-          </Form.Item>
-          <Form.Item label="来源账号" name="accountId">
-            <Select
-              options={accountOptions}
-              placeholder="全部账号"
-              allowClear
-              showSearch
-              optionFilterProp="label"
-            />
-          </Form.Item>
-          <Form.Item label="来源作品" name="postId">
-            <Select
-              options={postOptions}
-              placeholder="全部作品"
-              allowClear
-              showSearch
-              optionFilterProp="label"
-            />
-          </Form.Item>
-          <Form.Item label="处理状态" name="processStatus">
-            <Select options={processStatusOptions} placeholder="全部处理状态" allowClear />
-          </Form.Item>
-          <Form.Item label="添加状态" name="addStatus">
-            <Select options={addStatusOptions} placeholder="全部添加状态" allowClear />
-          </Form.Item>
-          <Form.Item label="成交状态" name="dealStatus">
-            <Select options={dealStatusOptions} placeholder="全部成交状态" allowClear />
-          </Form.Item>
-          <Form.Item label="创建日期范围" name="dateRange">
-            <RangePicker style={{ width: '100%' }} />
-          </Form.Item>
+          <Row gutter={12}>
+            <Col span={12}>
+              <Form.Item label="平台" name="platform">
+                <Select options={platformOptions} placeholder="全部平台" allowClear />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item label="运营" name="operatorId">
+                <Select
+                  options={employeeOptions}
+                  placeholder="全部运营"
+                  allowClear
+                  showSearch
+                  optionFilterProp="label"
+                />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item label="销售" name="salesId">
+                <Select
+                  options={salesOptions}
+                  placeholder="全部销售"
+                  allowClear
+                  showSearch
+                  optionFilterProp="label"
+                />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item label="来源账号" name="accountId">
+                <Select
+                  options={accountOptions}
+                  placeholder="全部账号"
+                  allowClear
+                  showSearch
+                  optionFilterProp="label"
+                />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item label="来源作品" name="postId">
+                <Select
+                  options={postOptions}
+                  placeholder="全部作品"
+                  allowClear
+                  showSearch
+                  optionFilterProp="label"
+                />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item label="处理状态" name="processStatus">
+                <Select options={processStatusOptions} placeholder="全部处理状态" allowClear />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item label="添加状态" name="addStatus">
+                <Select options={addStatusOptions} placeholder="全部添加状态" allowClear />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item label="成交状态" name="dealStatus">
+                <Select options={dealStatusOptions} placeholder="全部成交状态" allowClear />
+              </Form.Item>
+            </Col>
+            <Col span={24}>
+              <Form.Item label="创建日期范围" name="dateRange">
+                <RangePicker style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+          </Row>
         </Form>
       </Modal>
 
