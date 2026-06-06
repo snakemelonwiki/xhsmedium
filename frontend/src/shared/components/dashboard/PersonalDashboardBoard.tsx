@@ -401,7 +401,7 @@ export function PersonalDashboardBoard({ employeeId, showRefreshButton = true }:
               </div>
             }
           >
-            <PlatformTrendBarChart trend={platformTrend} loading={loadingDualPlatform} />
+            <PlatformTrendLineChart trend={platformTrend} loading={loadingDualPlatform} />
           </Card>
         </Col>
       </Row>
@@ -552,9 +552,14 @@ function PlatformPieChart({ items, metric, loading }: { items: PlatformDistribut
   );
 }
 
-// ============ v1.3 OP-19 双平台作品量柱状图（echarts） ============
+// ============ v1.3 OP-19 双平台作品量趋势图（echarts） ============
+// v1.3 / OP-19 调整：原为柱状图（type: 'bar'），改为折线图（type: 'line'），
+// 视觉上更贴合"趋势"语义，时间序列高低起伏更易感知。
+// - smooth: true 让折线带弧度；symbol: 'circle' + symbolSize: 6 标出每点
+// - axisPointer 由 'shadow' 改为 'line'（柱状才有 shadow，线图不合适）
+// - 顶部双平台作品量 title 改为"双平台作品量趋势"与外层 Card 标题保持一致
 
-function PlatformTrendBarChart({ trend, loading }: { trend?: PlatformTrend; loading: boolean }) {
+function PlatformTrendLineChart({ trend, loading }: { trend?: PlatformTrend; loading: boolean }) {
   const { containerRef, chartRef, echartsReady } = useEchartsChart();
   const points = trend?.points ?? [];
 
@@ -574,10 +579,10 @@ function PlatformTrendBarChart({ trend, loading }: { trend?: PlatformTrend; load
       const xhsLeads = d.map((p) => p.xiaohongshuLeads);
       const dyLeads = d.map((p) => p.douyinLeads);
       return {
-        title: { text: '双平台作品量', textStyle: { fontSize: 14, fontWeight: 'normal' }, left: 'center' },
+        title: { text: '双平台作品量趋势', textStyle: { fontSize: 14, fontWeight: 'normal' }, left: 'center' },
         tooltip: {
           trigger: 'axis',
-          axisPointer: { type: 'shadow' },
+          axisPointer: { type: 'line' },
           formatter: (params: any[]) => {
             if (!Array.isArray(params) || params.length === 0) return '';
             const idx = params[0].dataIndex;
@@ -600,8 +605,26 @@ function PlatformTrendBarChart({ trend, loading }: { trend?: PlatformTrend; load
         xAxis: { type: 'category', data: dates, axisLabel: { rotate: dates.length > 8 ? 30 : 0 } },
         yAxis: { type: 'value', name: '作品数' },
         series: [
-          { name: '小红书', type: 'bar', data: xhsData, itemStyle: { color: '#fa8c16' } },
-          { name: '抖音', type: 'bar', data: dyData, itemStyle: { color: '#1677ff' } },
+          {
+            name: '小红书',
+            type: 'line',
+            data: xhsData,
+            smooth: true,
+            symbol: 'circle',
+            symbolSize: 6,
+            lineStyle: { width: 2, color: '#fa8c16' },
+            itemStyle: { color: '#fa8c16' },
+          },
+          {
+            name: '抖音',
+            type: 'line',
+            data: dyData,
+            smooth: true,
+            symbol: 'circle',
+            symbolSize: 6,
+            lineStyle: { width: 2, color: '#1677ff' },
+            itemStyle: { color: '#1677ff' },
+          },
         ],
       };
     },
