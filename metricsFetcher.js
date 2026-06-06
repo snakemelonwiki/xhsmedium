@@ -405,49 +405,129 @@ async function scrapeXiaohongshu(page) {
   };
 }
 
+/**
+ * 抖音 4 项指标（点赞/评论/收藏/分享）抓取。
+ *
+ * 难点（2026-06-06 用户实测反馈）：
+ *   1. class 名是动态 hash（e6fO4odE MaBqgDY7 V1JBLS7f），`[class*="like"]` 全 0 命中。
+ *   2. "点赞"等中文文本只在 hover 时作为 tooltip 出现，selector 抓不到。
+ *   3. 绝对 xpath 会随登录态 / 视频/图文页变化：
+ *      - 视频页：#sliderVideo/div[1]/div/.../div[2]
+ *      - 图文/笔记页：#douyin-right-container/div[2]/main/div[1]/div[2]/...
+ *   4. 数字在心形 SVG 图标"下方"（子节点或紧邻 div），不是兄弟。
+ *
+ * 解法：page.evaluate 单次扫描 DOM —— 在 #douyin-right-container / #sliderVideo
+ *   容器内找 4 个交互按钮（按 SVG 路径特征：心 / 评论气泡 / 五角星 / 转发箭头），
+ *   拿它们紧邻的数字子节点。同时扫 INITIAL_STATE 拿兜底（`likeCount` 字段）。
+ */
+/**
+ * 抖音 4 项指标（点赞/评论/收藏/分享）抓取。
+ *
+ * 难点（2026-06-06 用户实测反馈）：
+ *   1. class 名是动态 hash（e6fO4odE MaBqgDY7 V1JBLS7f），`[class*="like"]` 全 0 命中。
+ *   2. "点赞"等中文文本只在 hover 时作为 tooltip 出现，selector 抓不到。
+ *   3. 绝对 xpath 会随登录态 / 视频/图文页变化。
+ *   4. **关键**：抖音把数字拆成多个 span/div 做动画，"1.9万" = 两个节点 "1" + "9万"。
+ *      直接 textContent 只能拿到 "9" 漏 "1"，所以"按位置拿全部数字节点再合并"是唯一可靠方式。
+ *
+ * 解法：page.evaluate 单次扫 #douyin-right-container 容器，定位 4 个交互按钮的容器
+ *   （按 DOM 顺序），每个容器内合并所有数字文本（"9" + "万" → "9万" → 9000）。
+ */
 async function scrapeDouyin(page) {
-  const htmlFallback = await inferDouyinCountsFromHtml(page);
-  const likes = await readCountBySelectors(page, [
-    "xpath=//*[@id=\"sliderVideo\"]/div[1]/div/div[1]/div[1]/div/div[2]/div[2]/div/div[2]",
-    "[data-e2e='like-count']",
-    "[class*='like'] [class*='count']",
-    "span:has-text('赞') + span",
-    "[aria-label*='点赞']",
-    "[title*='点赞']"
-  ]);
-  const comments = await readCountBySelectors(page, [
-    "xpath=//*[@id=\"sliderVideo\"]/div[1]/div/div[1]/div[1]/div/div[2]/div[3]/div[1]/div[2]",
-    "[data-e2e='comment-count']",
-    "[class*='comment'] [class*='count']",
-    "span:has-text('评论') + span",
-    "[aria-label*='评论']",
-    "[title*='评论']"
-  ]);
-  const favorites = await readCountBySelectors(page, [
-    "xpath=//*[@id=\"sliderVideo\"]/div[1]/div/div[1]/div[1]/div/div[2]/div[4]/div[2]",
-    "[data-e2e='collect-count']",
-    "[data-e2e='favorite-count']",
-    "[class*='collect'] [class*='count']",
-    "span:has-text('收藏') + span",
-    "[aria-label*='收藏']",
-    "[title*='收藏']"
-  ]);
-  const shares = await readCountBySelectors(page, [
-    "xpath=//*[@id=\"sliderVideo\"]/div[1]/div/div[1]/div[1]/div/div[2]/div[6]/div[1]/div[2]",
-    "[data-e2e='share-count']",
-    "[class*='share'] [class*='count']",
-    "span:has-text('分享') + span",
-    "[aria-label*='分享']",
-    "[title*='分享']"
-  ]);
+  // 模拟 hover 让 tooltip 出来（部分数字可能在 tooltip 里）
+  try {
+    const hoverTargets = await page.locator(
+      '#douyin-right-container svg, #sliderVideo svg'
+    ).all();
+    for (const t of hoverTargets.slice(0, 8)) {
+      try { await t.hover({ timeout: 200 }); } catch {}
+    }
+  } catch {}
 
+  // 单次 page.evaluate 拿 4 项指标（按 DOM 位置：[点赞, 评论, 收藏, 分享]）
+  const interactiveCounts = await page.evaluate(() => {
+    const root = document.getElementById('douyin-right-container');
+    if (!root) return null;
+
+    // 抖音把数字拆成多个 span 做位移动画。策略：递归收集容器内所有"纯数字文本"span，
+    // 按文档顺序拼接。还需处理"万 / w"这种单位后缀。
+    const collectNumbers = (el) => {
+      if (!el) return { value: 0, raw: "" };
+      // 收集所有叶子级文本节点
+      const text = el.innerText || el.textContent || "";
+      // 提取数字和单位：1.9万 / 1.9w / 19000
+      const match = text.match(/(\d+(?:\.\d+)?)\s*([wkW万千K]?)/);
+      if (!match) return { value: 0, raw: "" };
+      const num = parseFloat(match[1]);
+      const unit = match[2].toLowerCase();
+      let val = num;
+      if (unit === "w" || unit === "万") val = num * 10000;
+      else if (unit === "k" || unit === "千") val = num * 1000;
+      return { value: Math.round(val), raw: text.trim() };
+    };
+
+    // 找含 SVG 的按钮容器（心 / 评论 / 收藏 / 分享），按 DOM 顺序
+    const buttons = [];
+    const walk = (node) => {
+      if (node.tagName === "svg") {
+        // 找最近的有 innerText 的祖先容器
+        let p = node.parentElement;
+        for (let i = 0; i < 5 && p; i++) {
+          const txt = (p.innerText || "").trim();
+          if (txt && /\d/.test(txt) && p.children.length <= 4) {
+            buttons.push(p);
+            return;
+          }
+          p = p.parentElement;
+        }
+      }
+      for (const c of node.children || []) walk(c);
+    };
+    walk(root);
+
+    // 抖音图文/笔记页结构：每个交互按钮包一层 div，div 里有 SVG + 数字 span
+    //   直接取每个按钮的 innerText（含 SVG 旁所有数字节点拼接）
+    const result = { likes: 0, comments: 0, favorites: 0, shares: 0 };
+    if (buttons.length >= 4) {
+      const keys = ["likes", "comments", "favorites", "shares"];
+      for (let i = 0; i < 4; i++) {
+        const { value, raw } = collectNumbers(buttons[i]);
+        if (value) result[keys[i]] = value;
+      }
+    } else {
+      // 兜底：按 innerText 顺序抓 4 个数字（适配 DOM 结构变化）
+      const text = root.innerText || "";
+      const matches = text.match(/\d+(?:\.\d+)?\s*[wkW万千K]?/g) || [];
+      if (matches.length >= 4) {
+        const parse = (s) => {
+          const m = s.match(/(\d+(?:\.\d+)?)\s*([wkW万千K]?)/);
+          if (!m) return 0;
+          let v = parseFloat(m[1]);
+          const u = m[2].toLowerCase();
+          if (u === "w" || u === "万") v *= 10000;
+          else if (u === "k" || u === "千") v *= 1000;
+          return Math.round(v);
+        };
+        result.likes = parse(matches[0]);
+        result.comments = parse(matches[1]);
+        result.favorites = parse(matches[2]);
+        result.shares = parse(matches[3]);
+      }
+    }
+    return result;
+  }).catch(() => null);
+
+  const htmlFallback = await inferDouyinCountsFromHtml(page);
   const fallback = await inferCountsFromBody(page);
+
+  // 优先级：interactiveCounts (DOM 解析) > htmlFallback (INITIAL_STATE JSON) > fallback (body text)
+  const get = (k) => interactiveCounts?.[k] || htmlFallback[k] || fallback[k] || 0;
   return {
     bodyText: fallback.text,
-    likes: likes ?? htmlFallback.likes ?? fallback.likes ?? 0,
-    comments: comments ?? htmlFallback.comments ?? fallback.comments ?? 0,
-    favorites: favorites ?? htmlFallback.favorites ?? fallback.favorites ?? 0,
-    shares: shares ?? htmlFallback.shares ?? fallback.shares ?? 0
+    likes: get("likes"),
+    comments: get("comments"),
+    favorites: get("favorites"),
+    shares: get("shares"),
   };
 }
 
