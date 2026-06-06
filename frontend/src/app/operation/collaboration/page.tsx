@@ -275,18 +275,33 @@ export default function OperationCollaborationPage() {
           setDetailLead(null);
           setDetailTimeline([]);
         }}
-        footer={
-          selectedItem && (selectedItem.status === 'pending' || selectedItem.status === 'handling') ? (
-            <Button type="primary" onClick={() => setHandleOpen(true)}>
-              处理协同
-            </Button>
-          ) : undefined
-        }
+        footer={null}
         width={720}
       >
         <Spin spinning={detailLoading}>
           {selectedItem ? (
             <Space direction="vertical" size={16} style={{ width: '100%' }}>
+              {/* 顶部操作条：sticky，避免详情内容多时"翻到最下面才能看到、且只显示一半"。
+                  关键状态 (pending / handling) 下"处理协同"按钮常驻顶部，无需滚动。 */}
+              {selectedItem.status === 'pending' || selectedItem.status === 'handling' ? (
+                <div
+                  style={{
+                    position: 'sticky',
+                    top: 0,
+                    zIndex: 1,
+                    background: '#fff',
+                    paddingBottom: 8,
+                    borderBottom: '1px solid #f0f0f0',
+                    display: 'flex',
+                    justifyContent: 'flex-end',
+                  }}
+                >
+                  <Button type="primary" onClick={() => setHandleOpen(true)}>
+                    处理协同
+                  </Button>
+                </div>
+              ) : null}
+
               <Card size="small" title="协同信息">
                 <Descriptions bordered size="small" column={1}>
                   <Descriptions.Item label="协同类型">
