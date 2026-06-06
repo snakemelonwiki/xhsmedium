@@ -9,7 +9,13 @@ describe('buildOperationLeadsExportFilter', () => {
       pageSize: 20,
       platform: 'xiaohongshu',
       status: 'assigned',
+      processStatus: 'not_contacted',
+      addStatus: 'not_added',
+      collaborationStatus: 'pending',
       search: 'wx-1',
+      sourceAccountId: 'account-1',
+      from: '2026-06-02 00:00:00',
+      to: '2026-06-06 23:59:59',
     })).toEqual({
       scope: 'self',
       page: 2,
@@ -18,7 +24,13 @@ describe('buildOperationLeadsExportFilter', () => {
       offset: 20,
       platform: 'xiaohongshu',
       status: 'assigned',
+      processStatus: 'not_contacted',
+      addStatus: 'not_added',
+      collaborationStatus: 'pending',
       search: 'wx-1',
+      sourceAccountId: 'account-1',
+      from: '2026-06-02 00:00:00',
+      to: '2026-06-06 23:59:59',
     });
   });
 });

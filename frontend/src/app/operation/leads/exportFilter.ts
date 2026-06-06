@@ -3,7 +3,13 @@ type OperationLeadsExportFilterInput = {
   pageSize: number;
   platform?: string;
   status?: string;
+  processStatus?: string;
+  addStatus?: string;
+  collaborationStatus?: string;
   search?: string;
+  sourceAccountId?: string;
+  from?: string;
+  to?: string;
 };
 
 /**
@@ -22,7 +28,13 @@ export function buildOperationLeadsExportFilter(input: OperationLeadsExportFilte
 
   if (input.platform) filter.platform = input.platform;
   if (input.status) filter.status = input.status;
+  if (input.processStatus) filter.processStatus = input.processStatus;
+  if (input.addStatus) filter.addStatus = input.addStatus;
+  if (input.collaborationStatus) filter.collaborationStatus = input.collaborationStatus;
   if (input.search) filter.search = input.search;
+  if (input.sourceAccountId) filter.sourceAccountId = input.sourceAccountId;
+  if (input.from) filter.from = input.from;
+  if (input.to) filter.to = input.to;
 
   return filter;
 }
