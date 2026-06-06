@@ -98,7 +98,7 @@
 ### 2.2 运营排行榜榜单合并与指标统一（P1）
 - [ ] 指标统一改名为"成交数"（账号数/作品数/小红书作品/抖音作品/成交数 统一口径）
 - [ ] 两个 Tab 合并为一个榜单，左上角"按客资 / 按作品"作为筛选器
-- [ ] 时间筛选接入 `QuickRangePicker`（按月/按年预设）
+- [x] 时间筛选接入 `QuickRangePicker`（按月/按年预设） — 早已在 `operation/rankings/page.tsx:390-396` 完成接入：`variant="select"` + `RANGE_PRESETS_FULL`（12 个预设）+ `selectWidth=140` + 自定义 `derivePeriod()`（line 39）把 `{start,end}` 反推为 `Period` 后端 enum。首个 commit 是 `0e35619 feat(frontend): 新增 QuickRangePicker 时间段快捷选择组件 + 运营排行接入`。
 - [ ] 涉及文件：
   - `frontend/src/app/operation/rankings/page.tsx`
   - `frontend/src/app/operation/rankings/study/page.tsx`
