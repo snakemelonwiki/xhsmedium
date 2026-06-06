@@ -79,11 +79,14 @@
 ## 人员 P2（运营域）任务清单
 
 ### 2.1 总览页改造（P0）
+- [x] ~~左侧新增"协同处理"入口/面板~~ — 2026-06-06 已补齐菜单：
+  - `frontend/src/shared/layout/menu.tsx:96-102` 新增 `operation-collaboration` 菜单（path `/operation/collaboration`，roles `['operation']`）
+  - `frontend/src/app/owner/page.tsx:28` 在 owner 总后台首页快捷入口加入"协同处理 → /admin/collaboration"
+  - 两个目标页面 `operation/collaboration/page.tsx` 和 `admin/collaboration/page.tsx` 已存在，本次仅注册菜单
 - [ ] 员工低更新数点击 → 跳转到该员工个人看板
-- [ ] 左侧新增"协同处理"入口/面板（只读入口，组件由 P1 在 `shared/components/leads/` 提供）
 - [ ] 时间筛选接入 `QuickRangePicker`（P1 升级后直接调用）
 - [ ] 涉及文件：
-  - `frontend/src/app/owner/page.tsx`（总后台首页，假设路径，如不对应实际调整）
+  - `frontend/src/app/owner/page.tsx`（已部分改动，2026-06-06）
   - `backend/src/modules/dashboard/dashboard.service.ts`（首页数据接口）
 
 ### 2.2 运营排行榜榜单合并与指标统一（P1）

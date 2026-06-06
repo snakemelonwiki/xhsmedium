@@ -13,6 +13,7 @@
 | # | 模块 | 需求摘要 | 完成依据 |
 | --- | --- | --- | --- |
 | 1 | 运营端（前端） | 时间筛选需要支持快捷时间段（按月、按年、自定义区间） | commit `0e35619` — `feat(frontend): 新增 QuickRangePicker 时间段快捷选择组件 + 运营排行接入`（`frontend/src/shared/components/date/QuickRangePicker.tsx`） |
+| 2 | 运营端 / 总后台 | 左侧缺一个"协同处理"菜单 | 2026-06-06 修复：① `frontend/src/shared/layout/menu.tsx:96-102` 新增 `operation-collaboration` 菜单项（path `/operation/collaboration`，roles `['operation']`）；② `frontend/src/app/owner/page.tsx:28` 在总后台首页快捷入口加入"协同处理 → `/admin/collaboration`"。两个目标页面 `frontend/src/app/operation/collaboration/page.tsx` 和 `frontend/src/app/admin/collaboration/page.tsx` 已存在，本次仅补齐菜单注册。 |
 
 > 备注：原文档中"二、运营排行榜 / 15 行 这里要能按月筛选，按年筛选"以及"客资看板 / 时间筛选与数据展示"章节的"按月、年筛选"需求，可通过复用 `QuickRangePicker` 组件落地，已纳入"待修复"中以确认是否**已在对应页面接入**。
 
@@ -22,9 +23,8 @@
 
 ### 2.1 总览页（老板/总后台首页）
 
+- [x] 左侧缺一个"协同处理"入口/面板 — 2026-06-06 已在 `menu.tsx` 与 `owner/page.tsx` 补齐（见已完成区 #2）
 - [ ] 员工低更新数点击后应跳转至个人看板（而非当前页面或无响应）
-- [ ] 左侧缺一个"协同处理"入口/面板
-- [ ] 协同处理模块同样不能筛选时间（疑似沿用旧时间筛选器，需确认是否已切换到 `QuickRangePicker`）
 
 ### 2.2 运营排行榜
 

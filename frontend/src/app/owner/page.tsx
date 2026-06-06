@@ -25,6 +25,7 @@ const entries = [
   { title: '主管总览', href: '/admin', description: '今日作品/客资/成交，运营主管全量视图', icon: <BarChartOutlined /> },
   { title: '客资看板', href: '/admin/leads', description: '查看全部客资、销售归属和跟进状态', icon: <UserSwitchOutlined /> },
   { title: '订单看板', href: '/admin/orders', description: '订单全量视图与教务分配', icon: <ProjectOutlined /> },
+  { title: '协同处理', href: '/admin/collaboration', description: '全平台协同任务总览与稽核', icon: <ProjectOutlined /> },
   { title: '员工管理', href: '/admin/employees', description: '维护员工资料和在职状态', icon: <TeamOutlined /> },
   { title: '账号管理', href: '/admin/accounts', description: '管理运营账号、平台和定位信息', icon: <IdcardOutlined /> },
   { title: '基础分析', href: '/admin/analytics', description: '查看流量与客资统计', icon: <LineChartOutlined /> },

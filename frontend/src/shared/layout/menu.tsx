@@ -93,6 +93,13 @@ export const APP_MENU_ITEMS: AppMenuItem[] = [
     roles: ['operation'],
   },
   {
+    key: 'operation-collaboration',
+    label: '协同处理',
+    path: '/operation/collaboration',
+    icon: <ProjectOutlined />,
+    roles: ['operation'],
+  },
+  {
     key: 'operation-posts',
     label: '我的作品',
     path: '/operation/posts',
