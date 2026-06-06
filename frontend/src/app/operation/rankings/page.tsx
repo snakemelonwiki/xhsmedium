@@ -269,7 +269,9 @@ export default function OperationRankingsPage() {
       let gap = 0;
       if (index > 0) {
         const prevValue = getValue(items[index - 1]);
-        gap = prevValue - currentValue;
+        // 与上一名差距用正数展示（差距方向已由列名"与上一名差距"隐含）。
+        // 即便排序异常或同分，也保证不会出现负数或负号叠加。
+        gap = Math.max(0, prevValue - currentValue);
       }
       return { ...item, gap };
     });
@@ -314,7 +316,7 @@ export default function OperationRankingsPage() {
           dataIndex: 'gap',
           render: (gap: number) => {
             if (gap === 0) return '-';
-            return <Tag color="orange">-{gap}</Tag>;
+            return <Tag color="orange">{gap}</Tag>;
           },
         },
       ];
@@ -347,7 +349,7 @@ export default function OperationRankingsPage() {
           dataIndex: 'gap',
           render: (gap: number) => {
             if (gap === 0) return '-';
-            return <Tag color="orange">-{gap}</Tag>;
+            return <Tag color="orange">{gap}</Tag>;
           },
         },
       ];
@@ -369,7 +371,7 @@ export default function OperationRankingsPage() {
         dataIndex: 'gap',
         render: (gap: number) => {
           if (gap === 0) return '-';
-          return <Tag color="orange">-{gap}</Tag>;
+          return <Tag color="orange">{gap}</Tag>;
         },
       },
     ];
