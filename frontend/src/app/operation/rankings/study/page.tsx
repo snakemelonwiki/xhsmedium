@@ -111,7 +111,7 @@ const TAB_OPTIONS: TabsProps['items'] = [
   { key: 'posts', label: '优秀作品榜', icon: <StarOutlined /> },
   { key: 'accounts', label: '优秀账号榜', icon: <AppstoreOutlined /> },
   /** v1.3 OP-10：主管推荐板块 */
-  { key: 'picks', label: '主管推荐', icon: <StarOutlined /> },
+  { key: 'picks', label: '推荐作品', icon: <StarOutlined /> },
 ];
 
 function numberValue(value: unknown): number {
