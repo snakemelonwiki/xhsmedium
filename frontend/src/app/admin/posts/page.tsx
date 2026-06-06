@@ -142,6 +142,10 @@ function getPeriodLabel(period: PeriodKey): string {
   return '累计';
 }
 
+function isLongPostTitle(title?: string): boolean {
+  return Array.from(title || '').length > 12;
+}
+
 type Post = {
   id: string;
   platform: string;
@@ -551,30 +555,34 @@ export default function AdminPostsPage() {
     {
       title: '作品',
       dataIndex: 'title',
-      width: 340,
+      width: 200,
       render: (v: string, r: Post) => (
-        <Space size={10} align="start">
+        <Space size={6} align="start">
           {r.coverThumbUrl || r.coverImageUrl ? (
             <Image
               src={r.coverThumbUrl || r.coverImageUrl}
               alt="封面"
-              width={92}
-              height={66}
+              width={56}
+              height={42}
               style={{ objectFit: 'cover', borderRadius: 6, flex: '0 0 auto' }}
               preview={{ mask: <EyeOutlined /> }}
             />
           ) : (
-            <div style={{ width: 92, height: 66, background: '#f0f0f0', borderRadius: 6, flex: '0 0 auto' }} />
+            <div style={{ width: 56, height: 42, background: '#f0f0f0', borderRadius: 6, flex: '0 0 auto' }} />
           )}
           <Space direction="vertical" size={2} style={{ minWidth: 0 }}>
             {r.postUrl ? (
               <a href={r.postUrl} target="_blank" rel="noreferrer">
-                <Typography.Text strong ellipsis style={{ maxWidth: 220 }}>{v}</Typography.Text>
+                <Tooltip placement="top" title={isLongPostTitle(v) ? v : undefined}>
+                  <Typography.Text strong ellipsis style={{ maxWidth: 120 }}>{v}</Typography.Text>
+                </Tooltip>
               </a>
             ) : (
-              <Typography.Text strong ellipsis style={{ maxWidth: 220 }}>{v}</Typography.Text>
+              <Tooltip placement="top" title={isLongPostTitle(v) ? v : undefined}>
+                <Typography.Text strong ellipsis style={{ maxWidth: 120 }}>{v}</Typography.Text>
+              </Tooltip>
             )}
-            <Typography.Text type="secondary" ellipsis style={{ maxWidth: 220, fontSize: 12 }}>
+            <Typography.Text type="secondary" ellipsis style={{ maxWidth: 120, fontSize: 12 }}>
               {r.copywriting || r.note || '暂无文案'}
             </Typography.Text>
             {Number(r.isSupervisorPicked || 0) === 1 ? <Tag color="gold">优秀作品</Tag> : null}
@@ -600,20 +608,7 @@ export default function AdminPostsPage() {
       dataIndex: 'publishedAt',
       width: 110,
       ...sortColumn('publishedAt'),
-      render: (v?: string, r?: Post) => {
-        if (!r) return formatDate(v);
-        const isPicked = Number(r.isSupervisorPicked || 0) === 1;
-        return (
-          <Space size={4}>
-            {isPicked ? (
-              <Tooltip title="已被主管标记为优秀作品">
-                <StarFilled style={{ color: '#faad14' }} />
-              </Tooltip>
-            ) : null}
-            <span>{formatDate(v)}</span>
-          </Space>
-        );
-      },
+      render: (v?: string) => formatDate(v),
     },
     {
       title: '流量',

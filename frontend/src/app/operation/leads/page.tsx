@@ -162,8 +162,9 @@ export default function OperationLeadsPage() {
   async function handleExport() {
     setExporting(true);
     try {
+      const currentQuery = buildQuery();
       // 1) 先用当前筛选条件查 total,无数据直接短路提示
-      const statsResult = await getAdminLeadsStats({ scope: 'self', ...buildQuery() } as Parameters<typeof getAdminLeadsStats>[0]).catch(() => null);
+      const statsResult = await getAdminLeadsStats({ scope: 'self', ...currentQuery } as Parameters<typeof getAdminLeadsStats>[0]).catch(() => null);
       const total = statsResult?.total ?? 0;
       if (total === 0) {
         message.warning('当前筛选条件下无数据,无需导出');
@@ -179,7 +180,13 @@ export default function OperationLeadsPage() {
             pageSize: pagination.pageSize,
             platform: filters.platform,
             status: filters.processStatus,
+            processStatus: filters.processStatus,
+            addStatus: filters.addStatus,
+            collaborationStatus: filters.collaborationStatus,
             search: filters.sourcePost,
+            sourceAccountId: filters.sourceAccount,
+            from: typeof currentQuery.from === 'string' ? currentQuery.from : undefined,
+            to: typeof currentQuery.to === 'string' ? currentQuery.to : undefined,
           }),
         });
 
