@@ -21,6 +21,7 @@
 | 7 | 运营端-协同详情 | "处理协同"按钮常驻顶部，去掉半截问题 | commit `d3dd560`：`operation/collaboration/page.tsx` 把按钮作为 sticky 顶栏塞进 Modal body，footer 改 null |
 | 8 | 运营排行榜时间筛选 | QuickRangePicker 全 12 预设（天/周/月/年）精确生效 | commit `3965ac1`：后端 `RANKING_PERIODS` 扩到 10 项 + 新增 90d/1y/3y 分支 + from/to 透传；前端 `derivePeriod` 细分到 10 档 + `buildRangeQuery()` 走 from/to 兜底 |
 | 9 | 主管端-个人看板 | 双平台作品量趋势图由柱状图改为折线图 | commit `78bedb5`：`PersonalDashboardBoard.tsx` 把 `PlatformTrendBarChart` 改名为 `PlatformTrendLineChart`，series type `bar` → `line`（smooth + symbol circle + symbolSize 6），axisPointer `shadow` → `line`，title 与外层 Card 标题保持一致 |
+| 10 | 运营端-作品录入 | 链接输入框加 PC/移动端格式参考案例 | commit `109689b`：`operation/posts/new/page.tsx` 作品链接 Form.Item 加 extra 提示块，4 个示例（小红书 PC/移动端 + 抖音 PC/移动端）+ 移动端中文提示文案警示 |
 
 > 备注：原文档中"二、运营排行榜 / 15 行 这里要能按月筛选，按年筛选"以及"客资看板 / 时间筛选与数据展示"章节的"按月、年筛选"需求，可通过复用 `QuickRangePicker` 组件落地，已纳入"待修复"中以确认是否**已在对应页面接入**。
 
@@ -95,6 +96,7 @@
   - "全部作品"页面信息展示臃肿，封面/标题/文案应**置于更突出位置**
   - "标记为优秀作品"按钮**位置不佳**，需移至更合适位置
   - "高级筛选"区域**过宽**，需紧凑化布局
+- [x] **作品录入输入框加 PC/移动端格式参考案例** — commit `109689b` 在 `frontend/src/app/operation/posts/new/page.tsx` 的"作品链接" Form.Item 加 extra 提示块，4 个示例（小红书 PC / 小红书移动端 / 抖音 PC / 抖音移动端）+ 移动端常见中文提示文案警示。引导用户只取 URL 部分粘贴。
 - [ ] **新增作品与数据来源**
   - 新增作品时系统应**自动解析并填充**封面、标题、文案等信息（依赖抓取服务 `ParserService`），而非让用户手动截图/输入
 
