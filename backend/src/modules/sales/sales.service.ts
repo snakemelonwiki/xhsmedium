@@ -122,7 +122,7 @@ export class SalesService {
    * v1.3 / SA-7: 销售"我的成交"列表，委托给 OrdersService。
    */
   async listMyDeals(salesUserId: string, options: {
-    status?: string;
+    status?: string | string[];
     productType?: string;
     startDate?: string;
     endDate?: string;

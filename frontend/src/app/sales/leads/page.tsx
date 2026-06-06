@@ -34,6 +34,7 @@ import { useEffect, useMemo, useState } from 'react';
 
 import {
   listSalesLeads,
+  markLeadContactAdded,
   reassignLead,
   updateLeadIntentionLevel,
 } from '@/shared/api/leads';
@@ -175,8 +176,12 @@ export default function SalesLeadsPage() {
   }, [filters.status, filters.addStatus, filters.intentionLevel, filters.dateRange?.start.valueOf(), filters.dateRange?.end.valueOf(), filters.search]);
 
   const sortedItems = useMemo(() => {
+    // 「我的客资」= 待处理客资（未添加 + 中间态），已添加的（addStatus=added）应去「客资跟进」。
+    // 后端 findFilteredPaged 在 sales scope 下不强制过滤 addStatus=added，
+    // 这里前端做一次 client-side 过滤，避免已添加客资混在"我的客资"里。
+    const visible = items.filter((lead) => lead.addStatus !== LeadAddStatus.ADDED);
     // 今日未添加置顶
-    return [...items].sort((a, b) => {
+    return [...visible].sort((a, b) => {
       const aT = isTodayNotAdded(a) ? 1 : 0;
       const bT = isTodayNotAdded(b) ? 1 : 0;
       if (aT !== bT) return bT - aT;
@@ -320,6 +325,16 @@ export default function SalesLeadsPage() {
     }
   }
 
+  async function handleMarkContactAdded(lead: SalesLead) {
+    try {
+      await markLeadContactAdded(String(lead.id));
+      message.success('已添加联系方式', 1.5);
+      await loadLeads(page, pageSize, filters);
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '操作失败');
+    }
+  }
+
   const columns = useMemo<TableColumnsType<SalesLead>>(() => [
     {
       title: '客户',
@@ -452,15 +467,18 @@ export default function SalesLeadsPage() {
             <Tooltip title="查看客资详情">
               <Button size="small" onClick={() => router.push(`/sales/leads/${lead.id}`)}>详情</Button>
             </Tooltip>
-            <Button
-              size="small"
-              type="primary"
-              ghost
-              icon={<FileTextOutlined />}
-              onClick={() => openFollow(lead)}
-            >
-              写跟进
-            </Button>
+            {/* 「我的客资」页不开放"写跟进"按钮（写跟进统一去「客资跟进」页操作）。 */}
+            {/* 已添加联系方式：仅对 addStatus=not_added 的客资显示，
+                点击后 addStatus=added，客资从「我的客资」消失并出现在「客资跟进」。 */}
+            {lead.addStatus === LeadAddStatus.NOT_ADDED ? (
+              <Button
+                size="small"
+                type="primary"
+                onClick={() => handleMarkContactAdded(lead)}
+              >
+                已添加联系方式
+              </Button>
+            ) : null}
           </Space>
           <Space size={4} wrap>
             <Button

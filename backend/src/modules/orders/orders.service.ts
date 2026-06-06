@@ -1241,7 +1241,7 @@ export class OrdersService {
   // ============================================================
 
   async listMyDeals(salesUserId: string, options: {
-    status?: string;
+    status?: string | string[];
     productType?: string;
     startDate?: string;
     endDate?: string;
@@ -1253,8 +1253,15 @@ export class OrdersService {
     if (!salesUserId) return { items: [], total: 0, limit: safeLimit, offset: safeOffset };
     const qb = this.orderRepository.createQueryBuilder('o')
       .where('o.sales_user_id = :uid', { uid: salesUserId });
-    if (options.status && ALLOWED_ORDER_STATUS.includes(options.status as OrderStatus)) {
-      qb.andWhere('o.order_status = :status', { status: options.status });
+    // 兼容 ?status=completed&status=closed 多次传参或单值：过滤到白名单后用 IN。
+    if (options.status !== undefined && options.status !== null && options.status !== '') {
+      const statusArr = (Array.isArray(options.status) ? options.status : [options.status])
+        .filter((s) => ALLOWED_ORDER_STATUS.includes(s as OrderStatus));
+      if (statusArr.length === 1) {
+        qb.andWhere('o.order_status = :status', { status: statusArr[0] });
+      } else if (statusArr.length > 1) {
+        qb.andWhere('o.order_status IN (:...statuses)', { statuses: statusArr });
+      }
     }
     if (options.productType) {
       // 产品类型藏在 service_type 或 remark 里（详见 closeDeal.composeRemark）

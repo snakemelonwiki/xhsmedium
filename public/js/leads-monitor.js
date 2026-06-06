@@ -350,7 +350,11 @@ function mountSalesLeadsPagination() {
   });
 }
 
-function renderSalesFollowupBoard() {
+function renderSalesFollowupBoard(opts) {
+  const viewOpts = opts || {};
+  const pageTitle = viewOpts.title || "跟进看板";
+  const pageDesc = viewOpts.desc || "按客资意向度快速筛选，记录每条客资的跟进措施，方便销售持续跟进，也方便主管后续检查优化。";
+  const hideMarkDeal = Boolean(viewOpts.hideMarkDeal);
   const rows = getLeadsForMonitor().filter((item) => {
     if (!isAddStatusAdded(item.addStatus)) return false;
     if (state.salesFollowupIntentionFilter && (item.intention || "") !== state.salesFollowupIntentionFilter) return false;
@@ -375,8 +379,8 @@ function renderSalesFollowupBoard() {
   return `
     <div class="page-header page-header-rich">
       <div>
-        <h2>跟进看板</h2>
-        <p class="page-desc">按客资意向度快速筛选，记录每条客资的跟进措施，方便销售持续跟进，也方便主管后续检查优化。</p>
+        <h2>${escapeHtml(pageTitle)}</h2>
+        <p class="page-desc">${escapeHtml(pageDesc)}</p>
       </div>
       <div class="toolbar toolbar-end">
         <span class="tag">${getLeadMonitorLabel()}</span>
@@ -421,7 +425,8 @@ function renderSalesFollowupBoard() {
   `;
 }
 
-function renderSalesFollowupsCards(items) {
+function renderSalesFollowupsCards(items, opts) {
+  const cardOpts = opts || {};
   const grid = document.getElementById("salesFollowupsGrid");
   if (!grid) return;
   // 前端本地筛选：意向度（后端暂不支持 intentionLevel 筛选）
@@ -440,7 +445,7 @@ function renderSalesFollowupsCards(items) {
     grid.innerHTML = `<div class="empty">当前筛选下暂无需要跟进的客资。</div>`;
     return;
   }
-  grid.innerHTML = filtered.map(renderSalesFollowupCard).join("");
+  grid.innerHTML = filtered.map((item) => renderSalesFollowupCard(item, cardOpts)).join("");
 }
 
 function mountSalesFollowupsPagination() {
@@ -480,7 +485,10 @@ function mountSalesFollowupsPagination() {
       const total = Number(res?.total ?? items.length);
       return { items, total };
     },
-    renderItems: (items) => renderSalesFollowupsCards(items),
+    renderItems: (items) => {
+      const isFollowupView = state.currentView === "sales-lead-followup";
+      renderSalesFollowupsCards(items, isFollowupView ? { hideMarkDeal: true } : undefined);
+    },
   });
 }
 
@@ -557,7 +565,9 @@ function renderFollowupControlRow(item) {
   `;
 }
 
-function renderSalesFollowupCard(item) {
+function renderSalesFollowupCard(item, opts) {
+  const cardOpts = opts || {};
+  const hideMarkDeal = Boolean(cardOpts.hideMarkDeal);
   const isEditing = state.editingLeadId === item.id;
   const isEditingNote = state.editingLeadNoteId === item.id;
   const feedback = String(item.salesFeedback || "").trim();
@@ -631,7 +641,7 @@ function renderSalesFollowupCard(item) {
       <div class="lead-card-actions">
         <button class="ghost js-sales-view-detail" data-id="${item.id}" type="button">查看详情</button>
         <button class="ghost js-sales-request-collab" data-id="${item.id}" type="button">申请运营协同</button>
-        <button class="ghost js-sales-mark-deal" data-id="${item.id}" type="button">标记成交</button>
+        ${hideMarkDeal ? "" : `<button class="ghost js-sales-mark-deal" data-id="${item.id}" type="button">标记成交</button>`}
       </div>
     </article>
   `;
@@ -750,7 +760,26 @@ async function markDeal(leadId) {
   renderApp();
 }
 
-// ===== 销售端：关闭协同申请 =====
+// ===== 销售端：在「我的客资」点击"已添加联系方式" → addStatus=added，自动落入客资跟进 =====
+async function markContactAdded(leadId) {
+  if (!leadId) return;
+  if (!confirm("确认已添加该客户的联系方式？\n确认后该客资将移入「客资跟进」列表。")) return;
+  try {
+    await api(`/api/leads/${encodeURIComponent(leadId)}/status`, {
+      method: "PATCH",
+      body: JSON.stringify({ addStatus: "added" })
+    });
+    setFlash("success", "已添加联系方式", "该客资已进入客资跟进。");
+    const lead = (state.leads || []).find((l) => l && l.id === leadId);
+    if (lead) lead.addStatus = "added";
+  } catch (e) {
+    setFlash("warn", "操作失败", e?.message || "请稍后重试");
+    renderApp();
+    return;
+  }
+  await loadData();
+  renderApp();
+}
 async function closeCollab(taskId) {
   if (!taskId) return;
   if (!confirm("确认关闭这条协同申请？关闭后运营端不再处理。")) return;
@@ -1239,6 +1268,7 @@ function renderLeadMonitorCard(item) {
                   <input class="js-sales-add-toggle" data-id="${item.id}" type="checkbox" ${addStatusAdded ? "checked" : ""} />
                   <span>是否添加：${addStatusLabel}</span>
                 </label>
+                ${addStatusAdded ? "" : `<button class="ghost js-mark-contact-added" data-id="${item.id}" type="button">已添加联系方式</button>`}
                 <label class="lead-chip-select-wrap lead-chip-select-inline ${getLeadIntentionChipClass(intention)}">
                   <span>客资意向</span>
                   <select class="lead-chip-select js-lead-intention" data-id="${item.id}">

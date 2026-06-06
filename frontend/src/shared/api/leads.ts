@@ -229,6 +229,18 @@ export async function updateLeadBoard(id: string, body: Record<string, unknown>)
   });
 }
 
+/**
+ * 销售"已添加联系方式"按钮 → 把 lead.addStatus 切到 added。
+ * 调后端 PATCH /api/leads/:id/status（lead_status_update 内部走 addStatus 分支）。
+ * 改完后该客资从「我的客资」消失，进入「客资跟进」。
+ */
+export async function markLeadContactAdded(id: string) {
+  return apiClient.request(`/leads/${id}/status`, {
+    method: 'PATCH',
+    body: { addStatus: 'added' },
+  });
+}
+
 export async function createCollaborationTask(body: CreateCollaborationTaskBody) {
   const { leadId, ...payload } = body;
   return apiClient.post(`/leads/${leadId}/collaboration`, payload);
@@ -329,9 +341,10 @@ export async function listTodayFollowupsForSales(query: PageQuery = {}): Promise
 
 /**
  * v1.3 / SA-7: 销售"我的成交"列表。
+ * 支持 status 为字符串或数组（后端 status IN 过滤，"我的成交"默认传 ['completed','closed']）。
  */
 export async function listMyDeals(query: {
-  status?: string;
+  status?: string | string[];
   productType?: string;
   startDate?: string;
   endDate?: string;
@@ -343,6 +356,7 @@ export async function listMyDeals(query: {
   const limit = Number(query.pageSize ?? query.limit ?? 20);
   const page = Number(query.page ?? 1);
   const offset = query.offset ?? (page - 1) * limit;
+  // 数组传参：apiClient 内部 URLSearchParams 会展开成 ?status=completed&status=closed
   const payload = await apiClient.get<unknown>('/sales/deals', {
     query: { ...query, limit, offset },
   });

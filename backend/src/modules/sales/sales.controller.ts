@@ -84,7 +84,7 @@ export class SalesController {
   async listMyDeals(
     @Req() req: Request,
     @Res() res: Response,
-    @Query('status') status?: string,
+    @Query('status') status?: string | string[],
     @Query('productType') productType?: string,
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
@@ -93,8 +93,11 @@ export class SalesController {
   ) {
     const userId = getSessionUserId(req);
     if (!userId) return res.status(401).json({ ok: false, message: 'unauthenticated' });
+    const normalizedStatus = Array.isArray(status)
+      ? status
+      : (status ? [status] : undefined);
     const result = await this.salesService.listMyDeals(userId, {
-      status,
+      status: normalizedStatus,
       productType,
       startDate,
       endDate,

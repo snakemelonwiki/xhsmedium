@@ -10,5 +10,5 @@ export interface PageQuery {
   pageSize?: number;
   limit?: number;
   offset?: number;
-  [key: string]: string | number | boolean | null | undefined;
+  [key: string]: string | number | boolean | null | undefined | string[];
 }

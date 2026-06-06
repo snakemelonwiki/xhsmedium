@@ -36,6 +36,13 @@ function appendQuery(url: URL, query?: PageQuery): void {
   if (!query) return;
   Object.entries(query).forEach(([key, value]) => {
     if (value === undefined || value === null || value === '') return;
+    if (Array.isArray(value)) {
+      // 数组 → 重复同名 query 参数（?status=completed&status=closed），
+      // 便于后端 @Query('status') status?: string | string[] 直接接到数组。
+      const filtered = value.filter((v) => v !== undefined && v !== null && v !== '');
+      filtered.forEach((v) => url.searchParams.append(key, String(v)));
+      return;
+    }
     url.searchParams.set(key, String(value));
   });
 }

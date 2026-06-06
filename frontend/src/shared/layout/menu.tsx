@@ -149,6 +149,13 @@ export const APP_MENU_ITEMS: AppMenuItem[] = [
     roles: ['sales'],
   },
   {
+    key: 'sales-lead-followup',
+    label: '客资跟进',
+    path: '/sales/lead-followup',
+    icon: <ScheduleOutlined />,
+    roles: ['sales'],
+  },
+  {
     key: 'sales-orders',
     label: '订单跟进',
     path: '/sales/orders',

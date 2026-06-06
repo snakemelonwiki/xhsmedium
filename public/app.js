@@ -132,8 +132,10 @@ function renderApp() {
     ["sales-leads", "客资看板"],
     ["sales-passive-leads", "待确认被动添加"],
     ["sales-collabs", "协同申请"],
+    ["sales-lead-followup", "客资跟进"],
     ["sales-followups", "跟进看板"],
-    ["sales-orders", "订单跟进"]
+    ["sales-orders", "订单跟进"],
+    ["sales-deals", "我的成交"]
   ];
 
   const academicViews = [
@@ -279,7 +281,7 @@ function renderApp() {
     window.requestAnimationFrame(() => renderAccountVizChart());
   }
   // 客资看板视图统计卡片走后端 /api/leads/stats —— 进入视图时如果还没拉过，触发一次异步加载
-  const leadStatsViews = new Set(["leads", "sales-leads", "sales-followups", "staff-leads-board"]);
+  const leadStatsViews = new Set(["leads", "sales-leads", "sales-lead-followup", "sales-followups", "staff-leads-board"]);
   if (leadStatsViews.has(state.currentView) && state.leadStats === null && !state.leadStatsLoading) {
     refreshLeadStatsForCurrentView();
   }
@@ -408,6 +410,8 @@ function renderCurrentView() {
         return renderSalesPassiveLeads();
       case "sales-collabs":
         return renderSalesCollabs();
+      case "sales-lead-followup":
+        return renderSalesLeadFollowup();
       case "sales-followups":
         return renderSalesFollowupBoard();
       case "sales-lead-detail":
@@ -416,6 +420,8 @@ function renderCurrentView() {
         return renderSalesOrders();
       case "sales-order-detail":
         return renderSalesOrderDetail();
+      case "sales-deals":
+        return renderSalesDeals();
       default:
         return renderSalesLeads();
     }
@@ -555,7 +561,7 @@ function _refreshCurrentLeadsPagination() {
   if (v === "leads") refreshPagination("leadsMonitorPager");
   else if (v === "sales-leads") refreshPagination("salesLeadsPager");
   else if (v === "staff-leads-board") refreshPagination("staffLeadsPager");
-  else if (v === "sales-followups") refreshPagination("salesFollowupsPager");
+  else if (v === "sales-followups" || v === "sales-lead-followup") refreshPagination("salesFollowupsPager");
   else renderApp();
 }
 
@@ -1066,6 +1072,7 @@ function bindViewEvents() {
   document.querySelectorAll(".js-lead-intention").forEach((el) => el.addEventListener("change", () => updateLeadBoardState(el.dataset.id, { intention: el.value || "" })));
   document.querySelectorAll(".js-sales-process-select").forEach((el) => el.addEventListener("change", () => updateLeadBoardState(el.dataset.id, { processStatus: el.value || "not_contacted" })));
   document.querySelectorAll(".js-sales-process-toggle").forEach((el) => el.addEventListener("change", () => updateLeadBoardState(el.dataset.id, { processStatus: el.checked ? "applied" : "not_contacted" })));
+  document.querySelectorAll(".js-mark-contact-added").forEach((el) => el.addEventListener("click", () => markContactAdded(el.dataset.id)));
   document.querySelectorAll(".js-sales-add-toggle").forEach((el) => el.addEventListener("change", async () => {
     const addStatus = el.checked ? "added" : "not_added";
     await updateLeadBoardState(el.dataset.id, { addStatus });
@@ -1206,7 +1213,7 @@ function bindViewEvents() {
   if (state.currentView === "staff-leads-board" && document.getElementById("staffLeadsPager")) {
     mountStaffLeadsPagination();
   }
-  if (state.currentView === "sales-followups" && document.getElementById("salesFollowupsPager")) {
+  if ((state.currentView === "sales-followups" || state.currentView === "sales-lead-followup") && document.getElementById("salesFollowupsPager")) {
     mountSalesFollowupsPagination();
   }
   // 协同任务 + 导入历史分页器

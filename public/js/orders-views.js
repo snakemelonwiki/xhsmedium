@@ -480,6 +480,100 @@ function mountSalesOrdersPagination() {
   });
 }
 
+// ===========================================================================
+// 销售端："我的成交" 视图（order_status IN completed/closed）
+// 复用 /api/sales/deals，已支持 status 数组过滤。
+// ===========================================================================
+function renderSalesDeals() {
+  return `
+    <div class="sales-orders-page">
+      <div class="page-header page-header-rich">
+        <div>
+          <h2>我的成交</h2>
+          <p class="page-desc">仅显示 order_status 为「已完成 / 已关闭」的销售成交订单（口径：completed / closed）。可点击进入订单详情查看交付进度。</p>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>订单 ID</th>
+                <th>关联客资</th>
+                <th>服务类型</th>
+                <th>金额</th>
+                <th>订单状态</th>
+                <th>付款状态</th>
+                <th>教务</th>
+                <th>创建时间</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="salesDealsTbody"><tr><td colspan="9"><div class="empty">加载中…</div></td></tr></tbody>
+          </table>
+        </div>
+        <div id="salesDealsPager" class="pag-container"></div>
+      </div>
+    </div>
+  `;
+}
+
+function renderSalesDealsTableBody(items) {
+  const tbody = document.getElementById("salesDealsTbody");
+  if (!tbody) return;
+  if (!items || !items.length) {
+    tbody.innerHTML = `<tr><td colspan="9"><div class="empty">暂无已成交的订单。</div></td></tr>`;
+    return;
+  }
+  tbody.innerHTML = items.map((o) => {
+    const lead = findLeadByIdLite(o.leadId);
+    const leadCode = lead ? formatLeadCode(lead.leadCode) : (o.leadCode || shortOrderId(o.leadId) || "-");
+    const academicName = o.academicUserName || findOrderUserLabel(o.academicUserId);
+    return `
+      <tr class="js-sales-deal-open" data-id="${escapeHtmlAttribute(o.id || "")}" style="cursor:pointer;">
+        <td>${shortOrderId(o.id)}</td>
+        <td>${escapeHtml(leadCode)}</td>
+        <td>${escapeHtml(o.serviceType || "-")}</td>
+        <td>${formatOrderAmount(o.amount)}</td>
+        <td>${getOrderStatusLabel(o.orderStatus)}</td>
+        <td>${getPaidStatusLabel(o.paidStatus)}</td>
+        <td>${escapeHtml(academicName)}</td>
+        <td>${o.createdAt ? formatDate(o.createdAt) : "-"}</td>
+        <td>
+          <button class="ghost js-sales-deal-open-btn" data-id="${escapeHtmlAttribute(o.id || "")}" type="button">详情</button>
+        </td>
+      </tr>
+    `;
+  }).join("");
+  document.querySelectorAll("#salesDealsTbody .js-sales-deal-open").forEach((el) => el.addEventListener("click", (event) => {
+    if (event.target.closest("button,select")) return;
+    openSalesOrderDetail(el.dataset.id);
+  }));
+  document.querySelectorAll("#salesDealsTbody .js-sales-deal-open-btn").forEach((el) => el.addEventListener("click", (event) => {
+    event.stopPropagation();
+    openSalesOrderDetail(el.dataset.id);
+  }));
+}
+
+function mountSalesDealsPagination() {
+  if (typeof setupPagination !== "function") return;
+  setupPagination("salesDealsPager", {
+    pageSize: 20,
+    fetchPage: async (page, pageSize) => {
+      const params = new URLSearchParams();
+      params.set("status", "completed");
+      params.set("status", "closed");
+      params.set("limit", String(pageSize));
+      params.set("offset", String((page - 1) * pageSize));
+      const res = await api(`/api/sales/deals?${params.toString()}`);
+      const rawItems = Array.isArray(res?.items) ? res.items : (Array.isArray(res) ? res : []);
+      const total = Number(res?.total ?? rawItems.length);
+      return { items: rawItems, total };
+    },
+    renderItems: (items) => renderSalesDealsTableBody(items),
+  });
+}
+
 // 销售端：列表行直接改客资成交状态（PATCH /api/leads/:id/deal-status）
 async function salesUpdateLeadDealStatus(leadId, orderId, dealStatus) {
   if (!leadId || !dealStatus) return;
@@ -1477,6 +1571,10 @@ function bindOrdersViewsEvents() {
     if (sel) sel.value = "";
     refreshPagination("salesOrdersPager");
   });
+  // 销售"我的成交"分页器
+  if (state.currentView === "sales-deals" && document.getElementById("salesDealsPager")) {
+    mountSalesDealsPagination();
+  }
   document.querySelectorAll(".js-sales-order-open").forEach((el) => {
     el.addEventListener("click", (event) => {
       // 避免重复触发：内部按钮点击时同样进入详情
@@ -1485,6 +1583,16 @@ function bindOrdersViewsEvents() {
     });
   });
   document.querySelectorAll(".js-back-sales-orders").forEach((el) => el.addEventListener("click", backToSalesOrders));
+
+  // 销售"我的成交"详情点击（事件代理到 #salesDealsTbody）
+  document.querySelectorAll("#salesDealsTbody .js-sales-deal-open").forEach((el) => el.addEventListener("click", (event) => {
+    if (event.target.closest("button,select")) return;
+    openSalesOrderDetail(el.dataset.id);
+  }));
+  document.querySelectorAll("#salesDealsTbody .js-sales-deal-open-btn").forEach((el) => el.addEventListener("click", (event) => {
+    event.stopPropagation();
+    openSalesOrderDetail(el.dataset.id);
+  }));
 
   // 主管端订单看板
   document.getElementById("adminOrdersSalesFilter")?.addEventListener("change", (event) => {
