@@ -280,7 +280,48 @@ export default function OperationPostNewPage() {
 
             {/* 链接录入时显示 */}
             {entryType === 'link' && (
-              <Form.Item className="full-row" name="postUrl" label="作品链接" rules={getRequiredRules('postUrl')}>
+              <Form.Item
+                className="full-row"
+                name="postUrl"
+                label="作品链接"
+                rules={getRequiredRules('postUrl')}
+                // v1.3 / OP-12 录入格式参考：分 PC 端 / 移动端 4 个示例，
+                // 防止用户粘贴时把"复制打开抖音"/"先复制一下，再到【小红书】打开查看笔记"等
+                // 移动端短链提示文案当成有效 URL。
+                extra={
+                  <div style={{ fontSize: 12, lineHeight: 1.7, marginTop: 6 }}>
+                    <div style={{ marginBottom: 2 }}>
+                      <Typography.Text type="secondary">链接格式参考（PC / 移动端均可，支持小红书、抖音）：</Typography.Text>
+                    </div>
+                    <div>
+                      <Typography.Text type="secondary">小红书 PC：</Typography.Text>
+                      <Typography.Text code style={{ wordBreak: 'break-all' }}>
+                        https://www.xiaohongshu.com/explore/6a10628c000000003601e998?xsec_token=ABzF2uWcIoCcLPbYEnhpAv2a6zuEw8VcxVnE-kP1NV9x4=&xsec_source=pc_feed
+                      </Typography.Text>
+                    </div>
+                    <div>
+                      <Typography.Text type="secondary">小红书 移动端：</Typography.Text>
+                      <Typography.Text code style={{ wordBreak: 'break-all' }}>
+                        http://xhslink.com/o/617iP8AGqq2
+                      </Typography.Text>
+                      <Typography.Text type="secondary">（移动端链接常带"先复制一下，再到【小红书】打开查看笔记"等中文提示，粘贴时只取 URL 部分）</Typography.Text>
+                    </div>
+                    <div>
+                      <Typography.Text type="secondary">抖音 PC：</Typography.Text>
+                      <Typography.Text code style={{ wordBreak: 'break-all' }}>
+                        https://www.douyin.com/note/7631056454430192458
+                      </Typography.Text>
+                    </div>
+                    <div>
+                      <Typography.Text type="secondary">抖音 移动端：</Typography.Text>
+                      <Typography.Text code style={{ wordBreak: 'break-all' }}>
+                        https://v.douyin.com/ghF491o8e6w/
+                      </Typography.Text>
+                      <Typography.Text type="secondary">（移动端链接可能含 <code>hbn:/ 04/28 ...</code> 等短链片段，取 https:// 开头至第一个空格的 URL）</Typography.Text>
+                    </div>
+                  </div>
+                }
+              >
                 <Space.Compact style={{ width: '100%' }}>
                   <Input
                     id="postUrl"
