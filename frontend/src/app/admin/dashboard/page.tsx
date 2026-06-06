@@ -121,7 +121,7 @@ const EXCEPTION_CARDS: ExceptionCard[] = [
     title: '员工低更新数',
     icon: <TeamOutlined />,
     accent: '#faad14',
-    href: '/admin/employees',
+    href: '/admin/personal',
     description: '本周无作品更新的员工数量',
   },
   {
