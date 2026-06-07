@@ -1,6 +1,6 @@
 const http = require('node:http');
 
-const baseUrl = process.env.FRONTEND_URL || 'http://127.0.0.1:3002';
+const baseUrl = process.env.FRONTEND_URL || 'http://127.0.0.1:3302';
 const routes = [
   '/operation',
   '/operation/leads',

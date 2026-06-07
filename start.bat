@@ -67,7 +67,7 @@ if not exist "backend\node_modules" (
 REM 4) 启动
 echo [步骤 3/3] 启动服务...
 echo.
-echo   前端 / 员工 / 销售入口 : http://localhost:3002
+echo   前端 / 员工 / 销售入口 : http://localhost:3302
 echo   总后台入口            : http://localhost:3001
 echo   NestJS API            : http://localhost:8089/api/*
 echo.

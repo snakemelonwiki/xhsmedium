@@ -8,7 +8,7 @@ module.exports = {
       exec_mode: "fork",
       // v1.3（2026-06-04）：server.js 同进程内会监听 PORT / OWNER_PORT / ALL_ROLES_PORT
       // 三个端口（3000 / 3001 / 3003），PM2 两实例互为热备。
-      // 3002 被新前端 Next.js (frontend/package.json dev/start) 占用，本进程不可占用。
+      // 3302 被新前端 Next.js (frontend/package.json dev/start) 占用，本进程不可占用。
       env: {
         NODE_ENV: "production",
         PORT: 3000,

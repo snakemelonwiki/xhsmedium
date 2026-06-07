@@ -5,7 +5,7 @@
 ## 技术栈
 
 - **后端**：NestJS（TypeORM + MySQL），监听端口 `8089`
-- **前端**：原生 JavaScript，由 legacy Express 反向代理承载（监听 `3001` / `3002`）
+- **前端**：原生 JavaScript，由 legacy Express 反向代理承载（监听 `3001` / `3302`）
 - **数据库**：MySQL 8.x
 - **运行时**：Node.js 18+
 
@@ -18,7 +18,7 @@
 1. 检测 Node.js
 2. 缺 `.env` / `backend/.env` 时从对应 `.env.example` 生成并提示填写
 3. 缺 `node_modules` 时自动 `npm install`
-4. 同时启动 legacy proxy（3001 / 3002）和 NestJS（8089）
+4. 同时启动 legacy proxy（3001 / 3302）和 NestJS（8089）
 
 关闭窗口即停止服务。
 
@@ -33,11 +33,11 @@ chmod +x start.sh
 
 | 端口 | 用途 | URL |
 | --- | --- | --- |
-| 3002 | 员工 / 销售 / 主管 | http://localhost:3002 |
+| 3302 | 员工 / 销售 / 主管 | http://localhost:3302 |
 | 3001 | 总后台 | http://localhost:3001 |
 | 8089 | NestJS API（内部） | http://localhost:8089/api/* |
 
-> 3001 / 3002 只做静态资源 + SPA 兜底 + `/api/*` 反代到 8089，业务逻辑全部在 NestJS。
+> 3001 / 3302 只做静态资源 + SPA 兜底 + `/api/*` 反代到 8089，业务逻辑全部在 NestJS。
 
 ## 首次部署清单
 
@@ -130,7 +130,7 @@ chmod +x start.sh
 ## 常见问题
 
 **Q：3000 端口被占用？**
-A：legacy 已改用 3001 / 3002，NestJS 默认 8089。如果仍冲突，编辑 `.env` 中 `PORT` 与 `OWNER_PORT`，以及 `backend/.env` 中 `PORT`。
+A：legacy 已改用 3001 / 3302，NestJS 默认 8089。如果仍冲突，编辑 `.env` 中 `PORT` 与 `OWNER_PORT`，以及 `backend/.env` 中 `PORT`。
 
 **Q：登录提示"用户名或密码错误"？**
 A：密码加密用的是 bcrypt，明文校验已废弃。建议通过 NestJS 提供的种子工具生成测试账号，或直接更新数据库 `users.password` 为 bcrypt 哈希。

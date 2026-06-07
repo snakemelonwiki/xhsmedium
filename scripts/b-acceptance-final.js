@@ -25,7 +25,7 @@ async function shot(page, label) {
   log(`  📸 ${name}`);
 }
 
-async function loginAs(page, username, port = 3002) {
+async function loginAs(page, username, port = 3302) {
   await page.goto(`http://localhost:${port}`, { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('#loginForm', { timeout: 8000 });
   await page.fill('input[name="username"]', username);
@@ -55,7 +55,7 @@ async function loginAs(page, username, port = 3002) {
     // 阶段 1: 登录
     // ===========================================================
     log('\n========== 阶段 1: 登录页 ==========');
-    await page.goto('http://localhost:3002');
+    await page.goto('http://localhost:3302');
     await page.waitForSelector('#loginForm', { timeout: 8000 });
     await shot(page, 'login_page');
     log('1. 登录页加载: ✅');
@@ -326,7 +326,7 @@ async function loginAs(page, username, port = 3002) {
     await page2.close();
     const page3 = await ctx.newPage();
     page3.on('dialog', async d => await d.accept(d.defaultValue() || ''));
-    await page3.goto('http://localhost:3002');
+    await page3.goto('http://localhost:3302');
     if (await page3.$('#loginForm')) {
       await page3.fill('input[name="username"]', 'youlunrong');
       await page3.fill('input[name="password"]', PASSWORDS.youlunrong);

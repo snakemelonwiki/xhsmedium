@@ -22,7 +22,7 @@ function initNotificationSocket() {
     window.notificationSocket.disconnect();
     window.notificationSocket = null;
   }
-  const wsPort = window.location.port === "3002" || window.location.port === "3003"
+  const wsPort = window.location.port === "3302" || window.location.port === "3003"
     ? "8090"
     : (window.location.port === "3000" || window.location.port === "3001" ? "8089" : window.location.port);
   const socketOrigin = `${window.location.protocol}//${window.location.hostname}${wsPort ? `:${wsPort}` : ""}`;

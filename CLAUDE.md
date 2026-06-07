@@ -12,7 +12,7 @@ npm start              # Starts server on PORT (3000) + OWNER_PORT (3001) + ALL_
 - **Employee/Admin portal**: http://localhost:3000
 - **Owner-only console (总后台)**: http://localhost:3001 (restricted to `role: 'owner'`)
 - **Unified login entry (统一登录入口)**: http://localhost:3003 (admin / supervisor / sales / academic / staff；**owner 仍必须 3001**)
-- **Next.js frontend (dev)**: http://localhost:3002 (新前端，dev/start 脚本固定 3002，与本进程不冲突)
+- **Next.js frontend (dev)**: http://localhost:3302 (新前端，dev/start 脚本固定 3302，与本进程不冲突)
 - Environment variables: copy `.env.example` to `.env` for development, `.env.production.example` for production
 - MySQL must be running and configured (see `MYSQL_SETUP.md`)
 - Database schema: `schema.sql`
@@ -33,11 +33,11 @@ The business API itself lives in NestJS on port 8089; `server.js` is purely a re
 | **3000** 主入口 | `PORT` | 3000 | sales / academic / staff / admin / supervisor | owner |
 | **3001** 总后台 | `OWNER_PORT` | 3001 | owner | admin / supervisor / sales / academic / staff |
 | **3003** 统一登录入口 | `ALL_ROLES_PORT` | 3003 | sales / academic / staff / admin / supervisor | owner (L2 拒绝) |
-| 3002 新前端 (Next.js) | — | (frontend owned) | — | server.js 不监听 |
+| 3302 新前端 (Next.js) | — | (frontend owned) | — | server.js 不监听 |
 
-- **3002 reserved by Next.js**: `frontend/package.json` dev/start scripts pin Next.js to `-p 3002`,
-  so the new unified login port defaults to **3003** instead. Set `ALL_ROLES_PORT=3002` only if
-  Next.js is moved off 3002.
+- **3302 reserved by Next.js**: `frontend/package.json` dev/start scripts pin Next.js to `-p 3302`,
+  so the new unified login port defaults to **3003** instead. Set `ALL_ROLES_PORT=3302` only if
+  Next.js is moved off 3302.
 - **Three defenses (L1/L2/L3)**: L1 = `server.js` Express middleware (O(1) JWT peek, 403); L2 =
   `auth.service.ts:login` (401 with port/role context); L3 = `auth.guard.ts:assertRolePortMatch`
   (403 on any /api hit).

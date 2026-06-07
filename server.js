@@ -23,11 +23,11 @@ require("dotenv").config();
 
 const PORT = Number(process.env.PORT || 3000);
 const OWNER_PORT = Number(process.env.OWNER_PORT || 3001);
-// v1.3：统一登录入口端口（与新前端 Next.js 占用的 3002 错开，默认 3003）
+// v1.3：统一登录入口端口（与新前端 Next.js 占用的 3302 错开，默认 3003）
 const ALL_ROLES_PORT = Number(process.env.ALL_ROLES_PORT || 3003);
 const BACKEND_URL = process.env.BACKEND_URL || "http://localhost:8089";
-// 新前端入口（Next.js）。默认假设与本进程同主机的 3002 端口；可通过 env 覆盖。
-const FRONTEND_PUBLIC_URL = process.env.FRONTEND_PUBLIC_URL || "http://localhost:3002";
+// 新前端入口（Next.js）。默认假设与本进程同主机的 3302 端口；可通过 env 覆盖。
+const FRONTEND_PUBLIC_URL = process.env.FRONTEND_PUBLIC_URL || "http://localhost:3302";
 const PUBLIC_DIR = path.join(__dirname, "public");
 const UPLOAD_DIR = path.join(__dirname, "uploads");
 
@@ -35,8 +35,8 @@ const UPLOAD_DIR = path.join(__dirname, "uploads");
 //  * PORT (3000)            — 销售/教务/员工/主管/管理员（不含 owner）
 //  * OWNER_PORT (3001)      — 仅 owner（B7 后原 admin/supervisor 改走 ALL_ROLES_PORT 3003）
 //  * ALL_ROLES_PORT (3003)  — 统一登录入口；除 owner 外全角色放行（owner 仍必须 3001）
-// 3002 端口被新前端 Next.js (frontend/package.json dev/start 脚本) 占用，故
-// 统一登录入口从 3003 起；如未来 Next.js 改端口，ALL_ROLES_PORT 也可下调到 3002。
+// 3302 端口被新前端 Next.js (frontend/package.json dev/start 脚本) 占用，故
+// 统一登录入口从 3003 起；如未来 Next.js 改端口，ALL_ROLES_PORT 也可下调到 3302。
 // 详见 `doc/修复说明-端口体系-v1.3.md`。
 // B7：owner 端口白名单收紧为「仅 owner」（admin/supervisor 改走 3003 统一登录）
 const ALLOWED_OWNER_ROLES = ["owner"];
