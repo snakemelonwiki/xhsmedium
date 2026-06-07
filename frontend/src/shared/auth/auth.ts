@@ -27,7 +27,7 @@ const DEFAULT_HOME_BY_ROLE: Record<AppRole, string> = {
 const HOME_BY_PORT: Record<string, AppRole> = {
   '3000': 'operation',
   '3001': 'admin',
-  '3002': 'sales',
+  '3302': 'sales',
   '3003': 'academic',
 };
 

@@ -19,7 +19,7 @@ type ApiResult<T = any> = {
 };
 
 const backendURL = process.env.A_CROSS_BACKEND_URL ?? 'http://127.0.0.1:8089/api';
-const baseURL = process.env.A_LIVE_BASE_URL ?? 'http://127.0.0.1:3002';
+const baseURL = process.env.A_LIVE_BASE_URL ?? 'http://127.0.0.1:3302';
 const artifactRoot = resolve(__dirname, '../../screenshots/a-cross-live');
 const runId = `AGX_${new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14)}`;
 const report: string[] = [];

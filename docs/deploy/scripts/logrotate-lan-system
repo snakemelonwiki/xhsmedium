@@ -1,0 +1,53 @@
+# ============================================================================
+# logrotate 配置: lan-system (lan-legacy / lan-nestjs / lan-frontend)
+# ----------------------------------------------------------------------------
+# 适用场景: 不希望用 pm2-logrotate 插件, 走系统 logrotate 切.
+#           与 docs/deploy/scripts/install-pm2-logrotate.sh **二选一**,
+#           同时启用会竞争文件句柄, 偶发丢日志行.
+#
+# 策略 (与 pm2-logrotate 默认对齐, 保持行为一致):
+#   - daily         每天切一次
+#   - rotate 30     保留 30 天
+#   - compress      gzip 归档
+#   - missingok     进程没启动时不报错
+#   - notifempty    空文件不切
+#   - copytruncate  ⚠️ 关键: 不杀进程, 把当前日志文件原地清零
+#                            (PM2 进程拿的是 inode 引用, copytruncate
+#                             比 create 模式更安全, 不会丢正在写的行)
+#   - dateext       后缀带日期 (YYYYMMDD)
+#
+# 部署:
+#   sudo cp docs/deploy/scripts/logrotate-lan-system /etc/logrotate.d/lan-system
+#   sudo chmod 644 /etc/logrotate.d/lan-system
+#   # logrotate 由 cron.daily 自动跑, 不用额外配 crontab
+#   # 测试: sudo logrotate -d /etc/logrotate.d/lan-system
+#   # 强制跑一次: sudo logrotate -f /etc/logrotate.d/lan-system
+#
+# 卸载:
+#   sudo rm /etc/logrotate.d/lan-system
+# ============================================================================
+
+/var/log/lan-system/*.log {
+    daily
+    rotate 30
+    compress
+    compresscmd /usr/bin/gzip
+    compressext .gz
+    compressoptions -9
+    missingok
+    notifempty
+    copytruncate
+    dateext
+    dateformat -%Y%m%d
+    # 切割后文件权限: PM2 进程用户 (www-data) 可写, 运维可读
+    create 0640 www-data www-data
+    # 日志保留时一并把压缩文件所属也归到 www-data, 避免切完后 root 拥有
+    sharedscripts
+    postrotate
+        # logrotate 切完后让 PM2 重新打开文件句柄 (虽然 copytruncate 已经
+        # 不需要 reopen, 但 reload 一下让 PM2 内部状态更干净)
+        if [ -f /var/run/pm2.pid ]; then
+            /usr/bin/pm2 reloadLogs >/dev/null 2>&1 || true
+        fi
+    endscript
+}

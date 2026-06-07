@@ -20,7 +20,7 @@ type ApiResult<T = unknown> = {
 };
 
 const runId = `aop_live_${Date.now()}`;
-const baseURL = process.env.A_LIVE_BASE_URL ?? 'http://127.0.0.1:3002';
+const baseURL = process.env.A_LIVE_BASE_URL ?? 'http://127.0.0.1:3302';
 const evidenceDir = resolve(__dirname, '../../doc/screenshots/a-operation-live');
 const reportPath = resolve(__dirname, '../../doc/playwright-a端-运营端-执行报告.md');
 

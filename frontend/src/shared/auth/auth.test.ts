@@ -22,7 +22,7 @@ describe('auth route helpers', () => {
   it('maps known ports to the matching role home path', () => {
     expect(getPortHomePath('3000')).toBe('/operation');
     expect(getPortHomePath('3001')).toBe('/admin');
-    expect(getPortHomePath('3002')).toBe('/sales/leads');
+    expect(getPortHomePath('3302')).toBe('/sales/leads');
     expect(getPortHomePath('3003')).toBe('/academic');
   });
 

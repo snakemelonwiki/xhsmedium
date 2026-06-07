@@ -124,7 +124,7 @@ export class AuthService {
     // 修复 (2026-06-05)：
     //   1) 原代码用 `this.configService.get('PORT', 3000)` 比较 requestPort，但
     //      `PORT` 在 backend 进程是 8089（自身端口），与 server.js 的 3000 错位——
-    //      导致 curl / Next.js (port 3002 → 8089) 等无 x-server-port 头的请求被
+    //      导致 curl / Next.js (port 3302 → 8089) 等无 x-server-port 头的请求被
     //      误判为「来自主入口」而拦截 owner。
     //   2) server.js 启动时硬编码 `Number(process.env.PORT || 3000)`，所以
     //      legacy main port 默认 3000（与 backend 自身 PORT 无关）。

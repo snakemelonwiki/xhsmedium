@@ -47,7 +47,7 @@ test.describe.serial('运营端 OP-01~OP-12 (op_flow_01)', () => {
   test.beforeAll(async ({ browser }) => {
     const page = await browser.newPage();
     for (const path of ['/login', '/operation', '/operation/dashboard', '/operation/dashboard/account-analysis', '/operation/leads', '/operation/accounts']) {
-      try { await page.goto('http://127.0.0.1:3002' + path, { waitUntil: 'domcontentloaded', timeout: 60_000 }); } catch {}
+      try { await page.goto('http://127.0.0.1:3302' + path, { waitUntil: 'domcontentloaded', timeout: 60_000 }); } catch {}
     }
     await page.close();
   });

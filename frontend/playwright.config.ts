@@ -7,12 +7,12 @@ export default defineConfig({
   expect: { timeout: 10_000 },
   webServer: {
     command: 'npm run dev -- --hostname 127.0.0.1',
-    url: 'http://127.0.0.1:3002/login',
+    url: 'http://127.0.0.1:3302/login',
     timeout: 180_000,
     reuseExistingServer: true,
   },
   use: {
-    baseURL: 'http://127.0.0.1:3002',
+    baseURL: 'http://127.0.0.1:3302',
     trace: 'retain-on-failure',
   },
   projects: [

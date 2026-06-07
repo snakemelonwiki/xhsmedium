@@ -1,7 +1,7 @@
 // e2e/specs/06-messages.spec.ts
 // B 端 "销售消息中心" 场景：真实 API（不 mock），由项目根 playwright worker 串行执行。
 // 覆盖：1) /sales/messages 加载；2) 全部/未读 tab 切换 + 全部已读；3) Header 铃铛下拉。
-// 依赖：NestJS 后端 8089、Next.js 前端 3002、MySQL 已 seed sales1/test123。
+// 依赖：NestJS 后端 8089、Next.js 前端 3302、MySQL 已 seed sales1/test123。
 // 已知：/api/notifications 是稳定接口（已验证 200）；未读数可能为 0，不硬断言红点。
 
 import { test, expect, type Page, type Response } from '@playwright/test';
@@ -358,7 +358,7 @@ test.describe('B 端 /sales/messages 销售消息中心（真实 API）', () => 
 // ============================== 备注 ==============================
 // 跑通条件：
 //   1) NestJS 后端在 8089 已启动，MySQL 已 seed sales1/test123；
-//   2) Next.js 前端在 3002 跑（playwright.config 自动 npm run dev）；
+//   2) Next.js 前端在 3302 跑（playwright.config 自动 npm run dev）；
 //   3) 在 frontend 目录下执行：
 //        npx playwright test e2e/specs/06-messages.spec.ts
 // 已知：

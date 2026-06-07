@@ -1,6 +1,6 @@
 // specs/03-lead-detail-followup.spec.ts
 // B 端销售端：客资详情 + 写跟进 + 申请运营协同。
-// 使用真实 API（不 mock），串行执行；依赖后端 NestJS 跑在 8089、前端 Next.js 跑在 3002。
+// 使用真实 API（不 mock），串行执行；依赖后端 NestJS 跑在 8089、前端 Next.js 跑在 3302。
 import { test, expect, type Page, type Response } from '@playwright/test';
 
 import { loginAs, screenshot } from '../helpers/auth';
@@ -280,7 +280,7 @@ test('B-FE-3-03 申请运营协同弹窗字段（不提交）', async ({ page })
 // ============================== 备注 ==============================
 // 跑通条件：
 //   1) NestJS 后端在 8089 已启动，MySQL 已导入 schema.sql 并 seed sales1/test123；
-//   2) Next.js 前端在 3002 跑（playwright.config 自动 npm run dev）；
+//   2) Next.js 前端在 3302 跑（playwright.config 自动 npm run dev）；
 //   3) 在 frontend 目录下执行：npx playwright test e2e/specs/03-lead-detail-followup.spec.ts
 // 已知问题（不会让用例 fail，仅 warn）：
 //   - /api/leads 当前后端可能 500/404，list 拿不到真实 lead id 时自动回退到占位 id；

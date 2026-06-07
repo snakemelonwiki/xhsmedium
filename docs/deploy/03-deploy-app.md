@@ -34,7 +34,7 @@ sudo bash docs/deploy/scripts/deploy-app.sh
 - PM2 进程:`pm2 list` 看到 `lan-system` 在跑
 - legacy 反代:`http://127.0.0.1:3000/`(serve 老的 `public/app.js` 单页)
 - NestJS API:`http://127.0.0.1:8089/api/...`
-- Next.js:`http://127.0.0.1:3002/`(新前端,如果没 SKIP_FRONTEND)
+- Next.js:`http://127.0.0.1:3302/`(新前端,如果没 SKIP_FRONTEND)
 
 ## 二次更新(已部署,只更新代码)
 

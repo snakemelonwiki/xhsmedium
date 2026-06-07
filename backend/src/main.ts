@@ -65,11 +65,11 @@ async function bootstrap() {
 
   // B7 兜底：如果请求没带 x-server-port（说明没经过 server.js proxy，
   // 例如本地 8089 直连 / 测试），AuthGuard 看到 header 缺失会放行。
-  // 但 Next.js rewrite 到 backend 时，浏览器仍带 origin 头（指向 3002），
-  // 此时需把 x-server-port 兜底成 origin 推断的端口（3002），否则会被
+  // 但 Next.js rewrite 到 backend 时，浏览器仍带 origin 头（指向 3302），
+  // 此时需把 x-server-port 兜底成 origin 推断的端口（3302），否则会被
   // main.ts 默认 8089 兜底，AuthGuard 误判 owner 拒绝。
-  // 修复 (2026-06-05)：新增 Next.js 端口（3002）识别。origin/referer
-  //   含已知端口（3000/3001/3002/3003）才兜底成对应端口；都没有则**不
+  // 修复 (2026-06-05)：新增 Next.js 端口（3302）识别。origin/referer
+  //   含已知端口（3000/3001/3302/3003）才兜底成对应端口；都没有则**不
   //   设置** header，让 AuthGuard 走"缺 header 放行"分支（兼容本地 8089 直连）。
   const selfServerPort = String(Number(process.env.PORT ?? 3000) || 3000);
   app.use((req: any, _res: any, next: any) => {
@@ -77,7 +77,7 @@ async function bootstrap() {
       // 用 origin / referer 反推来源端口（Next.js 浏览器请求会带这两个头）
       const origin = String(req.headers['origin'] || req.headers['referer'] || '');
       let inferred: string | undefined;
-      if (origin.includes(':3002')) inferred = '3002';
+      if (origin.includes(':3302')) inferred = '3302';
       else if (origin.includes(':3003')) inferred = '3003';
       else if (origin.includes(':3001')) inferred = '3001';
       else if (origin.includes(':3000')) inferred = '3000';

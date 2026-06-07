@@ -1,6 +1,6 @@
 // specs/01-login-and-home.spec.ts
 // B 端销售端：登录 + 首页（6 宫格 & 通知红点）。
-// 使用真实 API（不 mock），串行执行；依赖后端 NestJS 跑在 8089、前端 Next.js 跑在 3002。
+// 使用真实 API（不 mock），串行执行；依赖后端 NestJS 跑在 8089、前端 Next.js 跑在 3302。
 import { test, expect, type Page, type Response } from '@playwright/test';
 
 import { ACCOUNTS, loginAs, screenshot } from '../helpers/auth';
@@ -162,7 +162,7 @@ test('B-FE-1 首页 6 宫格与通知红点 + 跳转到我的客资', async ({ p
 // ============================== 备注 ==============================
 // 跑通条件：
 //   1) NestJS 后端在 8089 已启动，MySQL 已导入 schema.sql 并 seed sales1/test123；
-//   2) Next.js 前端在 3002 跑（playwright.config 自动 npm run dev）；
+//   2) Next.js 前端在 3302 跑（playwright.config 自动 npm run dev）；
 //   3) 在 frontend 目录下执行：npx playwright test e2e/specs/01-login-and-home.spec.ts
 // 已知问题（不会让用例 fail，仅 warn）：
 //   - /api/sales/home-summary 后端可能 404/500，前端会回退为 0 占位；

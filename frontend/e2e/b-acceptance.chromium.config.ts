@@ -6,7 +6,7 @@ export default defineConfig({
   expect: { timeout: 10_000 },
   use: {
     ...devices['Desktop Chrome'],
-    baseURL: 'http://127.0.0.1:3002',
+    baseURL: 'http://127.0.0.1:3302',
     browserName: 'chromium',
     trace: 'retain-on-failure',
   },
