@@ -12,13 +12,16 @@ export type DateRangeValue = { start: Dayjs; end: Dayjs } | null;
 export type DateRangeUnit = 'day' | 'week' | 'month' | 'year';
 
 /**
- * 预设项：label 决定按钮文案，unit + n 决定 [now - n*unit, now] 的范围。
+ * 预设项：label 决定按钮文案，unit + n 决定范围。
+ * - 'relative'（默认）: [now - n*unit, now]，即"近 n 个 unit"
+ * - 'calendar'        : [startOf(unit), now]，即"本 unit"
  */
 export type DateRangePreset = {
   key: string;
   label: string;
   unit: DateRangeUnit;
   n: number;
+  mode?: 'relative' | 'calendar';
 };
 
 /**
@@ -40,16 +43,16 @@ export const DEFAULT_RANGE_PRESETS: ReadonlyArray<DateRangePreset> = [
  * 适用于"下拉选择"模式（variant='select'），按钮模式（variant='buttons'）下 12 个太挤，建议用 DEFAULT_RANGE_PRESETS。
  */
 export const RANGE_PRESETS_FULL: ReadonlyArray<DateRangePreset> = [
-  { key: 'today', label: '今日', unit: 'day', n: 1 },
+  { key: 'today', label: '今日', unit: 'day', n: 1, mode: 'calendar' },
   { key: '3d', label: '近 3 天', unit: 'day', n: 3 },
   { key: '6d', label: '近 6 天', unit: 'day', n: 6 },
-  { key: 'thisWeek', label: '本周', unit: 'week', n: 1 },
+  { key: 'thisWeek', label: '本周', unit: 'week', n: 1, mode: 'calendar' },
   { key: '3w', label: '近 3 周', unit: 'week', n: 3 },
   { key: '6w', label: '近 6 周', unit: 'week', n: 6 },
-  { key: 'thisMonth', label: '本月', unit: 'month', n: 1 },
+  { key: 'thisMonth', label: '本月', unit: 'month', n: 1, mode: 'calendar' },
   { key: '3m', label: '近 3 个月', unit: 'month', n: 3 },
   { key: '6m', label: '近 6 个月', unit: 'month', n: 6 },
-  { key: 'thisYear', label: '本年', unit: 'year', n: 1 },
+  { key: 'thisYear', label: '本年', unit: 'year', n: 1, mode: 'calendar' },
   { key: '3y', label: '近 3 年', unit: 'year', n: 3 },
 ];
 
@@ -70,9 +73,17 @@ export function buildLastRange(unit: DateRangeUnit, n: number, now: Dayjs = dayj
  * 规则：start/end 都用 startOf('day') 对齐到天，相等即视为匹配。
  * 这样用户点过预设后再点开 RangePicker 改时间，预设高亮会自然清空（因为 day 对不上了）。
  */
-export function isPresetMatch(value: DateRangeValue, unit: DateRangeUnit, n: number, now: Dayjs = dayjs()): boolean {
+export function isPresetMatch(
+  value: DateRangeValue,
+  unit: DateRangeUnit,
+  n: number,
+  mode?: 'relative' | 'calendar',
+  now: Dayjs = dayjs(),
+): boolean {
   if (!value) return false;
-  const target = buildLastRange(unit, n, now);
+  const target = mode === 'calendar'
+    ? { start: now.startOf(unit), end: now }
+    : buildLastRange(unit, n, now);
   return value.start.startOf('day').isSame(target.start.startOf('day'))
       && value.end.startOf('day').isSame(target.end.startOf('day'));
 }

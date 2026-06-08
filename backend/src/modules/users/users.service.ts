@@ -52,6 +52,7 @@ export class UsersService {
 
   /**
    * 查询可分配销售账号候选，仅返回 active sales 的安全字段。
+   * 同时从 employees 表加载真实姓名（employeeName）供下拉展示。
    */
   async findAssignableSalesUsersPaged(options: { limit: number; offset: number }): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
     const safeLimit = this.clampLimit(options.limit);
@@ -62,8 +63,24 @@ export class UsersService {
       skip: safeOffset,
       take: safeLimit,
     });
+
+    // 加载员工姓名（employees.name），供前端下拉显示真实姓名而非登录用户名
+    let employeeNameMap = new Map<string, string>();
+    const employeeIds = rows.map((u) => u.employeeId).filter(Boolean) as string[];
+    if (employeeIds.length > 0) {
+      const placeholders = employeeIds.map(() => '?').join(',');
+      const employees: Array<{ id: string; name: string }> = await this.userRepository.manager.query(
+        `SELECT id, name FROM employees WHERE id IN (${placeholders})`,
+        employeeIds,
+      );
+      employeeNameMap = new Map(employees.map((e) => [e.id, e.name]));
+    }
+
     return {
-      items: rows.map(toSafeUser),
+      items: rows.map((u) => ({
+        ...toSafeUser(u),
+        employeeName: u.employeeId ? (employeeNameMap.get(u.employeeId) ?? null) : null,
+      })),
       total,
       limit: safeLimit,
       offset: safeOffset,

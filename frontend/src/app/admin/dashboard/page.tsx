@@ -23,7 +23,6 @@ import {
   Empty,
   List,
   Row,
-  Segmented,
   Skeleton,
   Space,
   Statistic,
@@ -31,25 +30,26 @@ import {
   Typography,
   message as antdMessage,
 } from 'antd';
+import dayjs from 'dayjs';
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 
 import { getSupervisorOverview, type SupervisorOverview } from '@/shared/api/admin';
 import { listNotifications } from '@/shared/api/notifications';
 import { getReminderUnreadCount, markReminderRead } from '@/shared/api/reminders';
+import { QuickRangePicker } from '@/shared/components/date';
+import type { DateRangeValue } from '@/shared/components/date';
 import { readAuthenticatedUser } from '@/shared/auth/auth';
 import { useNotifications } from '@/shared/contexts/NotificationContext';
 import { useNotificationSocket } from '@/shared/hooks/useNotificationSocket';
 import type { NotificationItem } from '@/shared/types/notifications';
 import { formatDateTime } from '@/shared/utils/date-format';
 
-type Period = 'today' | 'week' | 'month';
-
-const PERIOD_LABELS: Record<Period, string> = {
-  today: '今日',
-  week: '本周',
-  month: '本月',
-};
+const OVERVIEW_PRESETS = [
+  { key: 'today', label: '今日', unit: 'day' as const, n: 1, mode: 'calendar' as const },
+  { key: 'thisWeek', label: '本周', unit: 'week' as const, n: 1, mode: 'calendar' as const },
+  { key: 'thisMonth', label: '本月', unit: 'month' as const, n: 1, mode: 'calendar' as const },
+];
 
 type DataCard = {
   key: keyof Pick<SupervisorOverview, 'postCount' | 'leadCount' | 'likes' | 'effectiveAccountCount'>;
@@ -156,7 +156,7 @@ const QUICK_ENTRIES = [
 ];
 
 export default function AdminDashboardPage() {
-  const [period, setPeriod] = useState<Period>('today');
+  const [dateRange, setDateRange] = useState<DateRangeValue>({ start: dayjs().startOf('day'), end: dayjs() });
   const [overview, setOverview] = useState<SupervisorOverview | undefined>();
   const [loading, setLoading] = useState(true);
   const { unreadCount } = useNotifications();
@@ -178,9 +178,11 @@ export default function AdminDashboardPage() {
   const [reminderItems, setReminderItems] = useState<NotificationItem[]>([]);
   const [reminderLoading, setReminderLoading] = useState(false);
 
-  const fetchOverview = useCallback((p: Period) => {
+  const fetchOverview = useCallback((range: DateRangeValue) => {
     setLoading(true);
-    getSupervisorOverview(p)
+    const from = range ? range.start.format('YYYY-MM-DD') : dayjs().startOf('day').format('YYYY-MM-DD');
+    const to = range ? range.end.format('YYYY-MM-DD') : dayjs().format('YYYY-MM-DD');
+    getSupervisorOverview('today', from, to)
       .then(setOverview)
       .catch(() => setOverview(undefined))
       .finally(() => setLoading(false));
@@ -202,8 +204,8 @@ export default function AdminDashboardPage() {
   }, []);
 
   useEffect(() => {
-    fetchOverview(period);
-  }, [period, fetchOverview]);
+    fetchOverview(dateRange);
+  }, [dateRange, fetchOverview]);
 
   useEffect(() => {
     void loadReminders();
@@ -330,14 +332,12 @@ export default function AdminDashboardPage() {
           </Typography.Paragraph>
         </div>
         <Space size={12} wrap align="center">
-          <Segmented
-            value={period}
-            onChange={(v) => setPeriod(v as Period)}
-            options={[
-              { label: '今日', value: 'today' },
-              { label: '本周', value: 'week' },
-              { label: '本月', value: 'month' },
-            ]}
+          <QuickRangePicker
+            value={dateRange}
+            onChange={setDateRange}
+            presets={OVERVIEW_PRESETS}
+            variant="buttons"
+            presetSize="middle"
           />
           <Tag color="purple" icon={<TeamOutlined />}>
             {user?.name ?? '主管'}
@@ -383,7 +383,7 @@ export default function AdminDashboardPage() {
                     </Space>
                     <Statistic value={value} valueStyle={{ color: card.accent }} />
                     <Typography.Paragraph type="secondary" style={{ marginBottom: 0, fontSize: 12 }}>
-                      {PERIOD_LABELS[period]}：{card.description}
+                      {dateRange ? `${dateRange.start.format('M/D')} - ${dateRange.end.format('M/D')}` : ''}：{card.description}
                     </Typography.Paragraph>
                   </Space>
                 </Card>

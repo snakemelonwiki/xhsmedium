@@ -1,6 +1,8 @@
 type RankingExportFilterInput = {
   type: 'posts' | 'leads';
-  period: 'today' | '7d' | '30d';
+  period?: string;
+  from?: string;
+  to?: string;
   platform?: '' | 'xhs' | 'douyin';
 };
 
@@ -10,8 +12,12 @@ type RankingExportFilterInput = {
 export function buildRankingExportFilter(input: RankingExportFilterInput): Record<string, string> {
   const filter: Record<string, string> = {
     type: input.type,
-    period: input.period,
+    period: input.period ?? 'today',
   };
+  if (input.from && input.to) {
+    filter.from = input.from;
+    filter.to = input.to;
+  }
   if (input.platform) {
     filter.platform = input.platform;
   }

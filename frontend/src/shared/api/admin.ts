@@ -289,9 +289,12 @@ export type SupervisorAnalysis = {
   leadTrend: Array<{ date: string; platform: string; leadCount: number }>;
 };
 
-export async function getSupervisorOverview(period: string = 'today'): Promise<SupervisorOverview | undefined> {
+export async function getSupervisorOverview(period: string = 'today', from?: string, to?: string): Promise<SupervisorOverview | undefined> {
+  const query: Record<string, string> = { period };
+  if (from) query.from = from;
+  if (to) query.to = to;
   const payload = await apiClient.get<RawRecord>('/dashboard/supervisor/overview', {
-    query: { period },
+    query,
   }).catch(() => undefined);
   if (!payload) return undefined;
   return {

@@ -30,22 +30,22 @@ describe('isPresetMatch', () => {
 
   it('matches a fresh preset range', () => {
     const range = buildLastRange('day', 7, now);
-    expect(isPresetMatch(range, 'day', 7, now)).toBe(true);
+    expect(isPresetMatch(range, 'day', 7, undefined, now)).toBe(true);
   });
 
   it('returns false for null value', () => {
-    expect(isPresetMatch(null, 'day', 7, now)).toBe(false);
+    expect(isPresetMatch(null, 'day', 7, undefined, now)).toBe(false);
   });
 
   it('returns false when start day differs by even 1', () => {
     const range = buildLastRange('day', 7, now);
     const shifted = { start: range.start.subtract(1, 'day'), end: range.end };
-    expect(isPresetMatch(shifted, 'day', 7, now)).toBe(false);
+    expect(isPresetMatch(shifted, 'day', 7, undefined, now)).toBe(false);
   });
 
   it('ignores intra-day time differences (startOf day alignment)', () => {
     const range = buildLastRange('day', 7, now);
     const tweakedTime = { start: range.start.add(3, 'hour'), end: range.end.add(3, 'hour') };
-    expect(isPresetMatch(tweakedTime, 'day', 7, now)).toBe(true);
+    expect(isPresetMatch(tweakedTime, 'day', 7, undefined, now)).toBe(true);
   });
 });

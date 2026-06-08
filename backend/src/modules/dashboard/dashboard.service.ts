@@ -1132,14 +1132,17 @@ export class DashboardService {
 
   /**
    * 主管总览统计，支撑作品、客资、互动、有效账号与风险卡片。
+   * @param period today / week / month（快捷周期）
+   * @param from 自定义开始日期（YYYY-MM-DD），非空时覆盖 period 推算
+   * @param to   自定义结束日期（YYYY-MM-DD），非空时覆盖 period 推算
    */
-  async getSupervisorOverview(period: string = 'today'): Promise<any> {
-    const { from, to } = this.resolvePeriod(period);
-    const cacheKey = `dashboard:supervisor:overview:${period}:${from}:${to}`;
+  async getSupervisorOverview(period: string = 'today', from?: string, to?: string): Promise<any> {
+    const range = from && to ? { from, to } : this.resolvePeriod(period);
+    const cacheKey = `dashboard:supervisor:overview:${period || 'custom'}:${range.from}:${range.to}`;
     const cached = this.cache.get<ReturnType<typeof this.computeSupervisorOverview>>(cacheKey);
     if (cached !== undefined) return cached;
 
-    const result = await this.computeSupervisorOverview(from, to, period);
+    const result = await this.computeSupervisorOverview(range.from, range.to, period);
     this.cache.set(cacheKey, result, CACHE_TTL_MS);
     return result;
   }

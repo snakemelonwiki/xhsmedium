@@ -189,10 +189,16 @@ export class DashboardController {
 
   /**
    * 主管总览，按周期返回作品、客资、互动、账号和风险摘要。
+   * period: today / week / month（快捷周期）；from + to 覆盖 period（自定义日期）。
    */
   @Get('supervisor/overview')
-  async getSupervisorOverview(@Res() res: Response, @Query('period') period?: string) {
-    const data = await this.dashboardService.getSupervisorOverview(period || 'today');
+  async getSupervisorOverview(
+    @Res() res: Response,
+    @Query('period') period?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    const data = await this.dashboardService.getSupervisorOverview(period || 'today', from, to);
     return res.json(data);
   }
 

@@ -4,6 +4,7 @@ import React, { useMemo } from 'react';
 import type { CSSProperties } from 'react';
 import { Button, DatePicker, Select, Space } from 'antd';
 import type { RangePickerProps } from 'antd/es/date-picker';
+import dayjs from 'dayjs';
 
 import {
   buildLastRange,
@@ -66,14 +67,18 @@ export function QuickRangePicker({
   const activeKey = useMemo(() => {
     if (!value) return null;
     for (const p of presets) {
-      if (isPresetMatch(value, p.unit, p.n)) return p.key;
+      if (isPresetMatch(value, p.unit, p.n, p.mode)) return p.key;
     }
     return null;
   }, [value, presets]);
 
   const handlePresetClick = (p: DateRangePreset) => {
     if (disabled) return;
-    onChange(buildLastRange(p.unit, p.n));
+    if (p.mode === 'calendar') {
+      onChange({ start: dayjs().startOf(p.unit), end: dayjs() });
+    } else {
+      onChange(buildLastRange(p.unit, p.n));
+    }
   };
 
   const handlePickerChange: RangePickerProps['onChange'] = (dates) => {

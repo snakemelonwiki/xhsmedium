@@ -3,8 +3,13 @@
 import { DownloadOutlined } from '@ant-design/icons';
 import { Alert, Button, Card, Empty, message, Pagination, Radio, Space, Table, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
+import dayjs from 'dayjs';
 import { useEffect, useState } from 'react';
 
+import { QuickRangePicker } from '@/shared/components/date';
+import type { DateRangeValue } from '@/shared/components/date';
+import { isPresetMatch } from '@/shared/utils/date-range';
+import type { DateRangePreset } from '@/shared/utils/date-range';
 import { apiClient } from '@/shared/api/apiClient';
 import { createExport, downloadExportUrl, getExport } from '@/shared/api/exports';
 
@@ -25,8 +30,13 @@ type RankingRow = {
 };
 
 type RankingType = 'posts' | 'leads';
-type Period = 'today' | '7d' | '30d';
 type Platform = '' | 'xhs' | 'douyin';
+
+const RANKING_PRESETS: readonly DateRangePreset[] = [
+  { key: 'today', label: '今日', unit: 'day', n: 1, mode: 'calendar' },
+  { key: '7d', label: '近 7 天', unit: 'day', n: 7 },
+  { key: '30d', label: '近 30 天', unit: 'day', n: 30 },
+] as const;
 
 /**
  * 主管运营排行榜：支持 type / platform / period 三档筛选，平铺所有员工聚合数据。
@@ -37,14 +47,25 @@ export default function AdminRankingsPage() {
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [type, setType] = useState<RankingType>('posts');
-  const [period, setPeriod] = useState<Period>('today');
+  const [dateRange, setDateRange] = useState<DateRangeValue>({ start: dayjs().startOf('day'), end: dayjs() });
   const [platform, setPlatform] = useState<Platform>('');
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string>();
   const pageSize = 20;
 
-  async function load(nextPage = page, nextType = type, nextPeriod = period, nextPlatform = platform) {
+  /** 根据当前 dateRange 生成请求参数：预设命中则发 period，否则发 from/to */
+  function buildPeriodQuery(): Record<string, string> {
+    if (!dateRange) return { period: 'today' };
+    for (const p of RANKING_PRESETS) {
+      if (isPresetMatch(dateRange, p.unit, p.n, p.mode)) {
+        return { period: p.key };
+      }
+    }
+    return { from: dateRange.start.format('YYYY-MM-DD'), to: dateRange.end.format('YYYY-MM-DD') };
+  }
+
+  async function load(nextPage = page, nextType = type, nextPlatform = platform) {
     setLoading(true);
     setError(undefined);
     try {
@@ -52,7 +73,7 @@ export default function AdminRankingsPage() {
         type: nextType,
         limit: pageSize,
         offset: (nextPage - 1) * pageSize,
-        period: nextPeriod,
+        ...buildPeriodQuery(),
       };
       if (nextPlatform) query.platform = nextPlatform;
       const payload = await apiClient.get<any>('/rankings', { query });
@@ -73,7 +94,7 @@ export default function AdminRankingsPage() {
   useEffect(() => {
     void load(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [dateRange]);
 
   const columns: ColumnsType<RankingRow> = [
     { title: '排名', width: 80, render: (_, __, index) => (page - 1) * pageSize + index + 1 },
@@ -92,7 +113,7 @@ export default function AdminRankingsPage() {
     setExporting(true);
     const hide = message.loading('正在生成导出文件...', 0);
     try {
-      const result = await createExport({ exportType: 'rankings', filter: buildRankingExportFilter({ type, period, platform }) });
+      const result = await createExport({ exportType: 'rankings', filter: buildRankingExportFilter({ type, ...buildPeriodQuery(), platform }) });
       let attempts = 0;
       const maxAttempts = 30;
       while (attempts < maxAttempts) {
@@ -130,16 +151,19 @@ export default function AdminRankingsPage() {
       </div>
       <Card>
         <Space size={16} wrap style={{ marginBottom: 16 }}>
-          <Radio.Group value={type} onChange={(e) => { setType(e.target.value); void load(1, e.target.value, period, platform); }}>
+          <Radio.Group value={type} onChange={(e) => { setType(e.target.value); void load(1, e.target.value, platform); }}>
             <Radio.Button value="posts">作品榜</Radio.Button>
             <Radio.Button value="leads">客资榜</Radio.Button>
           </Radio.Group>
-          <Radio.Group value={period} onChange={(e) => { setPeriod(e.target.value); void load(1, type, e.target.value, platform); }}>
-            <Radio.Button value="today">今日</Radio.Button>
-            <Radio.Button value="7d">近 7 天</Radio.Button>
-            <Radio.Button value="30d">近 30 天</Radio.Button>
-          </Radio.Group>
-          <Radio.Group value={platform} onChange={(e) => { setPlatform(e.target.value); void load(1, type, period, e.target.value); }}>
+          <QuickRangePicker
+            value={dateRange}
+            onChange={setDateRange}
+            presets={RANKING_PRESETS}
+            variant="buttons"
+            presetSize="middle"
+            selectPlaceholder="快捷周期"
+          />
+          <Radio.Group value={platform} onChange={(e) => { setPlatform(e.target.value); void load(1, type, e.target.value); }}>
             <Radio.Button value="">全部平台</Radio.Button>
             <Radio.Button value="xhs">小红书</Radio.Button>
             <Radio.Button value="douyin">抖音</Radio.Button>
