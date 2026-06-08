@@ -2,7 +2,7 @@ import {
   BadRequestException, ConflictException, Injectable, NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Like, Repository } from 'typeorm';
+import { In, Like, Repository } from 'typeorm';
 import { Employee } from '../../entities/employee.entity';
 import { User } from '../../entities/user.entity';
 import { makeId } from '../../shared/utils/id-generator';
@@ -46,17 +46,18 @@ export class EmployeesService {
   ) {}
 
   /**
-   * 查询员工列表。
+   * 查询员工列表，附带关联的登录账号角色。
    */
   async findAll(keyword = ''): Promise<any[]> {
-    return this.employeeRepository.find({
+    const items = await this.employeeRepository.find({
       order: { createdAt: 'DESC' },
       where: this.keywordWhere(keyword),
     });
+    return this.enrichWithRoles(items);
   }
 
   /**
-   * 分页查询员工列表。
+   * 分页查询员工列表，附带关联的登录账号角色。
    */
   async findAllPaged(limit: number, offset: number, keyword = ''): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
     const [items, total] = await this.employeeRepository.findAndCount({
@@ -65,7 +66,8 @@ export class EmployeesService {
       take: limit,
       skip: offset,
     });
-    return { items, total, limit, offset };
+    const enriched = await this.enrichWithRoles(items);
+    return { items: enriched, total, limit, offset };
   }
 
   /**
@@ -191,7 +193,7 @@ export class EmployeesService {
     }
 
     const password = String(input.loginPassword || '').trim() || this.generateRandomPassword();
-    const role = String(input.loginRole || 'operation').trim() || 'operation';
+    const role = String(input.loginRole || 'staff').trim() || 'staff';
     const hashedPassword = await bcrypt.hash(password, 10);
 
     const user = this.userRepository.create({
@@ -322,6 +324,28 @@ export class EmployeesService {
     }
     const after = await this.findById(id);
     return after as Employee;
+  }
+
+  /**
+   * 批量给员工列表附加关联的 user.role。
+   * 一次查询全部关联 user，避免 N+1。
+   */
+  private async enrichWithRoles(items: Employee[]): Promise<any[]> {
+    if (items.length === 0) return [];
+    const employeeIds = items.map((e) => e.id).filter(Boolean);
+    const users = employeeIds.length
+      ? await this.userRepository.find({ where: { employeeId: In(employeeIds) } })
+      : [];
+    const roleByEmployeeId = new Map<string, string | null>();
+    for (const u of users) {
+      if (u.employeeId && !roleByEmployeeId.has(u.employeeId)) {
+        roleByEmployeeId.set(u.employeeId, u.role);
+      }
+    }
+    return items.map((emp) => ({
+      ...emp,
+      role: roleByEmployeeId.get(emp.id) || null,
+    }));
   }
 
   /**

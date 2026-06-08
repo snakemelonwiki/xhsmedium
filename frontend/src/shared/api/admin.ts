@@ -56,6 +56,8 @@ function mapEmployee(raw: RawRecord): AdminEmployee {
     status: text(raw.status),
     department: text(raw.department) ?? null,
     createdAt: text(raw.createdAt),
+    roleType: text(raw.roleType),
+    role: text(raw.role),
   };
 }
 
@@ -178,10 +180,16 @@ export async function listAdminEmployees(query: PageQuery = {}): Promise<PagedRe
 }
 
 export async function saveAdminEmployee(body: Partial<AdminEmployee> & { name: string }) {
-  if (body.id) {
-    return apiClient.request(`/employees/${body.id}`, { method: 'PUT', body });
+  // 前端表单字段名 roleType → 后端期望 loginRole。
+  // 同时把前端别名 'operations' 翻译为后端枚举 'operation'（与 User.role enum 对齐）。
+  const { roleType, ...rest } = body;
+  const loginRole = roleType ? String(roleType).trim() : undefined;
+  const normalizedLoginRole = loginRole === 'operations' ? 'operation' : loginRole;
+  const payload = { ...rest, ...(normalizedLoginRole ? { loginRole: normalizedLoginRole } : {}) };
+  if (payload.id) {
+    return apiClient.request(`/employees/${payload.id}`, { method: 'PUT', body: payload });
   }
-  return apiClient.post('/employees', body);
+  return apiClient.post('/employees', payload);
 }
 
 export async function listAdminAccounts(query: PageQuery = {}): Promise<PagedResult<AdminAccount>> {

@@ -6,7 +6,7 @@ import {
 import type { TableColumnsType, TablePaginationConfig } from 'antd';
 import { useEffect, useState } from 'react';
 
-import { apiClient } from '@/shared/api/apiClient';
+import { apiClient, normalizePagedResult } from '@/shared/api/apiClient';
 import { listAdminEmployees, saveAdminEmployee } from '@/shared/api/admin';
 import type { AdminEmployee } from '@/shared/types/admin';
 
@@ -28,11 +28,12 @@ type UserRecord = {
 };
 
 const ROLE_OPTIONS = [
-  { label: '运营', value: 'operations' },
+  { label: '运营', value: 'operation' },
   { label: '销售', value: 'sales' },
   { label: '教务', value: 'academic' },
   { label: '主管', value: 'supervisor' },
   { label: '系统管理员', value: 'admin' },
+  { label: '员工', value: 'staff' },
 ];
 
 const STATUS_OPTIONS = [
@@ -42,11 +43,12 @@ const STATUS_OPTIONS = [
 ];
 
 const ROLE_TAG_COLORS: Record<string, string> = {
-  operations: 'blue',
+  operation: 'blue',
   sales: 'green',
   academic: 'purple',
   supervisor: 'orange',
   admin: 'red',
+  staff: 'geekblue',
 };
 
 function getRoleLabel(value?: string): string {
@@ -90,23 +92,28 @@ export default function AdminEmployeesPage() {
     setLoading(true);
     try {
       const result = await listAdminEmployees({ page, pageSize, keyword: keyword.trim() || undefined });
+      // 拉全量用户账号（带分页），用于按 employeeId 关联出每个员工的 role / username。
+      // 后端在传 limit 时返回 paged 结果 {items, total, ...}，需用 normalizePagedResult 抽出 items。
+      const usersPayload = await apiClient.get<unknown>('/users', { query: { limit: 500 } }).catch(() => null);
+      const userList: UserRecord[] = (() => {
+        if (!usersPayload) return [];
+        const paged = normalizePagedResult<UserRecord>(usersPayload);
+        return Array.isArray(paged.items) ? paged.items : [];
+      })();
+      const userByEmployeeId = new Map<string, UserRecord>();
+      userList.forEach((u) => {
+        if (u.employeeId) userByEmployeeId.set(u.employeeId, u);
+      });
       // 补充员工关联的登录账号信息
-      const enriched = await Promise.all(
-        result.items.map(async (emp) => {
-          try {
-            const users = await apiClient.get<unknown[]>('/users', { query: { limit: 100 } });
-            const matched = (users as UserRecord[]).find((u) => u.employeeId === emp.id);
-            return {
-              ...emp,
-              userId: matched?.id,
-              username: matched?.username,
-              role: matched?.role,
-            } as Employee;
-          } catch {
-            return { ...emp } as Employee;
-          }
-        }),
-      );
+      const enriched = result.items.map((emp) => {
+        const matched = userByEmployeeId.get(emp.id);
+        return {
+          ...emp,
+          userId: matched?.id,
+          username: matched?.username,
+          role: matched?.role,
+        } as Employee;
+      });
       setItems(enriched);
       setPagination({ current: result.page, pageSize: result.pageSize, total: result.total });
     } catch {
@@ -126,7 +133,7 @@ export default function AdminEmployeesPage() {
     setEditing(record);
     form.setFieldsValue({
       ...record,
-      roleType: record?.roleType || 'operations',
+      roleType: record?.roleType || record?.role || 'staff',
       status: record?.status || '在职',
     });
     setOpen(true);
@@ -245,8 +252,8 @@ export default function AdminEmployeesPage() {
       dataIndex: 'roleType',
       width: 100,
       render: (v, record) => {
-        const role = v || record?.role;
-        return role ? <Tag color={getRoleTagColor(role)}>{getRoleLabel(role)}</Tag> : '-';
+        const role = v || record?.role || 'staff';
+        return <Tag color={getRoleTagColor(role)}>{getRoleLabel(role)}</Tag>;
       },
     },
     { title: '部门', dataIndex: 'department', width: 100, render: (v) => v || '-' },
@@ -395,9 +402,23 @@ export default function AdminEmployeesPage() {
           </Row>
           <Row gutter={16}>
             <Col span={12}>
+              {/* 编辑已有员工且未绑定登录账号时，角色不可更改（必须先创建账号） */}
               <Form.Item name="roleType" label="角色">
-                <Select options={ROLE_OPTIONS} placeholder="选择角色" />
+                <Select
+                  options={ROLE_OPTIONS}
+                  placeholder="选择角色"
+                  disabled={!!editing && !editing.userId}
+                />
               </Form.Item>
+              {editing && !editing.userId && (
+                <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: -16, marginBottom: 12 }}>
+                  该员工暂无登录账号，请先
+                  <Button type="link" size="small" style={{ padding: '0 4px' }} onClick={() => { setOpen(false); openCreateUserModal(editing); }}>
+                    创建登录账号
+                  </Button>
+                  后再设置角色
+                </Text>
+              )}
             </Col>
             <Col span={12}>
               <Form.Item name="department" label="部门">
