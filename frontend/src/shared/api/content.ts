@@ -208,6 +208,10 @@ export async function togglePostFavorite(postId: string): Promise<FavoriteToggle
     targetType: 'post',
     targetId: postId,
   });
+  // 后端 ok=false 表示操作未实际执行（如 userId 为空），应视为失败
+  if (payload.ok === false) {
+    throw new Error('收藏操作失败，请重新登录后重试');
+  }
   return {
     isFavorited: boolValue(payload.favorited ?? payload.isFavorited ?? payload.is_favorited),
     favorites:
@@ -343,7 +347,7 @@ export async function getAccountTimeseries(
  * 前端分别渲染各账号的日历视图。
  */
 export async function getAllAccountsTimeseries(
-  query: { days?: number; from?: string; to?: string; platform?: string; sort?: string } = {},
+  query: { days?: number; from?: string; to?: string; platform?: string; sort?: string; employeeId?: string } = {},
 ): Promise<{ accounts: AccountInfo[]; items: AccountTimeseries[] }> {
   const raw = (await apiClient.get<unknown>(
     `/dashboard/personal/accounts/timeseries`,

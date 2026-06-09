@@ -48,5 +48,5 @@ const isLocalUploadUrl = (url: URL): boolean => {
 };
 
 export const normalizeTrafficByType = (postType: unknown, traffic: unknown): number => {
-  return normalizePostType(postType) === POST_TYPES.HUO_KE ? Number(traffic || 0) : 0;
+  return Number(traffic || 0);
 };

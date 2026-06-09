@@ -64,19 +64,18 @@ export interface UsePersonalDashboardParams {
   to?: string;
   /** v1.3 OP-19 趋势周期：日/周/月（独立于 period） */
   trendPeriod: 'day' | 'week' | 'month';
-  rankingSort: PersonalRankingSort;
   /** 不传时查当前运营（运营端），传值时查指定员工（主管端） */
   employeeId?: string;
 }
 
 export interface UsePersonalDashboardResult {
   overview: PersonalOverviewResponse | undefined;
-  rankings: PersonalRankingsResponse | undefined;
   platformDist: PlatformDistributionItem[];
   platformTrend: PlatformTrend | undefined;
+  rankings: PersonalRankingsResponse | undefined;
   loadingOverview: boolean;
-  loadingRankings: boolean;
   loadingDualPlatform: boolean;
+  loadingRankings: boolean;
   error: string | undefined;
   refreshAll: () => Promise<void>;
 }
@@ -89,16 +88,16 @@ export interface UsePersonalDashboardResult {
  * 集中（避免三处各自 `setError` 不一致）。
  */
 export function usePersonalDashboardData(params: UsePersonalDashboardParams): UsePersonalDashboardResult {
-  const { metric, platform, period, from, to, trendPeriod, rankingSort, employeeId } = params;
+  const { metric, platform, period, from, to, trendPeriod, employeeId } = params;
 
   const [overview, setOverview] = useState<PersonalOverviewResponse | undefined>();
-  const [rankings, setRankings] = useState<PersonalRankingsResponse | undefined>();
   // v1.3 OP-18/19 双平台图表数据
   const [platformDist, setPlatformDist] = useState<PlatformDistributionItem[]>([]);
   const [platformTrend, setPlatformTrend] = useState<PlatformTrend | undefined>();
+  const [rankings, setRankings] = useState<PersonalRankingsResponse | undefined>();
   const [loadingOverview, setLoadingOverview] = useState(false);
-  const [loadingRankings, setLoadingRankings] = useState(false);
   const [loadingDualPlatform, setLoadingDualPlatform] = useState(false);
+  const [loadingRankings, setLoadingRankings] = useState(false);
   const [error, setError] = useState<string>();
 
   const loadOverview = useCallback(async () => {
@@ -114,19 +113,6 @@ export function usePersonalDashboardData(params: UsePersonalDashboardParams): Us
       setLoadingOverview(false);
     }
   }, [metric, platform, period, from, to, employeeId]);
-
-  const loadRankings = useCallback(async () => {
-    setLoadingRankings(true);
-    try {
-      const data = await getPersonalRankings({ platform, period, from, to, employeeId, sort: rankingSort });
-      setRankings(data);
-    } catch (err) {
-      setRankings(undefined);
-      setError((prev) => prev ?? normalizeDashboardError(err));
-    } finally {
-      setLoadingRankings(false);
-    }
-  }, [platform, period, from, to, employeeId, rankingSort]);
 
   // v1.3 OP-18/19 双平台数据：使用 period 计算的 from/to
   const dualRange = useMemo(() => {
@@ -158,30 +144,43 @@ export function usePersonalDashboardData(params: UsePersonalDashboardParams): Us
     }
   }, [dualRange.from, dualRange.to, platform, trendPeriod, employeeId]);
 
+  const loadRankings = useCallback(async () => {
+    setLoadingRankings(true);
+    try {
+      const data = await getPersonalRankings({ platform, period, from: dualRange.from, to: dualRange.to, employeeId });
+      setRankings(data);
+    } catch (err) {
+      setRankings(undefined);
+      setError((prev) => prev ?? normalizeDashboardError(err));
+    } finally {
+      setLoadingRankings(false);
+    }
+  }, [platform, period, dualRange.from, dualRange.to, employeeId]);
+
   useEffect(() => {
     void loadOverview();
   }, [loadOverview]);
 
   useEffect(() => {
-    void loadRankings();
-  }, [loadRankings]);
-
-  useEffect(() => {
     void loadDualPlatform();
   }, [loadDualPlatform]);
 
+  useEffect(() => {
+    void loadRankings();
+  }, [loadRankings]);
+
   const refreshAll = useCallback(async () => {
-    await Promise.all([loadOverview(), loadRankings(), loadDualPlatform()]);
-  }, [loadOverview, loadRankings, loadDualPlatform]);
+    await Promise.all([loadOverview(), loadDualPlatform(), loadRankings()]);
+  }, [loadOverview, loadDualPlatform, loadRankings]);
 
   return {
     overview,
-    rankings,
     platformDist,
     platformTrend,
+    rankings,
     loadingOverview,
-    loadingRankings,
     loadingDualPlatform,
+    loadingRankings,
     error,
     refreshAll,
   };

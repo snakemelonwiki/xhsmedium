@@ -513,6 +513,15 @@ export class PostsService {
     if (dto.likes !== undefined) updates.likes = dto.likes;
     if (dto.comments !== undefined) updates.comments = dto.comments;
     if (dto.favorites !== undefined) updates.favorites = dto.favorites;
+    // 流量口径：likes + comments + favorites（不含分享）。
+    // 当任一互动指标变更时自动重算 traffic，避免 traffic 列与看板聚合不一致。
+    if (dto.likes !== undefined || dto.comments !== undefined || dto.favorites !== undefined) {
+      const existing = await this.postRepository.findOne({ where: { id } });
+      const likes = updates.likes ?? existing?.likes ?? 0;
+      const comments = updates.comments ?? existing?.comments ?? 0;
+      const favorites = updates.favorites ?? existing?.favorites ?? 0;
+      updates.traffic = Number(likes || 0) + Number(comments || 0) + Number(favorites || 0);
+    }
     if (dto.metricsUpdatedAt !== undefined) updates.metricsUpdatedAt = dto.metricsUpdatedAt;
     if (dto.publishedAt !== undefined) updates.publishedAt = dto.publishedAt;
     if (dto.note !== undefined) updates.note = dto.note;
@@ -757,11 +766,14 @@ export class PostsService {
   }
 
   async updateMetrics(id: string, metrics: { likes: number; comments: number; favorites: number; shares?: number; metricsUpdatedAt: Date | null }): Promise<void> {
+    // 流量口径：likes + comments + favorites（不含分享），与看板聚合保持一致
+    const traffic = Number(metrics.likes || 0) + Number(metrics.comments || 0) + Number(metrics.favorites || 0);
     await this.postRepository.update(id, {
       likes: metrics.likes,
       comments: metrics.comments,
       favorites: metrics.favorites,
       shares: Number(metrics.shares || 0),
+      traffic,
       metricsUpdatedAt: metrics.metricsUpdatedAt,
     });
   }
@@ -878,6 +890,11 @@ export class PostsService {
   }
 
   private mapPostRow(row: any, viewer?: PostViewer): any {
+    // 流量口径：likes + comments + favorites（不含分享），与看板聚合保持一致。
+    // 直接用互动指标实时计算，避免读取 DB 中可能滞后的 traffic 列。
+    const likes = Number(row.likes || 0);
+    const comments = Number(row.comments || 0);
+    const favorites = Number(row.favorites || 0);
     return {
       id: row.id,
       employeeId: row.employee_id,
@@ -891,7 +908,7 @@ export class PostsService {
       coverThumbUrl: row.cover_thumb_url,
       postUrl: row.post_url,
       postType: normalizePostType(row.post_type),
-      traffic: normalizeTrafficByType(row.post_type, Number(row.traffic || 0)),
+      traffic: likes + comments + favorites,
       likes: Number(row.likes || 0),
       comments: Number(row.comments || 0),
       favorites: Number(row.favorites || 0),
@@ -930,6 +947,11 @@ export class PostsService {
   }
 
   private mapPost(row: Post): any {
+    // 流量口径：likes + comments + favorites（不含分享），与看板聚合保持一致。
+    // 直接用互动指标实时计算，避免读取 DB 中可能滞后的 traffic 列。
+    const likes = Number(row.likes || 0);
+    const comments = Number(row.comments || 0);
+    const favorites = Number(row.favorites || 0);
     return {
       id: row.id,
       employeeId: row.employeeId,
@@ -941,7 +963,7 @@ export class PostsService {
       coverThumbUrl: row.coverThumbUrl,
       postUrl: row.postUrl,
       postType: normalizePostType(row.postType),
-      traffic: normalizeTrafficByType(row.postType, row.traffic),
+      traffic: likes + comments + favorites,
       likes: row.likes,
       comments: row.comments,
       favorites: row.favorites,

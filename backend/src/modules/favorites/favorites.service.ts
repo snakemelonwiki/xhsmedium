@@ -149,6 +149,15 @@ export class FavoritesService {
     const existing = await this.repo.findOne({ where: { userId, targetType, targetId } });
     if (existing) {
       await this.repo.delete(existing.id);
+      // 同步更新 posts.favorites 计数列（反范式化，避免前端显示与实际收藏状态不一致）
+      if (targetType === 'post') {
+        await this.postRepository
+          .createQueryBuilder()
+          .update()
+          .set({ favorites: () => 'GREATEST(COALESCE(favorites, 0) - 1, 0)' })
+          .where('id = :id', { id: targetId })
+          .execute();
+      }
       return { ok: true, favorited: false };
     }
     await this.repo.save(this.repo.create({
@@ -157,6 +166,15 @@ export class FavoritesService {
       targetType,
       targetId,
     }));
+    // 同步更新 posts.favorites 计数列
+    if (targetType === 'post') {
+      await this.postRepository
+        .createQueryBuilder()
+        .update()
+        .set({ favorites: () => 'COALESCE(favorites, 0) + 1' })
+        .where('id = :id', { id: targetId })
+        .execute();
+    }
     return { ok: true, favorited: true };
   }
 

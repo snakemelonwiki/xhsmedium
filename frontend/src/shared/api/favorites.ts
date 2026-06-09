@@ -118,8 +118,9 @@ export async function removeFavorite(
   targetType: FavoriteTargetType,
   targetId: string,
 ): Promise<{ ok: boolean; favorited: boolean }> {
-  return apiClient.post<{ ok: boolean; favorited: boolean }>('/favorites/toggle', {
+  const result = await apiClient.post<{ ok: boolean; favorited: boolean }>('/favorites/toggle', {
     targetType,
     targetId,
   });
+  return result;
 }
