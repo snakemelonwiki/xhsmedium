@@ -69,7 +69,7 @@ const OVERVIEW_PRESETS = [
 ];
 
 type DataCard = {
-  key: keyof Pick<SupervisorOverview, 'postCount' | 'leadCount' | 'likes' | 'effectiveAccountCount'>;
+  key: keyof Pick<SupervisorOverview, 'postCount' | 'leadCount' | 'interactions' | 'effectiveAccountCount'>;
   title: string;
   icon: React.ReactNode;
   accent: string;
@@ -92,11 +92,11 @@ const DATA_CARDS: DataCard[] = [
     description: '统计周期内新增的客资数量',
   },
   {
-    key: 'likes',
-    title: '点赞数',
+    key: 'interactions',
+    title: '流量数',
     icon: <FileSearchOutlined />,
     accent: '#722ed1',
-    description: '统计周期内作品获得的点赞总和',
+    description: '统计周期内作品获得的总流量（点赞+评论+收藏）',
   },
   {
     key: 'effectiveAccountCount',
@@ -667,7 +667,8 @@ function PieBlock({
 // ----- 2. 作品量趋势 -----
 function PostVolumeTrendChart({ extended, loading }: { extended?: SupervisorExtended; loading: boolean }) {
   const { containerRef, chartRef, echartsReady } = useEchartsChart();
-  const data = extended?.postVolumeTrend ?? [];
+  const allData = extended?.postVolumeTrend ?? [];
+  const data = allData.length > 30 ? allData.slice(-30) : allData;
   useEchartsRender<typeof data>({
     ready: echartsReady,
     containerRef,

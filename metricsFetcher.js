@@ -1,5 +1,38 @@
+const { execSync, spawn } = require("child_process");
 const fs = require("fs");
 const path = require("path");
+
+// ── Linux 无桌面环境：自动启动 Xvfb 虚拟帧缓冲 ────────────────
+// 抖音抓取使用 headless: false（有头模式）绕过反爬检测。
+// Ubuntu Server / Docker 等无 GUI 环境没有 Display Server，
+// Chromium 无法创建窗口 → 直接崩溃。这里自动检测并启动 Xvfb。
+let xvfbProcess = null;
+if (process.platform === "linux" && !process.env.DISPLAY && !process.env.WAYLAND_DISPLAY) {
+  const XVFB_DISPLAY = ":99";
+  try {
+    // 检查 Xvfb 是否已安装
+    execSync("which Xvfb", { stdio: "ignore" });
+    // 启动虚拟帧缓冲（-screen 0 1920x1080x24 提供 1080p 虚拟屏幕）
+    xvfbProcess = spawn("Xvfb", [XVFB_DISPLAY, "-screen", "0", "1920x1080x24", "-ac", "-nolisten", "tcp"], {
+      stdio: "ignore",
+      detached: true,
+    });
+    xvfbProcess.unref();
+    process.env.DISPLAY = XVFB_DISPLAY;
+    console.log(`[metricsFetcher] 已启动 Xvfb (${XVFB_DISPLAY})，有头模式将在虚拟屏幕上运行`);
+    // 进程退出时关闭 Xvfb
+    const killXvfb = () => {
+      if (xvfbProcess && !xvfbProcess.killed) {
+        try { xvfbProcess.kill("SIGTERM"); } catch {}
+      }
+    };
+    process.on("exit", killXvfb);
+    process.on("SIGINT", () => { killXvfb(); process.exit(0); });
+    process.on("SIGTERM", () => { killXvfb(); process.exit(0); });
+  } catch {
+    console.warn("[metricsFetcher] Xvfb 未安装，抖音有头模式可能失败。安装: sudo apt install xvfb");
+  }
+}
 
 // Playwright 浏览器二进制路径：优先用环境变量（兼容用户自定义位置），
 // 否则尝试默认位置。Windows 上 C 盘满时把默认指向 D 盘避免 ENOSPC。
@@ -52,10 +85,19 @@ async function getContext(platform) {
   // 抖音使用有头浏览器（headless: false）绕过反爬检测；
   // 小红书保持无头（headless: true）+ 资源拦截加速。
   const isHeadless = platform !== "抖音";
+  // Linux 特有参数：Docker/root 下需要 --no-sandbox；
+  // 有头模式需要 --disable-gpu 避免无 GPU 时的渲染问题。
+  const linuxArgs = [];
+  if (process.platform === "linux") {
+    linuxArgs.push("--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage");
+  }
   const ctx = await chromium.launchPersistentContext(profileDir, {
     headless: isHeadless,
     viewport: { width: 1440, height: 1100 },
-    args: isHeadless ? ["--disable-remote-fonts"] : [],
+    args: [
+      ...(isHeadless ? ["--disable-remote-fonts"] : []),
+      ...linuxArgs,
+    ],
     userAgent:
       "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
   });
@@ -761,9 +803,13 @@ async function openLoginBrowser(platform) {
   const profileDir = getProfileDir(platform);
   clearSingletonLocks(profileDir);
 
+  const linuxArgs = process.platform === "linux"
+    ? ["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"]
+    : [];
   const context = await chromium.launchPersistentContext(profileDir, {
     headless: false,
     viewport: { width: 1440, height: 980 },
+    args: linuxArgs,
     userAgent:
       "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
   });
@@ -874,6 +920,7 @@ async function fetchMetricsFromUrl(url) {
   const context = await getContext(platform);
   let page;
   const t0 = Date.now();
+  let contextReleased = false;
   try {
     page = await context.newPage();
 
@@ -909,6 +956,7 @@ async function fetchMetricsFromUrl(url) {
 
     if (looksLikeLoginWall(platform, payload.bodyText, pageTitle)) {
       // 登录墙 → 从池中移除，下次重新 launch
+      contextReleased = true;
       releaseContext(platform);
       throw new Error(`当前打开的是${platform}登录页，请先在"链接测试"里点"打开${platform}登录浏览器"完成一次登录。`);
     }
@@ -950,11 +998,26 @@ async function fetchMetricsFromUrl(url) {
   } catch (err) {
     // 非登录墙错误：context 可能已损坏，从池中移除
     if (!String(err?.message || "").includes("登录页")) {
+      contextReleased = true;
       releaseContext(platform);
     }
     throw err;
   } finally {
-    if (page) await page.close().catch(() => {});
+    // 关闭本次抓取打开的标签页。
+    // contextReleased=true 时整个浏览器已被 releaseContext 关闭，无需再关 page。
+    // 否则：先关 page，再兜底清理 context 中残留的非首页标签（防止泄漏）。
+    if (!contextReleased) {
+      if (page) {
+        await page.close().catch(() => {});
+      }
+      // 兜底：关闭 context 中除首页外的所有残留标签（防止 page.close 失败时泄漏）
+      try {
+        const pages = context.pages();
+        for (let i = 1; i < pages.length; i++) {
+          await pages[i].close().catch(() => {});
+        }
+      } catch {}
+    }
   }
 }
 

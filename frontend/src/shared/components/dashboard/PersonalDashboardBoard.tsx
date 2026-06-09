@@ -42,7 +42,7 @@ import type {
   PersonalRankingSort,
   PersonalRankingsResponse,
 } from '@/shared/api/content';
-import { QuickRangePicker, RANGE_PRESETS_FULL, type DateRangeValue } from '@/shared/components/date';
+import { QuickRangePicker, RANGE_PRESETS_FULL, isPresetMatch, type DateRangeValue } from '@/shared/components/date';
 import type { PlatformDistributionItem, PlatformTrend, PlatformTrendPoint } from '@/shared/types/content';
 import React, { useMemo, useState } from 'react';
 
@@ -63,14 +63,6 @@ export type OverviewMetricMode = 'traffic' | 'leads';
 const METRIC_MODE_OPTIONS: { label: string; value: OverviewMetricMode; metric: PersonalMetric }[] = [
   { label: '流量筛选', value: 'traffic', metric: 'totalTraffic' },
   { label: '获客筛选', value: 'leads', metric: 'totalLeads' },
-];
-
-const RANKING_SORT_OPTIONS: { label: string; value: PersonalRankingSort }[] = [
-  { label: '按获客数', value: 'leadCount' },
-  { label: '按作品数', value: 'postCount' },
-  { label: '按流量', value: 'traffic' },
-  { label: '按获客效率', value: 'efficiency' },
-  { label: '按获客贴效率', value: 'leadEfficiency' },
 ];
 
 const PLATFORM_OPTIONS: { label: string; value: PersonalPlatform }[] = [
@@ -119,6 +111,17 @@ export function buildPersonalDashboardRangeQuery(range: DateRangeValue): {
   };
 }
 
+/**
+ * 根据日期范围匹配预设，返回时间段描述标签（如"近3年"、"本月"等）
+ */
+function getTimeRangeLabel(range: DateRangeValue): string {
+  if (!range) return '本月';
+  const matched = RANGE_PRESETS_FULL.find((preset) =>
+    isPresetMatch(range, preset.unit, preset.n, preset.mode)
+  );
+  return matched ? matched.label : '自定义';
+}
+
 export function getOverviewCardKeys(mode: OverviewMetricMode): Array<keyof PersonalOverviewResponse['overview']> {
   return OVERVIEW_CARD_KEYS_BY_MODE[mode];
 }
@@ -136,19 +139,17 @@ export function PersonalDashboardBoard({ employeeId, showRefreshButton = true }:
   const [dateRange, setDateRange] = useState<DateRangeValue>(DEFAULT_RANGE_VALUE);
   // OP-19 趋势周期：日/周/月（独立于上面 period）
   const [trendPeriod, setTrendPeriod] = useState<'day' | 'week' | 'month'>('day');
-  // 三大效率榜排序字段：默认按获客数降序
-  const [rankingSort, setRankingSort] = useState<PersonalRankingSort>('leadCount');
   const metric = METRIC_MODE_OPTIONS.find((item) => item.value === metricMode)?.metric ?? 'totalTraffic';
   const rangeQuery = useMemo(() => buildPersonalDashboardRangeQuery(dateRange), [dateRange]);
 
   const {
     overview,
-    rankings,
     platformDist,
     platformTrend,
+    rankings,
     loadingOverview,
-    loadingRankings,
     loadingDualPlatform,
+    loadingRankings,
     error,
     refreshAll,
   } = usePersonalDashboardData({
@@ -158,7 +159,6 @@ export function PersonalDashboardBoard({ employeeId, showRefreshButton = true }:
     from: rangeQuery.from,
     to: rangeQuery.to,
     trendPeriod,
-    rankingSort,
     employeeId,
   });
 
@@ -197,137 +197,35 @@ export function PersonalDashboardBoard({ employeeId, showRefreshButton = true }:
     if (!overview) return null;
     const cardKeys = new Set(getOverviewCardKeys(metricMode));
     const cards = OVERVIEW_CARDS.filter((card) => cardKeys.has(card.key));
+    const timeLabel = getTimeRangeLabel(dateRange);
     return (
       <Row gutter={[12, 12]}>
-        {cards.map((card) => (
-          <Col key={card.key} xs={24} md={8}>
-            <Card size="small" loading={loadingOverview} className={styles.overviewCard}>
-              <Space size={4} align="center" className={styles.overviewCardHead}>
-                <span style={{ color: card.color, fontSize: 16 }}>{card.icon}</span>
-                <Typography.Text strong>{card.title}</Typography.Text>
-                <Tooltip title={card.hint}>
-                  <Typography.Text type="secondary" style={{ fontSize: 11, cursor: 'help' }}>?</Typography.Text>
-                </Tooltip>
-              </Space>
-              <Statistic
-                value={overview.overview[card.key] ?? 0}
-                valueStyle={{ color: card.color, fontSize: 22, fontWeight: 600 }}
-              />
-            </Card>
-          </Col>
-        ))}
+        {cards.map((card) => {
+          // 动态生成标题：将"本月"替换为实际时间段（如"近3年"）
+          const displayTitle = card.title.startsWith('本月')
+            ? card.title.replace('本月', timeLabel)
+            : card.title;
+          return (
+            <Col key={card.key} xs={24} md={8}>
+              <Card size="small" loading={loadingOverview} className={styles.overviewCard}>
+                <Space size={4} align="center" className={styles.overviewCardHead}>
+                  <span style={{ color: card.color, fontSize: 16 }}>{card.icon}</span>
+                  <Typography.Text strong>{displayTitle}</Typography.Text>
+                  <Tooltip title={card.hint}>
+                    <Typography.Text type="secondary" style={{ fontSize: 11, cursor: 'help' }}>?</Typography.Text>
+                  </Tooltip>
+                </Space>
+                <Statistic
+                  value={overview.overview[card.key] ?? 0}
+                  valueStyle={{ color: card.color, fontSize: 22, fontWeight: 600 }}
+                />
+              </Card>
+            </Col>
+          );
+        })}
       </Row>
     );
-  }, [overview, loadingOverview, metricMode]);
-
-  const rankingTabItems = useMemo(() => {
-    const makeColumns = (
-      valueField: keyof EfficiencyAccount,
-      valueRender: (v: number) => string,
-      metricLabel: string,
-    ): ColumnsType<EfficiencyAccount> => {
-      const items = (rankings?.accounts[metricKey(valueField)] ?? []).slice(0, 20);
-      const max = items.reduce((m, it) => Math.max(m, it[valueField] as number), 0) || 1;
-      return [
-        {
-          title: '排名',
-          dataIndex: 'accountId',
-          width: 60,
-          render: (_: string, __: EfficiencyAccount, index: number) => index + 1,
-        },
-        {
-          title: '账号',
-          dataIndex: 'accountName',
-          render: (v: string, r: EfficiencyAccount) => (
-            <Space size={4} align="center">
-              <Typography.Text strong>{v || r.accountId}</Typography.Text>
-              {r.platform ? <Tag>{r.platform}</Tag> : null}
-            </Space>
-          ),
-        },
-        {
-          title: '作品数',
-          dataIndex: 'postCount',
-          align: 'right' as const,
-          width: 80,
-        },
-        {
-          title: '客资数',
-          dataIndex: 'leadCount',
-          align: 'right' as const,
-          width: 80,
-        },
-        {
-          title: metricLabel,
-          dataIndex: valueField as string,
-          align: 'right' as const,
-          width: 140,
-          render: (v: unknown) => {
-            const num = Number(v) || 0;
-            return (
-              <Space size={6} style={{ width: '100%', justifyContent: 'flex-end' }} align="center">
-                <Typography.Text strong>{valueRender(num)}</Typography.Text>
-                <Progress
-                  percent={max > 0 ? Math.round((num / max) * 100) : 0}
-                  showInfo={false}
-                  size="small"
-                  strokeColor={valueField === 'traffic' ? '#fa541c' : valueField === 'leadEfficiency' ? '#722ed1' : '#52c41a'}
-                  style={{ width: 60, marginBottom: 0 }}
-                />
-              </Space>
-            );
-          },
-        },
-        {
-          title: '近 7 日流量趋势',
-          dataIndex: 'trend',
-          width: 120,
-          render: (trend: number[]) => <Sparkline values={trend} />,
-        },
-      ];
-    };
-    return [
-      {
-        key: 'traffic',
-        label: '流量榜',
-        children: rankings ? (
-          <EfficiencyTable
-            items={rankings.accounts.traffic.slice(0, 20)}
-            columns={makeColumns('traffic', (v) => v.toLocaleString(), '流量')}
-            loading={loadingRankings}
-          />
-        ) : (
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} />
-        ),
-      },
-      {
-        key: 'efficiency',
-        label: '获客效率榜',
-        children: rankings ? (
-          <EfficiencyTable
-            items={rankings.accounts.efficiency.slice(0, 20)}
-            columns={makeColumns('efficiency', (v) => v.toFixed(2), '效率 (客/作品)')}
-            loading={loadingRankings}
-          />
-        ) : (
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} />
-        ),
-      },
-      {
-        key: 'leadEfficiency',
-        label: '获客贴效率榜',
-        children: rankings ? (
-          <EfficiencyTable
-            items={rankings.accounts.leadEfficiency.slice(0, 20)}
-            columns={makeColumns('leadEfficiency', (v) => v.toFixed(2), '效率 (客/获客贴)')}
-            loading={loadingRankings}
-          />
-        ) : (
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} />
-        ),
-      },
-    ];
-  }, [rankings, loadingRankings]);
+  }, [overview, loadingOverview, metricMode, dateRange]);
 
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
@@ -366,7 +264,7 @@ export function PersonalDashboardBoard({ employeeId, showRefreshButton = true }:
             </Space>
           </Space>
           {showRefreshButton ? (
-            <Button icon={<ReloadOutlined />} loading={loadingOverview || loadingRankings} onClick={() => void refreshAll()}>
+            <Button icon={<ReloadOutlined />} loading={loadingOverview || loadingDualPlatform} onClick={() => void refreshAll()}>
               刷新
             </Button>
           ) : null}
@@ -487,95 +385,6 @@ export function PersonalDashboardBoard({ employeeId, showRefreshButton = true }:
         platformDist={platformDist}
         loading={loadingRankings}
       />
-
-      {/* 三大效率榜（OP-24 legacy 样式） */}
-      <Card
-        title={
-          <Space size={8} align="center">
-            <Typography.Text strong>三大效率榜</Typography.Text>
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              默认按获客数降序
-            </Typography.Text>
-          </Space>
-        }
-        extra={
-          <Space size={4} align="center">
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>排序</Typography.Text>
-            <Segmented
-              size="small"
-              value={rankingSort}
-              onChange={(v) => setRankingSort(v as PersonalRankingSort)}
-              options={RANKING_SORT_OPTIONS}
-            />
-          </Space>
-        }
-      >
-        <Tabs items={rankingTabItems} />
-      </Card>
-    </Space>
-  );
-}
-
-function metricKey(valueField: keyof EfficiencyAccount): 'traffic' | 'efficiency' | 'leadEfficiency' {
-  if (valueField === 'traffic') return 'traffic';
-  if (valueField === 'leadEfficiency') return 'leadEfficiency';
-  return 'efficiency';
-}
-
-function EfficiencyTable({
-  items,
-  columns,
-  loading,
-}: {
-  items: EfficiencyAccount[];
-  columns: ColumnsType<EfficiencyAccount>;
-  loading: boolean;
-}) {
-  if (items.length === 0) {
-    return <Empty description="暂无榜单数据" image={Empty.PRESENTED_IMAGE_SIMPLE} />;
-  }
-  return (
-    <Table
-      size="small"
-      rowKey="accountId"
-      loading={loading}
-      columns={columns}
-      dataSource={items}
-      pagination={false}
-      rowClassName={() => styles.efficiencyRow}
-    />
-  );
-}
-
-/**
- * 极简 sparkline：纯 SVG path，不依赖图表库。
- * 输入长度 0 时直接返回占位。
- */
-function Sparkline({ values }: { values: number[] }) {
-  if (!values || values.length === 0) {
-    return <Typography.Text type="secondary" style={{ fontSize: 12 }}>—</Typography.Text>;
-  }
-  const max = Math.max(...values, 1);
-  const min = Math.min(...values, 0);
-  const span = max - min || 1;
-  const w = 80;
-  const h = 24;
-  const step = values.length > 1 ? w / (values.length - 1) : w;
-  const points = values.map((v, i) => {
-    const x = i * step;
-    const y = h - ((v - min) / span) * h;
-    return [x, y] as const;
-  });
-  const path = points.map(([x, y], i) => (i === 0 ? `M${x.toFixed(1)},${y.toFixed(1)}` : `L${x.toFixed(1)},${y.toFixed(1)}`)).join(' ');
-  const last = values[values.length - 1];
-  const first = values[0];
-  const trend = last > first ? <ArrowUpOutlined style={{ color: '#52c41a' }} /> : last < first ? <ArrowDownOutlined style={{ color: '#fa541c' }} /> : null;
-  return (
-    <Space size={4} align="center">
-      <svg width={w} height={h} aria-label="近 7 日趋势" role="img">
-        <path d={path} fill="none" stroke="#1677ff" strokeWidth={1.5} />
-      </svg>
-      {trend}
     </Space>
   );
 }
