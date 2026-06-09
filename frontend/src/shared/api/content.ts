@@ -267,6 +267,7 @@ function textOrEmpty(value: unknown): string {
 /**
  * v1.3 OP-18: 双平台分布（小红书 / 抖音）作品 / 流量 / 获客占比
  * - employeeId: 主管查看指定员工时传入，运营端查看自己时不传
+ * - v1.3 T3.1/T3.2 扩展：返回 leadPostCount / leadEfficiency / postTypes
  */
 export async function getPersonalPlatformDistribution(
   query: { from?: string; to?: string; platform?: string; employeeId?: string } = {},
@@ -279,6 +280,14 @@ export async function getPersonalPlatformDistribution(
     postCount: numberValue(raw.postCount ?? raw.post_count),
     leadCount: numberValue(raw.leadCount ?? raw.lead_count),
     traffic: numberValue(raw.traffic),
+    leadPostCount: numberValue(raw.leadPostCount ?? raw.lead_post_count),
+    leadEfficiency: numberValue(raw.leadEfficiency ?? raw.lead_efficiency),
+    postTypes: Array.isArray(raw.postTypes)
+      ? (raw.postTypes as RawRecord[]).map((t) => ({
+          type: text(t.type) ?? '',
+          count: numberValue(t.count),
+        }))
+      : undefined,
   }));
 }
 

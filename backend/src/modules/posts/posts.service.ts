@@ -10,9 +10,43 @@ import { normalizePostType, normalizeTrafficByType, normalizeExternalUrl, normal
 import { PostsMetricsService } from './posts-metrics.service';
 import { FavoritesService } from '../favorites/favorites.service';
 
+/**
+ * T4.2 (2026-06-09): 把"小红书" / "抖音"前端枚举映射到 DB 中实际可能存在的所有写法。
+ * 历史脏数据 + 新录入数据并存：'小红书' / 'xiaohongshu' / 'xhs' / 偶发乱码。
+ * service 内部统一用 IN(...) 匹配，避免选平台后过滤出 0 条。
+ */
+function expandPlatformSynonyms(platform: string): string[] {
+  const key = String(platform || '').trim();
+  if (!key) return [];
+  // 兼容前端 / 历史：xiaohongshu / xhs / 小红书 / 乱码兜底
+  if (['xiaohongshu', 'xhs', '小红书', 'С����'].includes(key)) {
+    return ['xiaohongshu', 'xhs', '小红书', 'С����'];
+  }
+  if (['douyin', '抖音'].includes(key)) {
+    return ['douyin', '抖音'];
+  }
+  // 未识别值：原样精确匹配
+  return [key];
+}
+
+const METRIC_OPERATOR_SQL: Record<string, string> = {
+  gt: '>',
+  gte: '>=',
+  eq: '=',
+  lte: '<=',
+  lt: '<',
+};
+
 interface PostListFilters {
   employeeId?: string;
   accountId?: string;
+  /**
+   * 平台过滤。T4.2 修复 (2026-06-09):
+   *   历史脏数据 / 新录入数据并存 '小红书' / '抖音' / 'xhs' / 'douyin' /
+   *   偶发乱码。前端 select 只下「小红书/抖音」两种标准值；
+   *   service 内部映射到所有等价写法，命中 '小红书' ⇔ 'xiaohongshu' ⇔ 'xhs'，
+   *   '抖音' ⇔ 'douyin'，避免选平台后结果为 0。
+   */
   platform?: string;
   postType?: string;
   from?: string;
@@ -21,6 +55,13 @@ interface PostListFilters {
   search?: string;
   url?: string;
   postUrl?: string;
+  // T4.1 修复 (2026-06-09): 客资 / 流量阈值过滤，service 端 SQL 子查询完成。
+  //   metric: 'leadsCount' | 'traffic'
+  //   operator: 'gt' | 'gte' | 'eq' | 'lte' | 'lt'
+  //   threshold: 数字
+  metric?: 'leadsCount' | 'traffic';
+  metricOperator?: 'gt' | 'gte' | 'eq' | 'lte' | 'lt';
+  metricThreshold?: number;
 }
 
 interface PlazaFilters {
@@ -95,7 +136,11 @@ export class PostsService {
 
     if (filters.employeeId) qb.andWhere('p.employee_id = :employeeId', { employeeId: filters.employeeId });
     if (filters.accountId) qb.andWhere('p.account_id = :accountId', { accountId: filters.accountId });
-    if (filters.platform) qb.andWhere('p.platform = :platform', { platform: filters.platform });
+    // T4.2 修复 (2026-06-09)：platform 用 IN (...) 兼容历史数据 '小红书' / '抖音' / 'xhs' / 'douyin'
+    if (filters.platform) {
+      const platformSynonyms = expandPlatformSynonyms(filters.platform);
+      qb.andWhere('p.platform IN (:...platforms)', { platforms: platformSynonyms });
+    }
     if (filters.postType) qb.andWhere('p.post_type = :postType', { postType: filters.postType });
     if (filters.from) qb.andWhere('p.published_at >= :from', { from: filters.from });
     if (filters.to) qb.andWhere('p.published_at <= :to', { to: filters.to });
@@ -109,6 +154,21 @@ export class PostsService {
     if (urlFilter) {
       const normalized = normalizeExternalUrl(urlFilter);
       if (normalized) qb.andWhere('p.post_url = :postUrl', { postUrl: normalized });
+    }
+
+    // T4.1 修复 (2026-06-09)：客资 / 流量阈值改为后端 SQL 过滤。
+    //   - leadsCount: 关联 lead 数（post_id 命中 leads 表且非空）
+    //   - traffic:    作品的 traffic 列
+    //   子查询聚合在 500 条以内性能可接受；如未来切到大数据量可改为 EXISTS/JOIN 预聚合表。
+    if (filters.metric && filters.metricOperator && Number.isFinite(filters.metricThreshold)) {
+      const op = METRIC_OPERATOR_SQL[filters.metricOperator] || '>=';
+      const threshold = Number(filters.metricThreshold);
+      if (filters.metric === 'leadsCount') {
+        const sub = `(SELECT COUNT(*) FROM leads l WHERE l.post_id = p.id AND l.post_id IS NOT NULL)`;
+        qb.andWhere(`${sub} ${op} :threshold`, { threshold });
+      } else if (filters.metric === 'traffic') {
+        qb.andWhere(`p.traffic ${op} :threshold`, { threshold });
+      }
     }
 
     if (filters.sort === 'leads') {
@@ -132,6 +192,23 @@ export class PostsService {
     const [rows, total] = await qb.take(safeLimit).skip(safeOffset).getManyAndCount();
     const items = await this.attachJoinNames(rows.map((r) => this.mapPost(r)));
     await this.decorateWithFavorites(items, viewer);
+
+    // 补充 leadsCount：mapPost 走 ORM 实体不含 leads 关联数，
+    // 批量查 leads 表按 post_id 聚合后挂到每个 item，避免 N+1。
+    if (items.length) {
+      const ids = items.map((i) => i.id);
+      const placeholders = ids.map(() => '?').join(',');
+      const countRows: Array<{ post_id: string; cnt: number }> = await this.postRepository.manager.query(
+        `SELECT post_id, COUNT(*) AS cnt FROM leads WHERE post_id IN (${placeholders}) GROUP BY post_id`,
+        ids,
+      );
+      const countMap = new Map<string, number>();
+      for (const r of countRows) countMap.set(r.post_id, Number(r.cnt || 0));
+      for (const item of items) {
+        item.leadsCount = countMap.get(item.id) ?? 0;
+      }
+    }
+
     return { items, total, limit: safeLimit, offset: safeOffset };
   }
 
@@ -373,7 +450,14 @@ export class PostsService {
     if (!row) return null;
     const items = await this.attachJoinNames([this.mapPost(row)]);
     await this.decorateWithFavorites(items, viewer);
-    return items[0];
+    const item = items[0];
+    // 补充 leadsCount
+    const countRows: Array<{ cnt: number }> = await this.postRepository.manager.query(
+      `SELECT COUNT(*) AS cnt FROM leads WHERE post_id = ?`,
+      [id],
+    );
+    item.leadsCount = Number(countRows[0]?.cnt || 0);
+    return item;
   }
 
   async findByIds(ids: string[], viewer?: PostsListViewer): Promise<any[]> {

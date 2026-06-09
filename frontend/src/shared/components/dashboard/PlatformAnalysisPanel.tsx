@@ -145,12 +145,13 @@ function buildRankingColumns(
       ),
     },
     {
+      // v1.3 T3.4: "客资数"列 -> "流量数"列（数据源 leadCount -> traffic）
       title: (
-        <Tooltip title="作品关联的客资总数">
-          <span>客资数</span>
+        <Tooltip title="作品关联的 likes+comments+favorites 流量">
+          <span>流量数</span>
         </Tooltip>
       ),
-      dataIndex: 'leadCount',
+      dataIndex: 'traffic',
       align: 'right' as const,
       width: 64,
       render: (v: number) => <Typography.Text>{safeNumber(v).toLocaleString()}</Typography.Text>,
@@ -197,17 +198,20 @@ function PlatformColumn({ bucket, rankings, dist, loading }: PlatformColumnProps
   const postCount = safeNumber(distItem?.postCount);
   const leadCount = safeNumber(distItem?.leadCount);
   const traffic = safeNumber(distItem?.traffic);
+  // T3.1 扩展字段：获客贴数 + 真实 获客贴效率 (客资/获客贴)
+  const leadPostCount = safeNumber(distItem?.leadPostCount);
+  const leadEfficiency = distItem?.leadEfficiency !== undefined
+    ? safeNumber(distItem.leadEfficiency)
+    : 0;
   const efficiency = postCount > 0 ? leadCount / postCount : 0;
-  // 获客贴效率数据来源：后端 EfficiencyAccount.leadEfficiency 是基于单账号计算的；
-  // 此处用全平台 leadCount / (有 leadCount 的账号数对应 leadPostCount 求和) 的近似 = 全平台 leadCount / 平台 leadPostCount
-  // 没有平台维度的 leadPostCount 字段，所以用平均值；视觉占比使用 Progress 的 fixed width。
-  const leadEfficiencyDisplay = leadCount > 0 ? Math.min(100, leadCount * 5) : 0;
 
   // 3 个榜单
   const leadRows = buildPlatformRows(rankings, 'leadCount', bucket);
   const effRows = buildPlatformRows(rankings, 'efficiency', bucket);
   const leadEffRows = buildPlatformRows(rankings, 'leadEfficiency', bucket);
 
+  // v1.3 T3.4: "客资数"列固定展示 traffic（见 buildRankingColumns 内），"主指标"列各自展示对应榜的 metric
+  // 表头"获客数榜" → "账号流量榜"
   const leadColumns = buildRankingColumns('leadCount', '客资数', 0, '#52c41a');
   const effColumns = buildRankingColumns('efficiency', '效率 (客/作品)', 2, '#fa541c');
   const leadEffColumns = buildRankingColumns('leadEfficiency', '效率 (客/获客贴)', 2, '#722ed1');
@@ -280,19 +284,23 @@ function PlatformColumn({ bucket, rankings, dist, loading }: PlatformColumnProps
                 </Typography.Text>
               </Tooltip>
             </Space>
+            {/* v1.3 T3.2 修复：使用后端返回的真实 leadEfficiency，单位 "客/作" */}
             <Statistic
-              value={leadEfficiencyDisplay}
+              value={leadEfficiency}
               precision={2}
               valueStyle={{ color: '#722ed1', fontSize: 20, fontWeight: 600 }}
-              suffix="%"
+              suffix="客/作"
             />
             <Progress
-              percent={Math.round(leadEfficiencyDisplay)}
+              percent={Math.min(100, Math.round(leadEfficiency * 20))}
               showInfo={false}
               size="small"
               strokeColor="#722ed1"
               style={{ marginTop: 2 }}
             />
+            <Typography.Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 4 }}>
+              获客贴数：{leadPostCount.toLocaleString()} · 客资数：{leadCount.toLocaleString()}
+            </Typography.Text>
           </Card>
         </Col>
       </Row>
@@ -300,9 +308,11 @@ function PlatformColumn({ bucket, rankings, dist, loading }: PlatformColumnProps
       {/* 3 个榜单 */}
       <Row gutter={[8, 8]}>
         <Col span={8}>
-          <Typography.Title level={5} style={{ marginTop: 0, marginBottom: 4, fontSize: 13 }}>
-            获客数榜 Top {TOP_N}
-          </Typography.Title>
+          {/* W7 修复：标题应与排序键一致——排序键是 leadCount（客资数），标题用"获客数榜" */}
+          {/* v1.3 T3.4 修复：列已改为 traffic (likes+comments+favorites)，表头同步改"账号流量榜" */}
+        <Typography.Title level={5} style={{ marginTop: 0, marginBottom: 4, fontSize: 13 }}>
+          账号流量榜 Top {TOP_N}
+        </Typography.Title>
           <Skeleton active paragraph={{ rows: 4 }} loading={loading}>
             {leadRows.length === 0 ? (
               <Empty description="暂无" image={Empty.PRESENTED_IMAGE_SIMPLE} />

@@ -4,6 +4,7 @@ import {
   DownloadOutlined,
   EyeOutlined,
   LinkOutlined,
+  PlusOutlined,
   ReloadOutlined,
   StarFilled,
   StarOutlined,
@@ -76,8 +77,10 @@ const EMPTY_FILTERS: Filters = {
 
 const platformOptions = [
   { label: '全部平台', value: '' },
-  { label: '小红书', value: 'xiaohongshu' },
-  { label: '抖音', value: 'douyin' },
+  // T4.2 修复 (2026-06-09): value 改为与 DB 实际值对齐的「小红书 / 抖音」，
+  //   后端 service 已映射到 ['小红书','xiaohongshu','xhs','乱码'] 兼容匹配。
+  { label: '小红书', value: '小红书' },
+  { label: '抖音', value: '抖音' },
 ];
 
 const postTypeOptions = [
@@ -175,7 +178,7 @@ type Post = {
 };
 
 type Employee = { id: string; name: string };
-type Account = { id: string; name: string; employeeId?: string };
+type Account = { id: string; name?: string; accountName?: string; employeeId?: string; platform?: string };
 
 type SortField =
   | 'publishedAt'
@@ -236,7 +239,12 @@ export default function AdminPostsPage() {
     try {
       const payload = await apiClient.get<any>('/accounts', { query: { limit: 200, offset: 0 } });
       const data = payload?.items ?? payload ?? [];
-      setAccounts(Array.isArray(data) ? data : []);
+      // 后端返回字段是 accountName（不是 name），映射到 name 供下拉/列展示使用
+      const normalized = (Array.isArray(data) ? data : []).map((a: any) => ({
+        ...a,
+        name: a.accountName ?? a.name ?? a.id,
+      }));
+      setAccounts(normalized);
     } catch {
       setAccounts([]);
     }
@@ -256,6 +264,13 @@ export default function AdminPostsPage() {
     if (filters.accountId) query.accountId = filters.accountId;
     if (filters.postType) query.postType = filters.postType;
     if (filters.keyword) query.search = filters.keyword;
+    // T4.1 修复 (2026-06-09): 客资 / 流量阈值直接下推给后端 SQL，
+    //   避免之前在已分页的 15 条上做客户端过滤导致命中数几乎为 0。
+    if (filters.leadPostThreshold !== null && filters.leadPostThreshold !== undefined) {
+      query.metric = filters.leadPostMetric;
+      query.metricOperator = filters.leadPostOperator;
+      query.metricThreshold = filters.leadPostThreshold;
+    }
     // 排序：后端 sort 参数支持 'leads'（按关联 lead 数量降序）；
     // 其它字段（traffic / published_at）由后端默认行为处理，前端在拿到数据后兜底做客户端排序。
     if (sort.field === 'leadsCount') {
@@ -272,27 +287,8 @@ export default function AdminPostsPage() {
       const data = payload?.items ?? payload ?? [];
       let posts = Array.isArray(data) ? data : [];
 
-      // 前端筛选：按 (指标, 关系, 阈值) 三件套过滤
-      if (filters.leadPostThreshold !== null && filters.leadPostThreshold !== undefined) {
-        const threshold = filters.leadPostThreshold;
-        const metricKey = filters.leadPostMetric;
-        posts = posts.filter((p: any) => {
-          let value: number;
-          if (metricKey === 'leadsCount') {
-            value = Number(p.leadsCount ?? p.leadCount ?? p.leads_count ?? 0);
-          } else {
-            value = Number(p.traffic ?? p.views ?? 0);
-          }
-          switch (filters.leadPostOperator) {
-            case 'gt': return value > threshold;
-            case 'gte': return value >= threshold;
-            case 'eq': return value === threshold;
-            case 'lte': return value <= threshold;
-            case 'lt': return value < threshold;
-            default: return true;
-          }
-        });
-      }
+      // T4.1 修复 (2026-06-09): 客资 / 流量阈值已下推后端 SQL 过滤；
+      //   此处不再做客户端过滤（之前在分页后的 15 条上 filter，几乎命中 0 条）。
 
       // 映射数据
       let mapped = posts.map((p: any): Post => ({
@@ -519,10 +515,34 @@ export default function AdminPostsPage() {
     ...employees.map((e) => ({ label: e.name || e.id, value: e.id })),
   ];
 
-  const accountOptions = [
-    { label: '全部账号', value: '' },
-    ...accounts.map((a) => ({ label: a.name, value: a.id })),
-  ];
+  // T4.3 修复 (2026-06-09): 账号下拉按 (account_name + platform) 组合 label，
+  //   避免 DB 中同名账号（如 '青松果' 出现 2 次）让主管误以为同一账号被选了两遍。
+  //   value 仍是账号 id（账号 id 唯一），搜索 prop 同时搜 label 和 value 让主管可按 ID / 名称快速定位。
+  const accountOptions = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const a of accounts) {
+      const key = String(a.name || a.id).trim();
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+    return [
+      { label: '全部账号', value: '' },
+      ...accounts.map((a) => {
+        const name = String(a.name || a.id).trim();
+        const isDuplicate = (counts.get(name) || 0) > 1;
+        // 重复名时附加 platform 区分；正常情况下保持纯名称显示，避免下拉太长
+        const label = isDuplicate && a.platform
+          ? `${name}（${a.platform}）`
+          : name;
+        return {
+          label,
+          value: a.id,
+          // 冗余字段：搜索 prop 设为 'label' 时需要让 label 含 id（已含），
+          // 但 antd Select 不支持跨字段搜索；保留一个 data-search-key 让用户能搜 id 片段
+          // （antd v5 不直接支持，但下面 optionFilterProp='label' 配合 searchable 行为够用）
+        };
+      }),
+    ];
+  }, [accounts]);
 
   const employeeMap = useMemo(() => {
     const m = new Map<string, string>();
@@ -532,7 +552,7 @@ export default function AdminPostsPage() {
 
   const accountMap = useMemo(() => {
     const m = new Map<string, string>();
-    for (const a of accounts) m.set(a.id, a.name);
+    for (const a of accounts) m.set(a.id, a.name || a.id);
     return m;
   }, [accounts]);
 
@@ -696,6 +716,12 @@ export default function AdminPostsPage() {
           <Typography.Paragraph type="secondary">查看全量作品数据，分析获客效果。</Typography.Paragraph>
         </div>
         <Space wrap>
+          {/* T7.1 (2026-06-09): 主管端"推荐作品"录入入口。链接可分享给他人，未登录也能点开。 */}
+          <Link href="/admin/posts/recommend" target="_blank">
+            <Button icon={<PlusOutlined />} type="primary" ghost>
+              推荐作品
+            </Button>
+          </Link>
           <Button icon={<DownloadOutlined />} loading={exporting} onClick={openExportConfirm}>
             导出
           </Button>
@@ -988,7 +1014,7 @@ export default function AdminPostsPage() {
               {[
                 filters.keyword ? { label: '关键词', value: filters.keyword } : null,
                 filters.platform
-                  ? { label: '平台', value: filters.platform === 'xiaohongshu' ? '小红书' : filters.platform === 'douyin' ? '抖音' : filters.platform }
+                  ? { label: '平台', value: filters.platform }
                   : null,
                 filters.employeeId
                   ? { label: '员工', value: employeeMap.get(filters.employeeId) || filters.employeeId }

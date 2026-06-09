@@ -6,11 +6,17 @@ import {
   DashboardOutlined,
   ExclamationCircleOutlined,
   FileSearchOutlined,
+  FundProjectionScreenOutlined,
   IdcardOutlined,
+  LineChartOutlined,
   OrderedListOutlined,
+  PieChartOutlined,
+  RiseOutlined,
   RightOutlined,
   SafetyCertificateOutlined,
   TeamOutlined,
+  ThunderboltOutlined,
+  TrophyOutlined,
   UserSwitchOutlined,
   WarningOutlined,
 } from '@ant-design/icons';
@@ -23,27 +29,38 @@ import {
   Empty,
   List,
   Row,
+  Segmented,
   Skeleton,
   Space,
   Statistic,
   Tag,
+  Tooltip,
   Typography,
   message as antdMessage,
 } from 'antd';
 import dayjs from 'dayjs';
 import Link from 'next/link';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { getSupervisorOverview, type SupervisorOverview } from '@/shared/api/admin';
+import { getSupervisorExtended, getSupervisorOverview, type SupervisorExtended, type SupervisorOverview } from '@/shared/api/admin';
 import { listNotifications } from '@/shared/api/notifications';
 import { getReminderUnreadCount, markReminderRead } from '@/shared/api/reminders';
 import { QuickRangePicker } from '@/shared/components/date';
 import type { DateRangeValue } from '@/shared/components/date';
+import { useEchartsChart, useEchartsRender } from '@/shared/components/dashboard/useEchartsChart';
 import { readAuthenticatedUser } from '@/shared/auth/auth';
 import { useNotifications } from '@/shared/contexts/NotificationContext';
 import { useNotificationSocket } from '@/shared/hooks/useNotificationSocket';
 import type { NotificationItem } from '@/shared/types/notifications';
 import { formatDateTime } from '@/shared/utils/date-format';
+import { isPresetMatch } from '@/shared/utils/date-range';
+
+// echarts 通过 layout.tsx 注入的 CDN script 暴露为 window.echarts，
+// 它的加载晚于组件首次渲染，需要在 useEffect 内等 ready 后再 init，
+// 避免 dev 模式 HMR 偶发丢失全局变量导致 ReferenceError。
+// 参考 admin/analytics/page.tsx 的 EChart 容器实现；初始化 / dispose 已在 useEchartsChart 中集中。
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+declare const echarts: any;
 
 const OVERVIEW_PRESETS = [
   { key: 'today', label: '今日', unit: 'day' as const, n: 1, mode: 'calendar' as const },
@@ -158,7 +175,12 @@ const QUICK_ENTRIES = [
 export default function AdminDashboardPage() {
   const [dateRange, setDateRange] = useState<DateRangeValue>({ start: dayjs().startOf('day'), end: dayjs() });
   const [overview, setOverview] = useState<SupervisorOverview | undefined>();
+  // T1.3 总览扩展数据（7 个新区域）
+  const [extended, setExtended] = useState<SupervisorExtended | undefined>();
+  // 趋势图时间桶切换：日/周/月
+  const [trendPeriod, setTrendPeriod] = useState<'day' | 'week' | 'month'>('day');
   const [loading, setLoading] = useState(true);
+  const [loadingExtended, setLoadingExtended] = useState(true);
   const { unreadCount } = useNotifications();
   const user = typeof window === 'undefined' ? undefined : readAuthenticatedUser();
 
@@ -180,13 +202,24 @@ export default function AdminDashboardPage() {
 
   const fetchOverview = useCallback((range: DateRangeValue) => {
     setLoading(true);
+    setLoadingExtended(true);
     const from = range ? range.start.format('YYYY-MM-DD') : dayjs().startOf('day').format('YYYY-MM-DD');
     const to = range ? range.end.format('YYYY-MM-DD') : dayjs().format('YYYY-MM-DD');
-    getSupervisorOverview('today', from, to)
+    // T1.1 修复：根据当前 dateRange 反查匹配的 preset key，作为 period 上报。
+    // 之前硬编码 'today' 会让 URL 失去语义、缓存命中错误，且让后端 period.code 字段始终是 'today'。
+    // 自定义区间（无 preset 匹配）时退回到 'custom'，后端按 from/to 走自定义分支。
+    const matched = OVERVIEW_PRESETS.find((p) => isPresetMatch(range, p.unit, p.n, p.mode));
+    const period = matched ? matched.key : 'custom';
+    getSupervisorOverview(period, from, to)
       .then(setOverview)
       .catch(() => setOverview(undefined))
       .finally(() => setLoading(false));
-  }, []);
+    // T1.3 同步拉取扩展数据（趋势/平台分布/三类作品占比/获客效率/获客帖效率）
+    getSupervisorExtended(period, from, to, trendPeriod)
+      .then(setExtended)
+      .catch(() => setExtended(undefined))
+      .finally(() => setLoadingExtended(false));
+  }, [trendPeriod]);
 
   // 拉取提醒未读数 + 列表
   const loadReminders = useCallback(async () => {
@@ -393,6 +426,9 @@ export default function AdminDashboardPage() {
         </Row>
       </Skeleton>
 
+      {/* T1.3 总览扩展 7 个区域 */}
+      <ExtendedSections extended={extended} loading={loadingExtended} trendPeriod={trendPeriod} onTrendPeriodChange={setTrendPeriod} />
+
       {/* 4 Exception Cards */}
       <div>
         <Typography.Title level={4}>
@@ -466,5 +502,362 @@ export default function AdminDashboardPage() {
         ))}
       </Row>
     </Space>
+  );
+}
+
+// ============================================================
+// T1.3 总览扩展 7 个区域
+//   1. 双平台分布（小红书 / 抖音，3 个饼图：作品 / 流量 / 客资）
+//   2. 作品量趋势（按日/周/月聚合的双平台折线）
+//   3. 三类作品占比（人设贴 / 讨论贴 / 获客帖 饼图）
+//   4. 获客趋势（小红书 / 抖音 / 总和 三条曲线）
+//   5. 流量趋势（小红书 / 抖音 / 总和 三条曲线）
+//   6. 获客效率（小红书 / 抖音 / 双平台综合 三个值）
+//   7. 获客帖效率（小红书 / 抖音 / 双平台综合 三个值）
+// ============================================================
+
+function ExtendedSections({
+  extended,
+  loading,
+  trendPeriod,
+  onTrendPeriodChange,
+}: {
+  extended?: SupervisorExtended;
+  loading: boolean;
+  trendPeriod: 'day' | 'week' | 'month';
+  onTrendPeriodChange: (next: 'day' | 'week' | 'month') => void;
+}) {
+  return (
+    <Space direction="vertical" size={16} style={{ width: '100%' }}>
+      {/* 1. 双平台分布 + 2. 作品量趋势 */}
+      <Row gutter={[16, 16]}>
+        <Col xs={24} md={10}>
+          <Card size="small" title={<><PieChartOutlined /> 双平台分布</>}>
+            <PlatformDistPies extended={extended} loading={loading} />
+          </Card>
+        </Col>
+        <Col xs={24} md={14}>
+          <Card
+            size="small"
+            title={
+              <Space size={4} align="center">
+                <LineChartOutlined />
+                <Typography.Text strong>作品量趋势</Typography.Text>
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                  {trendPeriod === 'day' ? '按日' : trendPeriod === 'week' ? '按周' : '按月'}
+                </Typography.Text>
+              </Space>
+            }
+            extra={
+              <Segmented
+                size="small"
+                value={trendPeriod}
+                onChange={(v) => onTrendPeriodChange(v as 'day' | 'week' | 'month')}
+                options={[
+                  { label: '日', value: 'day' },
+                  { label: '周', value: 'week' },
+                  { label: '月', value: 'month' },
+                ]}
+              />
+            }
+          >
+            <PostVolumeTrendChart extended={extended} loading={loading} />
+          </Card>
+        </Col>
+      </Row>
+
+      {/* 3. 三类作品占比 + 4. 获客效率 + 7. 获客帖效率 */}
+      <Row gutter={[16, 16]}>
+        <Col xs={24} md={12}>
+          <Card size="small" title={<><PieChartOutlined /> 三类作品占比</>}>
+            <PostTypeSharePie extended={extended} loading={loading} />
+          </Card>
+        </Col>
+        <Col xs={24} md={6}>
+          <Card size="small" title={<><ThunderboltOutlined /> 获客效率（客/作）</>}>
+            <EfficiencyValues extended={extended} loading={loading} kind="leadEfficiency" />
+          </Card>
+        </Col>
+        <Col xs={24} md={6}>
+          <Card size="small" title={<><TrophyOutlined /> 获客帖效率（客/获客贴）</>}>
+            <EfficiencyValues extended={extended} loading={loading} kind="leadPostEfficiency" />
+          </Card>
+        </Col>
+      </Row>
+
+      {/* 4. 获客趋势 + 5. 流量趋势 */}
+      <Row gutter={[16, 16]}>
+        <Col xs={24} md={12}>
+          <Card size="small" title={<><RiseOutlined /> 获客趋势（小红书 / 抖音 / 总和）</>}>
+            <LeadTrendChart extended={extended} loading={loading} />
+          </Card>
+        </Col>
+        <Col xs={24} md={12}>
+          <Card size="small" title={<><FundProjectionScreenOutlined /> 流量趋势（小红书 / 抖音 / 总和）</>}>
+            <TrafficTrendChart extended={extended} loading={loading} />
+          </Card>
+        </Col>
+      </Row>
+    </Space>
+  );
+}
+
+// ----- 1. 双平台分布（3 个饼图：作品 / 流量 / 客资）-----
+function PlatformDistPies({ extended, loading }: { extended?: SupervisorExtended; loading: boolean }) {
+  const items = extended?.platformDistribution ?? [];
+  const dataPost = items.map((it) => ({ name: it.platform, value: it.postCount }));
+  const dataTraffic = items.map((it) => ({ name: it.platform, value: it.traffic }));
+  const dataLead = items.map((it) => ({ name: it.platform, value: it.leadCount }));
+  return (
+    <Row gutter={8}>
+      <Col span={8}>
+        <PieBlock data={dataPost} title="作品占比" color={['#fa8c16', '#1677ff']} loading={loading} />
+      </Col>
+      <Col span={8}>
+        <PieBlock data={dataTraffic} title="流量占比" color={['#fa541c', '#13c2c2']} loading={loading} />
+      </Col>
+      <Col span={8}>
+        <PieBlock data={dataLead} title="客资占比" color={['#52c41a', '#722ed1']} loading={loading} />
+      </Col>
+    </Row>
+  );
+}
+
+function PieBlock({
+  data,
+  title,
+  color,
+  loading,
+}: {
+  data: { name: string; value: number }[];
+  title: string;
+  color: string[];
+  loading: boolean;
+}) {
+  const { containerRef, chartRef, echartsReady } = useEchartsChart();
+  useEchartsRender<typeof data>({
+    ready: echartsReady,
+    containerRef,
+    chartRef,
+    data,
+    isEmpty: (d) => d.every((it) => it.value === 0),
+    emptyHTML: '<div style="height:140px;display:flex;align-items:center;justify-content:center;color:#999;">暂无数据</div>',
+    buildOption: (d) => ({
+      title: { text: title, textStyle: { fontSize: 13, fontWeight: 'normal' }, left: 'center', top: 4 },
+      tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
+      color,
+      series: [
+        {
+          type: 'pie',
+          radius: ['45%', '70%'],
+          data: d.filter((it) => it.value > 0),
+          label: { show: true, formatter: '{b}\n{d}%', fontSize: 10 },
+        },
+      ],
+    }),
+    deps: [data, loading, echartsReady, containerRef, chartRef],
+  });
+  return (
+    <Skeleton loading={loading} active>
+      <div ref={containerRef} style={{ height: 140 }} />
+    </Skeleton>
+  );
+}
+
+// ----- 2. 作品量趋势 -----
+function PostVolumeTrendChart({ extended, loading }: { extended?: SupervisorExtended; loading: boolean }) {
+  const { containerRef, chartRef, echartsReady } = useEchartsChart();
+  const data = extended?.postVolumeTrend ?? [];
+  useEchartsRender<typeof data>({
+    ready: echartsReady,
+    containerRef,
+    chartRef,
+    data,
+    isEmpty: (d) => d.length === 0 || d.every((p) => p.xiaohongshuCount === 0 && p.douyinCount === 0),
+    emptyHTML: '<div style="height:200px;display:flex;align-items:center;justify-content:center;color:#999;">暂无数据</div>',
+    buildOption: (d) => {
+      const dates = d.map((p) => p.date);
+      const xhs = d.map((p) => p.xiaohongshuCount);
+      const dy = d.map((p) => p.douyinCount);
+      return {
+        tooltip: { trigger: 'axis', axisPointer: { type: 'line' } },
+        legend: { data: ['小红书', '抖音'], bottom: 0 },
+        color: ['#fa8c16', '#1677ff'],
+        grid: { left: 40, right: 16, top: 24, bottom: 36 },
+        xAxis: { type: 'category', data: dates, axisLabel: { rotate: dates.length > 8 ? 30 : 0, fontSize: 11 } },
+        yAxis: { type: 'value', name: '作品数' },
+        series: [
+          { name: '小红书', type: 'line', data: xhs, smooth: true, symbol: 'circle', symbolSize: 5, lineStyle: { width: 2 } },
+          { name: '抖音', type: 'line', data: dy, smooth: true, symbol: 'circle', symbolSize: 5, lineStyle: { width: 2 } },
+        ],
+      };
+    },
+    deps: [data, loading, echartsReady, containerRef, chartRef],
+  });
+  return (
+    <Skeleton loading={loading} active>
+      <div ref={containerRef} style={{ height: 200 }} />
+    </Skeleton>
+  );
+}
+
+// ----- 3. 三类作品占比（人设贴 / 讨论贴 / 获客帖）-----
+function PostTypeSharePie({ extended, loading }: { extended?: SupervisorExtended; loading: boolean }) {
+  const { containerRef, chartRef, echartsReady } = useEchartsChart();
+  const items = extended?.postTypeDistribution ?? [];
+  const colors = ['#1890ff', '#fa541c', '#52c41a'];
+  const data = items.map((it, idx) => ({ name: it.type, value: it.count, color: colors[idx] || '#999' }));
+  useEchartsRender<typeof data>({
+    ready: echartsReady,
+    containerRef,
+    chartRef,
+    data,
+    isEmpty: (d) => d.every((it) => it.value === 0),
+    emptyHTML: '<div style="height:200px;display:flex;align-items:center;justify-content:center;color:#999;">暂无数据</div>',
+    buildOption: (d) => ({
+      title: { text: '人设贴 / 讨论贴 / 获客帖', textStyle: { fontSize: 13, fontWeight: 'normal' }, left: 'center', top: 4 },
+      tooltip: {
+        trigger: 'item',
+        formatter: (p: any) => `${p.name}：${p.value}（${p.percent}%）`,
+      },
+      legend: { bottom: 0 },
+      color: d.map((it) => it.color),
+      series: [
+        {
+          type: 'pie',
+          radius: ['45%', '70%'],
+          data: d.filter((it) => it.value > 0),
+          label: { show: true, formatter: '{b}\n{c}' },
+        },
+      ],
+    }),
+    deps: [data, loading, echartsReady, containerRef, chartRef],
+  });
+  return (
+    <Skeleton loading={loading} active>
+      <div ref={containerRef} style={{ height: 200 }} />
+    </Skeleton>
+  );
+}
+
+// ----- 4. 获客趋势（小红书 / 抖音 / 总和）-----
+function LeadTrendChart({ extended, loading }: { extended?: SupervisorExtended; loading: boolean }) {
+  const { containerRef, chartRef, echartsReady } = useEchartsChart();
+  const data = useMemo(() => {
+    const arr = extended?.leadTrend ?? [];
+    return arr.map((p) => ({ date: p.date, xhs: p.xiaohongshuLeads, dy: p.douyinLeads }));
+  }, [extended?.leadTrend]);
+  useEchartsRender<typeof data>({
+    ready: echartsReady,
+    containerRef,
+    chartRef,
+    data,
+    isEmpty: (d) => d.length === 0 || d.every((p) => p.xhs === 0 && p.dy === 0),
+    emptyHTML: '<div style="height:220px;display:flex;align-items:center;justify-content:center;color:#999;">暂无数据</div>',
+    buildOption: (d) => {
+      const dates = d.map((p) => p.date);
+      const xhs = d.map((p) => p.xhs);
+      const dy = d.map((p) => p.dy);
+      const total = d.map((p) => p.xhs + p.dy);
+      return {
+        tooltip: { trigger: 'axis', axisPointer: { type: 'line' } },
+        legend: { data: ['小红书', '抖音', '总和'], bottom: 0 },
+        color: ['#fa8c16', '#1677ff', '#52c41a'],
+        grid: { left: 40, right: 16, top: 24, bottom: 36 },
+        xAxis: { type: 'category', data: dates, axisLabel: { rotate: dates.length > 8 ? 30 : 0, fontSize: 11 } },
+        yAxis: { type: 'value', name: '获客数' },
+        series: [
+          { name: '小红书', type: 'line', data: xhs, smooth: true, symbol: 'circle', symbolSize: 5, lineStyle: { width: 2 } },
+          { name: '抖音', type: 'line', data: dy, smooth: true, symbol: 'circle', symbolSize: 5, lineStyle: { width: 2 } },
+          { name: '总和', type: 'line', data: total, smooth: true, symbol: 'circle', symbolSize: 5, lineStyle: { width: 2 } },
+        ],
+      };
+    },
+    deps: [data, loading, echartsReady, containerRef, chartRef],
+  });
+  return (
+    <Skeleton loading={loading} active>
+      <div ref={containerRef} style={{ height: 220 }} />
+    </Skeleton>
+  );
+}
+
+// ----- 5. 流量趋势（小红书 / 抖音 / 总和）-----
+function TrafficTrendChart({ extended, loading }: { extended?: SupervisorExtended; loading: boolean }) {
+  const { containerRef, chartRef, echartsReady } = useEchartsChart();
+  const data = useMemo(() => {
+    const arr = extended?.trafficTrend ?? [];
+    return arr.map((p) => ({ date: p.date, xhs: p.xiaohongshuTraffic, dy: p.douyinTraffic }));
+  }, [extended?.trafficTrend]);
+  useEchartsRender<typeof data>({
+    ready: echartsReady,
+    containerRef,
+    chartRef,
+    data,
+    isEmpty: (d) => d.length === 0 || d.every((p) => p.xhs === 0 && p.dy === 0),
+    emptyHTML: '<div style="height:220px;display:flex;align-items:center;justify-content:center;color:#999;">暂无数据</div>',
+    buildOption: (d) => {
+      const dates = d.map((p) => p.date);
+      const xhs = d.map((p) => p.xhs);
+      const dy = d.map((p) => p.dy);
+      const total = d.map((p) => p.xhs + p.dy);
+      return {
+        tooltip: { trigger: 'axis', axisPointer: { type: 'line' } },
+        legend: { data: ['小红书', '抖音', '总和'], bottom: 0 },
+        color: ['#fa8c16', '#1677ff', '#13c2c2'],
+        grid: { left: 50, right: 16, top: 24, bottom: 36 },
+        xAxis: { type: 'category', data: dates, axisLabel: { rotate: dates.length > 8 ? 30 : 0, fontSize: 11 } },
+        yAxis: { type: 'value', name: '流量' },
+        series: [
+          { name: '小红书', type: 'line', data: xhs, smooth: true, symbol: 'circle', symbolSize: 5, lineStyle: { width: 2 } },
+          { name: '抖音', type: 'line', data: dy, smooth: true, symbol: 'circle', symbolSize: 5, lineStyle: { width: 2 } },
+          { name: '总和', type: 'line', data: total, smooth: true, symbol: 'circle', symbolSize: 5, lineStyle: { width: 2 } },
+        ],
+      };
+    },
+    deps: [data, loading, echartsReady, containerRef, chartRef],
+  });
+  return (
+    <Skeleton loading={loading} active>
+      <div ref={containerRef} style={{ height: 220 }} />
+    </Skeleton>
+  );
+}
+
+// ----- 6. 7. 效率值（小红书 / 抖音 / 双平台综合 三个值）-----
+function EfficiencyValues({
+  extended,
+  loading,
+  kind,
+}: {
+  extended?: SupervisorExtended;
+  loading: boolean;
+  kind: 'leadEfficiency' | 'leadPostEfficiency';
+}) {
+  const values = extended?.[kind] ?? { xiaohongshu: 0, douyin: 0, total: 0 };
+  const unit = kind === 'leadEfficiency' ? '客/作' : '客/获客贴';
+  return (
+    <Skeleton loading={loading} active paragraph={{ rows: 2 }}>
+      <Space direction="vertical" size={8} style={{ width: '100%' }}>
+        <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+          <Typography.Text type="secondary">小红书</Typography.Text>
+          <Tooltip title={`小红书 ${unit}`}>
+            <Typography.Text strong style={{ fontSize: 16 }}>{values.xiaohongshu.toFixed(2)}</Typography.Text>
+          </Tooltip>
+        </Space>
+        <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+          <Typography.Text type="secondary">抖音</Typography.Text>
+          <Tooltip title={`抖音 ${unit}`}>
+            <Typography.Text strong style={{ fontSize: 16 }}>{values.douyin.toFixed(2)}</Typography.Text>
+          </Tooltip>
+        </Space>
+        <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+          <Typography.Text type="secondary">双平台综合</Typography.Text>
+          <Tooltip title={`双平台综合 ${unit}`}>
+            <Typography.Text strong style={{ fontSize: 18, color: '#1677ff' }}>{values.total.toFixed(2)}</Typography.Text>
+          </Tooltip>
+        </Space>
+      </Space>
+    </Skeleton>
   );
 }

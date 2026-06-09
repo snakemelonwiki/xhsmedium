@@ -10,6 +10,7 @@ import {
   OrderedListOutlined,
   ProjectOutlined,
   ScheduleOutlined,
+  ShareAltOutlined,
   ShopOutlined,
   TeamOutlined,
   UsergroupAddOutlined,
@@ -76,6 +77,13 @@ export const APP_MENU_ITEMS: AppMenuItem[] = [
     label: '作品录入',
     path: '/operation/posts/new',
     icon: <FormOutlined />,
+    roles: ['operation'],
+  },
+  {
+    key: 'operation-recommend',
+    label: '推荐作品录入',
+    path: '/operation/recommend',
+    icon: <ShareAltOutlined />,
     roles: ['operation'],
   },
   {
@@ -191,6 +199,13 @@ export const APP_MENU_ITEMS: AppMenuItem[] = [
     roles: ['sales'],
   },
   {
+    key: 'sales-recommend',
+    label: '推荐作品录入',
+    path: '/sales/recommend',
+    icon: <ShareAltOutlined />,
+    roles: ['sales'],
+  },
+  {
     key: 'academic-home',
     label: '教务首页',
     path: '/academic',
@@ -233,6 +248,13 @@ export const APP_MENU_ITEMS: AppMenuItem[] = [
     roles: ['academic'],
   },
   {
+    key: 'academic-recommend',
+    label: '推荐作品录入',
+    path: '/academic/recommend',
+    icon: <ShareAltOutlined />,
+    roles: ['academic'],
+  },
+  {
     key: 'owner-home',
     label: '总后台首页',
     path: '/owner',
@@ -265,6 +287,20 @@ export const APP_MENU_ITEMS: AppMenuItem[] = [
     label: '作品看板',
     path: '/admin/posts',
     icon: <OrderedListOutlined />,
+    roles: ['admin', 'owner'],
+  },
+  {
+    key: 'admin-recommend',
+    label: '推荐作品录入',
+    path: '/admin/posts/recommend',
+    icon: <ShareAltOutlined />,
+    roles: ['admin', 'owner'],
+  },
+  {
+    key: 'admin-account-analysis',
+    label: '账号分析',
+    path: '/admin/account-analysis',
+    icon: <FundOutlined />,
     roles: ['admin', 'owner'],
   },
   {

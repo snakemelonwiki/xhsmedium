@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import dayjs from 'dayjs';
 
-import { buildLastRange, isPresetMatch } from './date-range';
+import { buildLastRange, calendarStartOf, isPresetMatch } from './date-range';
 
 describe('buildLastRange', () => {
   it('returns a range spanning exactly N units ending at now', () => {
@@ -47,5 +47,33 @@ describe('isPresetMatch', () => {
     const range = buildLastRange('day', 7, now);
     const tweakedTime = { start: range.start.add(3, 'hour'), end: range.end.add(3, 'hour') };
     expect(isPresetMatch(tweakedTime, 'day', 7, undefined, now)).toBe(true);
+  });
+});
+
+describe('calendarStartOf', () => {
+  // T1.1 修复：业务口径为"自然周 = 周一到周日"。
+  // 2026-06-09 是周二，calendarStartOf('week') 必须返回 2026-06-08（周一），
+  // 不能是 dayjs 默认 startOf('week') 给的周日。
+  it('returns Monday for any day in the week (not Sunday)', () => {
+    const tue = dayjs('2026-06-09T15:00:00');
+    const mon = dayjs('2026-06-08T00:00:00');
+    expect(calendarStartOf('week', tue).isSame(mon, 'day')).toBe(true);
+
+    const sun = dayjs('2026-06-14T10:00:00');
+    const expectedMon = dayjs('2026-06-08T00:00:00');
+    expect(calendarStartOf('week', sun).isSame(expectedMon, 'day')).toBe(true);
+
+    const sat = dayjs('2026-06-13T23:59:00');
+    expect(calendarStartOf('week', sat).isSame(expectedMon, 'day')).toBe(true);
+  });
+
+  it('returns first day of month for month', () => {
+    const mid = dayjs('2026-06-09T12:00:00');
+    expect(calendarStartOf('month', mid).isSame(dayjs('2026-06-01T00:00:00'), 'day')).toBe(true);
+  });
+
+  it('returns start of day for day', () => {
+    const mid = dayjs('2026-06-09T12:34:56');
+    expect(calendarStartOf('day', mid).isSame(dayjs('2026-06-09T00:00:00'), 'minute')).toBe(true);
   });
 });

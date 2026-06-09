@@ -51,10 +51,16 @@ describe('DashboardController A端看板契约', () => {
     const analysisRes = response();
 
     await controller.getSupervisorOverview(overviewRes, 'month');
-    await controller.getSupervisorAnalysis(analysisRes, '小红书', 'emp-1');
+    await controller.getSupervisorAnalysis(analysisRes, '小红书', 'emp-1', 'acc-1', '2026-06-01', '2026-06-30');
 
     expect(service.getSupervisorOverview).toHaveBeenCalledWith('month');
-    expect(service.getSupervisorAnalysis).toHaveBeenCalledWith({ platform: '小红书', employeeId: 'emp-1' });
+    expect(service.getSupervisorAnalysis).toHaveBeenCalledWith({
+      platform: '小红书',
+      employeeId: 'emp-1',
+      accountId: 'acc-1',
+      from: '2026-06-01',
+      to: '2026-06-30',
+    });
     expect(overviewRes.json).toHaveBeenCalledWith({ postCount: 10 });
     expect(analysisRes.json).toHaveBeenCalledWith({ platformTrend: [] });
   });

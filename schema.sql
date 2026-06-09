@@ -2,6 +2,44 @@ CREATE DATABASE IF NOT EXISTS lan_dual_role_system CHARACTER SET utf8mb4 COLLATE
 USE lan_dual_role_system;
 
 -- ============================================================
+-- Drop all tables (idempotent re-run; reverse dependency order)
+-- Wrapped in FOREIGN_KEY_CHECKS=0/1 to bypass FK ordering errors
+-- 表顺序：叶子表 → 父表，让 schema.sql 可多次重跑
+-- ============================================================
+SET FOREIGN_KEY_CHECKS = 0;
+DROP TABLE IF EXISTS scraping_alerts;
+DROP TABLE IF EXISTS order_finance;
+DROP TABLE IF EXISTS order_reminders;
+DROP TABLE IF EXISTS order_status_history;
+DROP TABLE IF EXISTS order_submissions;
+DROP TABLE IF EXISTS order_authors;
+DROP TABLE IF EXISTS order_abnormal_feedbacks;
+DROP TABLE IF EXISTS order_follow_records;
+DROP TABLE IF EXISTS orders_order_code_seq;
+DROP TABLE IF EXISTS orders;
+DROP TABLE IF EXISTS collaboration_tasks;
+DROP TABLE IF EXISTS lead_drafts;
+DROP TABLE IF EXISTS lead_files;
+DROP TABLE IF EXISTS lead_follow_records;
+DROP TABLE IF EXISTS leads;
+DROP TABLE IF EXISTS post_metrics;
+DROP TABLE IF EXISTS post_metrics_history;
+DROP TABLE IF EXISTS posts;
+DROP TABLE IF EXISTS accounts;
+DROP TABLE IF EXISTS favorites;
+DROP TABLE IF EXISTS notifications;
+DROP TABLE IF EXISTS import_tasks;
+DROP TABLE IF EXISTS operation_logs;
+DROP TABLE IF EXISTS exports;
+DROP TABLE IF EXISTS revoked_tokens;
+DROP TABLE IF EXISTS supervisor_suggestions;
+DROP TABLE IF EXISTS users;
+DROP TABLE IF EXISTS employees;
+DROP TABLE IF EXISTS teachers;
+DROP TABLE IF EXISTS _migrations;
+SET FOREIGN_KEY_CHECKS = 1;
+
+-- ============================================================
 -- 0. _migrations
 -- scripts/run-migrations.js 使用的迁移登记表。
 -- ============================================================

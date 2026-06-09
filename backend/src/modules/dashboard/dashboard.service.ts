@@ -721,10 +721,30 @@ export class DashboardService {
    * - traffic = likes + comments + favorites
    * - leadCount 来自 leads 表（按 employeeId + platform 过滤）
    */
+  /**
+   * v1.3 OP-18 / T3.1 / T3.2 个人看板双平台分布
+   * 返回每平台聚合：作品 / 流量 / 客资 / 获客贴数 / 客资按平台分布；
+   * 新增字段（v1.3 T3 修复）：
+   *   - leadPostCount   获客贴数（post_type IN ('获客贴','营销贴','人设贴/讨论贴/获客贴')），
+   *                     注意：原代码口径已包含历史值 营销贴，这里扩展为：当前 3 大类型合并
+   *   - leadEfficiency  客资数 / 获客贴数（T3.2 单位 客/作）
+   *   - postTypes       三类作品分类（人设贴 / 讨论贴 / 获客贴），T3.1 饼图数据源
+   *                     字段值采用前端约定命名（人设贴=素人贴的别名, 讨论贴=话题贴的别名），
+   *                     与 schema 注释一致，避免前端再次做 normalize。
+   */
   async getPlatformDistribution(
     employeeId: string,
     range: { from?: string; to?: string; platform?: string } = {},
-  ): Promise<{ platform: string; postCount: number; leadCount: number; traffic: number }[]> {
+  ): Promise<{
+    platform: string;
+    postCount: number;
+    leadCount: number;
+    traffic: number;
+    leadPostCount: number;
+    leadEfficiency: number;
+    /** 三类作品分类（人设贴/讨论贴/获客贴）— 数量求和 = postCount */
+    postTypes: { type: string; count: number }[];
+  }[]> {
     const { from, to } = this.resolveRange(range);
     const platform = this.normalizePlatform(range.platform);
     const cacheKey = `dashboard:personal:platform-dist:${employeeId}:${from}:${to}:${platform || '_all'}`;
@@ -740,34 +760,89 @@ export class DashboardService {
     from: string,
     to: string,
     platform: string | null,
-  ): Promise<{ platform: string; postCount: number; leadCount: number; traffic: number }[]> {
+  ): Promise<{
+    platform: string;
+    postCount: number;
+    leadCount: number;
+    traffic: number;
+    leadPostCount: number;
+    leadEfficiency: number;
+    postTypes: { type: string; count: number }[];
+  }[]> {
     const platformList = platform ? [platform] : ['小红书', '抖音'];
-    const result: { platform: string; postCount: number; leadCount: number; traffic: number }[] = [];
+    const result: {
+      platform: string;
+      postCount: number;
+      leadCount: number;
+      traffic: number;
+      leadPostCount: number;
+      leadEfficiency: number;
+      postTypes: { type: string; count: number }[];
+    }[] = [];
     for (const p of platformList) {
-      const [postAgg, leadCount] = await Promise.all([
-        this.postRepo.createQueryBuilder('p')
-          .select('COUNT(*)', 'postCount')
-          .addSelect('COALESCE(SUM(p.likes), 0)', 'likes')
-          .addSelect('COALESCE(SUM(p.comments), 0)', 'comments')
-          .addSelect('COALESCE(SUM(p.favorites), 0)', 'favorites')
-          .where('p.employee_id = :employeeId', { employeeId })
-          .andWhere('p.platform = :platform', { platform: p })
-          .andWhere('p.published_at BETWEEN :from AND :to', { from, to })
-          .getRawOne(),
-        this.leadRepo.createQueryBuilder('l')
-          .select('COUNT(*)', 'count')
-          .where('l.employee_id = :employeeId', { employeeId })
-          .andWhere('l.platform = :platform', { platform: p })
-          .andWhere('DATE(l.created_at) BETWEEN :from AND :to', { from, to })
-          .getRawOne(),
+      // T3.1: 一次性取 3 类作品分类 + 获客贴总数；原 SQL 保留兼容性（leadPostCount 仍用 IN 列表口径）
+      const postBaseWhere = 'p.employee_id = ? AND p.platform = ? AND p.published_at BETWEEN ? AND ?';
+      const [postAgg, leadCount, postTypeRows] = await Promise.all([
+        this.postRepo.query(
+          `SELECT
+             COUNT(*) AS post_count,
+             COALESCE(SUM(p.likes), 0) AS likes,
+             COALESCE(SUM(p.comments), 0) AS comments,
+             COALESCE(SUM(p.favorites), 0) AS favorites,
+             COALESCE(SUM(CASE WHEN p.post_type IN ('获客贴','营销贴') THEN 1 ELSE 0 END), 0) AS lead_post_count
+           FROM posts p WHERE ${postBaseWhere}`,
+          [employeeId, p, from, to],
+        ),
+        this.leadRepo.query(
+          `SELECT COUNT(*) AS cnt FROM leads l
+           WHERE l.employee_id = ? AND l.platform = ? AND DATE(l.created_at) BETWEEN ? AND ?`,
+          [employeeId, p, from, to],
+        ),
+        // T3.1: 三类作品分类（人设贴/讨论贴/获客贴）。历史值映射：
+        //   人设贴 ↔ 素人贴；讨论帖 ↔ 话题贴；获客贴（含历史 营销贴）
+        // 使用 CASE 直接归类，避免 GROUP BY 中重复多值
+        this.postRepo.query(
+          `SELECT
+             CASE
+               WHEN p.post_type IN ('人设贴','素人贴') THEN '人设贴'
+               WHEN p.post_type IN ('讨论帖','讨论贴','话题贴') THEN '讨论贴'
+               WHEN p.post_type IN ('获客贴','营销贴') THEN '获客贴'
+               ELSE '其他'
+             END AS type_alias,
+             COUNT(*) AS cnt
+           FROM posts p WHERE ${postBaseWhere}
+           GROUP BY type_alias`,
+          [employeeId, p, from, to],
+        ),
       ]);
-      const postCount = Number(postAgg?.postCount || 0);
-      const traffic = Number(postAgg?.likes || 0) + Number(postAgg?.comments || 0) + Number(postAgg?.favorites || 0);
+      const r = (postAgg as any[])[0] || {};
+      const postCount = Number(r.post_count || 0);
+      const leadPostCount = Number(r.lead_post_count || 0);
+      const traffic = Number(r.likes || 0) + Number(r.comments || 0) + Number(r.favorites || 0);
+      const lc = Number((leadCount as any[])[0]?.cnt || 0);
+      const leadEfficiency = leadPostCount > 0 ? Number((lc / leadPostCount).toFixed(2)) : 0;
+
+      // 组装三类作品分类：保证 3 项齐全（即使 0）
+      const typeMap = new Map<string, number>();
+      for (const row of postTypeRows as any[]) {
+        const t = String(row.type_alias || '');
+        if (t === '其他') continue;
+        typeMap.set(t, Number(row.cnt || 0));
+      }
+      const postTypes = [
+        { type: '人设贴', count: typeMap.get('人设贴') || 0 },
+        { type: '讨论贴', count: typeMap.get('讨论贴') || 0 },
+        { type: '获客贴', count: typeMap.get('获客贴') || 0 },
+      ];
+
       result.push({
         platform: p,
         postCount,
-        leadCount: Number(leadCount?.count || 0),
+        leadCount: lc,
         traffic,
+        leadPostCount,
+        leadEfficiency,
+        postTypes,
       });
     }
     return result;
@@ -1190,76 +1265,627 @@ export class DashboardService {
   }
 
   /**
-   * 主管基础分析看板，返回聚合结果而不是前端拉全量计算。
+   * 主管总览扩展（T1.3 任务清单）：在 4 张概览卡之外补齐 7 个新区域数据。
+   *
+   *   1. platformDistribution       双平台分布（小红书 / 抖音，作品 / 客资 / 流量 3 维）
+   *   2. postVolumeTrend            作品量趋势（按日 / 周 / 月聚合；与 platformDistribution 共享数据源）
+   *   3. postTypeDistribution       三类作品占比（人设贴 / 讨论贴 / 获客帖 → 业务口径归一）
+   *   4. leadTrend                  获客趋势（小红书 / 抖音 / 总和 三条曲线，按 period 聚合）
+   *   5. trafficTrend               流量趋势（小红书 / 抖音 / 总和 三条曲线，按 period 聚合）
+   *   6. leadEfficiency             获客效率（客资数 / 作品数，按平台）
+   *   7. leadPostEfficiency         获客帖效率（客资数 / 获客帖数，按平台）
+   *
+   * 设计要点：
+   *   - 完全复用 computeSupervisorOverview 解析出的 from/to 区间，不影响现有 4 卡
+   *   - 三类作品占比：业务字面要求 `type IN ('人设贴','讨论贴','获客帖')`；为兼容历史值
+   *     （人设贴/讨论帖/营销贴）以及当前值（素人贴/话题贴/获客贴），使用 IN 子句同时包含
+   *     这 6 个值，再用 normalizePostType 在应用层归一为 素人贴/话题贴/获客贴（即"人设贴/讨论贴/获客帖"业务同义）
+   *   - 缓存键与 supervisor overview 一致，但加上 :extended 命名空间隔离
+   *   - period=day/week/month 仅决定趋势图的时间桶，4 张数据卡始终走 from/to
    */
-  async getSupervisorAnalysis(filters: { platform?: string; employeeId?: string } = {}): Promise<any> {
-    const platform = this.normalizePlatform(filters.platform);
-    const platformKey = platform || '_all';
-    const employeeIdKey = filters.employeeId || '_all';
-    const cacheKey = `dashboard:supervisor:analysis:${platformKey}:${employeeIdKey}`;
-    const cached = this.cache.get<ReturnType<typeof this.computeSupervisorAnalysis>>(cacheKey);
+  async getSupervisorExtended(
+    period: string = 'today',
+    from?: string,
+    to?: string,
+    trendPeriod: 'day' | 'week' | 'month' = 'day',
+  ): Promise<any> {
+    const range = from && to ? { from, to } : this.resolvePeriod(period);
+    const trendKey = this.normalizePeriod(trendPeriod);
+    const cacheKey = `dashboard:supervisor:extended:${period || 'custom'}:${range.from}:${range.to}:${trendKey}`;
+    const cached = this.cache.get<ReturnType<typeof this.computeSupervisorExtended>>(cacheKey);
     if (cached !== undefined) return cached;
 
-    const result = await this.computeSupervisorAnalysis(platform, filters.employeeId);
+    const result = await this.computeSupervisorExtended(range.from, range.to, trendKey);
     this.cache.set(cacheKey, result, CACHE_TTL_MS);
     return result;
   }
 
-  private async computeSupervisorAnalysis(platform: string | null, employeeId: string | undefined): Promise<any> {
-    const postWhere: string[] = ['1=1'];
-    const postParams: any[] = [];
-    const leadWhere: string[] = ['1=1'];
-    const leadParams: any[] = [];
+  private async computeSupervisorExtended(
+    from: string,
+    to: string,
+    trendPeriod: 'day' | 'week' | 'month',
+  ): Promise<any> {
+    // IN 列表覆盖业务字面三值 + 历史同义值 + 当前值（normalizePostType 统一归一为 素人贴/话题贴/获客贴）
+    const postTypeAliases = ['人设贴', '讨论贴', '获客帖', '素人贴', '话题贴', '获客贴', '营销贴', '讨论帖', 'note', 'video'];
+    const aliasPlaceholders = postTypeAliases.map(() => '?').join(',');
+
+    // 1) 平台分布（小红书 / 抖音）—— 作品数 / 客资数 / 流量
+    // 2) 三类作品占比（业务归一后）
+    // 5) 流量趋势（按 period 聚合）
+    // 4) 获客趋势（按 period 聚合）
+    // 6) 获客效率（聚合后计算）
+    // 7) 获客帖效率（聚合后计算）
+    // 3) 作品量趋势（按 period 聚合）—— 与 4 共享 lead bucket
+    const dateExpr = trendPeriod === 'day'
+      ? "DATE_FORMAT(p.published_at, '%Y-%m-%d')"
+      : trendPeriod === 'week'
+        ? "DATE_FORMAT(p.published_at, '%x-W%v')"
+        : "DATE_FORMAT(p.published_at, '%Y-%m')";
+    const leadDateExpr = trendPeriod === 'day'
+      ? "DATE_FORMAT(l.created_at, '%Y-%m-%d')"
+      : trendPeriod === 'week'
+        ? "DATE_FORMAT(l.created_at, '%x-W%v')"
+        : "DATE_FORMAT(l.created_at, '%Y-%m')";
+
+    const [platformAgg, postTypeRows, leadEfficiencyRows, postTrendRows, leadTrendRows] = await Promise.all([
+      // 1) 平台分布：单次聚合两个平台的三项指标
+      this.postRepo.query(
+        `SELECT p.platform AS platform,
+                COUNT(*) AS post_count,
+                COALESCE(SUM(p.likes), 0) AS likes,
+                COALESCE(SUM(p.comments), 0) AS comments,
+                COALESCE(SUM(p.favorites), 0) AS favorites
+         FROM posts p
+         WHERE p.published_at BETWEEN ? AND ?
+         GROUP BY p.platform`,
+        [from, to],
+      ),
+      // 2) 三类作品占比：先按字面 GROUP BY，再用 normalizePostType 归一
+      this.postRepo.query(
+        `SELECT post_type, COUNT(*) AS count
+         FROM posts
+         WHERE published_at BETWEEN ? AND ? AND post_type IN (${aliasPlaceholders})
+         GROUP BY post_type`,
+        [from, to, ...postTypeAliases],
+      ),
+      // 6) 7) 效率：每平台的作品数 / 客资数 / 获客帖数 一次拿全
+      this.postRepo.query(
+        `SELECT p.platform AS platform,
+                COUNT(*) AS post_count,
+                COALESCE(SUM(CASE WHEN p.post_type IN ('获客贴','获客帖','营销贴') THEN 1 ELSE 0 END), 0) AS lead_post_count
+         FROM posts p
+         WHERE p.published_at BETWEEN ? AND ?
+         GROUP BY p.platform`,
+        [from, to],
+      ),
+      // 5) 流量趋势：每桶每平台 likes+comments+favorites
+      this.postRepo.query(
+        `SELECT ${dateExpr} AS bucket, p.platform AS platform,
+                COALESCE(SUM(p.likes), 0) AS likes,
+                COALESCE(SUM(p.comments), 0) AS comments,
+                COALESCE(SUM(p.favorites), 0) AS favorites
+         FROM posts p
+         WHERE p.published_at BETWEEN ? AND ?
+         GROUP BY bucket, p.platform`,
+        [from, to],
+      ),
+      // 4) 获客趋势：每桶每平台 lead_count
+      this.leadRepo.query(
+        `SELECT ${leadDateExpr} AS bucket, l.platform AS platform, COUNT(*) AS lead_count
+         FROM leads l
+         WHERE DATE(l.created_at) BETWEEN ? AND ?
+         GROUP BY bucket, l.platform`,
+        [from, to],
+      ),
+    ]);
+
+    // 平台分布结果：组装为 [{platform, postCount, leadCount, traffic}]
+    // leads 也要按 platform 聚合，与 postUnion 后拼装
+    const leadByPlatformRows = await this.leadRepo.query(
+      `SELECT platform, COUNT(*) AS lead_count
+       FROM leads
+       WHERE DATE(created_at) BETWEEN ? AND ?
+       GROUP BY platform`,
+      [from, to],
+    );
+    // W4 修复：leadByPlatform key 需经过 normalizePlatform 归一化，
+    // 否则 DB 中 platform='douyin' 的行不会被 '抖音' key 匹配到
+    const leadByPlatform = new Map<string, number>();
+    for (const r of leadByPlatformRows as any[]) {
+      const normalized = this.normalizePlatform(String(r.platform || ''));
+      if (normalized) {
+        leadByPlatform.set(normalized, (leadByPlatform.get(normalized) || 0) + Number(r.lead_count || 0));
+      }
+    }
+    const platformDistribution: { platform: string; postCount: number; leadCount: number; traffic: number }[] = [];
+    for (const p of ['小红书', '抖音']) {
+      // 兼容历史平台值：xhs / xiaohongshu / 小红书 ；douyin / 抖音
+      let postCount = 0;
+      let traffic = 0;
+      for (const r of platformAgg as any[]) {
+        if (this.normalizePlatform(r.platform) === p) {
+          postCount += Number(r.post_count || 0);
+          traffic += Number(r.likes || 0) + Number(r.comments || 0) + Number(r.favorites || 0);
+        }
+      }
+      platformDistribution.push({
+        platform: p,
+        postCount,
+        traffic,
+        leadCount: leadByPlatform.get(p) || 0,
+      });
+    }
+
+    // 三类作品占比：归一 + 求百分比
+    const postTypeBuckets: Record<string, number> = { 素人贴: 0, 话题贴: 0, 获客贴: 0 };
+    for (const r of postTypeRows as any[]) {
+      const t = normalizePostType(r.post_type);
+      postTypeBuckets[t] = (postTypeBuckets[t] || 0) + Number(r.count || 0);
+    }
+    const postTypeTotal = postTypeBuckets.素人贴 + postTypeBuckets.话题贴 + postTypeBuckets.获客贴;
+    const postTypeDistribution: Array<{ type: string; count: number; ratio: string }> = (['素人贴', '话题贴', '获客贴'] as const).map((type) => {
+      const count = postTypeBuckets[type] || 0;
+      const ratio = postTypeTotal > 0 ? `${Math.round((count / postTypeTotal) * 100)}%` : '0%';
+      // 业务对外展示用"人设贴/讨论贴/获客帖"三标签（业务字面要求）
+      const display = type === '素人贴' ? '人设贴' : type === '话题贴' ? '讨论贴' : '获客帖';
+      return { type: display, count, ratio };
+    });
+
+    // 获客效率 / 获客帖效率（每平台 + 总计）
+    const leadEfficiencyByPlatform: Record<string, { postCount: number; leadPostCount: number; leadCount: number }> = {
+      '小红书': { postCount: 0, leadPostCount: 0, leadCount: 0 },
+      '抖音': { postCount: 0, leadPostCount: 0, leadCount: 0 },
+    };
+    for (const r of leadEfficiencyRows as any[]) {
+      const p = this.normalizePlatform(r.platform);
+      if (!p) continue;
+      const slot = leadEfficiencyByPlatform[p];
+      if (!slot) continue;
+      slot.postCount += Number(r.post_count || 0);
+      slot.leadPostCount += Number(r.lead_post_count || 0);
+    }
+    for (const p of ['小红书', '抖音'] as const) {
+      leadEfficiencyByPlatform[p].leadCount = leadByPlatform.get(p) || 0;
+    }
+    const leadEfficiency = this.computeEfficiencyTriplet(leadEfficiencyByPlatform);
+
+    // 趋势数据：合并 posts 流量 + leads 客资，按 bucket 对齐；每桶汇总三条曲线
+    const trendMap = new Map<string, { xhs: number; douyin: number; xhsLeads: number; douyinLeads: number; xhsTraffic: number; douyinTraffic: number; xhsPosts: number; douyinPosts: number }>();
+    const ensureSlot = (bucket: string) => {
+      let slot = trendMap.get(bucket);
+      if (!slot) {
+        slot = { xhs: 0, douyin: 0, xhsLeads: 0, douyinLeads: 0, xhsTraffic: 0, douyinTraffic: 0, xhsPosts: 0, douyinPosts: 0 };
+        trendMap.set(bucket, slot);
+      }
+      return slot;
+    };
+    for (const r of postTrendRows as any[]) {
+      const bucket = String(r.bucket || '');
+      if (!bucket) continue;
+      const p = this.normalizePlatform(r.platform);
+      const traffic = Number(r.likes || 0) + Number(r.comments || 0) + Number(r.favorites || 0);
+      const slot = ensureSlot(bucket);
+      if (p === '小红书') {
+        slot.xhsTraffic += traffic;
+        // 作品量趋势（同时累计 posts 计数）
+        slot.xhsPosts += Number(0); // 占位，下面用 leadTrend bucket 内补
+      } else if (p === '抖音') {
+        slot.douyinTraffic += traffic;
+      }
+    }
+    // 作品量需要单独查一次（postTrend 上面只 SELECT 了 likes/comments/favorites）
+    // 简化：再跑一遍 SELECT COUNT + 平台 与 bucket 聚合
+    const postCountTrendRows = await this.postRepo.query(
+      `SELECT ${dateExpr} AS bucket, p.platform AS platform, COUNT(*) AS post_count
+       FROM posts p
+       WHERE p.published_at BETWEEN ? AND ?
+       GROUP BY bucket, p.platform`,
+      [from, to],
+    );
+    for (const r of postCountTrendRows as any[]) {
+      const bucket = String(r.bucket || '');
+      if (!bucket) continue;
+      const p = this.normalizePlatform(r.platform);
+      const slot = ensureSlot(bucket);
+      if (p === '小红书') slot.xhsPosts += Number(r.post_count || 0);
+      else if (p === '抖音') slot.douyinPosts += Number(r.post_count || 0);
+    }
+    for (const r of leadTrendRows as any[]) {
+      const bucket = String(r.bucket || '');
+      if (!bucket) continue;
+      const p = this.normalizePlatform(r.platform);
+      const slot = ensureSlot(bucket);
+      if (p === '小红书') slot.xhsLeads += Number(r.lead_count || 0);
+      else if (p === '抖音') slot.douyinLeads += Number(r.lead_count || 0);
+    }
+    const postVolumeTrend = Array.from(trendMap.keys()).sort().map((bucket) => {
+      const s = trendMap.get(bucket)!;
+      return {
+        date: bucket,
+        xiaohongshuCount: s.xhsPosts,
+        douyinCount: s.douyinPosts,
+      };
+    });
+    const leadTrend = Array.from(trendMap.keys()).sort().map((bucket) => {
+      const s = trendMap.get(bucket)!;
+      return {
+        date: bucket,
+        xiaohongshuLeads: s.xhsLeads,
+        douyinLeads: s.douyinLeads,
+      };
+    });
+    const trafficTrend = Array.from(trendMap.keys()).sort().map((bucket) => {
+      const s = trendMap.get(bucket)!;
+      return {
+        date: bucket,
+        xiaohongshuTraffic: s.xhsTraffic,
+        douyinTraffic: s.douyinTraffic,
+      };
+    });
+
+    return {
+      period: { from, to, trendPeriod },
+      platformDistribution,           // 1
+      postVolumeTrend,                // 2
+      postTypeDistribution,           // 3
+      leadTrend,                      // 4
+      trafficTrend,                   // 5
+      leadEfficiency,                 // 6
+      leadPostEfficiency: this.computeLeadPostEfficiencyTriplet(leadEfficiencyByPlatform, leadEfficiency), // 7
+    };
+  }
+
+  /**
+   * 把 leadEfficiencyByPlatform（每平台的作品数/获客帖数/客资数）组装为：
+   *   {
+   *     xiaohongshu: number, douyin: number, total: number
+   *   }
+   * 效率 = 客资数 / 作品数；分母为 0 时返回 0。
+   */
+  private computeEfficiencyTriplet(agg: Record<string, { postCount: number; leadPostCount: number; leadCount: number }>): {
+    xiaohongshu: number;
+    douyin: number;
+    total: number;
+  } {
+    const xs = agg['小红书'] || { postCount: 0, leadCount: 0 };
+    const dy = agg['抖音'] || { postCount: 0, leadCount: 0 };
+    const totalPost = xs.postCount + dy.postCount;
+    const totalLead = xs.leadCount + dy.leadCount;
+    return {
+      xiaohongshu: xs.postCount > 0 ? Number((xs.leadCount / xs.postCount).toFixed(2)) : 0,
+      douyin: dy.postCount > 0 ? Number((dy.leadCount / dy.postCount).toFixed(2)) : 0,
+      total: totalPost > 0 ? Number((totalLead / totalPost).toFixed(2)) : 0,
+    };
+  }
+
+  /**
+   * 获客帖效率 = 客资数 / 获客帖数。
+   * 复用同一份 per-platform 聚合结果，避免重复 SQL。
+   */
+  private computeLeadPostEfficiencyTriplet(agg: Record<string, { postCount: number; leadPostCount: number; leadCount: number }>, _leadEff: { xiaohongshu: number; douyin: number; total: number }): {
+    xiaohongshu: number;
+    douyin: number;
+    total: number;
+  } {
+    const xs = agg['小红书'] || { postCount: 0, leadPostCount: 0, leadCount: 0 };
+    const dy = agg['抖音'] || { postCount: 0, leadPostCount: 0, leadCount: 0 };
+    const totalLeadPost = xs.leadPostCount + dy.leadPostCount;
+    const totalLead = xs.leadCount + dy.leadCount;
+    return {
+      xiaohongshu: xs.leadPostCount > 0 ? Number((xs.leadCount / xs.leadPostCount).toFixed(2)) : 0,
+      douyin: dy.leadPostCount > 0 ? Number((dy.leadCount / dy.leadPostCount).toFixed(2)) : 0,
+      total: totalLeadPost > 0 ? Number((totalLead / totalLeadPost).toFixed(2)) : 0,
+    };
+  }
+
+  /**
+   * T6.1/T6.2/T6.3/T6.4 主管分析看板聚合。
+   *
+   * 过滤维度：
+   *   - platform      '小红书' | '抖音' | ''（空=全部）
+   *   - employeeId    员工 ID（空=全部员工）
+   *   - accountId     账号 ID（空=全部账号；T6.2 单账号维度）
+   *   - from / to     日期区间（T6.2 时段筛选；缺省=本月第一天~今天）
+   *
+   * 8 类指标：
+   *   - platformTrend         每平台每日作品数 + 点赞数
+   *   - postStructure         作品类型占比（人设贴/讨论贴/获客帖）
+   *   - leadTrend             每平台每日客资数
+   *   - trafficTrend          每平台每日流量（T6.3：likes+comments+favorites）
+   *   - efficiencyTrend       每平台每日获客效率（客资/作）（T6.3）
+   *   - leadEfficiencyTrend   每平台每日获客帖效率（客资/获客贴）（T6.3）
+   *   - efficiencyRatio       按员工聚合：客资/作（T6.4）
+   *   - leadPostRatio         按员工聚合：客资/获客贴（T6.4）
+   *
+   * 5 分钟进程内缓存；key 含 5 个过滤维度。
+   */
+  async getSupervisorAnalysis(
+    filters: { platform?: string; employeeId?: string; accountId?: string; from?: string; to?: string } = {},
+  ): Promise<any> {
+    const platform = this.normalizePlatform(filters.platform);
+    const platformKey = platform || '_all';
+    const employeeIdKey = filters.employeeId || '_all';
+    const accountIdKey = filters.accountId || '_all';
+    const { from, to } = this.resolveAnalysisRange(filters);
+    const cacheKey = `dashboard:supervisor:analysis:${platformKey}:${employeeIdKey}:${accountIdKey}:${from}:${to}`;
+    const cached = this.cache.get<ReturnType<typeof this.computeSupervisorAnalysis>>(cacheKey);
+    if (cached !== undefined) return cached;
+
+    const result = await this.computeSupervisorAnalysis(platform, filters.employeeId, filters.accountId, from, to);
+    this.cache.set(cacheKey, result, CACHE_TTL_MS);
+    return result;
+  }
+
+  /**
+   * 分析看板时段解析：与主管端 dashboard.getSupervisorOverview 同口径。
+   * 不传 from/to → 本月第一天 ~ 今天；仅传一端 → 缺省端用今天。
+   */
+  private resolveAnalysisRange(filters: { from?: string; to?: string }): { from: string; to: string } {
+    const today = todayString();
+    const firstDay = (() => {
+      const now = new Date(today);
+      return new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+    })();
+    return {
+      from: filters.from || firstDay,
+      to: filters.to || today,
+    };
+  }
+
+  private async computeSupervisorAnalysis(
+    platform: string | null,
+    employeeId: string | undefined,
+    accountId: string | undefined,
+    from: string,
+    to: string,
+  ): Promise<any> {
+    // 公共 WHERE 片段：post 表 & lead 表同时使用平台/员工/账号 + 日期过滤
+    const postWhere: string[] = ['p.published_at BETWEEN ? AND ?'];
+    const postParams: any[] = [from, to];
+    const leadWhere: string[] = ['DATE(l.created_at) BETWEEN ? AND ?'];
+    const leadParams: any[] = [from, to];
     if (platform) {
-      postWhere.push('platform = ?');
+      postWhere.push('p.platform = ?');
       postParams.push(platform);
-      leadWhere.push('platform = ?');
+      leadWhere.push('l.platform = ?');
       leadParams.push(platform);
     }
     if (employeeId) {
-      postWhere.push('employee_id = ?');
+      postWhere.push('p.employee_id = ?');
       postParams.push(employeeId);
-      leadWhere.push('employee_id = ?');
+      leadWhere.push('l.employee_id = ?');
       leadParams.push(employeeId);
     }
-    const [platformTrend, postStructure, leadTrend] = await Promise.all([
-      this.postRepo.query(
-        `SELECT published_at AS date, platform, COUNT(*) AS post_count, COALESCE(SUM(likes), 0) AS likes
-         FROM posts WHERE ${postWhere.join(' AND ')}
-         GROUP BY published_at, platform ORDER BY published_at DESC LIMIT 90`,
-        postParams,
-      ),
-      this.postRepo.query(
-        `SELECT post_type AS type, COUNT(*) AS count
-         FROM posts WHERE ${postWhere.join(' AND ')}
-         GROUP BY post_type ORDER BY count DESC`,
-        postParams,
-      ),
-      this.leadRepo.query(
-        `SELECT DATE(created_at) AS date, platform, COUNT(*) AS lead_count
-         FROM leads WHERE ${leadWhere.join(' AND ')}
-         GROUP BY DATE(created_at), platform ORDER BY DATE(created_at) DESC LIMIT 90`,
-        leadParams,
-      ),
-    ]);
+    if (accountId) {
+      postWhere.push('p.account_id = ?');
+      postParams.push(accountId);
+      leadWhere.push('l.account_id = ?');
+      leadParams.push(accountId);
+    }
+    const postWhereSql = postWhere.join(' AND ');
+    const leadWhereSql = leadWhere.join(' AND ');
+
+    const [platformTrend, postStructure, leadTrend, trafficTrend, efficiencyByDay, leadEfficiencyByDay, efficiencyByEmployee, leadEfficiencyByEmployee] =
+      await Promise.all([
+        // 1. 平台趋势：每平台每日作品数 + 点赞
+        this.postRepo.query(
+          `SELECT DATE_FORMAT(p.published_at, '%Y-%m-%d') AS date, p.platform AS platform, COUNT(*) AS post_count, COALESCE(SUM(p.likes), 0) AS likes
+           FROM posts p
+           WHERE ${postWhereSql}
+           GROUP BY date, p.platform
+           ORDER BY date ASC`,
+          postParams,
+        ),
+        // 2. 作品结构：人设贴/讨论贴/获客帖
+        this.postRepo.query(
+          `SELECT p.post_type AS type, COUNT(*) AS count
+           FROM posts p
+           WHERE ${postWhereSql}
+           GROUP BY p.post_type`,
+          postParams,
+        ),
+        // 3. 客资趋势：每平台每日客资数
+        this.leadRepo.query(
+          `SELECT DATE_FORMAT(DATE(l.created_at), '%Y-%m-%d') AS date, l.platform AS platform, COUNT(*) AS lead_count
+           FROM leads l
+           WHERE ${leadWhereSql}
+           GROUP BY date, l.platform
+           ORDER BY date ASC`,
+          leadParams,
+        ),
+        // 4. T6.3 流量趋势：每平台每日流量 = likes + comments + favorites
+        this.postRepo.query(
+          `SELECT DATE_FORMAT(p.published_at, '%Y-%m-%d') AS date, p.platform AS platform,
+                  COALESCE(SUM(p.likes), 0) + COALESCE(SUM(p.comments), 0) + COALESCE(SUM(p.favorites), 0) AS traffic
+           FROM posts p
+           WHERE ${postWhereSql}
+           GROUP BY date, p.platform
+           ORDER BY date ASC`,
+          postParams,
+        ),
+        // 5. T6.3 获客效率按日：每平台每日 post_count / lead_count
+        // lead_count 来自 lead 表（不限定 account，因效率按平台整体看）
+        // 用子查询关联到 p.published_at + p.platform
+        // 注意：GROUP BY 必须包含 p.published_at, p.platform（与 SELECT 中的 date alias 功能依赖；
+        // 但 only_full_group_by 模式下 MySQL 不识别别名与原始列的依赖关系，所以保留原始列）
+        // W2 修复：DATE(l.created_at) 与 DATE(p.published_at) 对齐，避免 DATETIME vs DATE 类型不匹配导致 0 值
+        this.postRepo.query(
+          `SELECT DATE_FORMAT(p.published_at, '%Y-%m-%d') AS date, p.platform AS platform,
+                  COUNT(*) AS post_count,
+                  COALESCE((
+                    SELECT COUNT(*) FROM leads l
+                    WHERE DATE(l.created_at) = DATE(p.published_at)
+                      AND l.platform = p.platform
+                      ${employeeId ? 'AND l.employee_id = ?' : ''}
+                      ${accountId ? 'AND l.account_id = ?' : ''}
+                  ), 0) AS lead_count
+           FROM posts p
+           WHERE ${postWhereSql}
+           GROUP BY p.published_at, p.platform
+           ORDER BY p.published_at ASC`,
+          this.appendEfficiencyLeadParams(platform, employeeId, accountId, postParams),
+        ),
+        // 6. T6.3 获客帖效率按日：每平台每日 lead_post_count（post_type IN 获客贴/营销贴） / lead_count
+        this.postRepo.query(
+          `SELECT DATE_FORMAT(p.published_at, '%Y-%m-%d') AS date, p.platform AS platform,
+                  SUM(CASE WHEN p.post_type IN ('获客贴', '营销贴') THEN 1 ELSE 0 END) AS lead_post_count,
+                  COALESCE((
+                    SELECT COUNT(*) FROM leads l
+                    WHERE DATE(l.created_at) = DATE(p.published_at)
+                      AND l.platform = p.platform
+                      ${employeeId ? 'AND l.employee_id = ?' : ''}
+                      ${accountId ? 'AND l.account_id = ?' : ''}
+                  ), 0) AS lead_count
+           FROM posts p
+           WHERE ${postWhereSql}
+           GROUP BY p.published_at, p.platform
+           ORDER BY p.published_at ASC`,
+          this.appendEfficiencyLeadParams(platform, employeeId, accountId, postParams),
+        ),
+        // 7. T6.4 按员工聚合：postCount / leadCount
+        this.postRepo.query(
+          `SELECT p.employee_id AS employee_id,
+                  COALESCE(e.name, p.employee_id) AS name,
+                  COUNT(*) AS post_count,
+                  COALESCE((
+                    SELECT COUNT(*) FROM leads l
+                    WHERE l.employee_id = p.employee_id
+                      ${platform ? 'AND l.platform = ?' : ''}
+                      ${accountId ? 'AND l.account_id = ?' : ''}
+                      AND DATE(l.created_at) BETWEEN ? AND ?
+                  ), 0) AS lead_count
+           FROM posts p
+           LEFT JOIN employees e ON e.id = p.employee_id
+           WHERE ${postWhereSql}
+           GROUP BY p.employee_id, e.name
+           ORDER BY lead_count DESC, post_count DESC
+           LIMIT 50`,
+          this.appendRatioLeadParams(platform, employeeId, accountId, postParams, from, to),
+        ),
+        // 8. T6.4 按员工聚合：leadPostCount（获客贴/营销贴） / leadCount
+        this.postRepo.query(
+          `SELECT p.employee_id AS employee_id,
+                  COALESCE(e.name, p.employee_id) AS name,
+                  SUM(CASE WHEN p.post_type IN ('获客贴', '营销贴') THEN 1 ELSE 0 END) AS lead_post_count,
+                  COALESCE((
+                    SELECT COUNT(*) FROM leads l
+                    WHERE l.employee_id = p.employee_id
+                      ${platform ? 'AND l.platform = ?' : ''}
+                      ${accountId ? 'AND l.account_id = ?' : ''}
+                      AND DATE(l.created_at) BETWEEN ? AND ?
+                  ), 0) AS lead_count
+           FROM posts p
+           LEFT JOIN employees e ON e.id = p.employee_id
+           WHERE ${postWhereSql}
+           GROUP BY p.employee_id, e.name
+           ORDER BY lead_count DESC, lead_post_count DESC
+           LIMIT 50`,
+          this.appendRatioLeadParams(platform, employeeId, accountId, postParams, from, to),
+        ),
+      ]);
+
+    // 把 efficiencyByDay 转成前端期望的 {date, platform, postCount, leadCount, efficiency}
+    const efficiencyTrend = (efficiencyByDay as any[]).map((row) => {
+      const postCount = Number(row.post_count || 0);
+      const leadCount = Number(row.lead_count || 0);
+      return {
+        date: formatDateOnly(row.date),
+        platform: row.platform,
+        postCount,
+        leadCount,
+        efficiency: postCount > 0 ? Number((leadCount / postCount).toFixed(2)) : 0,
+      };
+    });
+    // 把 leadEfficiencyByDay 转成前端期望的 {date, platform, leadPostCount, leadCount, efficiency}
+    const leadEfficiencyTrend = (leadEfficiencyByDay as any[]).map((row) => {
+      const leadPostCount = Number(row.lead_post_count || 0);
+      const leadCount = Number(row.lead_count || 0);
+      return {
+        date: formatDateOnly(row.date),
+        platform: row.platform,
+        leadPostCount,
+        leadCount,
+        efficiency: leadPostCount > 0 ? Number((leadCount / leadPostCount).toFixed(2)) : 0,
+      };
+    });
+    // T6.4 按员工聚合行格式
+    const efficiencyRatio = (efficiencyByEmployee as any[]).map((row) => ({
+      employeeId: row.employee_id,
+      name: row.name,
+      postCount: Number(row.post_count || 0),
+      leadCount: Number(row.lead_count || 0),
+    }));
+    const leadPostRatio = (leadEfficiencyByEmployee as any[]).map((row) => ({
+      employeeId: row.employee_id,
+      name: row.name,
+      leadPostCount: Number(row.lead_post_count || 0),
+      leadCount: Number(row.lead_count || 0),
+    }));
+
     return {
-      filters: { platform, employeeId: employeeId || '' },
-      platformTrend: platformTrend.map((row: any) => ({
+      filters: { platform, employeeId: employeeId || '', accountId: accountId || '', from, to },
+      platformTrend: (platformTrend as any[]).map((row) => ({
         date: formatDateOnly(row.date),
         platform: row.platform,
         postCount: Number(row.post_count || 0),
         likes: Number(row.likes || 0),
       })),
-      postStructure: postStructure.map((row: any) => ({
+      postStructure: (postStructure as any[]).map((row) => ({
         type: normalizePostType(row.type),
         count: Number(row.count || 0),
       })),
-      leadTrend: leadTrend.map((row: any) => ({
+      leadTrend: (leadTrend as any[]).map((row) => ({
         date: formatDateOnly(row.date),
         platform: row.platform,
         leadCount: Number(row.lead_count || 0),
       })),
+      // T6.3
+      trafficTrend: (trafficTrend as any[]).map((row) => ({
+        date: formatDateOnly(row.date),
+        platform: row.platform,
+        traffic: Number(row.traffic || 0),
+      })),
+      efficiencyTrend,
+      leadEfficiencyTrend,
+      // T6.4
+      efficiencyRatio,
+      leadPostRatio,
     };
+  }
+
+  /**
+   * efficiencyByDay / leadEfficiencyByDay 子查询里额外需要 employeeId / accountId 参数
+   * （子查询内 platform 与 p.platform 已匹配，不再需要单独传）。
+   */
+  private appendEfficiencyLeadParams(
+    platform: string | null,
+    employeeId: string | undefined,
+    accountId: string | undefined,
+    baseParams: any[],
+  ): any[] {
+    void platform;
+    const extra: any[] = [];
+    if (employeeId) extra.push(employeeId);
+    if (accountId) extra.push(accountId);
+    return [...baseParams, ...extra];
+  }
+
+  /** efficiencyRatio / leadPostRatio 子查询里额外需要 platform / accountId + from/to */
+  private appendRatioLeadParams(
+    platform: string | null,
+    employeeId: string | undefined,
+    accountId: string | undefined,
+    baseParams: any[],
+    from: string,
+    to: string,
+  ): any[] {
+    const extra: any[] = [];
+    if (platform) extra.push(platform);
+    if (accountId) extra.push(accountId);
+    extra.push(from, to);
+    // employeeId 已在主表 WHERE 过滤，子查询里不需要再传
+    void employeeId;
+    return [...baseParams, ...extra];
   }
 
   /**
@@ -1363,18 +1989,37 @@ export class DashboardService {
 
   private resolvePeriod(period: string): { from: string; to: string } {
     const today = todayString();
+    // 工具方法：把 Date 的"本地日历"年月日拼成 YYYY-MM-DD，避免 toISOString()
+    // 在非 UTC 环境下把日期往前推一天（Asia/Shanghai 经常 06-30 → 06-29）
+    const toYmd = (d: Date) => {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
+    };
     const to = new Date(today);
     const normalized = String(period || '').toLowerCase();
     const from = new Date(to);
+    let toEnd = new Date(to);
     if (['week', 'thisweek', '本周'].includes(normalized)) {
+      // 本周 = 周一 ~ 周日（dayjs locale zh-cn endOf('week') 等价于周日）
+      // getDay(): 周日=0, 周一=1 ... 周六=6；用 (getDay() || 7) 把周日归到 7
       const day = from.getDay() || 7;
       from.setDate(from.getDate() - day + 1);
+      // 本周日 = 本周一 + 6 天
+      toEnd.setDate(toEnd.getDate() + (7 - day));
     } else if (['month', 'thismonth', '本月'].includes(normalized)) {
+      // 本月 = 1 号 ~ 本月最后一天（dayjs endOf('month') 等价物）
       from.setDate(1);
+      // 切到下月 0 号 = 本月最后一天（用本地日历重算，不要 toISOString）
+      toEnd = new Date(to.getFullYear(), to.getMonth() + 1, 0);
     } else if (['all', 'total', '累计'].includes(normalized)) {
       return { from: '1970-01-01', to: today };
     }
-    return { from: from.toISOString().slice(0, 10), to: today };
+    return {
+      from: toYmd(from),
+      to: toYmd(toEnd),
+    };
   }
 
   private mapAccountRanking(row: any): any {

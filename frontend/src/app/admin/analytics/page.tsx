@@ -1,10 +1,25 @@
 'use client';
 
-import { FundOutlined, SelectOutlined, TeamOutlined } from '@ant-design/icons';
-import { Alert, Card, Col, Empty, Row, Select, Skeleton, Space, Tag, Typography } from 'antd';
+import {
+  FundOutlined,
+  PercentageOutlined,
+  SelectOutlined,
+  TeamOutlined,
+  ThunderboltOutlined,
+  UserOutlined,
+} from '@ant-design/icons';
+import { Alert, Card, Col, Empty, Row, Select, Skeleton, Space, Statistic, Tag, Typography } from 'antd';
+import dayjs from 'dayjs';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
-import { getSupervisorAnalysis, type SupervisorAnalysis } from '@/shared/api/admin';
+import {
+  getSupervisorAnalysis,
+  listAdminAccounts,
+  type SupervisorAnalysis,
+} from '@/shared/api/admin';
+import type { AdminAccount } from '@/shared/types/admin';
+import { QuickRangePicker, type DateRangeValue } from '@/shared/components/date';
+import { isPresetMatch, type DateRangePreset } from '@/shared/utils/date-range';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 declare const echarts: any;
@@ -21,6 +36,13 @@ const PLATFORM_COLORS: Record<string, string> = {
   小红书: '#fa8c16',
   抖音: '#1677ff',
 };
+
+// T6.2 时段预设：今日 / 本周 / 本月 + 自定义（与主管端 dashboard 的 OVERVIEW_PRESETS 对齐）
+const ANALYTICS_PRESETS: ReadonlyArray<DateRangePreset> = [
+  { key: 'today', label: '今日', unit: 'day', n: 1, mode: 'calendar' },
+  { key: 'thisWeek', label: '本周', unit: 'week', n: 1, mode: 'calendar' },
+  { key: 'thisMonth', label: '本月', unit: 'month', n: 1, mode: 'calendar' },
+];
 
 function buildLineOption(
   title: string,
@@ -71,8 +93,6 @@ function EChart({ option, height, loading }: { option?: any; height: number; loa
   const chartRef = useRef<any>(null);
   const [echartsReady, setEchartsReady] = useState(false);
 
-  // echarts 通过 layout.tsx 注入的 CDN script 暴露为 window.echarts，
-  // 它的加载晚于组件首次渲染，需要等 ready=true 后再 init，避免 ReferenceError。
   useEffect(() => {
     if (typeof echarts === 'undefined') {
       const timer = window.setInterval(() => {
@@ -134,7 +154,6 @@ function PlatformTrendChart({ analysis, loading }: { analysis?: SupervisorAnalys
   const option = useMemo(() => {
     const rows = analysis?.platformTrend ?? [];
     if (rows.length === 0) return undefined;
-    // 从实际数据中提取出现的平台，避免切到单平台时仍硬编码两条 series
     const platforms = Array.from(new Set(rows.map((r) => r.platform))).sort();
     const dates = Array.from(new Set(rows.map((r) => r.date))).sort();
     const series = platforms.map((p) => ({
@@ -187,21 +206,275 @@ function LeadTrendChart({ analysis, loading }: { analysis?: SupervisorAnalysis; 
   );
 }
 
+// T6.3 流量趋势曲线：3 个 series（小红书 / 抖音 / 总和）
+function TrafficTrendChart({ analysis, loading }: { analysis?: SupervisorAnalysis; loading: boolean }) {
+  const option = useMemo(() => {
+    const rows = analysis?.trafficTrend ?? [];
+    if (rows.length === 0) return undefined;
+    const dates = Array.from(new Set(rows.map((r) => r.date))).sort();
+    const totalSeries = dates.map((d) =>
+      rows.filter((r) => r.date === d).reduce((s, r) => s + r.traffic, 0),
+    );
+    const xhsData = dates.map((d) => rows.find((r) => r.date === d && r.platform === '小红书')?.traffic ?? 0);
+    const dyData = dates.map((d) => rows.find((r) => r.date === d && r.platform === '抖音')?.traffic ?? 0);
+    return buildLineOption('流量趋势', dates, [
+      { name: '小红书', color: PLATFORM_COLORS.小红书, data: xhsData },
+      { name: '抖音', color: PLATFORM_COLORS.抖音, data: dyData },
+      { name: '总和', color: '#722ed1', data: totalSeries },
+    ]);
+  }, [analysis]);
+
+  return (
+    <Card title={<><ThunderboltOutlined /> 流量趋势</>} styles={{ body: { padding: '12px 12px 0' } }}>
+      <EChart option={option} height={280} loading={loading} />
+    </Card>
+  );
+}
+
+// T6.3 获客效率趋势：客资数 / 作品数（每天）
+function EfficiencyTrendChart({ analysis, loading }: { analysis?: SupervisorAnalysis; loading: boolean }) {
+  const option = useMemo(() => {
+    const rows = analysis?.efficiencyTrend ?? [];
+    if (rows.length === 0) return undefined;
+    const dates = Array.from(new Set(rows.map((r) => r.date))).sort();
+    const xhsData = dates.map((d) => {
+      const r = rows.find((it) => it.date === d && it.platform === '小红书');
+      return r ? r.efficiency : 0;
+    });
+    const dyData = dates.map((d) => {
+      const r = rows.find((it) => it.date === d && it.platform === '抖音');
+      return r ? r.efficiency : 0;
+    });
+    const totalData = dates.map((d) => {
+      const xhs = rows.find((it) => it.date === d && it.platform === '小红书');
+      const dy = rows.find((it) => it.date === d && it.platform === '抖音');
+      const totalPosts = (xhs?.postCount ?? 0) + (dy?.postCount ?? 0);
+      const totalLeads = (xhs?.leadCount ?? 0) + (dy?.leadCount ?? 0);
+      return totalPosts > 0 ? Number((totalLeads / totalPosts).toFixed(2)) : 0;
+    });
+    return buildLineOption('获客效率趋势（客资/作）', dates, [
+      { name: '小红书', color: PLATFORM_COLORS.小红书, data: xhsData },
+      { name: '抖音', color: PLATFORM_COLORS.抖音, data: dyData },
+      { name: '双平台综合', color: '#13c2c2', data: totalData },
+    ]);
+  }, [analysis]);
+
+  return (
+    <Card title={<><PercentageOutlined /> 获客效率趋势</>} styles={{ body: { padding: '12px 12px 0' } }}>
+      <EChart option={option} height={280} loading={loading} />
+    </Card>
+  );
+}
+
+// T6.3 获客帖效率趋势：客资数 / 获客贴数（每天）
+function LeadPostEfficiencyTrendChart({
+  analysis,
+  loading,
+}: {
+  analysis?: SupervisorAnalysis;
+  loading: boolean;
+}) {
+  const option = useMemo(() => {
+    const rows = analysis?.leadEfficiencyTrend ?? [];
+    if (rows.length === 0) return undefined;
+    const dates = Array.from(new Set(rows.map((r) => r.date))).sort();
+    const xhsData = dates.map((d) => {
+      const r = rows.find((it) => it.date === d && it.platform === '小红书');
+      return r ? r.efficiency : 0;
+    });
+    const dyData = dates.map((d) => {
+      const r = rows.find((it) => it.date === d && it.platform === '抖音');
+      return r ? r.efficiency : 0;
+    });
+    const totalData = dates.map((d) => {
+      const xhs = rows.find((it) => it.date === d && it.platform === '小红书');
+      const dy = rows.find((it) => it.date === d && it.platform === '抖音');
+      const totalLeadPosts = (xhs?.leadPostCount ?? 0) + (dy?.leadPostCount ?? 0);
+      const totalLeads = (xhs?.leadCount ?? 0) + (dy?.leadCount ?? 0);
+      return totalLeadPosts > 0 ? Number((totalLeads / totalLeadPosts).toFixed(2)) : 0;
+    });
+    return buildLineOption('获客帖效率趋势（客资/获客贴）', dates, [
+      { name: '小红书', color: PLATFORM_COLORS.小红书, data: xhsData },
+      { name: '抖音', color: PLATFORM_COLORS.抖音, data: dyData },
+      { name: '双平台综合', color: '#52c41a', data: totalData },
+    ]);
+  }, [analysis]);
+
+  return (
+    <Card title={<><PercentageOutlined /> 获客帖效率趋势</>} styles={{ body: { padding: '12px 12px 0' } }}>
+      <EChart option={option} height={280} loading={loading} />
+    </Card>
+  );
+}
+
+// T6.4 运营发帖数 / 获客数 比值（按员工聚合）
+function EfficiencyRatioSection({ analysis, loading }: { analysis?: SupervisorAnalysis; loading: boolean }) {
+  const rows = analysis?.efficiencyRatio ?? [];
+  const totalPosts = rows.reduce((s, r) => s + r.postCount, 0);
+  const totalLeads = rows.reduce((s, r) => s + r.leadCount, 0);
+  const ratio = totalPosts > 0 ? Number((totalLeads / totalPosts).toFixed(2)) : 0;
+
+  return (
+    <Card title={<>运营发帖数 / 获客数 比值</>}>
+      <Skeleton loading={loading} active paragraph={{ rows: 3 }}>
+        <Row gutter={16} align="middle">
+          <Col xs={24} md={8}>
+            <Statistic
+              title="比值（客资/作）"
+              value={ratio}
+              precision={2}
+              valueStyle={{ color: '#13c2c2' }}
+              prefix={<PercentageOutlined />}
+            />
+            <Typography.Paragraph type="secondary" style={{ marginTop: 8, marginBottom: 0 }}>
+              区间内：{totalPosts} 作品 / {totalLeads} 客资
+            </Typography.Paragraph>
+          </Col>
+          <Col xs={24} md={16}>
+            <EChart
+              option={
+                rows.length > 0
+                  ? {
+                      tooltip: { trigger: 'axis' },
+                      grid: { left: 48, right: 16, top: 16, bottom: 56 },
+                      xAxis: { type: 'category', data: rows.map((r) => r.name || r.employeeId) },
+                      yAxis: { type: 'value' },
+                      series: [
+                        {
+                          name: '客资/作',
+                          type: 'bar',
+                          data: rows.map((r) => (r.postCount > 0 ? Number((r.leadCount / r.postCount).toFixed(2)) : 0)),
+                          itemStyle: { color: '#13c2c2' },
+                        },
+                      ],
+                    }
+                  : undefined
+              }
+              height={240}
+              loading={false}
+            />
+          </Col>
+        </Row>
+      </Skeleton>
+    </Card>
+  );
+}
+
+// T6.4 获客帖数 / 获客数 比值（按员工聚合）
+function LeadPostRatioSection({ analysis, loading }: { analysis?: SupervisorAnalysis; loading: boolean }) {
+  const rows = analysis?.leadPostRatio ?? [];
+  const totalLeadPosts = rows.reduce((s, r) => s + r.leadPostCount, 0);
+  const totalLeads = rows.reduce((s, r) => s + r.leadCount, 0);
+  const ratio = totalLeadPosts > 0 ? Number((totalLeads / totalLeadPosts).toFixed(2)) : 0;
+
+  return (
+    <Card title={<>获客帖 / 获客数 比值</>}>
+      <Skeleton loading={loading} active paragraph={{ rows: 3 }}>
+        <Row gutter={16} align="middle">
+          <Col xs={24} md={8}>
+            <Statistic
+              title="比值（客资/获客贴）"
+              value={ratio}
+              precision={2}
+              valueStyle={{ color: '#52c41a' }}
+              prefix={<PercentageOutlined />}
+            />
+            <Typography.Paragraph type="secondary" style={{ marginTop: 8, marginBottom: 0 }}>
+              区间内：{totalLeadPosts} 获客贴 / {totalLeads} 客资
+            </Typography.Paragraph>
+          </Col>
+          <Col xs={24} md={16}>
+            <EChart
+              option={
+                rows.length > 0
+                  ? {
+                      tooltip: { trigger: 'axis' },
+                      grid: { left: 48, right: 16, top: 16, bottom: 56 },
+                      xAxis: { type: 'category', data: rows.map((r) => r.name || r.employeeId) },
+                      yAxis: { type: 'value' },
+                      series: [
+                        {
+                          name: '客资/获客贴',
+                          type: 'bar',
+                          data: rows.map((r) =>
+                            r.leadPostCount > 0 ? Number((r.leadCount / r.leadPostCount).toFixed(2)) : 0,
+                          ),
+                          itemStyle: { color: '#52c41a' },
+                        },
+                      ],
+                    }
+                  : undefined
+              }
+              height={240}
+              loading={false}
+            />
+          </Col>
+        </Row>
+      </Skeleton>
+    </Card>
+  );
+}
+
 export default function AdminAnalyticsPage() {
   const [analysis, setAnalysis] = useState<SupervisorAnalysis | undefined>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
   const [platform, setPlatform] = useState<PlatformFilter>('');
+  // T6.2 单账号维度：'all' = 全员；其他 = 具体 accountId
+  const [accountId, setAccountId] = useState<string>('all');
+  const [accounts, setAccounts] = useState<AdminAccount[]>([]);
+  const [accountsLoading, setAccountsLoading] = useState(false);
+  // T6.2 时段选择
+  const [dateRange, setDateRange] = useState<DateRangeValue>({
+    start: dayjs().startOf('day'),
+    end: dayjs(),
+  });
   const abortRef = useRef<AbortController | null>(null);
 
+  // T6.2 加载账号下拉（取所有账号，前端按需过滤）
   useEffect(() => {
-    // 切平台时立即取消上一次请求，避免旧响应覆盖新状态
+    let cancelled = false;
+    setAccountsLoading(true);
+    listAdminAccounts({ page: 1, pageSize: 500, limit: 500 })
+      .then((res) => {
+        if (cancelled) return;
+        setAccounts(Array.isArray(res?.items) ? res.items : []);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setAccounts([]);
+      })
+      .finally(() => {
+        if (!cancelled) setAccountsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    // 切换平台 / 账号 / 时段都重发请求；AbortController 取消旧请求
     abortRef.current?.abort();
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     setLoading(true);
     setError(undefined);
-    getSupervisorAnalysis({ platform: platform || undefined }, { signal: ctrl.signal })
+
+    const from = dateRange ? dateRange.start.format('YYYY-MM-DD') : dayjs().startOf('day').format('YYYY-MM-DD');
+    const to = dateRange ? dateRange.end.format('YYYY-MM-DD') : dayjs().format('YYYY-MM-DD');
+    const matched = ANALYTICS_PRESETS.find((p) => isPresetMatch(dateRange, p.unit, p.n, p.mode));
+
+    // T6.2 单账号维度：'all' 翻译成空串让后端跳过过滤
+    const effectiveAccountId = accountId && accountId !== 'all' ? accountId : '';
+    const params: Record<string, string> = {
+      platform: platform || '',
+      accountId: effectiveAccountId,
+      employeeId: '',
+      from,
+      to,
+      period: matched ? matched.key : 'custom',
+    };
+    getSupervisorAnalysis(params, { signal: ctrl.signal })
       .then((data) => {
         if (ctrl.signal.aborted) return;
         setAnalysis(data);
@@ -215,7 +488,18 @@ export default function AdminAnalyticsPage() {
         if (!ctrl.signal.aborted) setLoading(false);
       });
     return () => ctrl.abort();
-  }, [platform]);
+  }, [platform, accountId, dateRange]);
+
+  const accountOptions = useMemo(() => {
+    const items = [{ label: '全部账号', value: 'all' }];
+    for (const a of accounts) {
+      const name = a.accountName || a.id;
+      const emp = a.employeeName ? `（${a.employeeName}）` : '';
+      const platformTag = a.platform ? ` [${a.platform}]` : '';
+      items.push({ label: `${name}${platformTag}${emp}`, value: a.id });
+    }
+    return items;
+  }, [accounts]);
 
   return (
     <Space direction="vertical" size={16} className="page-stack">
@@ -223,17 +507,35 @@ export default function AdminAnalyticsPage() {
         <div>
           <Typography.Title level={2}>分析看板</Typography.Title>
           <Typography.Paragraph type="secondary">
-            主管视角核心指标趋势、作品结构与客资走势分析。
+            主管视角核心指标趋势、作品结构、客资走势、流量与获客效率分析；支持按账号 / 时段筛选。
           </Typography.Paragraph>
         </div>
         <Space size={12} wrap align="center">
           <Tag color="purple">主管</Tag>
+          <Select
+            value={accountId}
+            onChange={setAccountId}
+            options={accountOptions}
+            loading={accountsLoading}
+            style={{ minWidth: 220 }}
+            placeholder="选择账号"
+            suffixIcon={<UserOutlined />}
+            showSearch
+            optionFilterProp="label"
+          />
           <Select
             value={platform}
             onChange={(v) => setPlatform(v as PlatformFilter)}
             options={PLATFORM_OPTIONS}
             style={{ width: 140 }}
             suffixIcon={<SelectOutlined />}
+          />
+          <QuickRangePicker
+            value={dateRange}
+            onChange={setDateRange}
+            presets={ANALYTICS_PRESETS}
+            variant="buttons"
+            presetSize="small"
           />
         </Space>
       </div>
@@ -254,6 +556,31 @@ export default function AdminAnalyticsPage() {
       <Row gutter={[16, 16]}>
         <Col xs={24}>
           <LeadTrendChart analysis={analysis} loading={loading} />
+        </Col>
+      </Row>
+
+      {/* T6.3 三条新曲线 */}
+      <Row gutter={[16, 16]}>
+        <Col xs={24} lg={12}>
+          <TrafficTrendChart analysis={analysis} loading={loading} />
+        </Col>
+        <Col xs={24} lg={12}>
+          <EfficiencyTrendChart analysis={analysis} loading={loading} />
+        </Col>
+      </Row>
+      <Row gutter={[16, 16]}>
+        <Col xs={24}>
+          <LeadPostEfficiencyTrendChart analysis={analysis} loading={loading} />
+        </Col>
+      </Row>
+
+      {/* T6.4 搬移中台总览的两个比值看板 */}
+      <Row gutter={[16, 16]}>
+        <Col xs={24} lg={12}>
+          <EfficiencyRatioSection analysis={analysis} loading={loading} />
+        </Col>
+        <Col xs={24} lg={12}>
+          <LeadPostRatioSection analysis={analysis} loading={loading} />
         </Col>
       </Row>
     </Space>

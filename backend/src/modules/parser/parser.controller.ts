@@ -1,4 +1,16 @@
-import { Body, Controller, Get, HttpCode, Logger, Post, Query, Res } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Logger,
+  Post,
+  Query,
+  Res,
+  UploadedFile,
+  UseInterceptors,
+} from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { Response } from 'express';
 import { isParserFailure, ParserService } from './parser.service';
 
@@ -92,6 +104,46 @@ export class ParserController {
     }
     const result = await this.parserService.closeLogin(platform);
     return res.json(result);
+  }
+
+  /**
+   * T10.2 截图 OCR 占位端点：当前不返回真实识别结果，固定 ocr='placeholder'。
+   * 真实 OCR 引擎接入时只需要替换 parser.service.parseImage 实现，路由/响应字段不变。
+   *   POST /api/parser/parse-image  multipart/form-data  field=image
+   *   resp: { ok: true, data: { title, accountName, platform, text, ocr, warning? } }
+   */
+  @Post('parse-image')
+  @HttpCode(200)
+  @UseInterceptors(
+    FileInterceptor('image', {
+      limits: { fileSize: 10 * 1024 * 1024, files: 1 },
+    }),
+  )
+  async parseImage(
+    @UploadedFile() file: any,
+    @Res() res: Response,
+  ) {
+    if (!file?.buffer) {
+      return res.status(400).json({
+        ok: false,
+        error: { code: 'usage', message: '请上传截图 (field=image)' },
+      });
+    }
+    try {
+      const result = await this.parserService.parseImage({
+        buffer: file.buffer,
+        originalname: file.originalname,
+        mimetype: file.mimetype,
+        size: file.size,
+      });
+      return res.json(result);
+    } catch (err: any) {
+      this.logger.warn(`parseImage failed: ${err?.message}`);
+      return res.status(500).json({
+        ok: false,
+        error: { code: 'ocr_failed', message: err?.message || String(err) },
+      });
+    }
   }
 
   /**

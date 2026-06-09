@@ -186,7 +186,7 @@ export function PersonalDashboardBoard({ employeeId, showRefreshButton = true }:
           <Typography.Text strong>{metricValue.toFixed(2)}</Typography.Text>
           <Typography.Text type="secondary" style={{ marginLeft: 12 }}>与上一名差距：</Typography.Text>
           <Typography.Text strong style={{ color: gapToPrev > 0 ? '#fa541c' : '#52c41a' }}>
-            {gapToPrev > 0 ? `-${gapToPrev.toFixed(2)}` : '—'}
+            {gapToPrev > 0 ? `+${gapToPrev.toFixed(2)}` : '—'}
           </Typography.Text>
         </div>
       </div>
@@ -442,8 +442,44 @@ export function PersonalDashboardBoard({ employeeId, showRefreshButton = true }:
         </Col>
       </Row>
 
-      {/* 三类型作品占比饼图（基于 platformDist：作品 / 流量 / 客资 三扇区 + 平台单选） */}
+      {/* v1.3 T3.1 三类作品占比饼图（人设贴/讨论贴/获客贴，替代旧的"作品/流量/客资"分类） */}
       <PostTypeSharePieCard items={platformDist} loading={loadingDualPlatform} platform={platform} onPlatformChange={setPlatform} />
+
+      {/* v1.3 T3.3 获客趋势 + 流量趋势曲线（小红书/抖音/总和 三条） */}
+      <Row gutter={[12, 12]}>
+        <Col xs={24} md={12}>
+          <Card
+            size="small"
+            title={
+              <Space size={4} align="center">
+                <LineChartOutlined />
+                <Typography.Text strong>获客趋势</Typography.Text>
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                  {trendPeriod === 'day' ? '按日' : trendPeriod === 'week' ? '按周' : '按月'} · 小红书 / 抖音 / 总和
+                </Typography.Text>
+              </Space>
+            }
+          >
+            <LeadTrendLineChart trend={platformTrend} loading={loadingDualPlatform} />
+          </Card>
+        </Col>
+        <Col xs={24} md={12}>
+          <Card
+            size="small"
+            title={
+              <Space size={4} align="center">
+                <FundProjectionScreenOutlined />
+                <Typography.Text strong>流量趋势</Typography.Text>
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                  {trendPeriod === 'day' ? '按日' : trendPeriod === 'week' ? '按周' : '按月'} · 小红书 / 抖音 / 总和
+                </Typography.Text>
+              </Space>
+            }
+          >
+            <TrafficTrendLineChart trend={platformTrend} loading={loadingDualPlatform} />
+          </Card>
+        </Col>
+      </Row>
 
       {/* v1.3 双平台数据分析面板（顶部 3 概览卡 + 3 榜单 Top 8） */}
       <PlatformAnalysisPanel
@@ -677,13 +713,15 @@ function PlatformTrendLineChart({ trend, loading }: { trend?: PlatformTrend; loa
   );
 }
 
-// ============ 三类型作品占比饼图（作品 / 流量 / 客资 + 平台单选） ============
-// 数据源：PersonalDashboardBoard 透传下来的 platformDist（已按个人看板的 period/platform 过滤）
-// - 选项：全部 / 小红书 / 抖音
-// - 单选选"小红书"时，只把 platformDist 中 platform === '小红书' 的行累加成 3 个扇区值
-// - 三扇区：作品（postCount）/ 流量（traffic）/ 客资（leadCount）
-// 选"全部"则把小红书 + 抖音累加（注意三个指标量纲不同，仅作整体分布观察，不宜直接相加作百分比基数；
-// 这里用三个独立数值分别占各自总和的方式呈现，tooltip 各自展示绝对值）。
+// ============ v1.3 T3.1 三类型作品占比饼图（人设贴 / 讨论贴 / 获客贴） ============
+// v1.3 T3.1 修复：原"三类型占比（作品 / 流量 / 客资）"是按指标维度切的，不是作品类型。
+// 改用后端 platformDist[i].postTypes（按 post_type 分类）渲染，三扇区：
+//   - 人设贴 (alias for 素人贴, 旧 schema 注释里叫"人设贴"，与 素人贴=SU_REN 等价)
+//   - 讨论贴 (alias for 话题贴)
+//   - 获客贴 (含历史 营销贴)
+// 平台过滤由 scope 决定；scope='all' 时把两个平台 postTypes 累加。
+// 当月内可能 "其他" 分类的 post_type（如 note/marketing/图文）会被后端 SQL 过滤掉，
+// 因此三项之和可能 < postCount（差值显示在 tooltip 副标题中提示用户）。
 type PostTypeSharePlatform = 'all' | '小红书' | '抖音';
 
 const POST_TYPE_SHARE_PLATFORM_OPTIONS: { label: string; value: PersonalPlatform }[] = [
@@ -693,10 +731,12 @@ const POST_TYPE_SHARE_PLATFORM_OPTIONS: { label: string; value: PersonalPlatform
 ];
 
 const POST_TYPE_SHARE_COLORS: Record<string, string> = {
-  作品: '#1890ff',
-  流量: '#fa541c',
-  客资: '#52c41a',
+  人设贴: '#722ed1',
+  讨论贴: '#fa8c16',
+  获客贴: '#52c41a',
 };
+
+const POST_TYPE_DISPLAY_ORDER = ['人设贴', '讨论贴', '获客贴'] as const;
 
 function PostTypeSharePieCard({
   items,
@@ -712,26 +752,30 @@ function PostTypeSharePieCard({
   const { containerRef, chartRef, echartsReady } = useEchartsChart();
   const scope = mapPersonalPlatformToSharePlatform(platform);
 
-  // 聚合：按 scope 过滤后，求三个指标的总和
+  // 聚合：把 scope 范围内的 postTypes 累加，按固定顺序输出
   const aggregated = useMemo(() => {
     const filtered = scope === 'all' ? items : items.filter((it) => it.platform === scope);
-    let post = 0;
-    let traffic = 0;
-    let lead = 0;
+    const acc: Record<string, number> = { 人设贴: 0, 讨论贴: 0, 获客贴: 0 };
+    let classifiedTotal = 0;
     for (const it of filtered) {
-      post += Number(it.postCount) || 0;
-      traffic += Number(it.traffic) || 0;
-      lead += Number(it.leadCount) || 0;
+      const types = it.postTypes || [];
+      for (const t of types) {
+        const key = String(t.type || '');
+        if (key in acc) {
+          acc[key] += Number(t.count) || 0;
+        }
+      }
     }
-    return { post, traffic, lead };
+    for (const v of Object.values(acc)) classifiedTotal += v;
+    return { acc, classifiedTotal };
   }, [items, scope]);
 
   const data = useMemo(
-    () => [
-      { name: '作品', value: aggregated.post, color: POST_TYPE_SHARE_COLORS.作品 },
-      { name: '流量', value: aggregated.traffic, color: POST_TYPE_SHARE_COLORS.流量 },
-      { name: '客资', value: aggregated.lead, color: POST_TYPE_SHARE_COLORS.客资 },
-    ],
+    () => POST_TYPE_DISPLAY_ORDER.map((type) => ({
+      name: type,
+      value: aggregated.acc[type] || 0,
+      color: POST_TYPE_SHARE_COLORS[type],
+    })),
     [aggregated],
   );
 
@@ -746,13 +790,19 @@ function PostTypeSharePieCard({
     emptyHTML: '<div class="' + styles.pieChartBoxEmpty + '">暂无数据</div>',
     buildOption: (d) => ({
       title: {
-        text: '三类型占比（作品 / 流量 / 客资）',
+        text: '三类作品占比（人设贴 / 讨论贴 / 获客贴）',
+        subtext: scope === 'all' ? '全部平台' : scope,
         textStyle: { fontSize: 14, fontWeight: 'normal' },
+        subtextStyle: { fontSize: 11 },
         left: 'center',
       },
       tooltip: {
         trigger: 'item',
-        formatter: (params: any) => `${params.name}：${params.value.toLocaleString()}（${params.percent}%）`,
+        formatter: (params: any) => {
+          const total = d.reduce((s, it) => s + it.value, 0) || 1;
+          const pct = ((params.value / total) * 100).toFixed(1);
+          return `${params.name}：${params.value.toLocaleString()}（${pct}%）`;
+        },
       },
       legend: { bottom: 0 },
       color: d.map((it) => it.color),
@@ -777,9 +827,9 @@ function PostTypeSharePieCard({
       title={
         <Space size={6} align="center">
           <PieChartOutlined />
-          <Typography.Text strong>三类型作品占比</Typography.Text>
+          <Typography.Text strong>三类作品占比</Typography.Text>
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            作品 / 流量 / 客资（{scope === 'all' ? '全部平台' : scope}）
+            人设贴 / 讨论贴 / 获客贴（{scope === 'all' ? '全部平台' : scope}）
           </Typography.Text>
         </Space>
       }
@@ -804,6 +854,97 @@ function mapPersonalPlatformToSharePlatform(platform: PersonalPlatform): PostTyp
   if (platform === 'xiaohongshu') return '小红书';
   if (platform === 'douyin') return '抖音';
   return 'all';
+}
+
+// ============ v1.3 T3.3 获客趋势曲线（小红书 / 抖音 / 总和 三条） ============
+// 数据源：usePersonalDashboardData().platformTrend.points 里的 xiaohongshuLeads / douyinLeads
+// 总和 = xiaohongshuLeads + douyinLeads
+function LeadTrendLineChart({ trend, loading }: { trend?: PlatformTrend; loading: boolean }) {
+  const { containerRef, chartRef, echartsReady } = useEchartsChart();
+  const points = trend?.points ?? [];
+
+  useEchartsRender<PlatformTrendPoint[]>({
+    ready: echartsReady,
+    containerRef,
+    chartRef,
+    data: points,
+    isEmpty: (d) => d.length === 0,
+    emptyHTML: '<div class="' + styles.trendChartBoxEmpty + '">暂无数据</div>',
+    buildOption: (d) => {
+      const dates = d.map((p) => p.date);
+      const xhs = d.map((p) => p.xiaohongshuLeads);
+      const dy = d.map((p) => p.douyinLeads);
+      const total = d.map((p) => p.xiaohongshuLeads + p.douyinLeads);
+      return {
+        tooltip: {
+          trigger: 'axis',
+          axisPointer: { type: 'line' },
+        },
+        legend: { data: ['小红书', '抖音', '总和'], bottom: 0 },
+        color: ['#fa8c16', '#1677ff', '#52c41a'],
+        grid: { left: 48, right: 16, top: 28, bottom: 48 },
+        xAxis: { type: 'category', data: dates, axisLabel: { rotate: dates.length > 8 ? 30 : 0 } },
+        yAxis: { type: 'value', name: '获客数' },
+        series: [
+          { name: '小红书', type: 'line', data: xhs, smooth: true, symbol: 'circle', symbolSize: 5, lineStyle: { width: 2, color: '#fa8c16' }, itemStyle: { color: '#fa8c16' } },
+          { name: '抖音', type: 'line', data: dy, smooth: true, symbol: 'circle', symbolSize: 5, lineStyle: { width: 2, color: '#1677ff' }, itemStyle: { color: '#1677ff' } },
+          { name: '总和', type: 'line', data: total, smooth: true, symbol: 'circle', symbolSize: 5, lineStyle: { width: 2, type: 'dashed', color: '#52c41a' }, itemStyle: { color: '#52c41a' } },
+        ],
+      };
+    },
+    deps: [trend, loading, echartsReady, containerRef, chartRef],
+  });
+
+  return (
+    <Skeleton loading={loading} active>
+      <div ref={containerRef} className={styles.trendChartBox} />
+    </Skeleton>
+  );
+}
+
+// ============ v1.3 T3.3 流量趋势曲线（小红书 / 抖音 / 总和 三条） ============
+// 数据源：platformTrend.points.xiaohongshuTraffic / douyinTraffic
+function TrafficTrendLineChart({ trend, loading }: { trend?: PlatformTrend; loading: boolean }) {
+  const { containerRef, chartRef, echartsReady } = useEchartsChart();
+  const points = trend?.points ?? [];
+
+  useEchartsRender<PlatformTrendPoint[]>({
+    ready: echartsReady,
+    containerRef,
+    chartRef,
+    data: points,
+    isEmpty: (d) => d.length === 0,
+    emptyHTML: '<div class="' + styles.trendChartBoxEmpty + '">暂无数据</div>',
+    buildOption: (d) => {
+      const dates = d.map((p) => p.date);
+      const xhs = d.map((p) => p.xiaohongshuTraffic);
+      const dy = d.map((p) => p.douyinTraffic);
+      const total = d.map((p) => p.xiaohongshuTraffic + p.douyinTraffic);
+      return {
+        tooltip: {
+          trigger: 'axis',
+          axisPointer: { type: 'line' },
+        },
+        legend: { data: ['小红书', '抖音', '总和'], bottom: 0 },
+        color: ['#fa8c16', '#1677ff', '#fa541c'],
+        grid: { left: 48, right: 16, top: 28, bottom: 48 },
+        xAxis: { type: 'category', data: dates, axisLabel: { rotate: dates.length > 8 ? 30 : 0 } },
+        yAxis: { type: 'value', name: '流量' },
+        series: [
+          { name: '小红书', type: 'line', data: xhs, smooth: true, symbol: 'circle', symbolSize: 5, lineStyle: { width: 2, color: '#fa8c16' }, itemStyle: { color: '#fa8c16' } },
+          { name: '抖音', type: 'line', data: dy, smooth: true, symbol: 'circle', symbolSize: 5, lineStyle: { width: 2, color: '#1677ff' }, itemStyle: { color: '#1677ff' } },
+          { name: '总和', type: 'line', data: total, smooth: true, symbol: 'circle', symbolSize: 5, lineStyle: { width: 2, type: 'dashed', color: '#fa541c' }, itemStyle: { color: '#fa541c' } },
+        ],
+      };
+    },
+    deps: [trend, loading, echartsReady, containerRef, chartRef],
+  });
+
+  return (
+    <Skeleton loading={loading} active>
+      <div ref={containerRef} className={styles.trendChartBox} />
+    </Skeleton>
+  );
 }
 
 export default PersonalDashboardBoard;

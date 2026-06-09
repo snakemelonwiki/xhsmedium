@@ -7,6 +7,7 @@ import { todayString } from '../../shared/utils/date-utils';
 import { DebounceGuard } from '../../common/debounce.guard';
 import { OperationLogsService } from '../operation-logs/operation-logs.service';
 import { getSessionUserId } from '../../common/session.utils';
+import { AuthGuard, Public } from '../../common/auth.guard';
 import {
   OPERATION_LOG_ACTIONS,
   OPERATION_LOG_TARGET_TYPES,
@@ -45,6 +46,10 @@ export class PostsController {
     @Query('postUrl') postUrl?: string,
     // v1.3 / OP-14: 作品广场范围放宽，staff 显式传 scope=all 时不再强制按本人过滤
     @Query('scope') scope?: 'self' | 'all',
+    // T4.1 修复 (2026-06-09): 客资 / 流量阈值后端过滤
+    @Query('metric') metric?: 'leadsCount' | 'traffic',
+    @Query('metricOperator') metricOperator?: 'gt' | 'gte' | 'eq' | 'lte' | 'lt',
+    @Query('metricThreshold') metricThreshold?: string,
   ) {
     const session = (req as any).session;
     const wantsPaging = limit !== undefined || offset !== undefined;
@@ -62,20 +67,27 @@ export class PostsController {
     if (wantsPaging) {
       // 漏洞1修复：staff 强制只用 session.employeeId 过滤，不能通过 query 参数绕过
       //   v1.3 / OP-14 例外：scope=all 时，staff 也可以看全公司作品（前端 Gallery 用）
+      const filterArgs = {
+        employeeId: forceSelf ? session.employeeId : employeeId,
+        accountId,
+        platform,
+        postType,
+        from,
+        to,
+        sort,
+        search: nextSearch,
+        url,
+        postUrl,
+        // T4.1 (2026-06-09)
+        metric: (metric === 'leadsCount' || metric === 'traffic') ? metric : undefined,
+        metricOperator: (['gt', 'gte', 'eq', 'lte', 'lt'].includes(String(metricOperator || '')))
+          ? (metricOperator as any) : undefined,
+        metricThreshold: metricThreshold !== undefined && metricThreshold !== '' && Number.isFinite(Number(metricThreshold))
+          ? Number(metricThreshold) : undefined,
+      };
       if (forceSelf) {
         const result = await this.postsService.findPaged(
-          {
-            employeeId: session.employeeId, // 强制使用 session 的 employeeId
-            accountId,
-            platform,
-            postType,
-            from,
-            to,
-            sort,
-            search: nextSearch,
-            url,
-            postUrl,
-          },
+          filterArgs,
           Number(limit) || 20,
           Number(offset) || 0,
           viewer,
@@ -84,18 +96,7 @@ export class PostsController {
       }
       // 非 staff 或 scope=all：employeeId 参数由 query 决定（主管可查任意员工；staff 看全公司）
       const result = await this.postsService.findPaged(
-        {
-          employeeId,
-          accountId,
-          platform,
-          postType,
-          from,
-          to,
-          sort,
-          search: nextSearch,
-          url,
-          postUrl,
-        },
+        filterArgs,
         Number(limit) || 20,
         Number(offset) || 0,
         viewer,
@@ -150,6 +151,111 @@ export class PostsController {
         },
       });
     }
+  }
+
+  /**
+   * v1.3 T7.1：主管端"推荐作品"录入入口。
+   * 任何员工（甚至未登录用户）都可以通过 /admin/posts/recommend 页分享一个作品链接，
+   * 后端自动解析平台/标题/封面并把作品写入 posts 表，随后出现在主管端作品列表。
+   *
+   * 设计要点：
+   *   - 公开路由（@Public()）：不需要登录态即可调用，便于分享链接
+   *   - 通过 postUrl 查重：相同链接已存在 → 409 + duplicate
+   *   - 作品归属：未登录推荐时 employeeId/accountId 留空串，等待运营认领
+   *   - 推荐信息：推荐人和推荐理由以可读文本写入 `note` 字段，
+   *     便于后续在主管端 list 上直接看到；后续若需独立字段再做 schema 迁移
+   */
+  @Post('recommend')
+  @Public()
+  async recommendPost(@Body() body: any, @Req() req: Request, @Res() res: Response) {
+    const postUrl = String(body?.postUrl || '').trim();
+    const recommender = String(body?.recommender || '').trim().slice(0, 200);
+    const reason = String(body?.reason || '').trim().slice(0, 500);
+    if (!postUrl) {
+      return res.status(400).json({ ok: false, message: '作品链接不能为空' });
+    }
+    // SSRF 防护：仅允许已知平台域名，防止服务端被当作任意 URL 代理
+    const ALLOWED_HOSTS = [
+      'xiaohongshu.com', 'www.xiaohongshu.com', 'xhslink.com',
+      'douyin.com', 'www.douyin.com', 'v.douyin.com',
+      'iesdouyin.com', 'www.iesdouyin.com',
+    ];
+    let hostname = '';
+    try { hostname = new URL(postUrl).hostname.toLowerCase(); } catch { /* invalid URL below */ }
+    if (!hostname || !ALLOWED_HOSTS.some((h) => hostname === h || hostname.endsWith('.' + h))) {
+      return res.status(400).json({ ok: false, message: '仅支持小红书或抖音作品链接' });
+    }
+    // 重复检查
+    const duplicate = await this.postsService.findDuplicateByUrl(postUrl);
+    if (duplicate) {
+      return res.status(409).json({ ok: false, message: '该作品已存在', duplicate });
+    }
+    // 复用 parse-link 抓取标题/平台/封面；失败时降级为兜底字段
+    let parsed: {
+      platform: string;
+      postUrl: string;
+      title: string;
+      coverImageUrl: string;
+      coverThumbUrl: string;
+      likes: number;
+      comments: number;
+      favorites: number;
+      shares: number;
+    };
+    try {
+      const data = await this.postsService.parsePostLink(postUrl, { fetch: true });
+      parsed = {
+        platform: data.platform,
+        postUrl: data.postUrl,
+        title: data.title,
+        coverImageUrl: data.coverImageUrl,
+        coverThumbUrl: data.coverThumbUrl,
+        likes: Number(data.likes || 0),
+        comments: Number(data.comments || 0),
+        favorites: Number(data.favorites || 0),
+        shares: Number(data.shares || 0),
+      };
+    } catch {
+      parsed = {
+        platform: '',
+        postUrl,
+        title: '推荐作品',
+        coverImageUrl: '',
+        coverThumbUrl: '',
+        likes: 0,
+        comments: 0,
+        favorites: 0,
+        shares: 0,
+      };
+    }
+    const postId = makeId();
+    // 把推荐人和理由以可读形式写入 note，方便主管在作品详情里看到来源
+    const noteLines: string[] = [];
+    noteLines.push('【推荐录入】');
+    if (recommender) noteLines.push(`推荐人：${recommender}`);
+    if (reason) noteLines.push(`推荐理由：${reason}`);
+    await this.postsService.create({
+      id: postId,
+      // 未登录推荐时 employeeId 留空，等待运营在后续录入流程里补齐
+      employeeId: '',
+      accountId: '',
+      platform: parsed.platform,
+      title: parsed.title,
+      copywriting: '',
+      coverImageUrl: parsed.coverImageUrl || '',
+      coverThumbUrl: parsed.coverThumbUrl || '',
+      postUrl: parsed.postUrl,
+      // 留空 postType，由运营认领时补充
+      postType: '',
+      traffic: 0,
+      likes: parsed.likes,
+      comments: parsed.comments,
+      favorites: parsed.favorites,
+      publishedAt: todayString(),
+      note: noteLines.join('\n'),
+      supervisorSuggestion: '',
+    } as any);
+    return res.json({ ok: true, id: postId });
   }
 
   /**

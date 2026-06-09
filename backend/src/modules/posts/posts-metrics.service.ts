@@ -1,5 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { isParserFailure, ParserService } from '../parser/parser.service';
+import { CacheService } from '../../shared/cache.service';
+
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 分钟缓存
 
 export interface ScrapedMetrics {
   platform: string;
@@ -34,7 +37,10 @@ export interface ScrapedMetrics {
 export class PostsMetricsService {
   private readonly logger = new Logger(PostsMetricsService.name);
 
-  constructor(private readonly parserService: ParserService) {}
+  constructor(
+    private readonly parserService: ParserService,
+    private readonly cacheService: CacheService,
+  ) {}
 
   /**
    * 抓取帖子指标并规范化为 NestJS 调用方可直接使用的字段。
@@ -50,11 +56,14 @@ export class PostsMetricsService {
     const normalizedUrl = String(url || '').trim();
     if (!normalizedUrl) throw new Error('作品链接不能为空');
 
-    // 优化：retry 2→0，单次 15s→20s。
-    // 旧 retry=2 总耗时 45s+，叠加 ScrapingLock 8s 间隔 → 单次 parse-link 最坏 60s+，
-    // 容易撞 nginx 60s 上限返回 500。改为不重试：单次 20s 抓不到就让用户手动点重试。
-    // 注意：metrics 刷新场景（fetch-metrics / refresh-metrics）仍用 retry=2 保留重试，
-    // 因为那是非交互链路，多花点时间换成功率合理。parse-link 走 source='parse-link' 短路。
+    // ── 缓存命中：同 URL 5 分钟内直接返回 ──
+    const cacheKey = `metrics:${normalizedUrl}`;
+    const cached = this.cacheService.get<ScrapedMetrics>(cacheKey);
+    if (cached) {
+      this.logger.log(`[metrics] 缓存命中: ${normalizedUrl}`);
+      return { ...cached, metricsUpdatedAt: new Date(cached.metricsUpdatedAt) };
+    }
+
     const isInteractive = (opts.source || 'fetch-metrics') === 'parse-link';
     const result = await this.parserService.parse(normalizedUrl, {
       retry: isInteractive ? 0 : 2,
@@ -67,7 +76,7 @@ export class PostsMetricsService {
       throw new Error(result.error.message);
     }
     const d = result.data;
-    return {
+    const scraped: ScrapedMetrics = {
       platform: d.platform,
       title: d.title,
       likes: Number(d.likes || 0),
@@ -76,9 +85,11 @@ export class PostsMetricsService {
       shares: Number(d.shares || 0),
       coverImageUrl: d.coverImageUrl || '',
       coverThumbUrl: d.coverThumbUrl || '',
-      // parser-core 给的是 ISO 字符串，转 Date 喂给 updateMetrics；JSON 序列化时再变回 ISO
       metricsUpdatedAt: d.metricsUpdatedAt ? new Date(d.metricsUpdatedAt) : new Date(),
     };
+    this.cacheService.set(cacheKey, scraped, CACHE_TTL_MS);
+    this.logger.log(`[metrics] 抓取成功并缓存: ${normalizedUrl} (赞${scraped.likes} 评${scraped.comments} 藏${scraped.favorites})`);
+    return scraped;
   }
 
   /**

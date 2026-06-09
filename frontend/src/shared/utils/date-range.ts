@@ -25,6 +25,24 @@ export type DateRangePreset = {
 };
 
 /**
+ * 把日历周期单元对齐到「自然周/月/年的起点」。
+ * 与 dayjs 默认的 startOf('week') 不同：项目业务口径为「周一到周日」，
+ * 而 dayjs 在不显式设置 zh-cn locale 时 startOf('week') 实际是周日。
+ * 这里显式用「周一」对齐，避免依赖全局 locale 设置。
+ */
+export function calendarStartOf(unit: DateRangeUnit, now: Dayjs = dayjs()): Dayjs {
+  if (unit === 'week') {
+    // getDay(): 周日=0, 周一=1, ..., 周六=6。周一统一 = 1
+    const dow = now.day();
+    const offset = dow === 0 ? 6 : dow - 1;
+    return now.subtract(offset, 'day').startOf('day');
+  }
+  if (unit === 'month') return now.startOf('month');
+  if (unit === 'year') return now.startOf('year');
+  return now.startOf('day');
+}
+
+/**
  * 默认 6 个快捷预设：近 1 天 / 7 天 / 30 天 / 90 天 / 近 1 年 / 近 3 年。
  * 覆盖业务最常见的"日 / 周 / 月 / 年"四档粒度。
  */
@@ -82,7 +100,7 @@ export function isPresetMatch(
 ): boolean {
   if (!value) return false;
   const target = mode === 'calendar'
-    ? { start: now.startOf(unit), end: now }
+    ? { start: calendarStartOf(unit, now), end: now }
     : buildLastRange(unit, n, now);
   return value.start.startOf('day').isSame(target.start.startOf('day'))
       && value.end.startOf('day').isSame(target.end.startOf('day'));

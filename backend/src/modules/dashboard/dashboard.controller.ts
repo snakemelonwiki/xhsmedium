@@ -203,15 +203,52 @@ export class DashboardController {
   }
 
   /**
-   * 主管基础分析看板，保留平台趋势、作品结构和客资趋势三类指标。
+   * v1.3 T1.3：主管总览扩展数据，补齐 7 个区域（双平台分布 / 作品量趋势 /
+   * 三类作品占比 / 获客趋势 / 流量趋势 / 获客效率 / 获客帖效率）。
+   *
+   * Query:
+   *   - period      today / week / month（与 supervisor/overview 同步）
+   *   - from / to   自定义区间（与 period 互斥）
+   *   - trendPeriod day / week / month（趋势图时间桶，默认 day）
+   *
+   * 业务目标：让主管端总览页具备"个人看板"能力，无需切到 /admin/personal。
+   */
+  @Get('supervisor/overview/extended')
+  async getSupervisorOverviewExtended(
+    @Res() res: Response,
+    @Query('period') period?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('trendPeriod') trendPeriod?: string,
+  ) {
+    const data = await this.dashboardService.getSupervisorExtended(
+      period || 'today',
+      from,
+      to,
+      (['day', 'week', 'month'] as const).includes(String(trendPeriod || '').toLowerCase() as 'day' | 'week' | 'month')
+        ? (String(trendPeriod).toLowerCase() as 'day' | 'week' | 'month')
+        : 'day',
+    );
+    return res.json(data);
+  }
+
+  /**
+   * T6.1/T6.2/T6.3/T6.4：主管分析看板。
+   * - 接收 platform / employeeId / accountId / from / to 五个过滤维度。
+   * - 不传 from/to 时回退到本月第一天~今天（与主管端 dashboard 同口径）。
+   * - 返回 platformTrend / postStructure / leadTrend / trafficTrend /
+   *   efficiencyTrend / leadEfficiencyTrend / efficiencyRatio / leadPostRatio 八类指标。
    */
   @Get('supervisor/analysis')
   async getSupervisorAnalysis(
     @Res() res: Response,
     @Query('platform') platform?: string,
     @Query('employeeId') employeeId?: string,
+    @Query('accountId') accountId?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
   ) {
-    const data = await this.dashboardService.getSupervisorAnalysis({ platform, employeeId });
+    const data = await this.dashboardService.getSupervisorAnalysis({ platform, employeeId, accountId, from, to });
     return res.json(data);
   }
 

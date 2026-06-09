@@ -34,8 +34,8 @@ type Platform = '' | 'xhs' | 'douyin';
 
 const RANKING_PRESETS: readonly DateRangePreset[] = [
   { key: 'today', label: '今日', unit: 'day', n: 1, mode: 'calendar' },
-  { key: '7d', label: '近 7 天', unit: 'day', n: 7 },
-  { key: '30d', label: '近 30 天', unit: 'day', n: 30 },
+  { key: 'thisWeek', label: '本周', unit: 'week', n: 1, mode: 'calendar' },
+  { key: 'thisMonth', label: '本月', unit: 'month', n: 1, mode: 'calendar' },
 ] as const;
 
 /**

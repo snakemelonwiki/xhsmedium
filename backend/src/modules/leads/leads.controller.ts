@@ -125,6 +125,29 @@ export class LeadsController {
     return res.json(result);
   }
 
+  /**
+   * v1.3 / T5.3: 客资看板"按客资量降序"视图——按作品维度聚合 lead 数。
+   * 主管端 admin/leads 页面 Tab 切换时调用。
+   * 透传 platform / from / to 三个最常用筛选维度，排序固定 lead_count DESC。
+   */
+  @Get('aggregate-by-post')
+  async aggregateByPost(
+    @Req() req: Request,
+    @Res() res: Response,
+    @Query('platform') platform?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const result = await this.leadsService.aggregateByPost({
+      platform,
+      from,
+      to,
+      limit: Number(limit) || 50,
+    });
+    return res.json(result);
+  }
+
   private resolveScope(role?: string, scope?: 'self' | 'employee' | 'all'): 'self' | 'employee' | 'all' {
     if (role === 'admin' || role === 'owner') {
       return scope || 'all';

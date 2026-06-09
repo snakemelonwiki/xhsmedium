@@ -1,6 +1,6 @@
 'use client';
 
-import { DownloadOutlined, FilterOutlined, ReloadOutlined, SwapOutlined, HistoryOutlined } from '@ant-design/icons';
+import { DownloadOutlined, FilterOutlined, ReloadOutlined, SwapOutlined, HistoryOutlined, AppstoreOutlined, UnorderedListOutlined } from '@ant-design/icons';
 import {
   Alert,
   Button,
@@ -17,6 +17,7 @@ import {
   Spin,
   Statistic,
   Table,
+  Tabs,
   Tag,
   Typography,
   message,
@@ -27,7 +28,7 @@ import dayjs, { type Dayjs } from 'dayjs';
 import { useEffect, useMemo, useState } from 'react';
 
 import { apiClient } from '@/shared/api/apiClient';
-import { getAdminLeadsStats, listAdminEmployees, listAdminLeads } from '@/shared/api/admin';
+import { getAdminLeadsStats, listAdminEmployees, listAdminLeads, listAdminLeadsByPost, type AdminLeadPostAggregate } from '@/shared/api/admin';
 import { listSourceAccounts, listSourcePosts, listAssignableSalesUsers, type CatalogOption } from '@/shared/api/catalog';
 import { createExport, downloadExportUrl, getExport } from '@/shared/api/exports';
 import { QuickRangePicker, RANGE_PRESETS_FULL } from '@/shared/components/date';
@@ -189,6 +190,11 @@ export default function AdminLeadsPage() {
 
   const [exporting, setExporting] = useState(false);
 
+  // v1.3 / T5.3 客资看板多→少视图：作品聚合 lead 数
+  const [viewMode, setViewMode] = useState<'list' | 'byPost'>('list');
+  const [postAggregates, setPostAggregates] = useState<AdminLeadPostAggregate[]>([]);
+  const [aggregatesLoading, setAggregatesLoading] = useState(false);
+
   // 合并: 初始加载 employees + sales users (并行，一次性)
   useEffect(() => {
     void Promise.all([
@@ -221,6 +227,33 @@ export default function AdminLeadsPage() {
       debouncedFilters.accountId, debouncedFilters.postId, debouncedFilters.processStatus,
       debouncedFilters.addStatus, debouncedFilters.dealStatus,
       debouncedFilters.startDate, debouncedFilters.endDate]);
+
+  // v1.3 / T5.3: 作品聚合视图：筛选变化或 Tab 切换时刷新
+  // W9 修复：使用 AbortController 防止快速切换 tab 时竞态覆盖
+  useEffect(() => {
+    if (viewMode !== 'byPost') return;
+    const controller = new AbortController();
+    void loadPostAggregates(controller.signal);
+    return () => controller.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewMode, debouncedFilters.platform, debouncedFilters.startDate, debouncedFilters.endDate]);
+
+  async function loadPostAggregates(signal?: AbortSignal) {
+    setAggregatesLoading(true);
+    try {
+      const result = await listAdminLeadsByPost({
+        platform: debouncedFilters.platform || undefined,
+        from: debouncedFilters.startDate || undefined,
+        to: debouncedFilters.endDate || undefined,
+        limit: 50,
+      }, { signal });
+      setPostAggregates(result.items);
+    } catch {
+      setPostAggregates([]);
+    } finally {
+      setAggregatesLoading(false);
+    }
+  }
 
   async function loadStats() {
     setStatsLoading(true);
@@ -484,6 +517,7 @@ export default function AdminLeadsPage() {
         collaborating: 0,
         dealDone: 0,
         invalid: 0,
+        platformTotal: 0,
       };
     }
     return {
@@ -495,8 +529,18 @@ export default function AdminLeadsPage() {
       collaborating: stats.byStatus['in_collaboration'] ?? 0,
       dealDone: stats.byProcess['deal_done'] ?? 0,
       invalid: stats.byStatus['invalid'] ?? 0,
+      // v1.3 / T5.2: 当前筛选条件下平台对应的客资总数
+      // - 选了具体平台 → filteredTotal（与顶部筛选口径一致）
+      // - 全部平台 → total
+      platformTotal: filters.platform ? stats.filteredTotal : stats.total,
     };
-  }, [stats]);
+  }, [stats, filters.platform]);
+
+  // v1.3 / T5.2 当前筛选平台的展示名
+  const currentPlatformLabel = useMemo(() => {
+    const opt = platformOptions.find((o) => o.value === filters.platform);
+    return opt?.label || '全部平台';
+  }, [filters.platform]);
 
   const columns: ColumnsType<Lead> = [
     { title: '客户昵称', dataIndex: 'customerName', width: 120, render: (v: string) => v || '未命名客户' },
@@ -566,6 +610,62 @@ export default function AdminLeadsPage() {
     void loadLeads(next.current ?? 1, next.pageSize ?? DEFAULT_PAGE_SIZE);
   };
 
+  // W8 修复：预计算总客资数，避免 postAggregateColumns "占比" 列每行都 reduce 全数组
+  const postAggregateTotal = useMemo(
+    () => postAggregates.reduce((sum, p) => sum + (p.leadCount || 0), 0),
+    [postAggregates],
+  );
+
+  // v1.3 / T5.3 作品聚合视图列：按作品维度展示 lead 数（关联到具体作品）
+  const postAggregateColumns: ColumnsType<AdminLeadPostAggregate> = [
+    {
+      title: '排名',
+      key: 'rank',
+      width: 60,
+      render: (_: unknown, _record: AdminLeadPostAggregate, index: number) => (
+        <Tag color={index < 3 ? 'magenta' : 'default'}>#{index + 1}</Tag>
+      ),
+    },
+    {
+      title: '作品标题',
+      dataIndex: 'postTitle',
+      width: 200,
+      render: (v: string, record: AdminLeadPostAggregate) => (
+        <PostTitleCell title={v} postId={record.postId} maxChars={16} />
+      ),
+    },
+    {
+      title: '平台',
+      dataIndex: 'platform',
+      width: 80,
+      render: (v?: string) => (v ? <Tag>{v}</Tag> : '-'),
+    },
+    {
+      title: '来源账号',
+      dataIndex: 'accountName',
+      width: 160,
+      render: (v?: string) => v || '-',
+    },
+    {
+      title: '客资数',
+      dataIndex: 'leadCount',
+      width: 100,
+      sorter: false,
+      render: (v: number) => (
+        <span style={{ color: '#eb2f96', fontWeight: 600 }}>{v}</span>
+      ),
+    },
+    {
+      title: '占比',
+      key: 'ratio',
+      width: 100,
+      render: (_: unknown, record: AdminLeadPostAggregate) => {
+        const ratio = postAggregateTotal > 0 ? (record.leadCount / postAggregateTotal) * 100 : 0;
+        return `${ratio.toFixed(1)}%`;
+      },
+    },
+  ];
+
   const tablePagination: TablePaginationConfig = {
     current: page,
     pageSize: pageSize,
@@ -597,16 +697,21 @@ export default function AdminLeadsPage() {
         </Space>
       </div>
 
-      {/* 8 统计卡 */}
-      <Row gutter={16}>
+      {/* 8 统计卡（T5.2: 第 2 张改为按当前平台筛选的"平台客资数"卡，标题随平台变化） */}
+      <Row gutter={12}>
         <Col span={3}>
           <Card size="small">
             <Statistic title="客资总数" value={statsData.total} loading={statsLoading} />
           </Card>
         </Col>
         <Col span={3}>
-          <Card size="small">
-            <Statistic title="新客资" value={statsData.newCount} loading={statsLoading} valueStyle={{ color: '#1890ff' }} />
+          <Card size="small" data-testid="platform-leads-card">
+            <Statistic
+              title={`${currentPlatformLabel}客资数`}
+              value={statsData.platformTotal}
+              loading={statsLoading}
+              valueStyle={{ color: filters.platform ? '#eb2f96' : '#8c8c8c' }}
+            />
           </Card>
         </Col>
         <Col span={3}>
@@ -709,19 +814,55 @@ export default function AdminLeadsPage() {
 
       {error ? <Alert type="warning" showIcon message={error} /> : null}
 
-      {/* 主表格 */}
+      {/* 主内容区：Tabs 切换"客资列表" / "按作品聚合（多→少）" */}
       <Card>
-        <Spin spinning={loading}>
-          <Table<Lead>
-            rowKey="id"
-            columns={columns}
-            dataSource={items}
-            pagination={tablePagination}
-            scroll={{ x: 1400 }}
-            onChange={handleTableChange}
-            locale={{ emptyText: <Empty description={error ? '客资加载失败' : '暂无客资'} /> }}
-          />
-        </Spin>
+        <Tabs
+          activeKey={viewMode}
+          onChange={(key) => setViewMode(key as 'list' | 'byPost')}
+          items={[
+            {
+              key: 'list',
+              label: (
+                <span>
+                  <UnorderedListOutlined /> 客资列表
+                </span>
+              ),
+              children: (
+                <Spin spinning={loading}>
+                  <Table<Lead>
+                    rowKey="id"
+                    columns={columns}
+                    dataSource={items}
+                    pagination={tablePagination}
+                    scroll={{ x: 1400 }}
+                    onChange={handleTableChange}
+                    locale={{ emptyText: <Empty description={error ? '客资加载失败' : '暂无客资'} /> }}
+                  />
+                </Spin>
+              ),
+            },
+            {
+              key: 'byPost',
+              label: (
+                <span>
+                  <AppstoreOutlined /> 按作品聚合（多→少）
+                </span>
+              ),
+              children: (
+                <Spin spinning={aggregatesLoading}>
+                  <Table<AdminLeadPostAggregate>
+                    rowKey="postId"
+                    columns={postAggregateColumns}
+                    dataSource={postAggregates}
+                    pagination={false}
+                    scroll={{ x: 1000 }}
+                    locale={{ emptyText: <Empty description="暂无聚合数据" /> }}
+                  />
+                </Spin>
+              ),
+            },
+          ]}
+        />
       </Card>
 
       {/* 高级筛选弹窗 */}

@@ -129,6 +129,11 @@ export default function OperationPostNewPage() {
         nextValues.title = data.title;
       }
 
+      // 抖音解析成功后，将标题写入文案字段（如果文案为空）
+      if (data?.parsed && data?.title && !form.getFieldValue('copywriting') && data?.platform === '抖音') {
+        nextValues.copywriting = data.title;
+      }
+
       // 作者信息回填：匹配账号下拉列表
       if (data?.authorName && !form.getFieldValue('accountId')) {
         const matched = accountOptions.find(
@@ -201,6 +206,68 @@ export default function OperationPostNewPage() {
       message.warning('后端解析失败，已根据域名自动识别平台');
     } finally {
       setParsing(false);
+    }
+  }
+
+  /**
+   * T10.2：粘贴截图后调后端 OCR 端点（占位），把识别结果填到表单。
+   * 当前后端 OCR 引擎未启用，data.warning 会提示"请手动补充标题与账号"；
+   * 表单字段保持可编辑（前端不强制覆盖非空字段），用户可手动修正。
+   */
+  const [ocrRunning, setOcrRunning] = useState(false);
+  async function recognizeImageFromPaste(file: File) {
+    setOcrRunning(true);
+    try {
+      const body = new FormData();
+      body.set('image', file);
+      const ac = new AbortController();
+      const timeoutId = window.setTimeout(() => ac.abort(), 30_000);
+      let payload: any;
+      try {
+        payload = await apiClient.post<{
+          ok?: boolean;
+          data?: {
+            title?: string;
+            accountName?: string;
+            platform?: string;
+            text?: string;
+            ocr?: string;
+            warning?: string;
+          };
+          error?: { code?: string; message?: string };
+        }>('/parser/parse-image', body, { signal: ac.signal });
+      } finally {
+        window.clearTimeout(timeoutId);
+      }
+      if (!payload?.ok || !payload?.data) {
+        message.warning(payload?.error?.message || 'OCR 识别失败，请手动输入');
+        return;
+      }
+      const nextValues: Record<string, string> = {};
+      // 只在表单为空时回填，避免覆盖用户已经输入的内容
+      if (payload.data.title && !form.getFieldValue('title')) {
+        nextValues.title = payload.data.title;
+      }
+      if (payload.data.accountName && !form.getFieldValue('accountId')) {
+        const matched = accountOptions.find(
+          (a) => a.name === payload.data.accountName || a.id === payload.data.accountName,
+        );
+        if (matched) nextValues.accountId = matched.id;
+      }
+      if (Object.keys(nextValues).length > 0) {
+        form.setFieldsValue(nextValues);
+      }
+      if (payload.data.warning) {
+        // 占位场景：前端要明确告诉用户"识别字段可手动修正"
+        message.info(payload.data.warning);
+      } else if (Object.keys(nextValues).length > 0) {
+        message.success('已根据截图识别填充字段，可手动修改');
+      }
+    } catch (err) {
+      // 静默：失败时不影响上传流程，提示一句即可
+      message.warning('OCR 识别未完成（' + (err instanceof Error ? err.message : '未知错误') + '），请手动输入');
+    } finally {
+      setOcrRunning(false);
     }
   }
 
@@ -439,6 +506,9 @@ export default function OperationPostNewPage() {
               <ImageUploadField
                 bucket="post-covers"
                 onThumbChange={(url) => { latestThumbRef.current = url; }}
+                // T10.2：粘贴截图后自动调 OCR（占位），把可识别的字段回填；
+                // onPastedImage 仅在用户粘贴时触发，点击上传不会触发 OCR。
+                onPastedImage={(file) => { void recognizeImageFromPaste(file); }}
               />
             </Form.Item>
             <Form.Item className="full-row" name="note" label="备注">

@@ -122,6 +122,46 @@ export class ParserService {
   // ---- 登录态管理 ----
 
   /**
+   * T10.2 占位实现：图片 OCR 识别。
+   * 当前 backend 不内置 OCR 引擎（tesseract / 阿里云 OCR / 百度 OCR 都未引入），
+   * 也不允许新增重型依赖；本方法只做"图片合法性 + 文件大小 + 元数据提取"，并返回
+   * 显式 ocr='placeholder' 标识，让前端走 manual-correct 路径，识别字段可编辑。
+   *
+   * 后续接真 OCR 时，只替换该方法实现即可，controller 与前端无需改动。
+   */
+  async parseImage(file: {
+    buffer: Buffer;
+    originalname: string;
+    mimetype?: string;
+    size?: number;
+  }): Promise<{
+    ok: true;
+    data: {
+      title: string;
+      accountName: string;
+      platform: string;
+      text: string;
+      ocr: 'placeholder';
+      warning?: string;
+    };
+  }> {
+    if (!file?.buffer || file.buffer.length === 0) {
+      throw new Error('请上传图片文件');
+    }
+    return {
+      ok: true,
+      data: {
+        title: '',
+        accountName: '',
+        platform: '',
+        text: '',
+        ocr: 'placeholder',
+        warning: '后端尚未启用 OCR 引擎，请手动补充标题与账号',
+      },
+    };
+  }
+
+  /**
    * 启动 headful 登录浏览器（带 UI，让用户扫码）
    * 注意：需要 GUI 环境（桌面系统）。服务器跑会失败。
    */

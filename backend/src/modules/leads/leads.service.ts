@@ -1389,6 +1389,64 @@ export class LeadsService {
     };
   }
 
+  /**
+   * v1.3 / T5.3 客资看板"按客资量降序"视图：按作品维度聚合 lead 数。
+   *
+   * 关联到具体作品（不是孤立展示），返回：
+   *   - postId, postTitle, postUrl, platform
+   *   - accountId, accountName
+   *   - leadCount
+   *
+   * 支持的筛选维度：platform / from / to（与 stats 保持口径一致）。
+   * 排序：lead_count DESC, l.id ASC。
+   * 用途：主管端 admin/leads 页面新增"按作品聚合" Tab。
+   */
+  async aggregateByPost(opts: {
+    platform?: string;
+    from?: string;
+    to?: string;
+    limit?: number;
+  }): Promise<{ items: any[]; total: number }> {
+    const safeLimit = Math.min(Math.max(Number(opts.limit) || 50, 1), 200);
+
+    const qb = this.leadRepository.createQueryBuilder('l')
+      .leftJoin(Post, 'p', 'p.id = l.post_id')
+      .leftJoin(Account, 'a', 'a.id = l.account_id')
+      .select('l.post_id', 'postId')
+      .addSelect('p.title', 'postTitle')
+      .addSelect('p.post_url', 'postUrl')
+      .addSelect('l.platform', 'platform')
+      .addSelect('p.account_id', 'accountId')
+      .addSelect('a.account_name', 'accountName')
+      .addSelect('COUNT(*)', 'leadCount')
+      .where('l.post_id IS NOT NULL')
+      .groupBy('l.post_id')
+      .addGroupBy('p.title')
+      .addGroupBy('p.post_url')
+      .addGroupBy('l.platform')
+      .addGroupBy('p.account_id')
+      .addGroupBy('a.account_name')
+      .orderBy('leadCount', 'DESC')
+      .addOrderBy('l.post_id', 'ASC')
+      .limit(safeLimit);
+
+    if (opts.platform) qb.andWhere('l.platform = :platform', { platform: opts.platform });
+    if (opts.from) qb.andWhere('l.created_at >= :from', { from: opts.from });
+    if (opts.to) qb.andWhere('l.created_at < :to', { to: opts.to });
+
+    const rows: any[] = await qb.getRawMany();
+    const items = rows.map((r) => ({
+      postId: r.postId,
+      postTitle: r.postTitle || '未命名作品',
+      postUrl: r.postUrl || null,
+      platform: r.platform || null,
+      accountId: r.accountId || null,
+      accountName: r.accountName || null,
+      leadCount: Number(r.leadCount) || 0,
+    }));
+    return { items, total: items.length };
+  }
+
   private toCountMap(rows: Array<{ k: string | null; n: any }>): Record<string, number> {
     const out: Record<string, number> = {};
     for (const r of rows) {

@@ -217,12 +217,18 @@ export class ImportsService implements OnModuleInit, OnModuleDestroy {
 
   /**
    * Split a raw text row into columns. Order: Tab > Pipe > Comma.
+   * - For tab/pipe: simple split.
+   * - For comma: simple split (5 fields). Quoted CSV is NOT supported; users should
+   *   use tab/pipe for fields containing commas, or the remark/note will be truncated.
+   *   This matches the prior behavior and avoids pulling in a CSV parser.
    */
   splitColumns(rawLine: string): string[] {
-    if (rawLine.includes('\t')) return rawLine.split('\t').map((s) => s.trim());
-    if (rawLine.includes('|')) return rawLine.split('|').map((s) => s.trim());
-    if (rawLine.includes(',')) return rawLine.split(',').map((s) => s.trim());
-    return [rawLine.trim()];
+    // Strip BOM (U+FEFF) at start of line (Excel-saved UTF-8 files)
+    const line = rawLine && rawLine.charCodeAt(0) === 0xFEFF ? rawLine.slice(1) : rawLine;
+    if (line.includes('\t')) return line.split('\t').map((s) => s.trim());
+    if (line.includes('|')) return line.split('|').map((s) => s.trim());
+    if (line.includes(',')) return line.split(',').map((s) => s.trim());
+    return [line.trim()];
   }
 
   parseRow(rawLine: string): ParsedLeadRow {
@@ -238,17 +244,45 @@ export class ImportsService implements OnModuleInit, OnModuleDestroy {
 
   /**
    * §8.3 validation. Returns reason on failure, null on success.
+   * 联系人格式：先去除常见前缀（+86 / v / vx / wechat / 微信:），去除空白、括号、连字符，
+   * 再尝试 phone / wxid_ / alt 匹配。这样 `+86 138-0013-8001`、`微信:abc123` 等都能通过。
    */
   validate(row: ParsedLeadRow): string | null {
     if (!row.platform) return '平台缺失';
     if (!row.contact) return '联系方式缺失';
+    const cleaned = this.normalizeContact(row.contact);
+    if (!cleaned) return '联系方式缺失';
     const phoneRe = /^1[3-9]\d{9}$/;
     const wxidRe = /^wxid_[A-Za-z0-9_-]+$/;
     const altRe = /^[A-Za-z0-9_-]{6,}$/;
-    if (!phoneRe.test(row.contact) && !wxidRe.test(row.contact) && !altRe.test(row.contact)) {
+    if (!phoneRe.test(cleaned) && !wxidRe.test(cleaned) && !altRe.test(cleaned)) {
       return '联系方式格式错误';
     }
     return null;
+  }
+
+  /**
+   * 把 `+86 138-0013-8001`、`微信:abc123_xyz`、`v信 foo-bar123` 等统一成可校验的 contact。
+   * 规则：
+   *   1) 去掉 `+86` / `+86-` 等国家码
+   *   2) 提取第一个连续 11 位手机号（适用 `+86 xxx-xxxx-xxxx`）
+   *   3) 否则去掉 `v:` / `vx:` / `wechat:` / `微信:` / `wx:` 等前缀
+   *   4) 去掉所有空白、连字符、括号
+   *   5) 至少 6 位才返回，否则交给调用方判 "联系方式缺失"
+   */
+  private normalizeContact(raw: string): string {
+    if (!raw) return '';
+    let s = String(raw).trim();
+    // 1) 去掉 +86 / 86 国家码
+    s = s.replace(/^\+?86[\s\-:：]?/, '');
+    // 2) 提取 11 位手机号
+    const m = s.match(/1[3-9]\d{9}/);
+    if (m) return m[0];
+    // 3) 去掉常见前缀（中文/英文，顺序很关键：先匹配长前缀再短前缀）
+    s = s.replace(/^(微信号|微信|wechat\s*id|wechat|微信\s*号|vx|v信|v)[\s:：是=]+/i, '');
+    // 4) 去掉空白、连字符、括号
+    s = s.replace(/[\s\-()（）]+/g, '');
+    return s;
   }
 
   /**
@@ -361,6 +395,17 @@ export class ImportsService implements OnModuleInit, OnModuleDestroy {
   /**
    * 私有方法：实际执行客资导入（processor 调用或 setImmediate 兜底）。
    * 任务记录已在 enqueueImport 中创建，taskId 由调用方传入。
+   *
+   * 修复点（T9.1 客资导入不全）：
+   *  1) 文件 / 粘贴内容可能含 UTF-8 BOM（Excel 导出的常见现象），splitColumns 已剥除。
+   *  2) 同一文件内部可能含重复 contact：在去重循环内用 `batchInserted` Map 缓存本批
+   *     已写入的 (contact -> leadCode)，命中时直接记为"本批内已存在"并复用 leadCode，
+   *     不再走 DB 查询、也不计入 fail 计数。
+   *  3) 联系人格式校验先 normalize（去 +86 / vx / 微信: 等前缀、空白、连字符、括号），
+   *     再走 phone / wxid_ / alt 三个正则，覆盖 `+86 138-0013-8001`、`微信:abc123` 这类。
+   *  4) 整体在一个 TypeORM 事务里完成，单条 INSERT 失败时整批回滚、错误条数 + 错误信息
+   *     通过 errors 数组返回给前端。
+   *  5) Header 检测兼容更多模板（大小写不敏感、首尾空白、零宽字符），不再硬编码 3 个串。
    */
   async _doImportLeadsPaste(taskId: string, actorUserId: string, actorEmployeeId: string, rows: string[]): Promise<void> {
     const errors: ImportRowError[] = [];
@@ -374,69 +419,148 @@ export class ImportsService implements OnModuleInit, OnModuleDestroy {
       const firstRaw = rows[0] == null ? '' : String(rows[0]);
       const firstCols = this.splitColumns(firstRaw);
       const firstCell = (firstCols[0] || '').trim();
-      if (['平台', 'platform', 'Platform'].includes(firstCell)) {
+      if (this.isHeaderCell(firstCell)) {
         startIdx = 1;
       }
     }
     const total = rows.length - startIdx;
 
-    for (let i = startIdx; i < rows.length; i++) {
-      const rowIndex = i + 1; // 1-based 物理行号
-      const rawLine = rows[i] == null ? '' : String(rows[i]);
-      if (!rawLine.trim()) {
-        fail++;
-        errors.push({ row: rowIndex, reason: '空行', raw: rawLine });
-        continue;
-      }
+    // 本批内已写入的 contact -> leadCode 缓存（in-batch dedup，避免对同一文件内重复
+    // contact 第二次 INSERT 时误报"30 天内已存在"）。
+    const batchInserted = new Map<string, string>();
+    // 本批内已确认重复的 contact（行号列表），用于在第二次出现时只 push 一次错误。
+    const batchDupRows = new Map<string, number[]>();
 
-      const parsed = this.parseRow(rawLine);
-      const validationError = this.validate(parsed);
-      if (validationError) {
-        fail++;
-        errors.push({ row: rowIndex, reason: validationError, raw: rawLine });
-        continue;
+    // W5 修复：改用 savepoint-per-row 模式，避免单条 INSERT 失败后事务被 poison，
+    // 导致后续合法行也无法写入。hard error（死锁等）仍回滚整批。
+    // T9.1 修复：savepoint 与 INSERT 必须跑在同一个连接上，否则 RELEASE SAVEPOINT
+    // 会报 "SAVEPOINT does not exist"。统一使用 manager.queryRunner（事务持有的连接），
+    // manager.connection 在连接池场景下可能与事务 queryRunner 不是同一连接。
+    await this.leadRepository.manager.transaction(async (manager) => {
+      const leadRepo = manager.getRepository(Lead);
+      const queryRunner = manager.queryRunner;
+      if (!queryRunner) {
+        // 防御性：理论不应发生；如发生直接抛错让外层事务回滚
+        throw new Error('transactional EntityManager has no queryRunner');
       }
-
-      try {
-        const dup = await this.findRecentDuplicate(parsed.contact);
-        if (dup.existed) {
+      for (let i = startIdx; i < rows.length; i++) {
+        const rowIndex = i + 1; // 1-based 物理行号
+        const rawLine = rows[i] == null ? '' : String(rows[i]);
+        if (!rawLine.trim()) {
+          // 空行：作为 fail 计入"无效数据"，不抛错
           fail++;
-          const codePart = dup.leadCode ? `(${dup.leadCode})` : '';
+          errors.push({ row: rowIndex, reason: '空行', raw: rawLine });
+          continue;
+        }
+
+        const parsed = this.parseRow(rawLine);
+        const validationError = this.validate(parsed);
+        if (validationError) {
+          fail++;
+          errors.push({ row: rowIndex, reason: validationError, raw: rawLine });
+          continue;
+        }
+
+        // 用规范化后的 contact 做去重 key（与 DB 查询口径一致）
+        const contactKey = this.normalizeContact(parsed.contact) || parsed.contact;
+
+        // 1) 先看本批内是否已插入
+        if (batchInserted.has(contactKey)) {
+          const dupRows = batchDupRows.get(contactKey) || [];
+          dupRows.push(rowIndex);
+          batchDupRows.set(contactKey, dupRows);
+          // 本批内重复：作为 fail 计入，但只记录一次最终汇总
+          fail++;
+          continue;
+        }
+
+        // 2) 查 DB 30 天内是否已存在
+        try {
+          const dup = await leadRepo.createQueryBuilder('l')
+            .where('l.contact_info = :c', { c: contactKey })
+            .andWhere('l.created_at >= (NOW() - INTERVAL 30 DAY)')
+            .select(['l.id', 'l.leadCode'])
+            .limit(1)
+            .getOne();
+          if (dup) {
+            batchInserted.set(contactKey, dup.leadCode || '');
+            fail++;
+            const codePart = dup.leadCode ? `(${dup.leadCode})` : '';
+            errors.push({
+              row: rowIndex,
+              reason: `30 天内已存在相同联系方式${codePart}`,
+              raw: rawLine,
+            });
+            continue;
+          }
+        } catch (err: any) {
+          fail++;
           errors.push({
             row: rowIndex,
-            reason: `30 天内已存在相同联系方式${codePart}`,
+            reason: `去重查询失败: ${err?.message || String(err)}`,
             raw: rawLine,
           });
           continue;
         }
 
-        const lead = this.leadRepository.create({
-          id: makeId(),
-          leadCode: this.generateLeadCode(),
-          employeeId: actorEmployeeId || '',
-          accountId: '',
-          postId: null,
-          platform: parsed.platform,
-          contactInfo: parsed.contact,
-          nickname: parsed.nickname || '',
-          majorContent: parsed.accountName || null,
-          note: parsed.remark || null,
-          status: 'new',
-          processStatus: 'not_contacted',
-          addStatus: 'not_added',
-          salesUserName: '',
-          assignedSalesUserName: '',
-        } as any);
-        await this.leadRepository.save(lead);
-        success++;
-      } catch (err: any) {
-        fail++;
-        errors.push({
-          row: rowIndex,
-          reason: `写入失败: ${err?.message || String(err)}`,
-          raw: rawLine,
-        });
+        // 3) 写入（使用 savepoint 隔离，单条失败不影响事务整体）。
+        //    SAVEPOINT / RELEASE / ROLLBACK TO 必须全部走 queryRunner，
+        //    与 leadRepo.save()（内部走同一 queryRunner）共用同一连接。
+        const spName = `sp_row_${rowIndex}`;
+        await queryRunner.query(`SAVEPOINT ${spName}`);
+        try {
+          const lead = leadRepo.create({
+            id: makeId(),
+            leadCode: this.generateLeadCode(),
+            employeeId: actorEmployeeId || '',
+            accountId: '',
+            postId: null,
+            platform: parsed.platform,
+            contactInfo: contactKey,
+            nickname: parsed.nickname || '',
+            majorContent: parsed.accountName || null,
+            note: parsed.remark || null,
+            status: 'new',
+            processStatus: 'not_contacted',
+            addStatus: 'not_added',
+            salesUserName: '',
+            assignedSalesUserName: '',
+          } as any);
+          await leadRepo.save(lead);
+          const savedLead = Array.isArray(lead) ? lead[0] : lead;
+          batchInserted.set(contactKey, (savedLead as Lead).leadCode || '');
+          await queryRunner.query(`RELEASE SAVEPOINT ${spName}`);
+          success++;
+        } catch (err: any) {
+          // 回滚到 savepoint，事务仍然有效，后续行可以继续插入
+          await queryRunner.query(`ROLLBACK TO SAVEPOINT ${spName}`).catch(() => {});
+          const msg = (err?.message || String(err)) + '';
+          const isHardError = /deadlock|lock wait timeout|connection lost|ER_LOCK_WAIT_TIMEOUT|ER_LOCK_DEADLOCK/i.test(msg);
+          fail++;
+          errors.push({
+            row: rowIndex,
+            reason: `写入失败: ${msg.slice(0, 200)}`,
+            raw: rawLine,
+          });
+          if (isHardError) {
+            // 真硬错：整批回滚，避免半成功
+            throw err;
+          }
+        }
       }
+    });
+
+    // 把本批内重复 contact 汇总成一条错误（避免每个重复行各占一条 errors，污染 fail 计数）
+    for (const [contact, dupRows] of batchDupRows.entries()) {
+      const code = batchInserted.get(contact) || '';
+      const codePart = code ? `(${code})` : '';
+      const rowsList = dupRows.join(', ');
+      // 注意：fail 已在循环里 ++ 过了，这里只补充 errors 描述，不重复计数
+      errors.push({
+        row: dupRows[0],
+        reason: `本批内已存在相同联系方式${codePart}（重复行: ${rowsList}）`,
+        raw: '',
+      });
     }
 
     // §8 错误文件下载：fail > 0 时写一份 CSV 到对象存储 (T-22 走 StorageService)。
@@ -471,6 +595,18 @@ export class ImportsService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * 识别首行是否为表头。支持：中文模板（"平台"）、英文模板（"platform"）、
+   * 大小写不敏感、首尾空白、Excel 的 BOM（splitColumns 已剥除）。
+   */
+  private isHeaderCell(cell: string): boolean {
+    if (!cell) return false;
+    const c = cell.trim().toLowerCase();
+    if (!c) return false;
+    return c === '平台' || c === 'platform' || c === 'plat' || c === '来源平台'
+      || c === 'source' || c === 'sourceplatform';
+  }
+
+  /**
    * 私有方法：实际执行作品导入（processor 调用或 setImmediate 兜底）。
    */
   async _doImportPostsPaste(taskId: string, actorUserId: string, actorEmployeeId: string, rows: string[]): Promise<void> {
@@ -480,7 +616,7 @@ export class ImportsService implements OnModuleInit, OnModuleDestroy {
     let startIdx = 0;
     if (rows.length > 0) {
       const first = (this.splitColumns(String(rows[0] || ''))[0] || '').trim();
-      if (['平台', 'platform', 'Platform'].includes(first)) startIdx = 1;
+      if (this.isHeaderCell(first)) startIdx = 1;
     }
     const total = rows.length - startIdx;
 

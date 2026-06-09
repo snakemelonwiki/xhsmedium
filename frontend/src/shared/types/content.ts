@@ -83,6 +83,11 @@ export interface PlatformDistributionItem {
   postCount: number;
   leadCount: number;
   traffic: number; // likes + comments + favorites
+  /** v1.3 T3.2 / T3.1 扩展：获客贴数 + 真实获客贴效率 (客资/获客贴，单位 客/作) */
+  leadPostCount?: number;
+  leadEfficiency?: number;
+  /** v1.3 T3.1：三类作品分类（人设贴 / 讨论贴 / 获客贴）— 数量求和 = postCount */
+  postTypes?: { type: string; count: number }[];
 }
 
 // v1.3 OP-19: 双平台作品量（柱状图用）

@@ -8,6 +8,7 @@ import dayjs from 'dayjs';
 
 import {
   buildLastRange,
+  calendarStartOf,
   DEFAULT_RANGE_PRESETS,
   isPresetMatch,
   type DateRangePreset,
@@ -75,7 +76,9 @@ export function QuickRangePicker({
   const handlePresetClick = (p: DateRangePreset) => {
     if (disabled) return;
     if (p.mode === 'calendar') {
-      onChange({ start: dayjs().startOf(p.unit), end: dayjs() });
+      // 用 calendarStartOf 保证 week = 周一开始，month/year/day 也对齐自然周期。
+      // 不依赖 dayjs 全局 locale 设置。
+      onChange({ start: calendarStartOf(p.unit), end: dayjs() });
     } else {
       onChange(buildLastRange(p.unit, p.n));
     }
