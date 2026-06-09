@@ -20,9 +20,68 @@ const sharp = require("sharp");
 const DEFAULT_TIMEOUT = 15000;
 const PROFILE_ROOT = path.join(__dirname, ".playwright-profiles");
 const COVERS_DIR = path.join(__dirname, "uploads", "post-covers");
-const COVER_THUMB_MAX_WIDTH = 960; // 略缩图：960px 宽（≥1080p 屏幕"点击查看大图"时仍清晰），远低于原图但人眼无颗粒感
-const COVER_THUMB_QUALITY = 92; // mozjpeg 92：体积仍可控（典型 960px 截图 ~80–150KB），文字/线条更锐利
+const COVER_THUMB_MAX_WIDTH = 960;
+const COVER_THUMB_QUALITY = 92;
 const loginContexts = new Map();
+
+// ── 优化：资源拦截 ──────────────────────────────────────────────
+// 屏蔽图片/字体/CSS/媒体/WebSocket，只放行 document/script/xhr/fetch。
+// SSR 数据（__INITIAL_STATE__ / RENDER_DATA）在 HTML 原文里，不需要渲染完整页面。
+const BLOCKED_RESOURCE_TYPES = new Set(["image", "stylesheet", "font", "media", "websocket"]);
+
+// ── 优化：浏览器上下文池 ────────────────────────────────────────
+// 复用 persistent context，避免每次请求冷启动 Chromium（省 1-3s）。
+// 全局锁保证同一时刻只有一个抓取任务，所以单 context 够用。
+const pooledContexts = new Map(); // platform -> BrowserContext
+
+async function getContext(platform) {
+  const existing = pooledContexts.get(platform);
+  if (existing) {
+    try {
+      existing.pages();
+      console.log(`[metricsFetcher] 复用 ${platform} 浏览器上下文（池命中）`);
+      return existing;
+    } catch {
+      console.warn(`[metricsFetcher] ${platform} 上下文已失效，重新创建`);
+      pooledContexts.delete(platform);
+    }
+  }
+  const profileDir = getProfileDir(platform);
+  clearSingletonLocks(profileDir);
+  console.log(`[metricsFetcher] 创建 ${platform} 浏览器上下文（冷启动）`);
+  // 抖音使用有头浏览器（headless: false）绕过反爬检测；
+  // 小红书保持无头（headless: true）+ 资源拦截加速。
+  const isHeadless = platform !== "抖音";
+  const ctx = await chromium.launchPersistentContext(profileDir, {
+    headless: isHeadless,
+    viewport: { width: 1440, height: 1100 },
+    args: isHeadless ? ["--disable-remote-fonts"] : [],
+    userAgent:
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+  });
+  pooledContexts.set(platform, ctx);
+  return ctx;
+}
+
+function releaseContext(platform) {
+  const ctx = pooledContexts.get(platform);
+  if (ctx) {
+    ctx.close().catch(() => {});
+    pooledContexts.delete(platform);
+  }
+}
+
+function cleanupAllContexts() {
+  for (const [platform, ctx] of pooledContexts) {
+    ctx.close().catch(() => {});
+    pooledContexts.delete(platform);
+  }
+}
+
+// 进程退出时清理
+process.on("exit", cleanupAllContexts);
+process.on("SIGINT", () => { cleanupAllContexts(); process.exit(0); });
+process.on("SIGTERM", () => { cleanupAllContexts(); process.exit(0); });
 
 fs.mkdirSync(PROFILE_ROOT, { recursive: true });
 fs.mkdirSync(COVERS_DIR, { recursive: true });
@@ -118,54 +177,98 @@ async function readCountBySelectors(page, selectors) {
   return null;
 }
 
-async function inferDouyinCountsFromHtml(page) {
+function extractDouyinVideoId(url) {
+  // modal_id=xxx 或 /video/xxx 或 /note/xxx
+  const modalMatch = url.match(/[?&]modal_id=(\d+)/);
+  if (modalMatch) return modalMatch[1];
+  const pathMatch = url.match(/\/(?:video|note)\/(\d+)/);
+  if (pathMatch) return pathMatch[1];
+  return null;
+}
+
+async function inferDouyinCountsFromHtml(page, videoId) {
   const html = await page.content().catch(() => "");
   if (!html) {
-    return {
-      likes: null,
-      comments: null,
-      favorites: null,
-      shares: null
-    };
+    console.log(`[metricsFetcher] 抖音 HTML 为空，跳过正则提取`);
+    return { likes: null, comments: null, favorites: null, shares: null };
+  }
+  console.log(`[metricsFetcher] 抖音 HTML 大小: ${html.length} bytes, videoId: ${videoId || '未提取'}`);
+
+  // ── 精确提取：按 videoId 定位当前视频的 JSON 对象 ──
+  if (videoId) {
+    const vidStr = String(videoId);
+    // RENDER_DATA 结构：...,"videoId":{...,"statistics":{...}}...
+    const videoBlockRe = new RegExp(
+      `"${vidStr}"\\s*:\\s*\\{[\\s\\S]{0,2000}?"statistics"\\s*:\\s*\\{([^}]+)\\}`,
+      "i"
+    );
+    const blockMatch = html.match(videoBlockRe);
+    if (blockMatch?.[1]) {
+      const block = blockMatch[1];
+      const extract = (key) => {
+        const re = new RegExp(`"${key}"\\s*:\\s*(\\d+)`, "i");
+        const m = block.match(re);
+        return m ? Number(m[1]) : null;
+      };
+      const likes = extract("digg_count");
+      const comments = extract("comment_count");
+      const favorites = extract("collect_count");
+      const shares = extract("share_count");
+      console.log(`[metricsFetcher] 按 videoId=${vidStr} 定位: 赞${likes} 评${comments} 藏${favorites} 分享${shares}`);
+      if (likes !== null || comments !== null || favorites !== null || shares !== null) {
+        return { likes, comments, favorites, shares };
+      }
+    } else {
+      console.log(`[metricsFetcher] 未找到 videoId=${vidStr} 的 statistics 块`);
+    }
+
+    // 尝试 JSON 路径：C_ii / video / detail / statistics
+    const jsonBlockRe = new RegExp(
+      `"${vidStr}"[\\s\\S]{0,3000}?"statistics"\\s*:\\s*\\{([^}]+)\\}`,
+      "i"
+    );
+    const jsonMatch = html.match(jsonBlockRe);
+    if (jsonMatch?.[1]) {
+      const block = jsonMatch[1];
+      const extract = (key) => {
+        const re = new RegExp(`"${key}"\\s*:\\s*(\\d+)`, "i");
+        const m = block.match(re);
+        return m ? Number(m[1]) : null;
+      };
+      const likes = extract("digg_count");
+      const comments = extract("comment_count");
+      const favorites = extract("collect_count");
+      const shares = extract("share_count");
+      console.log(`[metricsFetcher] JSON 路径定位(videoId=${vidStr}): 赞${likes} 评${comments} 藏${favorites} 分享${shares}`);
+      if (likes !== null || comments !== null || favorites !== null || shares !== null) {
+        return { likes, comments, favorites, shares };
+      }
+    }
   }
 
-  const readByPatterns = (patterns) => {
+  // ── 兜底：全局首次匹配（可能命中推荐视频数据，仅供参考）──
+  const readByPatterns = (patterns, label) => {
     for (const pattern of patterns) {
       const match = html.match(pattern);
       const value = match?.[1];
       if (value === undefined) continue;
       const numeric = Number(value);
-      if (Number.isFinite(numeric) && numeric >= 0) return numeric;
+      if (Number.isFinite(numeric) && numeric >= 0) {
+        console.log(`[metricsFetcher] 抖音 兜底匹配 ${label}: ${value} (pattern: ${pattern})`);
+        return numeric;
+      }
     }
     return null;
   };
 
-  return {
-    likes: readByPatterns([
-      /"digg_count"\s*:\s*(\d+)/i,
-      /"diggCount"\s*:\s*(\d+)/i,
-      /"like_count"\s*:\s*(\d+)/i,
-      /"likeCount"\s*:\s*(\d+)/i,
-      /"admire_count"\s*:\s*(\d+)/i,
-      /"admireCount"\s*:\s*(\d+)/i
-    ]),
-    comments: readByPatterns([
-      /"comment_count"\s*:\s*(\d+)/i,
-      /"commentCount"\s*:\s*(\d+)/i
-    ]),
-    favorites: readByPatterns([
-      /"collect_count"\s*:\s*(\d+)/i,
-      /"collectCount"\s*:\s*(\d+)/i,
-      /"favorite_count"\s*:\s*(\d+)/i,
-      /"favoriteCount"\s*:\s*(\d+)/i
-    ]),
-    shares: readByPatterns([
-      /"share_count"\s*:\s*(\d+)/i,
-      /"shareCount"\s*:\s*(\d+)/i,
-      /"share_num"\s*:\s*(\d+)/i,
-      /"shareNum"\s*:\s*(\d+)/i
-    ])
+  const result = {
+    likes: readByPatterns([/"digg_count"\s*:\s*(\d+)/i, /"like_count"\s*:\s*(\d+)/i], "likes"),
+    comments: readByPatterns([/"comment_count"\s*:\s*(\d+)/i], "comments"),
+    favorites: readByPatterns([/"collect_count"\s*:\s*(\d+)/i, /"favorite_count"\s*:\s*(\d+)/i], "favorites"),
+    shares: readByPatterns([/"share_count"\s*:\s*(\d+)/i], "shares"),
   };
+  console.log(`[metricsFetcher] 抖音 兜底结果(可能非当前视频): 赞${result.likes} 评${result.comments} 藏${result.favorites} 分享${result.shares}`);
+  return result;
 }
 
 async function readXiaohongshuEngageBar(page) {
@@ -433,7 +536,79 @@ async function scrapeXiaohongshu(page) {
  * 解法：page.evaluate 单次扫 #douyin-right-container 容器，定位 4 个交互按钮的容器
  *   （按 DOM 顺序），每个容器内合并所有数字文本（"9" + "万" → "9万" → 9000）。
  */
+/**
+ * 从抖音页面 HTML 中提取 <script id="RENDER_DATA"> 里的 SSR 数据。
+ * RENDER_DATA 是 URL-encoded JSON，解码后含 aweme_detail.statistics。
+ * 直接搜索含 digg_count + comment_count 的 statistics 对象（不依赖具体路径）。
+ */
+async function readDouyinRenderData(page) {
+  try {
+    const html = await page.content();
+    const match = html.match(/<script\s+id="RENDER_DATA"\s+type="application\/json"[^>]*>([\s\S]*?)<\/script>/i);
+    if (!match?.[1]) return null;
+    let decoded = match[1].trim();
+    try { decoded = decodeURIComponent(decoded); } catch {}
+    if (decoded.startsWith("%")) {
+      try { decoded = decodeURIComponent(decoded); } catch {}
+    }
+    const json = JSON.parse(decoded);
+
+    // 直接搜索含 digg_count + comment_count 的 statistics 对象（不依赖 aweme_detail 路径）
+    const pick = (v) => {
+      const n = Number(v);
+      return Number.isFinite(n) && n >= 0 ? n : null;
+    };
+
+    const candidates = [];
+    const walk = (obj, depth) => {
+      if (!obj || typeof obj !== "object" || depth > 8) return;
+      if (obj.statistics && typeof obj.statistics === "object"
+        && ("digg_count" in obj.statistics || "comment_count" in obj.statistics)) {
+        const s = obj.statistics;
+        const likes = pick(s.digg_count ?? s.like_count);
+        const comments = pick(s.comment_count);
+        const favorites = pick(s.collect_count ?? s.favorite_count);
+        const shares = pick(s.share_count);
+        // 质量分：命中字段越多越可信
+        const score = [likes, comments, favorites, shares].filter((v) => v !== null).length;
+        candidates.push({
+          likes, comments, favorites, shares,
+          title: String(obj.desc || obj.title || "").trim(),
+          score,
+          digg: Number(s.digg_count || 0),
+        });
+      }
+      for (const v of Object.values(obj)) walk(v, depth + 1);
+    };
+    walk(json, 0);
+
+    if (!candidates.length) return null;
+
+    // 选质量分最高的；同分时取 digg_count 最大的（真实视频数据通常有大量点赞）
+    candidates.sort((a, b) => b.score - a.score || b.digg - a.digg);
+    const best = candidates[0];
+
+    console.log(`[metricsFetcher] RENDER_DATA 找到 ${candidates.length} 个 statistics 对象，选用第一个: 赞${best.likes} 评${best.comments} 藏${best.favorites} 分享${best.shares}`);
+
+    if (best.likes === null && best.comments === null && best.favorites === null && best.shares === null) {
+      return null;
+    }
+    return best;
+  } catch (err) {
+    console.warn(`[metricsFetcher] 抖音 RENDER_DATA 提取失败: ${err?.message || err}`);
+    return null;
+  }
+}
+
 async function scrapeDouyin(page) {
+  const currentUrl = page.url();
+  const videoId = extractDouyinVideoId(currentUrl);
+  console.log(`[metricsFetcher] 抖音 scrapeDouyin: url=${currentUrl}, videoId=${videoId || '未提取'}`);
+
+  // ── Layer 0: HTML 正则，按 videoId 精确定位 ──
+  const htmlFallback = await inferDouyinCountsFromHtml(page, videoId);
+
+  // ── Layer 2: DOM 扫描 ──
   // 模拟 hover 让 tooltip 出来（部分数字可能在 tooltip 里）
   try {
     const hoverTargets = await page.locator(
@@ -517,18 +692,29 @@ async function scrapeDouyin(page) {
     return result;
   }).catch(() => null);
 
-  const htmlFallback = await inferDouyinCountsFromHtml(page);
   const fallback = await inferCountsFromBody(page);
 
-  // 优先级：interactiveCounts (DOM 解析) > htmlFallback (INITIAL_STATE JSON) > fallback (body text)
-  const get = (k) => interactiveCounts?.[k] || htmlFallback[k] || fallback[k] || 0;
-  return {
+  // 优先级：HTML 正则（按 videoId 定位） > DOM 扫描 > body text
+  const sources = { likes: "", comments: "", favorites: "", shares: "" };
+  const get = (k) => {
+    if (htmlFallback[k] != null) { sources[k] = "html-regex"; return htmlFallback[k]; }
+    if (interactiveCounts?.[k]) { sources[k] = "dom-scan"; return interactiveCounts[k]; }
+    if (fallback[k]) { sources[k] = "body-text"; return fallback[k]; }
+    sources[k] = "default(0)";
+    return 0;
+  };
+  const result = {
     bodyText: fallback.text,
     likes: get("likes"),
     comments: get("comments"),
     favorites: get("favorites"),
     shares: get("shares"),
   };
+  console.log(`[metricsFetcher] 抖音 最终数据来源: ${JSON.stringify(sources)}`);
+  console.log(`[metricsFetcher] 抖音 HTML层: 赞${htmlFallback.likes} 评${htmlFallback.comments} 藏${htmlFallback.favorites} 分享${htmlFallback.shares}`);
+  console.log(`[metricsFetcher] 抖音 DOM层:  赞${interactiveCounts?.likes ?? 'null'} 评${interactiveCounts?.comments ?? 'null'} 藏${interactiveCounts?.favorites ?? 'null'} 分享${interactiveCounts?.shares ?? 'null'}`);
+  console.log(`[metricsFetcher] 抖音 body层: 赞${fallback.likes} 评${fallback.comments} 藏${fallback.favorites} 分享${fallback.shares}`);
+  return result;
 }
 
 function looksLikeLoginWall(platform, bodyText, pageTitle = "") {
@@ -685,19 +871,45 @@ async function fetchMetricsFromUrl(url) {
     throw new Error("暂时只支持小红书和抖音作品链接");
   }
 
-  const context = await launchProfileContext(platform);
+  const context = await getContext(platform);
+  let page;
+  const t0 = Date.now();
   try {
-    const page = context.pages()[0] || (await context.newPage());
+    page = await context.newPage();
+
+    // ── 资源拦截：仅小红书启用（抖音 SPA 需要完整 JS 执行） ──
+    if (platform !== "抖音") {
+      await page.route("**/*", (route) => {
+        const type = route.request().resourceType();
+        if (BLOCKED_RESOURCE_TYPES.has(type)) { route.abort(); } else { route.continue(); }
+      });
+    }
+
+    // ── 抖音：提取 videoId 用于日志，不修改 URL ──
+    let targetVideoId = null;
+    if (platform === "抖音") {
+      targetVideoId = targetUrl.match(/modal_id=(\d+)/)?.[1] || targetUrl.match(/\/video\/(\d+)/)?.[1] || null;
+      console.log(`[metricsFetcher] 抖音模式: targetVideoId=${targetVideoId}`);
+    }
+
     await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: DEFAULT_TIMEOUT });
-    // 抖音/小红书 __INITIAL_STATE__ 嵌在 script 标签里，DOMContentLoaded 时通常已注入；
-    //   networkidle 对持续 ws/long-poll 不可达，但 1500ms 短超时仍能拿到首屏资源完成事件，
-    //   比 0ms（直接走 timeout）更稳。实测抖音 note 链接 networkidle 1.5s 内能命中。
-    await page.waitForLoadState("networkidle", { timeout: 1500 }).catch(() => {});
-    await page.waitForTimeout(400);
+    const tLoad = Date.now();
+
+    // ── 等待策略：抖音需要完整 SPA 渲染（networkidle + 1s），小红书用优化等待 ──
+    if (platform === "抖音") {
+      await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => {});
+      await page.waitForTimeout(1000);
+    } else {
+      await page.waitForLoadState("networkidle", { timeout: 800 }).catch(() => {});
+      await page.waitForTimeout(200);
+    }
     const pageTitle = await page.title().catch(() => "");
 
     const payload = platform === "小红书" ? await scrapeXiaohongshu(page) : await scrapeDouyin(page);
+
     if (looksLikeLoginWall(platform, payload.bodyText, pageTitle)) {
+      // 登录墙 → 从池中移除，下次重新 launch
+      releaseContext(platform);
       throw new Error(`当前打开的是${platform}登录页，请先在"链接测试"里点"打开${platform}登录浏览器"完成一次登录。`);
     }
 
@@ -706,8 +918,6 @@ async function fetchMetricsFromUrl(url) {
       .replace(/\s*-\s*抖音\s*$/, "")
       .trim();
 
-    // 封面截图：抓取指标后顺手截作品关键区域，sharp 压成低分辨率 JPEG 落到 uploads/post-covers/
-    // 失败不抛错 —— 没封面也能继续录入
     let coverImageUrl = "";
     let coverThumbUrl = "";
     try {
@@ -715,13 +925,14 @@ async function fetchMetricsFromUrl(url) {
       if (cover) {
         coverImageUrl = cover.coverImageUrl;
         coverThumbUrl = cover.coverThumbUrl;
+      } else {
+        console.warn(`[metricsFetcher] ${platform} 封面截图为空（capturePostCover 返回 null）`);
       }
     } catch (coverErr) {
-      // eslint-disable-next-line no-console
       console.warn(`[metricsFetcher] capturePostCover failed: ${coverErr?.message || coverErr}`);
     }
 
-    return {
+    const result = {
       platform,
       title: normalizedTitle,
       authorName: payload?.authorName || "",
@@ -734,8 +945,16 @@ async function fetchMetricsFromUrl(url) {
       coverThumbUrl,
       metricsUpdatedAt: new Date().toISOString()
     };
+    console.log(`[metricsFetcher] ${platform} 抓取完成: ${Date.now() - t0}ms (加载${tLoad - t0}ms) 赞${result.likes} 评${result.comments} 藏${result.favorites} 分享${result.shares}`);
+    return result;
+  } catch (err) {
+    // 非登录墙错误：context 可能已损坏，从池中移除
+    if (!String(err?.message || "").includes("登录页")) {
+      releaseContext(platform);
+    }
+    throw err;
   } finally {
-    await context.close();
+    if (page) await page.close().catch(() => {});
   }
 }
 
@@ -751,18 +970,24 @@ async function fetchMetricsFromUrl(url) {
  *   整体 1.2s 上限；写入落盘 ~150ms。
  */
 async function capturePostCover(page, platform) {
-  // 视口截图：clip 区域 (0, header 高度, viewport 宽, 作品主区高度)
-  // 避免取到顶部导航栏 + 评论区。header 高度 ~80px, 主区 980px (1100-120)。
   try {
-    const buf = await page.screenshot({
-      type: "png",
-      clip: { x: 0, y: 0, width: 1440, height: 1080 },
-    });
-    if (buf && buf.length > 1024) {
-      return await writeCoverJpeg(buf, "viewport");
+    // 抖音有头模式：字体正常加载，直接用 page.screenshot()。
+    // 小红书无头模式：locator.screenshot() 绕过 CDP 字体等待。
+    const useLocator = process.env.PLAYWRIGHT_HEADLESS !== "0" && platform !== "抖音";
+    let buf;
+    if (useLocator) {
+      buf = await page.locator("body").screenshot({ type: "png", timeout: 8000 });
+    } else {
+      buf = await page.screenshot({ type: "png", clip: { x: 0, y: 0, width: 1440, height: 1080 }, timeout: 10000 });
     }
+    console.log(`[metricsFetcher] 截图 buffer: ${buf ? buf.length : 'null'} bytes`);
+    if (buf && buf.length > 1024) {
+      const cover = await writeCoverJpeg(buf, "viewport");
+      console.log(`[metricsFetcher] 封面写入: ${cover?.coverImageUrl || 'null'}`);
+      return cover;
+    }
+    console.warn(`[metricsFetcher] 截图 buffer 过小(${buf?.length || 0} bytes)，跳过封面`);
   } catch (err) {
-    // eslint-disable-next-line no-console
     console.warn(`[metricsFetcher] viewport screenshot failed: ${err?.message || err}`);
   }
   return null;
@@ -818,4 +1043,5 @@ module.exports = {
   getLoginStatus,
   getProfileDir,
   getPlatformHome,
+  cleanupAllContexts,
 };
