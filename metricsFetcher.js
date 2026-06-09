@@ -661,6 +661,32 @@ async function scrapeDouyin(page) {
     }
   } catch {}
 
+  // ── Layer 1.5: XPath 精确定位（抖音笔记页/图文页） ──
+  // 当 SVG walk 方案因 DOM 结构变化失败时，用固定 XPath 兜底。
+  const xpathCounts = await page.evaluate(() => {
+    const parseNum = (text) => {
+      if (!text) return 0;
+      const m = text.trim().match(/(\d+(?:\.\d+)?)\s*([wkW万千K]?)/i);
+      if (!m) return 0;
+      let v = parseFloat(m[1]);
+      const u = m[2].toLowerCase();
+      if (u === "w" || u === "万") v *= 10000;
+      else if (u === "k" || u === "千") v *= 1000;
+      return Math.round(v);
+    };
+    const xpath = (expr) => {
+      try {
+        const r = document.evaluate(expr, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+        return r.singleNodeValue ? (r.singleNodeValue.textContent || "").trim() : "";
+      } catch { return ""; }
+    };
+    const likes = parseNum(xpath('//*[@id="sliderVideo"]/div[1]/div/div[1]/div[1]/div/div[2]/div[2]/div[1]/div[2]'));
+    const comments = parseNum(xpath('//*[@id="sliderVideo"]/div[1]/div/div[1]/div[1]/div/div[2]/div[3]/div[1]/div[2]'));
+    const favorites = parseNum(xpath('//*[@id="sliderVideo"]/div[1]/div/div[1]/div[1]/div/div[2]/div[4]/div[2]'));
+    const shares = parseNum(xpath('//*[@id="sliderVideo"]/div[1]/div/div[1]/div[1]/div/div[2]/div[5]/div[1]/div[2]'));
+    return { likes, comments, favorites, shares };
+  }).catch(() => null);
+
   // 单次 page.evaluate 拿 4 项指标（按 DOM 位置：[点赞, 评论, 收藏, 分享]）
   const interactiveCounts = await page.evaluate(() => {
     const root = document.getElementById('douyin-right-container');
@@ -736,10 +762,11 @@ async function scrapeDouyin(page) {
 
   const fallback = await inferCountsFromBody(page);
 
-  // 优先级：HTML 正则（按 videoId 定位） > DOM 扫描 > body text
+  // 优先级：HTML 正则（按 videoId 定位） > XPath > DOM 扫描 > body text
   const sources = { likes: "", comments: "", favorites: "", shares: "" };
   const get = (k) => {
     if (htmlFallback[k] != null) { sources[k] = "html-regex"; return htmlFallback[k]; }
+    if (xpathCounts?.[k]) { sources[k] = "xpath"; return xpathCounts[k]; }
     if (interactiveCounts?.[k]) { sources[k] = "dom-scan"; return interactiveCounts[k]; }
     if (fallback[k]) { sources[k] = "body-text"; return fallback[k]; }
     sources[k] = "default(0)";
@@ -754,6 +781,7 @@ async function scrapeDouyin(page) {
   };
   console.log(`[metricsFetcher] 抖音 最终数据来源: ${JSON.stringify(sources)}`);
   console.log(`[metricsFetcher] 抖音 HTML层: 赞${htmlFallback.likes} 评${htmlFallback.comments} 藏${htmlFallback.favorites} 分享${htmlFallback.shares}`);
+  console.log(`[metricsFetcher] 抖音 XPath层: 赞${xpathCounts?.likes ?? 'null'} 评${xpathCounts?.comments ?? 'null'} 藏${xpathCounts?.favorites ?? 'null'} 分享${xpathCounts?.shares ?? 'null'}`);
   console.log(`[metricsFetcher] 抖音 DOM层:  赞${interactiveCounts?.likes ?? 'null'} 评${interactiveCounts?.comments ?? 'null'} 藏${interactiveCounts?.favorites ?? 'null'} 分享${interactiveCounts?.shares ?? 'null'}`);
   console.log(`[metricsFetcher] 抖音 body层: 赞${fallback.likes} 评${fallback.comments} 藏${fallback.favorites} 分享${fallback.shares}`);
   return result;
@@ -954,7 +982,12 @@ async function fetchMetricsFromUrl(url) {
 
     const payload = platform === "小红书" ? await scrapeXiaohongshu(page) : await scrapeDouyin(page);
 
-    if (looksLikeLoginWall(platform, payload.bodyText, pageTitle)) {
+    // 抖音：DOM 层已抓到任意一项指标 → 页面有真实内容，不是登录墙。
+    // 导航栏的"登录后"文案会触发误判，用 DOM 结果覆盖。
+    const hasDouyinData = platform === "抖音"
+      && (payload.likes > 0 || payload.comments > 0 || payload.favorites > 0 || payload.shares > 0);
+
+    if (!hasDouyinData && looksLikeLoginWall(platform, payload.bodyText, pageTitle)) {
       // 登录墙 → 从池中移除，下次重新 launch
       contextReleased = true;
       releaseContext(platform);
