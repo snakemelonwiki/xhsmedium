@@ -69,6 +69,7 @@ function mapLead(raw: RawRecord): SalesLead {
       postId: text(raw.sourcePostId) ?? text(raw.source_post_id) ?? text(raw.postId),
       postTitle: text(raw.sourcePostTitle) ?? text(raw.source_post_title) ?? text(raw.postTitle),
       postUrl: text(raw.sourcePostUrl) ?? text(raw.source_post_url) ?? text(raw.postUrl),
+      postQualityStatus: text(raw.sourcePostQualityStatus) ?? text(raw.source_post_quality_status),
     },
     operator: {
       id: text(raw.employeeId) ?? text(raw.operatorId),
@@ -106,6 +107,8 @@ function mapLead(raw: RawRecord): SalesLead {
     dealStatus: text(raw.dealStatus) ?? text(raw.deal_status) ?? null,
     dealAmount: text(raw.dealAmount) ?? text(raw.deal_amount) ?? null,
     intentionLevel: text(raw.intentionLevel) ?? text(raw.intention_level) ?? null,
+    sourcePostQualityStatus: text(raw.sourcePostQualityStatus) ?? text(raw.source_post_quality_status),
+    leadPriceMultiplier: Number(raw.leadPriceMultiplier ?? raw.lead_price_multiplier ?? 1),
   };
 }
 

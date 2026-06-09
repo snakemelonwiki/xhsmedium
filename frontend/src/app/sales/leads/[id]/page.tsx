@@ -268,6 +268,7 @@ export default function SalesLeadDetailPage() {
     if (!lead) return false;
     return lead.status === LeadStatus.IN_FOLLOWUP || lead.addStatus === LeadAddStatus.ADDED;
   }, [lead]);
+  const isHalfPriceLead = lead?.sourcePostQualityStatus === 'unqualified' || Number(lead?.leadPriceMultiplier || 1) === 0.5;
 
   return (
     <Space direction="vertical" size={16} className="page-stack">
@@ -314,6 +315,14 @@ export default function SalesLeadDetailPage() {
             showIcon
             type={lead.status === LeadStatus.OPERATION_HANDLED || lead.collaborationStatus === CollaborationStatus.HANDLED ? 'warning' : 'info'}
             message={`下一步：${nextAction(lead)}`}
+            style={{ marginBottom: 16 }}
+          />
+        ) : null}
+        {isHalfPriceLead ? (
+          <Alert
+            showIcon
+            type="warning"
+            message="来源作品已标记不合格，该客资成交时订单金额会按销售填写金额的 50% 入单。"
             style={{ marginBottom: 16 }}
           />
         ) : null}
@@ -602,6 +611,15 @@ export default function SalesLeadDetailPage() {
             >
               <InputNumber min={0.01} precision={2} style={{ width: '100%' }} placeholder="0.00" />
             </Form.Item>
+            {isHalfPriceLead ? (
+              <Alert
+                className="full-row"
+                showIcon
+                type="warning"
+                message="不合格作品客资半价入单"
+                description="提交后，系统会把订单金额和财务订单额写为当前填写金额的 50%。"
+              />
+            ) : null}
             <Form.Item name="paymentStage" label="付款阶段" className="full-row">
               <Input placeholder="如：定金 / 中期 / 尾款" />
             </Form.Item>

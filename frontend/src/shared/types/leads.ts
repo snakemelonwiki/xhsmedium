@@ -15,6 +15,7 @@ export interface LeadSourceSummary {
   postId?: string | number;
   postTitle?: string;
   postUrl?: string;
+  postQualityStatus?: 'normal' | 'excellent' | 'unqualified' | string;
 }
 
 export interface LeadOperatorSummary {
@@ -70,6 +71,10 @@ export interface SalesLead {
   dealAmount?: string | null;
   // v1.3 意向程度（已在 schema/intention_level）
   intentionLevel?: IntentionLevelCode | string | null;
+  /** 来源作品质量状态。不合格作品的客资成单按 50% 入单。 */
+  sourcePostQualityStatus?: 'normal' | 'excellent' | 'unqualified' | string;
+  /** 客资入单价格倍率。普通/优秀为 1，不合格为 0.5。 */
+  leadPriceMultiplier?: number;
 }
 
 export type LeadTimelineKind = 'follow' | 'collaboration';

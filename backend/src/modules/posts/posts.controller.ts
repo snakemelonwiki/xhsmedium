@@ -534,6 +534,37 @@ export class PostsController {
     return res.json({ ok: true });
   }
 
+  /**
+   * 主管更新作品质量状态。
+   * normal = 普通；excellent = 优秀作品；unqualified = 不合格作品，关联客资成单按半价入单。
+   */
+  @Patch(':id/quality')
+  async updateSupervisorQuality(
+    @Param('id') id: string,
+    @Body() body: any,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    const session = (req as any).session;
+    const role = String(session?.role || '').toLowerCase();
+    if (!['supervisor', 'admin', 'owner'].includes(role)) {
+      return res.status(403).json({ ok: false, message: '仅主管/管理员可标记' });
+    }
+    const userId = getSessionUserId(req);
+    if (!userId) {
+      return res.status(401).json({ ok: false, message: '未登录' });
+    }
+    const qualityStatus = String(body?.qualityStatus || body?.supervisorQualityStatus || '').toLowerCase();
+    if (!['normal', 'excellent', 'unqualified'].includes(qualityStatus)) {
+      return res.status(422).json({ ok: false, message: '作品质量状态无效' });
+    }
+    const result = await this.postsService.updateSupervisorQuality(id, qualityStatus as any, userId);
+    if (!result) {
+      return res.status(404).json({ ok: false, message: '作品不存在' });
+    }
+    return res.json({ ok: true, ...result });
+  }
+
   // ── v1.3 SUP-1: 主管手动标记优秀作品 ─────────────────────────────
   // supervisor-picks 静态路径已在 :id 路由之前（见文件上方）；
   // :id/pick 与 :id/supervisor-suggestion 同为前缀匹配，按 NestJS 路径注册顺序即可。

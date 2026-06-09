@@ -161,6 +161,7 @@ export class OrdersService {
         throw new NotFoundException('lead not found');
       }
       leadContact = lead.contactInfo || '';
+      const pricing = await this.resolveLeadOrderPricing(manager, lead, amountNum);
       // v1.3 / CROSS-4: 在同一事务内生成订单编号 ORD-YYYYMMDD-XXXXX
       // 必须在 INSERT Order 之前完成（行锁在同一事务内保持），避免并发时序号重复。
       generatedOrderCode = await this.generateOrderCode(manager);
@@ -179,9 +180,9 @@ export class OrdersService {
       //   hasMetadata 检查,但 entity class 与 metadata 注册顺序在 NestJS 异步初始化
       //   下不稳定,仍可能漏判。raw SQL 100% 绕开 TypeORM 1.0 这条 bug 路径,且语义
       //   与 insert/update 等价（带参数化,无 SQL 注入风险）。
-      const remark = this.composeRemark(dto);
+      const remark = this.composeRemark(dto, pricing);
       // 上面已经校验 amountNum > 0；统一以 string 形式落库。
-      const amountStr = String(amountNum);
+      const amountStr = pricing.finalAmount;
       await manager.query(
         `UPDATE leads
          SET process_status = ?, deal_status = ?, status = ?, updated_at = CURRENT_TIMESTAMP
@@ -227,7 +228,7 @@ export class OrdersService {
       );
 
       // v1.3 / SA-9: 落首条 order_follow_records(销售成交记录)。
-      const followContent = this.composeFollowContent(dto, generatedOrderCode);
+      const followContent = this.composeFollowContent(dto, generatedOrderCode, pricing);
       const followId = makeId();
       await manager.query(
         `INSERT INTO order_follow_records
@@ -287,7 +288,10 @@ export class OrdersService {
    * 拼成结构化文本（用「||」分隔），便于教务端拆开解析。
    * 例：`客户要求: 12周见刊 || 产品: 期刊论文 || 服务: 全流程 || 保障: 保录 || 付款: 定金 / 中期 / 尾款`
    */
-  private composeRemark(dto: CloseDealDto): string | null {
+  private composeRemark(
+    dto: CloseDealDto,
+    pricing?: { discountApplied: boolean; originalAmount: string; finalAmount: string },
+  ): string | null {
     const parts: string[] = [];
     if (dto.clientRequirementNote) parts.push(`客户要求: ${dto.clientRequirementNote}`);
     if (dto.productType) parts.push(`产品: ${dto.productType}`);
@@ -295,6 +299,9 @@ export class OrdersService {
     if (dto.guaranteeType) parts.push(`保障: ${dto.guaranteeType}`);
     if (dto.paymentStage) parts.push(`付款: ${dto.paymentStage}`);
     if (dto.deliveryRequirement) parts.push(`交付要求: ${dto.deliveryRequirement}`);
+    if (pricing?.discountApplied) {
+      parts.push(`不合格作品半价: 原金额 ${pricing.originalAmount} -> 入单金额 ${pricing.finalAmount}`);
+    }
     if (parts.length === 0) return dto.remark || null;
     return parts.join(' || ');
   }
@@ -302,12 +309,47 @@ export class OrdersService {
   /**
    * v1.3 / SA-9: 销售成交首条 order_follow_records 的 content 文本。
    */
-  private composeFollowContent(dto: CloseDealDto, orderCode: string | null): string {
+  private composeFollowContent(
+    dto: CloseDealDto,
+    orderCode: string | null,
+    pricing?: { discountApplied: boolean; originalAmount: string; finalAmount: string },
+  ): string {
     const codeLine = orderCode ? `订单编号 ${orderCode}` : '';
-    const amountLine = dto.amount != null && dto.amount !== '' ? `金额 ¥${dto.amount}` : '';
+    const amountLine = pricing?.discountApplied
+      ? `原金额 ¥${pricing.originalAmount} | 不合格作品半价入单金额 ¥${pricing.finalAmount}`
+      : dto.amount != null && dto.amount !== '' ? `金额 ¥${dto.amount}` : '';
     const stageLine = dto.paymentStage ? `付款阶段 ${dto.paymentStage}` : '';
     const lines = [codeLine, amountLine, stageLine].filter(Boolean);
     return lines.join(' | ') || '销售成交';
+  }
+
+  /**
+   * 计算客资成单金额。
+   * 来源作品被主管标记为不合格时，销售输入金额按 50% 写入订单与财务表。
+   */
+  private async resolveLeadOrderPricing(
+    manager: EntityManager,
+    lead: Lead,
+    amountNum: number,
+  ): Promise<{ discountApplied: boolean; originalAmount: string; finalAmount: string }> {
+    const originalAmount = amountNum.toFixed(2);
+    const postId = lead.postId || lead.matchedPostId || '';
+    if (!postId) {
+      return { discountApplied: false, originalAmount, finalAmount: originalAmount };
+    }
+    const rows: Array<{ supervisor_quality_status?: string }> = await manager.query(
+      `SELECT supervisor_quality_status FROM posts WHERE id = ? LIMIT 1`,
+      [postId],
+    );
+    const isUnqualified = String(rows[0]?.supervisor_quality_status || '').toLowerCase() === 'unqualified';
+    if (!isUnqualified) {
+      return { discountApplied: false, originalAmount, finalAmount: originalAmount };
+    }
+    return {
+      discountApplied: true,
+      originalAmount,
+      finalAmount: (Math.round(amountNum * 50) / 100).toFixed(2),
+    };
   }
 
   /**

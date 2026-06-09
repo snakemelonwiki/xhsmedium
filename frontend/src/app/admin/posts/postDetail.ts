@@ -11,6 +11,8 @@ export type AdminPostDetailSource = {
   supervisorSuggestion?: string | null;
 };
 
+export type PostQualityStatus = 'normal' | 'excellent' | 'unqualified';
+
 type PostExportFilterInput = {
   employeeId?: string;
   platform?: string;
@@ -48,4 +50,16 @@ export function getPostDetailDisplay(post: AdminPostDetailSource) {
     ],
     supervisorSuggestion: post.supervisorSuggestion || '',
   };
+}
+
+export function getPostQualityMeta(status?: string | null): { label: string; color: string; warning?: string } {
+  if (status === 'excellent') return { label: '优秀作品', color: 'gold' };
+  if (status === 'unqualified') {
+    return {
+      label: '不合格',
+      color: 'red',
+      warning: '关联客资成单时，订单金额按销售填写金额的 50% 入单。',
+    };
+  }
+  return { label: '普通', color: 'default' };
 }

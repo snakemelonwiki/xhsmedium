@@ -83,6 +83,10 @@ interface PostViewer {
   role?: string;
 }
 
+export type SupervisorQualityStatus = 'normal' | 'excellent' | 'unqualified';
+
+const SUPERVISOR_QUALITY_STATUSES: SupervisorQualityStatus[] = ['normal', 'excellent', 'unqualified'];
+
 /**
  * viewer 上下文：用于按当前登录用户计算 isFavorited 等个人化字段。
  * 透传自 controller，使用 getSessionUserId / getSessionRole 提取。
@@ -399,6 +403,7 @@ export class PostsService {
         p.cover_image_url, p.cover_thumb_url, p.post_url, p.post_type, p.traffic,
         p.likes, p.comments, p.favorites, p.shares,
         p.metrics_updated_at, p.published_at, p.note, p.supervisor_suggestion,
+        p.supervisor_quality_status, p.supervisor_quality_marked_by, p.supervisor_quality_marked_at,
         p.created_at, p.updated_at,
         e.name AS employee_name,
         a.account_name,
@@ -539,14 +544,7 @@ export class PostsService {
    * 不存在的 post → null。
    */
   async markSupervisorPick(id: string, pickedBy: string): Promise<{ id: string; isSupervisorPicked: number } | null> {
-    const post = await this.postRepository.findOne({ where: { id } });
-    if (!post) return null;
-    await this.postRepository.update(id, {
-      isSupervisorPicked: 1,
-      supervisorPickedBy: pickedBy,
-      supervisorPickedAt: new Date(),
-    });
-    return { id, isSupervisorPicked: 1 };
+    return this.updateSupervisorQuality(id, 'excellent', pickedBy);
   }
 
   /**
@@ -554,14 +552,35 @@ export class PostsService {
    * 幂等：已是未标记状态再调用也返回 ok。
    */
   async unmarkSupervisorPick(id: string): Promise<{ id: string; isSupervisorPicked: number } | null> {
+    const result = await this.updateSupervisorQuality(id, 'normal', null);
+    return result ? { id: result.id, isSupervisorPicked: result.isSupervisorPicked } : null;
+  }
+
+  /**
+   * 主管更新作品质量状态。
+   * excellent 兼容旧"优秀作品"字段；unqualified 会让关联客资成单按半价入单。
+   */
+  async updateSupervisorQuality(
+    id: string,
+    status: SupervisorQualityStatus,
+    markedBy: string | null,
+  ): Promise<{ id: string; supervisorQualityStatus: SupervisorQualityStatus; isSupervisorPicked: number } | null> {
+    if (!SUPERVISOR_QUALITY_STATUSES.includes(status)) {
+      throw new Error('invalid supervisor quality status');
+    }
     const post = await this.postRepository.findOne({ where: { id } });
     if (!post) return null;
+    const isExcellent = status === 'excellent';
+    const markedAt = status === 'normal' ? null : new Date();
     await this.postRepository.update(id, {
-      isSupervisorPicked: 0,
-      supervisorPickedBy: null,
-      supervisorPickedAt: null,
-    });
-    return { id, isSupervisorPicked: 0 };
+      isSupervisorPicked: isExcellent ? 1 : 0,
+      supervisorPickedBy: isExcellent ? markedBy : null,
+      supervisorPickedAt: isExcellent ? markedAt : null,
+      supervisorQualityStatus: status,
+      supervisorQualityMarkedBy: markedBy,
+      supervisorQualityMarkedAt: markedAt,
+    } as any);
+    return { id, supervisorQualityStatus: status, isSupervisorPicked: isExcellent ? 1 : 0 };
   }
 
   /**
@@ -617,6 +636,7 @@ export class PostsService {
         p.cover_image_url, p.cover_thumb_url, p.post_url, p.post_type, p.traffic,
         p.likes, p.comments, p.favorites, p.shares,
         p.metrics_updated_at, p.published_at, p.note, p.supervisor_suggestion,
+        p.supervisor_quality_status, p.supervisor_quality_marked_by, p.supervisor_quality_marked_at,
         p.is_supervisor_picked, p.supervisor_picked_by, p.supervisor_picked_at,
         p.created_at, p.updated_at,
         e.name AS employee_name,
@@ -727,6 +747,7 @@ export class PostsService {
         p.cover_image_url, p.cover_thumb_url, p.post_url, p.post_type, p.traffic,
         p.likes, p.comments, p.favorites, p.shares,
         p.metrics_updated_at, p.published_at, p.note, p.supervisor_suggestion,
+        p.supervisor_quality_status, p.supervisor_quality_marked_by, p.supervisor_quality_marked_at,
         p.is_supervisor_picked, p.supervisor_picked_by, p.supervisor_picked_at,
         p.created_at, p.updated_at,
         e.name AS employee_name,
@@ -920,6 +941,9 @@ export class PostsService {
       isSupervisorPicked: Number(row.is_supervisor_picked ?? 0),
       supervisorPickedBy: row.supervisor_picked_by ?? null,
       supervisorPickedAt: row.supervisor_picked_at ?? null,
+      supervisorQualityStatus: row.supervisor_quality_status || 'normal',
+      supervisorQualityMarkedBy: row.supervisor_quality_marked_by ?? null,
+      supervisorQualityMarkedAt: row.supervisor_quality_marked_at ?? null,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       // OP-14: leadsCount 涉及客户跟进量，仅作者本人 + supervisor/admin/owner 见真实值
@@ -974,6 +998,9 @@ export class PostsService {
       isSupervisorPicked: Number((row as any).isSupervisorPicked ?? 0),
       supervisorPickedBy: (row as any).supervisorPickedBy ?? null,
       supervisorPickedAt: (row as any).supervisorPickedAt ?? null,
+      supervisorQualityStatus: (row as any).supervisorQualityStatus || 'normal',
+      supervisorQualityMarkedBy: (row as any).supervisorQualityMarkedBy ?? null,
+      supervisorQualityMarkedAt: (row as any).supervisorQualityMarkedAt ?? null,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
       // 个人化字段：默认 false/0，decorateWithFavorites 步骤会按当前 viewer 覆盖

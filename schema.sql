@@ -150,6 +150,9 @@ CREATE TABLE IF NOT EXISTS posts (
   is_supervisor_picked  TINYINT      NOT NULL DEFAULT 0 COMMENT '是否被主管标记为优秀作品（学习榜单主管推荐用）',
   supervisor_picked_by  VARCHAR(64)  NULL COMMENT '标记人（主管）ID',
   supervisor_picked_at  DATETIME     NULL COMMENT '标记时间',
+  supervisor_quality_status    VARCHAR(16) NOT NULL DEFAULT 'normal' COMMENT '主管质量状态：normal/excellent/unqualified',
+  supervisor_quality_marked_by VARCHAR(64) NULL COMMENT '最近一次标记质量状态的主管用户ID',
+  supervisor_quality_marked_at DATETIME    NULL COMMENT '最近一次标记质量状态的时间',
   created_at            DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at            DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 
@@ -161,7 +164,8 @@ CREATE TABLE IF NOT EXISTS posts (
   INDEX idx_posts_employee_published (employee_id, published_at DESC, created_at DESC),
   INDEX idx_posts_account_published  (account_id, published_at DESC),
   INDEX idx_posts_platform_type_published (platform, post_type, published_at),
-  INDEX idx_posts_supervisor_picked  (is_supervisor_picked)
+  INDEX idx_posts_supervisor_picked  (is_supervisor_picked),
+  INDEX idx_posts_quality_status     (supervisor_quality_status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='作品帖子表';
 
 -- ============================================================

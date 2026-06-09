@@ -485,7 +485,9 @@ export class LeadsService {
     if (filters.processStatus) qb.andWhere('l.process_status = :processStatus', { processStatus: filters.processStatus });
     // BUG-2: 新增筛选条件
     if (filters.assignedSalesUserId) qb.andWhere('l.assigned_sales_user_id = :assignedSalesUserId', { assignedSalesUserId: filters.assignedSalesUserId });
-    if (filters.postId) qb.andWhere('l.post_id = :postId', { postId: filters.postId });
+    if (filters.postId) {
+      qb.andWhere('(l.post_id = :postId OR l.matched_post_id = :postId)', { postId: filters.postId });
+    }
     if (filters.dealStatus) qb.andWhere('l.deal_status = :dealStatus', { dealStatus: filters.dealStatus });
     // BUG-SUPERVISOR-KANBAN 修复 (2026-06-04)：主管客资看板点击不同运营时数据应按
     //   该运营过滤。applyLeadScope 仅在 scope=employee 时使用 employeeId，scope=all
@@ -1499,14 +1501,14 @@ export class LeadsService {
       ? await this.accountsByIds(rows.map((row) => row.accountId))
       : new Map<string, Account>();
     const posts = rows.length <= 200
-      ? await this.postsByIds(rows.map((row) => row.postId || ''))
+      ? await this.postsByIds(rows.flatMap((row) => [row.postId || '', row.matchedPostId || '']))
       : new Map<string, Post>();
     return rows.map((row) => this.mapLead(
       row,
       latest.get(row.id),
       latestCollaboration.get(row.id),
       accounts.get(row.accountId),
-      row.postId ? posts.get(row.postId) : undefined,
+      row.postId ? posts.get(row.postId) : row.matchedPostId ? posts.get(row.matchedPostId) : undefined,
     ));
   }
 
@@ -1578,6 +1580,8 @@ export class LeadsService {
       sourcePostId: row.postId,
       sourcePostTitle: post?.title || null,
       sourcePostUrl: post?.postUrl || null,
+      sourcePostQualityStatus: (post as any)?.supervisorQualityStatus || 'normal',
+      leadPriceMultiplier: (post as any)?.supervisorQualityStatus === 'unqualified' ? 0.5 : 1,
       platform: row.platform,
       contactInfo: row.contactInfo,
       nickname: row.nickname,

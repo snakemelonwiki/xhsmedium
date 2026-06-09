@@ -89,6 +89,21 @@ export class Post {
   @Column({ name: 'supervisor_picked_at', type: 'datetime', nullable: true })
   supervisorPickedAt: Date | null;
 
+  /**
+   * 主管质量状态。
+   * normal = 未特别标记；excellent = 优秀作品；unqualified = 不合格作品，关联客资成单按半价入单。
+   */
+  @Column({ name: 'supervisor_quality_status', length: 16, default: 'normal' })
+  supervisorQualityStatus: string;
+
+  /** 最近一次标记质量状态的主管用户 ID。 */
+  @Column({ name: 'supervisor_quality_marked_by', length: 64, nullable: true })
+  supervisorQualityMarkedBy: string | null;
+
+  /** 最近一次标记质量状态的时间。 */
+  @Column({ name: 'supervisor_quality_marked_at', type: 'datetime', nullable: true })
+  supervisorQualityMarkedAt: Date | null;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 

@@ -6,6 +6,7 @@ import {
   LinkOutlined,
   PlusOutlined,
   ReloadOutlined,
+  StopOutlined,
   StarFilled,
   StarOutlined,
 } from '@ant-design/icons';
@@ -39,7 +40,7 @@ import { apiClient } from '@/shared/api/apiClient';
 import { createExport, downloadExportUrl, getExport } from '@/shared/api/exports';
 import { QuickRangePicker, RANGE_PRESETS_FULL } from '@/shared/components/date';
 import { normalizePostMetric } from '@/shared/utils/post-metrics';
-import { buildPostExportFilter, getPostDetailDisplay } from './postDetail';
+import { buildPostExportFilter, getPostDetailDisplay, getPostQualityMeta, type PostQualityStatus } from './postDetail';
 
 const DEFAULT_PAGE_SIZE = 15;
 const PAGE_SIZE_OPTIONS = [15, 30, 50, 100];
@@ -167,6 +168,7 @@ type Post = {
   note?: string;
   supervisorSuggestion?: string;
   isSupervisorPicked?: number;
+  supervisorQualityStatus?: PostQualityStatus;
   metrics: {
     traffic: number;
     likes: number;
@@ -211,6 +213,7 @@ export default function AdminPostsPage() {
   const [exportConfirmOpen, setExportConfirmOpen] = useState(false);
   const [exportCountdown, setExportCountdown] = useState(5);
   const [pickPendingId, setPickPendingId] = useState<string | null>(null);
+  const [qualityPendingId, setQualityPendingId] = useState<string | null>(null);
 
   // 导出确认弹窗倒计时
   useEffect(() => {
@@ -309,6 +312,7 @@ export default function AdminPostsPage() {
         note: p.note,
         supervisorSuggestion: p.supervisorSuggestion ?? p.supervisor_suggestion,
         isSupervisorPicked: Number(p.isSupervisorPicked ?? p.is_supervisor_picked ?? 0),
+        supervisorQualityStatus: (p.supervisorQualityStatus ?? p.supervisor_quality_status ?? 'normal') as PostQualityStatus,
         metrics: {
           traffic: normalizePostMetric(p.traffic),
           likes: normalizePostMetric(p.likes),
@@ -391,6 +395,35 @@ export default function AdminPostsPage() {
       message.error(err instanceof Error ? err.message : '标记失败');
     } finally {
       setPickPendingId(null);
+    }
+  }
+
+  async function updateQuality(row: Post, qualityStatus: PostQualityStatus) {
+    const meta = getPostQualityMeta(qualityStatus);
+    const ok = qualityStatus === 'unqualified'
+      ? window.confirm('确认标记为不合格作品？关联客资成单时，订单金额会按销售填写金额的 50% 入单。')
+      : true;
+    if (!ok) return;
+    setQualityPendingId(row.id);
+    try {
+      const result = await apiClient.request<any>(`/posts/${encodeURIComponent(row.id)}/quality`, {
+        method: 'PATCH',
+        body: { qualityStatus },
+      });
+      setItems((prev) =>
+        prev.map((it) => (it.id === row.id
+          ? {
+              ...it,
+              supervisorQualityStatus: result?.supervisorQualityStatus ?? qualityStatus,
+              isSupervisorPicked: Number(result?.isSupervisorPicked ?? (qualityStatus === 'excellent' ? 1 : 0)),
+            }
+          : it)),
+      );
+      message.success(`已标记为${meta.label}`);
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '标记失败');
+    } finally {
+      setQualityPendingId(null);
     }
   }
 
@@ -605,7 +638,11 @@ export default function AdminPostsPage() {
             <Typography.Text type="secondary" ellipsis style={{ maxWidth: 120, fontSize: 12 }}>
               {r.copywriting || r.note || '暂无文案'}
             </Typography.Text>
-            {Number(r.isSupervisorPicked || 0) === 1 ? <Tag color="gold">优秀作品</Tag> : null}
+            {(() => {
+              const quality = r.supervisorQualityStatus || (Number(r.isSupervisorPicked || 0) === 1 ? 'excellent' : 'normal');
+              const meta = getPostQualityMeta(quality);
+              return quality !== 'normal' ? <Tag color={meta.color}>{meta.label}</Tag> : null;
+            })()}
           </Space>
         </Space>
       ),
@@ -683,6 +720,9 @@ export default function AdminPostsPage() {
       render: (_: unknown, row: Post) => {
         const isPicked = Number(row.isSupervisorPicked || 0) === 1;
         const isPending = pickPendingId === row.id;
+        const quality = row.supervisorQualityStatus || (isPicked ? 'excellent' : 'normal');
+        const isUnqualified = quality === 'unqualified';
+        const isQualityPending = qualityPendingId === row.id;
         return (
           <Space size={4} wrap>
             <Button size="small" icon={<EyeOutlined />} onClick={() => openDetail(row)}>
@@ -696,6 +736,15 @@ export default function AdminPostsPage() {
               onClick={() => void togglePick(row)}
             >
               {isPicked ? '已标记优秀' : '标记优秀作品'}
+            </Button>
+            <Button
+              size="small"
+              danger={isUnqualified}
+              icon={<StopOutlined />}
+              loading={isQualityPending}
+              onClick={() => void updateQuality(row, isUnqualified ? 'normal' : 'unqualified')}
+            >
+              {isUnqualified ? '取消不合格' : '标记不合格'}
             </Button>
           </Space>
         );
