@@ -12,7 +12,7 @@ const RANKING_TYPES = ['posts', 'leads', 'traffic', 'study'];
  *  全部 12 个预设。如有未列出的预设（用户手动选了 RangePicker 任意区间），
  *  请同时传 from / to，由 service 端走 options.range 优先级。
  */
-const RANKING_PERIODS = ['today', 'week', 'month', 'total', '7d', '14d', '30d', '90d', '1y', '3y'];
+const RANKING_PERIODS = ['today', 'week', 'month', 'thisweek', 'thismonth', 'thisyear', 'total', '7d', '14d', '30d', '90d', '1y', '3y'];
 
 /** ISO 日期串（YYYY-MM-DD）宽松校验。用于 from/to 透传时的兜底。 */
 function isValidDate(s: any): s is string {
@@ -41,7 +41,12 @@ export class RankingsController {
   ) {
     const targetDate = date || todayString();
     const normalizedType = RANKING_TYPES.includes(type || '') ? type : 'posts';
-    const normalizedPeriod = RANKING_PERIODS.includes(period || '') ? period : 'today';
+    // T2.2 (2026-06-09)：大小写不敏感 + 兼容驼峰 / 下划线别名。
+    // 前端 QuickRangePicker preset key 是 thisWeek / thisMonth / thisYear（驼峰），
+    // 而 service resolveDateRange 用 lowercase 比较。这里统一在 controller 归一化，
+    // 避免被白名单兜底成 'today'。
+    const lowerPeriod = String(period || '').trim().toLowerCase();
+    const normalizedPeriod = RANKING_PERIODS.includes(lowerPeriod) ? lowerPeriod : 'today';
     const range = isValidDate(from) || isValidDate(to) ? { from, to } : undefined;
     const options = { platform, period: normalizedPeriod, range };
     const wantsPaging = limit !== undefined || offset !== undefined;
@@ -77,7 +82,8 @@ export class RankingsController {
     @Query('to') to?: string,
   ) {
     const normalizedType = RANKING_TYPES.includes(type || '') ? type : 'posts';
-    const normalizedPeriod = RANKING_PERIODS.includes(period || '') ? period : 'today';
+    const lowerPeriod = String(period || '').trim().toLowerCase();
+    const normalizedPeriod = RANKING_PERIODS.includes(lowerPeriod) ? lowerPeriod : 'today';
     const range = isValidDate(from) || isValidDate(to) ? { from, to } : undefined;
     const result = await this.rankingsService.getRankingsPaged(
       normalizedType,

@@ -2,19 +2,31 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Post } from '../../entities/post.entity';
+import { Lead } from '../../entities/lead.entity';
 import { DashboardService } from '../dashboard/dashboard.service';
-import { PostsService } from '../posts/posts.service';
-import { LeadsService } from '../leads/leads.service';
 import { normalizePostType, normalizeTrafficByType } from '../../shared/utils/normalize';
+
+/** 把前端中文平台名映射到 DB 中可能的所有写法（与 posts.service 同逻辑） */
+function expandPlatformSynonyms(platform: string): string[] {
+  const key = String(platform || '').trim();
+  if (!key) return [];
+  if (['xiaohongshu', 'xhs', '小红书', 'С����'].includes(key)) {
+    return ['xiaohongshu', 'xhs', '小红书', 'С����'];
+  }
+  if (['douyin', '抖音'].includes(key)) {
+    return ['douyin', '抖音'];
+  }
+  return [key];
+}
 
 @Injectable()
 export class RankingsService {
   constructor(
     private readonly dashboardService: DashboardService,
-    private readonly postsService: PostsService,
-    private readonly leadsService: LeadsService,
     @InjectRepository(Post)
     private readonly postRepository: Repository<Post>,
+    @InjectRepository(Lead)
+    private readonly leadRepository: Repository<Lead>,
   ) {}
 
   /**
@@ -41,14 +53,47 @@ export class RankingsService {
       platform: options.platform,
     });
 
-    // 历史 total post 计数（不限日期，限平台），用于"累计作品/累计客资"等指标
+    // C2 修复：将日期/平台过滤下沉到 SQL，避免全量加载后再内存过滤
     const platformFilter = this.normalizePlatform(options.platform);
-    const posts = (await this.postsService.findAll()).filter(
-      (p) => !platformFilter || p.platform === platformFilter,
-    );
-    const leads = (await this.leadsService.findAll()).filter(
-      (l) => !platformFilter || l.platform === platformFilter,
-    );
+
+    // --- posts: SQL 级别 from/to + platform 过滤 ---
+    const postQb = this.postRepository.createQueryBuilder('p')
+      .select([
+        'p.id', 'p.employeeId', 'p.platform', 'p.title',
+        'p.likes', 'p.comments', 'p.favorites', 'p.shares',
+        'p.publishedAt', 'p.createdAt',
+      ]);
+    if (range.from) postQb.andWhere('p.published_at >= :from', { from: range.from });
+    if (range.to) postQb.andWhere('p.published_at <= :to', { to: `${range.to} 23:59:59` });
+    if (platformFilter) {
+      postQb.andWhere('p.platform IN (:...platforms)', { platforms: expandPlatformSynonyms(platformFilter) });
+    }
+    const posts = (await postQb.getMany()).map((p) => ({
+      employeeId: p.employeeId,
+      platform: p.platform,
+      likes: Number(p.likes || 0),
+      comments: Number(p.comments || 0),
+      favorites: Number(p.favorites || 0),
+      shares: Number(p.shares || 0),
+      publishedAt: p.publishedAt,
+      createdAt: p.createdAt,
+    }));
+
+    // --- leads: SQL 级别 from/to + platform 过滤 ---
+    const leadQb = this.leadRepository.createQueryBuilder('l')
+      .select(['l.id', 'l.employeeId', 'l.platform', 'l.contactInfo', 'l.status', 'l.createdAt']);
+    if (range.from) leadQb.andWhere('l.created_at >= :from', { from: range.from });
+    if (range.to) leadQb.andWhere('l.created_at <= :to', { to: `${range.to} 23:59:59` });
+    if (platformFilter) {
+      leadQb.andWhere('l.platform IN (:...platforms)', { platforms: expandPlatformSynonyms(platformFilter) });
+    }
+    const leads = (await leadQb.getMany()).map((l) => ({
+      employeeId: l.employeeId,
+      platform: l.platform,
+      contactInfo: l.contactInfo,
+      status: l.status,
+      createdAt: l.createdAt,
+    }));
 
     // 统一主榜基础指标：账号数/作品数/平台作品数/成交数同表展示，type 只决定排序口径。
     const mergedMetricRows = () => {
@@ -145,8 +190,8 @@ export class RankingsService {
     offset: number,
     options: { period?: string; platform?: string; range?: { from?: string; to?: string } } = {},
   ): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
-    // TODO: 当前为内存分页，getRankings 会全量加载 posts + leads。当数据量增长时，
-    // 需要将聚合逻辑下沉到 SQL，避免全表加载后再 slice。后续可改为纯 SQL 聚合或缓存。
+    // C2 已修复：getRankings 内部已按 from/to + platform SQL 过滤，不再全表加载。
+    // 当前仍为内存分页（聚合后 slice），数据量级可控。
     const allRows = await this.getRankings(type, date, options);
     const total = allRows.length;
     const items = allRows.slice(offset, offset + limit);
