@@ -1,7 +1,7 @@
 'use client';
 
 import {
-  Button, Card, Col, Form, Input, Modal, Popconfirm, Row, Select, Space, Table, Tag, Typography, message,
+  App, Button, Card, Col, Form, Input, Modal, Popconfirm, Row, Select, Space, Table, Tag, Typography,
 } from 'antd';
 import type { TableColumnsType, TablePaginationConfig } from 'antd';
 import { useEffect, useState } from 'react';
@@ -60,6 +60,7 @@ function getRoleTagColor(value?: string): string {
 }
 
 export default function AdminEmployeesPage() {
+  const { message: messageApi } = App.useApp();
   const [items, setItems] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
@@ -141,7 +142,7 @@ export default function AdminEmployeesPage() {
 
   async function submit(values: Partial<Employee> & { name: string }) {
     await saveAdminEmployee({ ...editing, ...values } as Parameters<typeof saveAdminEmployee>[0]);
-    message.success(editing ? '员工信息已更新' : '员工已新增');
+    messageApi.success(editing ? '员工信息已更新' : '员工已新增');
     setOpen(false);
     form.resetFields();
     void load();
@@ -163,13 +164,13 @@ export default function AdminEmployeesPage() {
         employeeId: bindingEmployee.id,
         status: 'active',
       });
-      message.success('登录账号绑定成功');
+      messageApi.success('登录账号绑定成功');
       setBindModalOpen(false);
       bindForm.resetFields();
       void load();
     } catch (err: unknown) {
       const msg = (err as { message?: string })?.message || '绑定失败';
-      message.error(msg);
+      messageApi.error(msg);
     } finally {
       setLoading(false);
     }
@@ -188,11 +189,11 @@ export default function AdminEmployeesPage() {
         method: 'PATCH',
         body: { status: '停用' },
       });
-      message.success(`员工"${deactivateEmployee.name}"已停用`);
+      messageApi.success(`员工"${deactivateEmployee.name}"已停用`);
       setDeactivateModalOpen(false);
       void load();
     } catch (err: unknown) {
-      message.error((err as Error)?.message || '停用失败');
+      messageApi.error((err as Error)?.message || '停用失败');
     } finally {
       setDeactivateLoading(false);
     }
@@ -208,19 +209,23 @@ export default function AdminEmployeesPage() {
     if (!bindingEmployee) return;
     setCreateUserLoading(true);
     try {
+      console.log('[submitCreateUser] Calling API with:', { username: values.username, employeeId: bindingEmployee.id });
       await apiClient.post('/users/staff', {
         username: values.username,
         password: values.password,
         employeeId: bindingEmployee.id,
         status: 'active',
       });
-      message.success('登录账号创建成功');
+      console.log('[submitCreateUser] API call succeeded');
+      messageApi.success('登录账号创建成功');
       setCreateUserModalOpen(false);
       createUserForm.resetFields();
       void load();
     } catch (err: unknown) {
+      console.error('[submitCreateUser] Error caught:', err);
       const msg = (err as { message?: string })?.message || '创建失败';
-      message.error(msg);
+      console.error('[submitCreateUser] Showing error message:', msg);
+      messageApi.error(msg);
     } finally {
       setCreateUserLoading(false);
     }

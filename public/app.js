@@ -72,7 +72,7 @@ async function submitReassignLead() {
   const reason = document.getElementById("reassignLeadReason")?.value || "";
   if (!leadId) return closeReassignLeadDialog();
   if (!newAssigneeId) {
-    setFlash("warn", "请选择新销售", "");
+    showToast("warn", "请选择新销售", "");
     return;
   }
   try {
@@ -91,7 +91,7 @@ async function submitReassignLead() {
     closeReassignLeadDialog();
     renderApp();
   } catch (e) {
-    setFlash("warn", "改派失败", e?.message || "请稍后重试");
+    showToast("warn", "改派失败", e?.message || "请稍后重试");
   }
 }
 

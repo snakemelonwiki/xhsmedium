@@ -587,7 +587,7 @@ async function salesUpdateLeadDealStatus(leadId, orderId, dealStatus) {
     const lead = (state.leads || []).find((l) => l && l.id === leadId);
     if (lead) lead.processStatus = dealStatus;
   } catch (e) {
-    setFlash("warn", "更新失败", e?.message || "请稍后重试");
+    showToast("warn", "更新失败", e?.message || "请稍后重试");
   }
   renderApp();
 }
@@ -611,7 +611,7 @@ async function salesOneClickCloseDeal(leadId, orderId) {
       renderApp();
     }
   } catch (e) {
-    setFlash("warn", "成交失败", e?.message || "请稍后重试");
+    showToast("warn", "成交失败", e?.message || "请稍后重试");
     renderApp();
   }
 }
@@ -957,7 +957,7 @@ async function adminAssignAcademic(orderId) {
     await loadAdminOrderDetail(orderId);
     state.adminOrders = null;
   } catch (e) {
-    setFlash("warn", "分配失败", e?.message || "请稍后重试");
+    showToast("warn", "分配失败", e?.message || "请稍后重试");
     renderApp();
   }
 }
@@ -1172,7 +1172,7 @@ function mountAcademicOrdersPagination() {
 async function academicClaimOrder(orderId) {
   if (!orderId) return;
   if (!state.user?.id) {
-    setFlash("warn", "未登录", "请重新登录后再试。");
+    showToast("warn", "未登录", "请重新登录后再试。");
     renderApp();
     return;
   }
@@ -1185,7 +1185,7 @@ async function academicClaimOrder(orderId) {
     state.academicOrders = null;
     renderApp();
   } catch (e) {
-    setFlash("warn", "领取失败", e?.message || "请稍后重试");
+    showToast("warn", "领取失败", e?.message || "请稍后重试");
     renderApp();
   }
 }
@@ -1234,7 +1234,7 @@ async function academicUpdateOrderStatus(orderId, status) {
     await loadAcademicOrderDetail(orderId);
     state.academicOrders = null;
   } catch (e) {
-    setFlash("warn", "更新失败", e?.message || "请稍后重试");
+    showToast("warn", "更新失败", e?.message || "请稍后重试");
     renderApp();
   }
 }
@@ -1250,7 +1250,7 @@ async function academicUpdatePaidStatus(orderId, paid) {
     await loadAcademicOrderDetail(orderId);
     state.academicOrders = null;
   } catch (e) {
-    setFlash("warn", "更新失败", e?.message || "请稍后重试");
+    showToast("warn", "更新失败", e?.message || "请稍后重试");
     renderApp();
   }
 }
@@ -1274,7 +1274,7 @@ async function academicAddFollowNode(orderId) {
     setFlash("success", "节点已新增", "时间线已更新。");
     await loadAcademicOrderDetail(orderId);
   } catch (e) {
-    setFlash("warn", "新增失败", e?.message || "请稍后重试");
+    showToast("warn", "新增失败", e?.message || "请稍后重试");
     renderApp();
   }
 }
@@ -1468,7 +1468,7 @@ async function academicResolveAbnormal(orderId) {
     state.academicAbnormalOrders = null;
     renderApp();
   } catch (e) {
-    setFlash("warn", "处理失败", e?.message || "请稍后重试");
+    showToast("warn", "处理失败", e?.message || "请稍后重试");
     renderApp();
   }
 }
@@ -1524,7 +1524,7 @@ async function triggerExport(exportType) {
     });
     setFlash("success", "导出任务已创建", "完成后会在消息中心提供下载链接。");
   } catch (e) {
-    setFlash("warn", "导出失败", e?.message || "请稍后重试");
+    showToast("warn", "导出失败", e?.message || "请稍后重试");
   }
   renderApp();
 }

@@ -413,7 +413,7 @@ function applyQuickTimeShortcut(scope, action) {
 async function copyContactInfo(text) {
   const value = String(text || "").trim();
   if (!value) {
-    setFlash("warn", "暂无可复制的联系方式");
+    showToast("warn", "暂无可复制的联系方式");
     renderApp();
     return;
   }
@@ -449,7 +449,7 @@ async function copyContactInfo(text) {
     }
     setFlash("success", "联系方式已复制", value);
   } catch {
-    setFlash("warn", "复制失败", "当前浏览器环境没有成功复制，请手动复制这条联系方式。");
+    showToast("warn", "复制失败", "当前浏览器环境没有成功复制，请手动复制这条联系方式。");
   }
   renderApp();
 }
@@ -460,6 +460,64 @@ function setFlash(type, title, message = "") {
 
 function clearFlash() {
   state.flash = null;
+}
+
+/**
+ * 显示toast提示消息
+ * @param {string} type - 类型：success/error/warn/info
+ * @param {string} title - 标题
+ * @param {string} message - 消息内容
+ * @param {number} duration - 持续时间（毫秒），默认3000
+ */
+function showToast(type, title, message = "", duration = 3000) {
+  // 确保容器存在
+  let container = document.querySelector(".toast-container");
+  if (!container) {
+    container = document.createElement("div");
+    container.className = "toast-container";
+    container.style.cssText = "position:fixed;top:20px;right:20px;z-index:99999;display:flex;flex-direction:column;gap:10px;max-width:400px;";
+    document.body.appendChild(container);
+  }
+
+  // 创建toast元素
+  const icons = {
+    success: "✓",
+    error: "✕",
+    warn: "⚠",
+    info: "ℹ"
+  };
+
+  const colors = {
+    success: "#10b981",
+    error: "#ef4444",
+    warn: "#f59e0b",
+    info: "#3b82f6"
+  };
+
+  const toast = document.createElement("div");
+  toast.className = `toast toast-${type}`;
+  const borderColor = colors[type] || colors.info;
+  toast.style.cssText = `background:white;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.15);padding:16px;display:flex;align-items:flex-start;gap:12px;border-left:4px solid ${borderColor};animation:toastSlideIn 0.3s ease;`;
+  toast.innerHTML = `
+    <span class="toast-icon" style="font-size:20px;line-height:1;color:${borderColor};">${icons[type] || icons.info}</span>
+    <div class="toast-content" style="flex:1;">
+      <div class="toast-title" style="font-weight:600;font-size:14px;color:#111827;margin-bottom:4px;">${escapeHtml(title)}</div>
+      ${message ? `<div class="toast-message" style="font-size:13px;color:#6b7280;">${escapeHtml(message)}</div>` : ""}
+    </div>
+    <button class="toast-close" style="background:none;border:none;font-size:18px;cursor:pointer;color:#9ca3af;padding:0;line-height:1;" onclick="this.parentElement.remove()">×</button>
+  `;
+
+  container.appendChild(toast);
+
+  // 自动移除
+  if (duration > 0) {
+    setTimeout(() => {
+      if (toast.parentElement) {
+        toast.classList.add("toast-exit");
+        setTimeout(() => toast.remove(), 300);
+      }
+    }, duration);
+  }
 }
 
 function formatDate(value) {

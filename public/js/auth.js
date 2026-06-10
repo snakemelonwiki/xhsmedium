@@ -169,7 +169,7 @@ function renderLogin() {
       if (typeof initNotificationSocket === "function") initNotificationSocket();
       renderApp();
     } catch (error) {
-      alert(error.message);
+      showToast("error", "登录失败", error.message);
     }
   });
 }

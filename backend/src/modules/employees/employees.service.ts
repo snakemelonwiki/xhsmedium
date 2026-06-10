@@ -88,6 +88,16 @@ export class EmployeesService {
   }
 
   /**
+   * 检查用户名是否已存在。
+   */
+  async checkUsernameExists(username: string): Promise<boolean> {
+    const trimmed = String(username || '').trim().toLowerCase();
+    if (!trimmed) return false;
+    const existing = await this.userRepository.findOne({ where: { username: trimmed } });
+    return !!existing;
+  }
+
+  /**
    * 创建员工资料（不带登录账号）。
    * 仍保留向后兼容；新代码应使用 createWithLogin。
    */

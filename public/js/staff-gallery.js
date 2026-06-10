@@ -20,7 +20,7 @@ async function loadPlazaPosts(view) {
   } catch (err) {
     console.warn("[plaza] loadPlazaPosts failed", err);
     if (typeof setFlash === "function") {
-      setFlash("warn", "作品广场加载失败", err?.message || "请稍后重试");
+      showToast("warn", "作品广场加载失败", err?.message || "请稍后重试");
     }
     return [];
   }
@@ -693,6 +693,6 @@ async function toggleFavoritePost(button) {
   } catch (error) {
     button.disabled = false;
     button.textContent = originalText;
-    alert(error?.message || "操作失败，请稍后重试。");
+    showToast("error", "操作失败", error?.message || "请稍后重试。");
   }
 }

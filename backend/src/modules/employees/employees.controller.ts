@@ -70,6 +70,13 @@ export class EmployeesController {
    * 查询员工详情。
    * 仅 admin/supervisor/owner 可访问。
    */
+  @Get('check-username/:username')
+  async checkUsername(@Param('username') username: string, @Req() req: Request, @Res() res: Response) {
+    if (!ensureEmployeeAdmin(req, res)) return;
+    const exists = await this.employeesService.checkUsernameExists(username);
+    return res.json({ exists });
+  }
+
   @Get(':id')
   async findById(@Param('id') id: string, @Req() req: Request, @Res() res: Response) {
     if (!ensureEmployeeAdmin(req, res)) return;

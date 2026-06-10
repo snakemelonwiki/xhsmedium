@@ -19,7 +19,7 @@ import {
   message,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import dayjs, { type Dayjs } from 'dayjs';
+import { type Dayjs } from 'dayjs';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
@@ -118,6 +118,11 @@ export default function AdminExportsPage() {
     }
   }, [page, statusFilter, typeFilter, dateRange]);
 
+  // 首次进入页面以及筛选条件变化时，统一由同一条数据流触发重新加载。
+  useEffect(() => {
+    void load(1);
+  }, [load]);
+
   // 处理中和待处理状态自动刷新
   useEffect(() => {
     const hasPendingOrProcessing = items.some((item) =>
@@ -142,19 +147,16 @@ export default function AdminExportsPage() {
   const handleStatusChange = (value: StatusFilter) => {
     setStatusFilter(value);
     setPage(1);
-    void load(1);
   };
 
   const handleTypeChange = (value: ExportType | 'all') => {
     setTypeFilter(value);
     setPage(1);
-    void load(1);
   };
 
   const handleDateChange = (value: [Dayjs | null, Dayjs | null] | null) => {
     setDateRange(value);
     setPage(1);
-    void load(1);
   };
 
   async function openDetail(row: ExportTask) {

@@ -240,7 +240,7 @@ async function markAllNotificationsRead() {
     });
     state.unreadNotificationCount = 0;
     if (typeof setFlash === "function") {
-      setFlash("warn", "已本地清空未读", "后端同步失败，请稍后重试。");
+      showToast("warn", "已本地清空未读", "后端同步失败，请稍后重试。");
     }
   }
   if (typeof updateNotificationPanelDom === "function") updateNotificationPanelDom();

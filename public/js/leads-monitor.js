@@ -696,7 +696,7 @@ async function requestCollab(leadId) {
   if (!type) return;
   const allowed = ["remind_customer", "supplement_info", "verify_identity", "second_touch"];
   if (!allowed.includes(type)) {
-    setFlash("warn", "类型无效", "请输入上述 4 个英文 code 之一。");
+    showToast("warn", "类型无效", "请输入上述 4 个英文 code 之一。");
     renderApp();
     return;
   }
@@ -712,7 +712,7 @@ async function requestCollab(leadId) {
       })
     });
   } catch (e) {
-    setFlash("warn", "提交失败", e?.message || "请稍后重试");
+    showToast("warn", "提交失败", e?.message || "请稍后重试");
     renderApp();
     return;
   }
@@ -734,7 +734,7 @@ async function markDeal(leadId) {
   if (amountStr === null) return;
   const amountNum = Number(amountStr);
   if (!Number.isFinite(amountNum) || amountNum < 0) {
-    setFlash("warn", "金额无效", "请输入正数。");
+    showToast("warn", "金额无效", "请输入正数。");
     renderApp();
     return;
   }
@@ -752,7 +752,7 @@ async function markDeal(leadId) {
     const orderId = resp?.orderId || resp?.order?.id || "";
     setFlash("success", "已标记成交", orderId ? `订单已创建：${orderId}` : "订单已创建。");
   } catch (e) {
-    setFlash("warn", "标记失败", e?.message || "请稍后重试");
+    showToast("warn", "标记失败", e?.message || "请稍后重试");
     renderApp();
     return;
   }
@@ -773,7 +773,7 @@ async function markContactAdded(leadId) {
     const lead = (state.leads || []).find((l) => l && l.id === leadId);
     if (lead) lead.addStatus = "added";
   } catch (e) {
-    setFlash("warn", "操作失败", e?.message || "请稍后重试");
+    showToast("warn", "操作失败", e?.message || "请稍后重试");
     renderApp();
     return;
   }
@@ -789,7 +789,7 @@ async function closeCollab(taskId) {
       body: JSON.stringify({ actorUserId: state.user?.id || "" })
     });
   } catch (e) {
-    setFlash("warn", "关闭失败", e?.message || "请稍后重试");
+    showToast("warn", "关闭失败", e?.message || "请稍后重试");
     renderApp();
     return;
   }
@@ -809,7 +809,7 @@ async function claimCollab(taskId) {
       body: JSON.stringify({ actorUserId: state.user?.id || "" })
     });
   } catch (e) {
-    setFlash("warn", "领取失败", e?.message || "请稍后重试");
+    showToast("warn", "领取失败", e?.message || "请稍后重试");
     renderApp();
     return;
   }
@@ -833,7 +833,7 @@ async function handleCollab(taskId) {
       body: JSON.stringify({ handledNote: note })
     });
   } catch (e) {
-    setFlash("warn", "完成失败", e?.message || "请稍后重试");
+    showToast("warn", "完成失败", e?.message || "请稍后重试");
     renderApp();
     return;
   }
@@ -1105,7 +1105,7 @@ async function confirmLeadSource(leadId) {
       })
     });
   } catch (e) {
-    setFlash("warn", "确认失败", e?.message || "请稍后重试");
+    showToast("warn", "确认失败", e?.message || "请稍后重试");
     renderApp();
     return;
   }
@@ -1691,7 +1691,7 @@ async function loadImportHistory() {
 async function analyzeLeadPaste() {
   const rawText = document.getElementById("leadPasteRawText")?.value?.trim() || "";
   if (!rawText) {
-    setFlash("warn", "请粘贴内容", "至少输入一段文字");
+    showToast("warn", "请粘贴内容", "至少输入一段文字");
     renderApp();
     return;
   }
@@ -1705,7 +1705,7 @@ async function analyzeLeadPaste() {
     state.leadPasteRawText = rawText;
     renderApp();
   } catch (err) {
-    setFlash("warn", "解析失败", err?.message || "请稍后重试");
+    showToast("warn", "解析失败", err?.message || "请稍后重试");
     renderApp();
   }
 }
@@ -1724,7 +1724,7 @@ async function submitLeadPaste(event) {
   const formData = new FormData(event.currentTarget);
   const contactInfo = String(formData.get("contactInfo") || "").trim();
   if (!contactInfo) {
-    setFlash("warn", "联系方式必填", "请补充联系方式后再提交");
+    showToast("warn", "联系方式必填", "请补充联系方式后再提交");
     renderApp();
     return;
   }
@@ -1756,7 +1756,7 @@ async function submitLeadPaste(event) {
     await loadData();
     renderApp();
   } catch (err) {
-    setFlash("warn", "提交失败", err?.message || "请稍后重试");
+    showToast("warn", "提交失败", err?.message || "请稍后重试");
     renderApp();
   }
 }
@@ -1764,7 +1764,7 @@ async function submitLeadPaste(event) {
 async function submitLeadBatchImport() {
   const text = document.getElementById("leadImportRowsInput")?.value?.trim() || "";
   if (!text) {
-    setFlash("warn", "请粘贴数据", "至少粘贴一行");
+    showToast("warn", "请粘贴数据", "至少粘贴一行");
     renderApp();
     return;
   }
@@ -1781,7 +1781,7 @@ async function submitLeadBatchImport() {
     await loadData();
     renderApp();
   } catch (err) {
-    setFlash("warn", "导入失败", err?.message || "请稍后重试");
+    showToast("warn", "导入失败", err?.message || "请稍后重试");
     renderApp();
   }
 }
@@ -2118,7 +2118,7 @@ async function submitLead(event) {
     formData.set("captureImage", state.leadCaptureFile, state.leadCaptureFile.name || "lead-capture.png");
   }
   if (!String(formData.get("postId") || "")) {
-    alert("请选择这条客资对应的作品。");
+    showToast("warn", "请选择作品", "请选择这条客资对应的作品。");
     return;
   }
 
@@ -2152,7 +2152,7 @@ async function submitLead(event) {
     renderApp();
   } catch (err) {
     // 提交失败时保留表单内容，不清空
-    setFlash("error", "提交失败", err.message || "请检查网络连接后重试，已填写内容已自动保存。");
+    showToast("error", "提交失败", err.message || "请检查网络连接后重试，已填写内容已自动保存。");
     throw err;
   }
 }
@@ -2285,7 +2285,7 @@ async function showLeadFollowTimeline(id) {
   try {
     records = await api(`/api/leads/${id}/follow-records?limit=100`);
   } catch (err) {
-    setFlash("warn", "时间线加载失败", err?.message || "请稍后重试");
+    showToast("warn", "时间线加载失败", err?.message || "请稍后重试");
     return;
   }
   const list = Array.isArray(records) ? records : [];
@@ -2408,7 +2408,7 @@ async function searchPassiveCandidates() {
   const wechat = document.getElementById("passiveWechatInput")?.value.trim() || "";
   const nickname = document.getElementById("passiveNicknameInput")?.value.trim() || "";
   if (!phone && !wechat && !nickname) {
-    setFlash("warn", "请填写信息", "至少填一个：手机号 / 微信号 / 昵称");
+    showToast("warn", "请填写信息", "至少填一个：手机号 / 微信号 / 昵称");
     renderApp();
     return;
   }
@@ -2430,7 +2430,7 @@ async function bindPassiveLead(leadId) {
       body: JSON.stringify({ leadId, contact, salesFeedback: feedback || "" })
     });
   } catch (e) {
-    setFlash("warn", "绑定失败", e?.message || "请稍后重试");
+    showToast("warn", "绑定失败", e?.message || "请稍后重试");
     renderApp();
     return;
   }
@@ -2460,7 +2460,7 @@ async function createPassiveLead({ contact, nickname, platform, feedback }) {
       body: JSON.stringify({ contact, nickname, platform, salesFeedback: feedback })
     });
   } catch (e) {
-    setFlash("warn", "新建失败", e?.message || "请稍后重试");
+    showToast("warn", "新建失败", e?.message || "请稍后重试");
     renderApp();
     return;
   }

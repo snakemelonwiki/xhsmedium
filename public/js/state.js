@@ -225,7 +225,7 @@ function clearPendingLeadCapture() {
 function setPendingPostCover(file) {
   if (!(file instanceof File)) return;
   if (!String(file.type || "").startsWith("image/")) {
-    alert("请粘贴或选择图片文件作为封面。");
+    showToast("warn", "文件格式错误", "请粘贴或选择图片文件作为封面。");
     return;
   }
   clearPendingPostCover();
@@ -236,7 +236,7 @@ function setPendingPostCover(file) {
 function setPendingLeadCapture(file) {
   if (!(file instanceof File)) return;
   if (!String(file.type || "").startsWith("image/")) {
-    alert("请上传图片文件作为引流截图。");
+    showToast("warn", "文件格式错误", "请上传图片文件作为引流截图。");
     return;
   }
   clearPendingLeadCapture();

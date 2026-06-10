@@ -467,12 +467,32 @@ async function deleteAccount(id) {
 async function submitStaffUser(event) {
   event.preventDefault();
   const formData = new FormData(event.currentTarget);
-  await api("/api/users/staff", {
-    method: "POST",
-    body: JSON.stringify(Object.fromEntries(formData.entries()))
-  });
-  setFlash("success", "员工登录账号已创建", "把用户名和密码发给对应员工，他就可以开始录作品和客资。");
-  await loadData();
-  renderApp();
+  const username = String(formData.get("username") || "").trim();
+
+  // 检查用户名是否已存在
+  if (username) {
+    try {
+      const checkResult = await api(`/api/employees/check-username/${encodeURIComponent(username)}`);
+      if (checkResult.exists) {
+        showToast("error", "用户名重复", `用户名"${username}"已被使用，请更换一个用户名。`);
+        return;
+      }
+    } catch (err) {
+      showToast("error", "检测失败", "无法检测用户名是否重复，请稍后重试。");
+      return;
+    }
+  }
+
+  try {
+    await api("/api/users/staff", {
+      method: "POST",
+      body: JSON.stringify(Object.fromEntries(formData.entries()))
+    });
+    setFlash("success", "员工登录账号已创建", "把用户名和密码发给对应员工，他就可以开始录作品和客资。");
+    await loadData();
+    renderApp();
+  } catch (err) {
+    showToast("error", "创建失败", err.message || "请稍后重试");
+  }
 }
 

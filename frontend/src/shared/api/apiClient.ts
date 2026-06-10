@@ -126,12 +126,21 @@ export function createApiClient(options: ApiClientOptions = {}) {
 
     const payload = await parseResponse(response);
     if (!response.ok) {
+      // 调试日志
+      console.error('[apiClient] Request failed:', {
+        url: `${url.pathname}${url.search}`,
+        status: response.status,
+        payload,
+      });
+
       // 403 优先用后端的 reason 字段（比裸 message 'forbidden' 更有信息量）
       const payloadObj = typeof payload === 'object' && payload ? (payload as Record<string, unknown>) : null;
       const reason = payloadObj && typeof payloadObj.reason === 'string' ? String(payloadObj.reason) : '';
       const message =
         reason ||
         (payloadObj && 'message' in payloadObj ? String(payloadObj.message) : `请求失败：${response.status}`);
+
+      console.error('[apiClient] Throwing error:', message);
       throw new Error(message);
     }
 

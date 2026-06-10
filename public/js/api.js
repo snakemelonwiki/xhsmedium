@@ -70,7 +70,7 @@ async function _handle401() {
       state.user = null;
     }
     if (typeof setFlash === "function") {
-      setFlash("warn", "登录已失效", "请重新登录后继续操作。已为您保存最近一次输入的草稿。");
+      showToast("warn", "登录已失效", "请重新登录后继续操作。已为您保存最近一次输入的草稿。");
     }
     if (typeof renderLogin === "function") {
       renderLogin();
@@ -156,7 +156,7 @@ function withSubmitLock(key, asyncFn, lockMs = 1000) {
   return async function (...args) {
     if (_submittingKeys.has(key)) {
       if (typeof setFlash === "function") {
-        setFlash("warn", "请稍候", "操作正在处理中，请勿重复点击。");
+        showToast("warn", "请稍候", "操作正在处理中，请勿重复点击。");
       }
       return;
     }

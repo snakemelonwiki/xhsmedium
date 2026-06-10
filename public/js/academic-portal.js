@@ -182,7 +182,7 @@ async function receiveOrder(orderId) {
     setFlash('success', '接单成功', '订单已分配给您');
     loadAcademicOrders();
   } catch (err) {
-    setFlash('error', '接单失败', err.message);
+    showToast('error', '接单失败', err.message);
   }
 }
 
@@ -199,7 +199,7 @@ async function loadAcademicOrderDetail(id) {
     state.academicOrderDetailLead = lead;
   } catch (err) {
     console.error('[academic] load order detail failed', err);
-    setFlash('error', '加载失败', err.message);
+    showToast('error', '加载失败', err.message);
   } finally {
     state.academicOrderDetailLoading = false;
     renderApp();
@@ -456,7 +456,7 @@ async function submitUpdateOrderStatus(orderId) {
     document.querySelector('.modal-overlay')?.remove();
     loadAcademicOrderDetail(orderId);
   } catch (err) {
-    setFlash('error', '更新失败', err.message);
+    showToast('error', '更新失败', err.message);
   }
 }
 
@@ -507,7 +507,7 @@ async function submitAddFollowRecord(orderId) {
   const nextRemind = document.getElementById('followNextRemind')?.value;
 
   if (!nodeType) {
-    setFlash('warn', '请选择节点类型', '');
+    showToast('warn', '请选择节点类型', '');
     return;
   }
 
@@ -524,7 +524,7 @@ async function submitAddFollowRecord(orderId) {
     document.querySelector('.modal-overlay')?.remove();
     loadAcademicOrderDetail(orderId);
   } catch (err) {
-    setFlash('error', '添加失败', err.message);
+    showToast('error', '添加失败', err.message);
   }
 }
 
@@ -571,7 +571,7 @@ async function submitAbnormalFeedback(orderId) {
   const content = document.getElementById('abnormalContent')?.value;
 
   if (!content || !content.trim()) {
-    setFlash('warn', '请填写异常说明', '');
+    showToast('warn', '请填写异常说明', '');
     return;
   }
 
@@ -594,7 +594,7 @@ async function submitAbnormalFeedback(orderId) {
     document.querySelector('.modal-overlay')?.remove();
     loadAcademicOrderDetail(orderId);
   } catch (err) {
-    setFlash('error', '提交失败', err.message);
+    showToast('error', '提交失败', err.message);
   }
 }
 

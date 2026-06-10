@@ -527,11 +527,11 @@ async function submitPost(event) {
     renderApp();
 
     if (result.metricsSyncError) {
-      alert(`作品已保存，但互动数据暂未自动抓到：${result.metricsSyncError}`);
+      showToast("warn", "数据抓取提醒", `作品已保存，但互动数据暂未自动抓到：${result.metricsSyncError}`);
     }
   } catch (err) {
     // 提交失败时保留表单内容，不清空
-    setFlash("error", "提交失败", err.message || "请检查网络连接后重试，已填写内容已自动保存。");
+    showToast("error", "提交失败", err.message || "请检查网络连接后重试，已填写内容已自动保存。");
     throw err;
   }
 }
@@ -553,7 +553,7 @@ async function savePostSuggestion(id) {
 async function refreshScopedMetrics() {
   const postIds = getScopedRefreshPostIds();
   if (!postIds.length) {
-    alert("当前范围内没有可刷新的作品。");
+    showToast("info", "没有可刷新作品", "当前范围内没有可刷新的作品。");
     return;
   }
   try {
@@ -565,19 +565,19 @@ async function refreshScopedMetrics() {
     await loadData();
     renderApp();
   } catch (error) {
-    alert(error.message);
+    showToast("error", "刷新失败", error.message);
   }
 }
 
 async function rollbackScopedMetrics() {
   const postIds = getScopedRefreshPostIds();
   if (!postIds.length) {
-    alert("当前范围内没有可回退的作品。");
+    showToast("info", "没有可回退作品", "当前范围内没有可回退的作品。");
     return;
   }
 
   if (!state.rollbackSnapshotDate) {
-    alert("请先选择一个回退日期。");
+    showToast("warn", "请选择日期", "请先选择一个回退日期。");
     return;
   }
 
@@ -590,7 +590,7 @@ async function rollbackScopedMetrics() {
     return;
   }
   if (!String(password).trim()) {
-    alert("未输入密码，已取消回退。");
+    showToast("warn", "取消回退", "未输入密码，已取消回退。");
     return;
   }
 
@@ -606,9 +606,9 @@ async function rollbackScopedMetrics() {
     await loadData();
     renderApp();
     const failedCount = Array.isArray(result.failed) ? result.failed.length : 0;
-    alert(`已按 ${result.snapshotDate} 快照回退，成功 ${result.restored} 条，跳过 ${result.skipped} 条，失败 ${failedCount} 条。`);
+    showToast("success", "回退完成", `已按 ${result.snapshotDate} 快照回退，成功 ${result.restored} 条，跳过 ${result.skipped} 条，失败 ${failedCount} 条。`);
   } catch (error) {
-    alert(error.message);
+    showToast("error", "回退失败", error.message);
   }
 }
 
@@ -617,11 +617,11 @@ async function handleRefreshPostMetricsClick(button) {
   if (!id) return;
   const post = state.posts.find((item) => item.id === id) || state.plazaPosts.find((item) => item.id === id);
   if (!post) {
-    alert("找不到这条作品，可能已被删除。");
+    showToast("error", "作品不存在", "找不到这条作品，可能已被删除。");
     return;
   }
   if (!post.postUrl) {
-    alert("这条作品没有作品链接，无法抓取互动数据。");
+    showToast("warn", "缺少链接", "这条作品没有作品链接，无法抓取互动数据。");
     return;
   }
   if (button.disabled) return;
@@ -637,7 +637,7 @@ async function handleRefreshPostMetricsClick(button) {
     await loadData();
     renderApp();
   } catch (error) {
-    alert(error?.message || "刷新失败，请稍后重试。");
+    showToast("error", "刷新失败", error?.message || "请稍后重试。");
     button.disabled = false;
     button.textContent = originalText;
   }
@@ -647,7 +647,7 @@ async function handleBatchRefreshFilteredPosts() {
   const filteredRows = typeof getFilteredPostsForMonitor === "function" ? getFilteredPostsForMonitor() : [];
   const eligible = filteredRows.filter((item) => item.postUrl);
   if (!eligible.length) {
-    alert("当前筛选下没有可刷新的作品。");
+    showToast("info", "没有可刷新作品", "当前筛选下没有可刷新的作品。");
     return;
   }
   if (!window.confirm(`确认批量刷新 ${eligible.length} 条作品互动数据吗？`)) {
@@ -674,7 +674,7 @@ async function handleBatchRefreshFilteredPosts() {
     state.postBatchRefreshFailures = failed;
     setFlash(failed.length ? "warn" : "success", "批量刷新完成", `已刷新 ${success}/${results.length || eligible.length} 条${failed.length ? `，失败 ${failed.length} 条，可查看明细并重试。` : ""}`);
   } catch (error) {
-    alert(error?.message || "批量刷新失败，请稍后重试。");
+    showToast("error", "批量刷新失败", error?.message || "请稍后重试。");
   } finally {
     await loadData();
     renderApp();
@@ -704,7 +704,7 @@ async function retryFailedPostRefreshes() {
     await loadData();
     renderApp();
   } catch (error) {
-    alert(error?.message || "重试失败，请稍后再试。");
+    showToast("error", "重试失败", error?.message || "请稍后再试。");
     if (button) {
       button.disabled = false;
       button.textContent = "重试失败项";
@@ -726,7 +726,7 @@ async function submitPostBulkImport() {
   const delimiter = checkedDelimiterEl?.dataset?.value === "comma" ? "comma" : "tab";
   const rows = getPostBulkImportRows(raw, delimiter);
   if (!rows.length) {
-    alert("请粘贴需要导入的内容（首行表头）。");
+    showToast("warn", "请粘贴内容", "请粘贴需要导入的内容（首行表头）。");
     return;
   }
   state.postBulkImportRaw = raw;
@@ -747,7 +747,7 @@ async function submitPostBulkImport() {
     await loadData();
     renderApp();
   } catch (error) {
-    alert(error?.message || "批量导入失败，请稍后重试。");
+    showToast("error", "批量导入失败", error?.message || "请稍后重试。");
     if (submitBtn) {
       submitBtn.disabled = false;
       submitBtn.textContent = originalText || "提交导入";
@@ -759,7 +759,7 @@ async function submitPostBulkImportFile() {
   const input = document.getElementById("postBulkImportFileInput");
   const [file] = input?.files || [];
   if (!file) {
-    alert("请选择作品导入文件。");
+    showToast("warn", "请选择文件", "请选择作品导入文件。");
     return;
   }
   const submitBtn = document.getElementById("postBulkImportFileSubmitBtn");
@@ -778,7 +778,7 @@ async function submitPostBulkImportFile() {
     await loadData();
     renderApp();
   } catch (error) {
-    alert(error?.message || "作品文件导入失败，请检查模板后重试。");
+    showToast("error", "文件导入失败", error?.message || "请检查模板后重试。");
     if (submitBtn) {
       submitBtn.disabled = false;
       submitBtn.textContent = originalText || "上传文件导入";
