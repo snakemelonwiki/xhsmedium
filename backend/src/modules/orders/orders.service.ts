@@ -4,6 +4,8 @@ import { Repository, DataSource, EntityManager, In } from 'typeorm';
 import { Order, HANDOVER_STATUS_CODES, HandoverStatusCode } from '../../entities/order.entity';
 import { OrderFollowRecord } from '../../entities/order-follow-record.entity';
 import { OrderFinance } from '../../entities/order-finance.entity';
+import { OrderAuthor } from '../../entities/order-author.entity';
+import { OrderSubmission } from '../../entities/order-submission.entity';
 import { Lead } from '../../entities/lead.entity';
 import { User } from '../../entities/user.entity';
 import { makeId } from '../../shared/utils/id-generator';
@@ -96,8 +98,16 @@ interface OrderFollowDto {
   nodeType: string;
   content?: string | null;
   nextRemindAt?: string | Date | null;
+  remindStage?: string | null;
   attachmentUrl?: string | null;
   attachmentName?: string | null;
+}
+
+interface OrderDeliveryDto {
+  order?: Record<string, any>;
+  authors?: Array<Record<string, any>>;
+  submissions?: Array<Record<string, any>>;
+  finance?: Record<string, any>;
 }
 
 @Injectable()
@@ -109,6 +119,10 @@ export class OrdersService {
     private readonly orderFollowRepository: Repository<OrderFollowRecord>,
     @InjectRepository(OrderFinance)
     private readonly orderFinanceRepository: Repository<OrderFinance>,
+    @InjectRepository(OrderAuthor)
+    private readonly orderAuthorRepository: Repository<OrderAuthor>,
+    @InjectRepository(OrderSubmission)
+    private readonly orderSubmissionRepository: Repository<OrderSubmission>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
     @InjectRepository(Lead)
@@ -736,6 +750,77 @@ export class OrdersService {
   }
 
   /**
+   * 查询教务端交付详情。
+   * 聚合 orders 主表、order_authors、order_submissions、order_finance，供订单跟进页编辑。
+   */
+  async getOrderDelivery(orderId: string): Promise<any> {
+    const order = await this.orderRepository.findOne({ where: { id: orderId } });
+    if (!order) {
+      throw new NotFoundException('order not found');
+    }
+    const [authors, submissions, finance] = await Promise.all([
+      this.orderAuthorRepository.find({
+        where: { orderId },
+        order: { authorOrder: 'ASC' },
+      }),
+      this.orderSubmissionRepository.find({
+        where: { orderId },
+        order: { submissionNo: 'ASC' },
+      }),
+      this.orderFinanceRepository.findOne({ where: { orderId } }),
+    ]);
+    return {
+      order: this.mapOrderDeliveryFields(order),
+      authors: authors.map((row) => this.mapOrderAuthor(row)),
+      submissions: submissions.map((row) => this.mapOrderSubmission(row)),
+      finance: this.mapOrderFinance(finance),
+    };
+  }
+
+  /**
+   * 保存教务端交付详情。
+   * 主表字段更新 orders；作者与投稿信息采用按订单整体替换，避免旧位次残留；
+   * 财务表为 1:1 upsert，并自动计算客户/老师待付金额。
+   */
+  async saveOrderDelivery(orderId: string, dto: OrderDeliveryDto): Promise<void> {
+    const order = await this.orderRepository.findOne({ where: { id: orderId } });
+    if (!order) {
+      throw new NotFoundException('order not found');
+    }
+    const orderPatch = this.buildOrderDeliveryPatch(dto.order || {});
+    if (Object.keys(orderPatch).length > 0) {
+      await this.orderRepository.update(orderId, orderPatch);
+    }
+
+    if (Array.isArray(dto.authors)) {
+      await this.orderAuthorRepository.delete({ orderId });
+      const authors = dto.authors
+        .map((item, index) => this.buildOrderAuthor(orderId, item, index))
+        .filter((item): item is OrderAuthor => item !== null);
+      if (authors.length > 0) {
+        await this.orderAuthorRepository.save(authors);
+      }
+    }
+
+    if (Array.isArray(dto.submissions)) {
+      await this.orderSubmissionRepository.delete({ orderId });
+      const submissions = dto.submissions
+        .map((item, index) => this.buildOrderSubmission(orderId, item, index))
+        .filter((item): item is OrderSubmission => item !== null);
+      if (submissions.length > 0) {
+        await this.orderSubmissionRepository.save(submissions);
+      }
+    }
+
+    if (dto.finance) {
+      const currentFinance = await this.orderFinanceRepository.findOne({ where: { orderId } });
+      await this.orderFinanceRepository.save(
+        this.buildOrderFinance(orderId, dto.finance, currentFinance),
+      );
+    }
+  }
+
+  /**
    * P0 越权修复 (TC-PERM-023 等)：控制器层在写操作前调用本方法做归属校验。
    * 规则与 findOne / applyOrdersScope 中的可见性策略保持一致：
    * - admin / owner：可访问全部订单
@@ -914,6 +999,7 @@ export class OrdersService {
       nodeType,
       content: dto.content ? String(dto.content).trim() : null,
       nextRemindAt: dto.nextRemindAt ? new Date(dto.nextRemindAt) : null,
+      remindStage: dto.remindStage ? String(dto.remindStage).trim() : null,
       attachmentUrl: dto.attachmentUrl || null,
       attachmentName: dto.attachmentName || null,
     });
@@ -1410,6 +1496,272 @@ export class OrdersService {
     };
   }
 
+  private mapOrderDeliveryFields(row: Order): any {
+    return {
+      id: row.id,
+      orderNumber: row.orderCode || row.id,
+      customerName: row.customerName,
+      degreeLevel: row.educationLevel,
+      majorDirection: row.major,
+      requiredZone: row.area,
+      paperUse: row.articlePurpose,
+      registrationFormStatus: row.registrationStatus,
+      infoSentToTeacherAt: row.handoverToTeacherAt,
+      fundInfo: row.fundInfo,
+      submissionEmail: row.submitEmail,
+      submissionEmailPassword: row.submitEmailPassword,
+      authorRegistrationUrl: row.authorRegistrationUrl,
+      authorRegistrationName: row.authorRegistrationName,
+      operationMethod: row.operationMethod,
+      plagiarismRequirement: row.checkedDuplicate ? '已查重' : '未确认',
+      responsibleTeacher: row.dispatchedTeacherId,
+      statusStage: row.orderStage,
+      paperProgress: row.paperProgress,
+      assignedTeacher: row.teacherId,
+      backupTeacher: row.backupTeacher,
+      teacherPhone: row.teacherPhone,
+      teacherStability: row.teacherStability,
+      innovationReviewStatus: row.innovationReviewStatus,
+      innovationReviewAt: row.innovationReviewAt,
+      firstDraftReviewStatus: row.draftReviewStatus,
+      firstDraftReviewAt: row.draftReviewAt,
+      editorReviewStatus: row.editorReviewStatus,
+      editorReviewAt: row.editorReviewAt,
+      authorInfoChecked: row.authorVerifyStatus,
+      authorInfoCheckedAt: row.authorVerifyAt,
+      salesContact: row.salesContact,
+      academicOwner: row.academicOwner,
+      lastTeacherUpdateAt: row.lastTeacherUpdateAt,
+      customerComplaint: row.customerComplaint,
+      needsSupervisor: row.needsSupervisor,
+      emergencyStatus: row.emergencyStatus,
+      supervisorNote: row.supervisorNote,
+      nextFollowUpAt: row.nextFollowAt,
+      riskLevel: row.riskLevel,
+      journalStatus: row.currentStage,
+      submittedExpectedAt: row.submittedExpectedAt,
+      withEditorExpectedAt: row.withEditorExpectedAt,
+      underReviewExpectedAt: row.underReviewExpectedAt,
+      revisionExpectedAt: row.revisionExpectedAt,
+      acceptedExpectedAt: row.acceptedExpectedAt,
+      proofingExpectedAt: row.proofingExpectedAt,
+      onlineExpectedAt: row.onlineExpectedAt,
+      indexedExpectedAt: row.indexedExpectedAt,
+      firstWeekCheckAt: row.firstWeekCheckAt,
+      nextJournalCheckAt: row.nextCheckAt,
+      reminderLetterStatus: row.urgeLetterStatus,
+      revisionStatus: row.revisionStatus,
+      revisionDueAt: row.revisionDueAt,
+      pageFeeStatus: row.pageFeeStatus,
+      proofingStatus: row.proofStatus,
+      onlineStatus: row.onlineStatus,
+      onlineAt: row.onlineAt,
+      indexingStatus: row.indexedStatus,
+      indexingAt: row.indexingAt,
+      reviewReportStatus: row.indexReviewReport,
+    };
+  }
+
+  private buildOrderDeliveryPatch(input: Record<string, any>): Partial<Order> {
+    const patch: Partial<Order> = {};
+    const setString = (key: keyof Order, value: any) => {
+      if (value !== undefined) {
+        (patch as any)[key] = value === '' || value === null ? null : String(value);
+      }
+    };
+    const setDate = (key: keyof Order, value: any) => {
+      if (value !== undefined) {
+        (patch as any)[key] = value ? new Date(value) : null;
+      }
+    };
+    setString('educationLevel', input.degreeLevel);
+    setString('customerName', input.customerName);
+    setString('major', input.majorDirection);
+    setString('area', input.requiredZone);
+    setString('articlePurpose', input.paperUse);
+    setString('registrationStatus', input.registrationFormStatus);
+    setDate('handoverToTeacherAt', input.infoSentToTeacherAt);
+    setString('fundInfo', input.fundInfo);
+    setString('submitEmail', input.submissionEmail);
+    setString('submitEmailPassword', input.submissionEmailPassword);
+    setString('authorRegistrationUrl', input.authorRegistrationUrl);
+    setString('authorRegistrationName', input.authorRegistrationName);
+    setString('operationMethod', input.operationMethod);
+    if (input.plagiarismRequirement !== undefined) {
+      patch.checkedDuplicate = ['已查重', '需要查重'].includes(String(input.plagiarismRequirement));
+    }
+    setString('dispatchedTeacherId', input.responsibleTeacher);
+    setString('orderStage', input.statusStage);
+    setString('paperProgress', input.paperProgress);
+    setString('teacherId', input.assignedTeacher);
+    setString('backupTeacher', input.backupTeacher);
+    setString('teacherPhone', input.teacherPhone);
+    setString('teacherStability', input.teacherStability);
+    setString('innovationReviewStatus', input.innovationReviewStatus);
+    setDate('innovationReviewAt', input.innovationReviewAt);
+    setString('draftReviewStatus', input.firstDraftReviewStatus);
+    setDate('draftReviewAt', input.firstDraftReviewAt);
+    setString('editorReviewStatus', input.editorReviewStatus);
+    setDate('editorReviewAt', input.editorReviewAt);
+    setString('authorVerifyStatus', input.authorInfoChecked);
+    setDate('authorVerifyAt', input.authorInfoCheckedAt);
+    setString('salesContact', input.salesContact);
+    setString('academicOwner', input.academicOwner);
+    setDate('lastTeacherUpdateAt', input.lastTeacherUpdateAt);
+    setString('customerComplaint', input.customerComplaint);
+    setString('needsSupervisor', input.needsSupervisor);
+    setString('emergencyStatus', input.emergencyStatus);
+    setString('supervisorNote', input.supervisorNote);
+    setString('currentStage', input.journalStatus);
+    setDate('submittedExpectedAt', input.submittedExpectedAt);
+    setDate('withEditorExpectedAt', input.withEditorExpectedAt);
+    setDate('underReviewExpectedAt', input.underReviewExpectedAt);
+    setDate('revisionExpectedAt', input.revisionExpectedAt);
+    setDate('acceptedExpectedAt', input.acceptedExpectedAt);
+    setDate('proofingExpectedAt', input.proofingExpectedAt);
+    setDate('onlineExpectedAt', input.onlineExpectedAt);
+    setDate('indexedExpectedAt', input.indexedExpectedAt);
+    setDate('firstWeekCheckAt', input.firstWeekCheckAt);
+    setDate('nextCheckAt', input.nextJournalCheckAt);
+    setString('urgeLetterStatus', input.reminderLetterStatus);
+    setString('revisionStatus', input.revisionStatus);
+    setDate('revisionDueAt', input.revisionDueAt);
+    setString('pageFeeStatus', input.pageFeeStatus);
+    setString('proofStatus', input.proofingStatus);
+    setString('onlineStatus', input.onlineStatus);
+    setDate('onlineAt', input.onlineAt);
+    setString('indexedStatus', input.indexingStatus);
+    setDate('indexingAt', input.indexingAt);
+    setString('indexReviewReport', input.reviewReportStatus);
+    setString('riskLevel', input.riskLevel);
+    setDate('nextFollowAt', input.nextFollowUpAt);
+    return patch;
+  }
+
+  private buildOrderAuthor(
+    orderId: string,
+    input: Record<string, any>,
+    index: number,
+  ): OrderAuthor | null {
+    const name = String(input.name || input.authorName || '').trim();
+    if (!name) return null;
+    return {
+      id: input.id || makeId(),
+      orderId,
+      authorOrder: Number(input.authorOrder || input.order || index + 1),
+      name,
+      email: input.email ? String(input.email).trim() : null,
+      degree: input.degree ? String(input.degree).trim() : null,
+      school: input.school ? String(input.school).trim() : null,
+      zipCode: input.zipCode ? String(input.zipCode).trim() : null,
+      nameEn: input.nameEn ? String(input.nameEn).trim() : null,
+    } as OrderAuthor;
+  }
+
+  private buildOrderSubmission(
+    orderId: string,
+    input: Record<string, any>,
+    index: number,
+  ): OrderSubmission | null {
+    const paperTitle = String(input.paperTitle || '').trim();
+    const journalName = String(input.journalName || '').trim();
+    const hasAnyValue = [
+      paperTitle,
+      journalName,
+      input.journalUrl || input.submissionUrl,
+      input.account || input.submissionAccount,
+      input.password || input.submissionPassword,
+      input.submitTime || input.submittedAt,
+    ].some((value) => value !== undefined && value !== null && String(value).trim() !== '');
+    if (!hasAnyValue) return null;
+    return {
+      id: input.id || makeId(),
+      orderId,
+      submissionNo: Number(input.submissionNo || input.no || index + 1),
+      paperTitle: paperTitle || `投稿信息 ${index + 1}`,
+      journalName: journalName || null,
+      journalUrl: input.journalUrl || input.submissionUrl ? String(input.journalUrl || input.submissionUrl).trim() : null,
+      account: input.account || input.submissionAccount ? String(input.account || input.submissionAccount).trim() : null,
+      password: input.password || input.submissionPassword ? String(input.password || input.submissionPassword).trim() : null,
+      submitTime: input.submitTime || input.submittedAt ? new Date(input.submitTime || input.submittedAt) : null,
+    } as OrderSubmission;
+  }
+
+  private buildOrderFinance(
+    orderId: string,
+    input: Record<string, any>,
+    current: OrderFinance | null,
+  ): OrderFinance {
+    const orderAmount = this.normalizeMoney(input.orderAmount);
+    const clientPaid = this.normalizeMoney(input.customerPaid ?? input.clientPaid);
+    const teacherPrice = this.normalizeMoney(input.teacherPrice);
+    const teacherPaid = this.normalizeMoney(input.teacherPaid);
+    return {
+      ...(current || {}),
+      id: current?.id || makeId(),
+      orderId,
+      orderAmount,
+      clientPaid,
+      clientPending: this.computePending(orderAmount, clientPaid),
+      teacherPrice,
+      teacherPaid,
+      teacherPending: this.computePending(teacherPrice, teacherPaid),
+    } as OrderFinance;
+  }
+
+  private mapOrderAuthor(row: OrderAuthor): any {
+    return {
+      id: row.id,
+      orderId: row.orderId,
+      authorOrder: row.authorOrder,
+      name: row.name,
+      email: row.email,
+      degree: row.degree,
+      school: row.school,
+      zipCode: row.zipCode,
+      nameEn: row.nameEn,
+    };
+  }
+
+  private mapOrderSubmission(row: OrderSubmission): any {
+    return {
+      id: row.id,
+      orderId: row.orderId,
+      submissionNo: row.submissionNo,
+      paperTitle: row.paperTitle,
+      journalName: row.journalName,
+      journalUrl: row.journalUrl,
+      account: row.account,
+      password: row.password,
+      submitTime: row.submitTime,
+    };
+  }
+
+  private mapOrderFinance(row: OrderFinance | null): any {
+    return {
+      orderAmount: row?.orderAmount ?? null,
+      customerPaid: row?.clientPaid ?? null,
+      customerPending: row?.clientPending ?? null,
+      teacherPrice: row?.teacherPrice ?? null,
+      teacherPaid: row?.teacherPaid ?? null,
+      teacherPending: row?.teacherPending ?? null,
+    };
+  }
+
+  private normalizeMoney(value: any): string | null {
+    if (value === undefined || value === null || value === '') return null;
+    const num = Number(value);
+    if (!Number.isFinite(num)) return null;
+    return num.toFixed(2);
+  }
+
+  private computePending(total: string | null, paid: string | null): string | null {
+    if (total === null && paid === null) return null;
+    const totalNum = Number(total || 0);
+    const paidNum = Number(paid || 0);
+    return (totalNum - paidNum).toFixed(2);
+  }
+
   /**
    * Resolve order user display names. Historical data may store either users.id
    * or employees.id in orders.academic_user_id, so support both shapes.
@@ -1470,6 +1822,7 @@ export class OrdersService {
       nodeType: row.nodeType,
       content: row.content,
       nextRemindAt: row.nextRemindAt,
+      remindStage: row.remindStage,
       createdAt: row.createdAt,
     };
   }

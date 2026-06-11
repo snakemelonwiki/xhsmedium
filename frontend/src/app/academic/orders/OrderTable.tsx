@@ -6,7 +6,7 @@ import type { TableColumnsType } from 'antd';
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 
-import { listOrders, updateOrder } from '@/shared/api/orders';
+import { createOrderFollowRecord, listOrders, updateOrder } from '@/shared/api/orders';
 import { updateLeadDealStatus } from '@/shared/api/leads';
 import { createExport, downloadExportUrl, getExport, type ExportFilter } from '@/shared/api/exports';
 import { readStoredUser } from '@/shared/auth/auth';
@@ -52,6 +52,7 @@ interface OrderTableProps {
   status?: string;
   showStatusFilter?: boolean;
   actionMode: 'academic' | 'abnormal' | 'sales' | 'admin';
+  listMode?: 'default' | 'claimPool' | 'followup';
   /** 顶部工具栏额外按钮（如异常页的"导出异常记录"） */
   toolbarExtra?: React.ReactNode;
   /** 自定义行操作渲染（用于异常页加"关闭"按钮） */
@@ -91,7 +92,17 @@ function getCurrentAcademicUserId() {
   return user?.id || user?.employeeId || '';
 }
 
-export function OrderTable({ title, description, scope, status, showStatusFilter, actionMode, toolbarExtra, renderRowExtra }: OrderTableProps) {
+export function OrderTable({
+  title,
+  description,
+  scope,
+  status,
+  showStatusFilter,
+  actionMode,
+  listMode = 'default',
+  toolbarExtra,
+  renderRowExtra,
+}: OrderTableProps) {
   const router = useRouter();
   const [items, setItems] = useState<OrderItem[]>([]);
   const [page, setPage] = useState(1);
@@ -110,6 +121,8 @@ export function OrderTable({ title, description, scope, status, showStatusFilter
   const [exportRange, setExportRange] = useState<DateRangeValue>(null);
   const [exportStatus, setExportStatus] = useState<string>('');
   const [exportPaidStatus, setExportPaidStatus] = useState<string>('');
+  const isClaimPool = listMode === 'claimPool';
+  const isFollowup = listMode === 'followup';
 
   async function loadOrders(
     nextPage = page,
@@ -121,12 +134,15 @@ export function OrderTable({ title, description, scope, status, showStatusFilter
     setLoading(true);
     setError('');
     try {
+      const queryScope = isClaimPool ? 'pool' : isFollowup ? 'assigned' : scope;
+      const queryStatus = isClaimPool ? 'to_receive' : nextStatus || undefined;
+      const queryHandover = isClaimPool ? 'handed_over' : nextHandover || undefined;
       const result = await listOrders({
-        scope,
+        scope: queryScope,
         page: nextPage,
         pageSize: nextPageSize,
-        status: nextStatus || undefined,
-        handoverStatus: nextHandover || undefined,
+        status: queryStatus,
+        handoverStatus: queryHandover,
         abnormal: nextAbnormal || undefined,
       });
       setItems(result.items);
@@ -180,7 +196,16 @@ export function OrderTable({ title, description, scope, status, showStatusFilter
       message.error('未读取到当前教务身份，请重新登录后再领取');
       return;
     }
-    await patchOrder(id, { academic_user_id: academicUserId, order_status: 'in_progress' }, '订单已领取');
+    setUpdatingId(id);
+    try {
+      await createOrderFollowRecord(id, { nodeType: '已接收', content: '教务领取订单' });
+      message.success('订单已领取');
+      await loadOrders();
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '订单领取失败');
+    } finally {
+      setUpdatingId('');
+    }
   }
 
   function openAssignModal(order: OrderItem) {
@@ -205,7 +230,7 @@ export function OrderTable({ title, description, scope, status, showStatusFilter
     const hide = message.loading('正在生成导出文件...', 0);
     try {
       const filter: ExportFilter = {
-        scope: actionMode === 'academic' || actionMode === 'abnormal' ? 'academic' : (scope || 'all'),
+        scope: actionMode === 'academic' || actionMode === 'abnormal' ? 'academic' : scope === 'assigned' ? 'mine' : (scope || 'all'),
       };
       if (exportStatus) filter.status = exportStatus;
       if (exportPaidStatus) filter.paidStatus = exportPaidStatus;
@@ -252,6 +277,15 @@ export function OrderTable({ title, description, scope, status, showStatusFilter
     loadOrders(1, pageSize, statusFilter, handoverFilter, abnormalOnly);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scope, statusFilter, handoverFilter, abnormalOnly]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || status) return;
+    const nextStatus = new URLSearchParams(window.location.search).get('status') || '';
+    if (nextStatus && nextStatus !== statusFilter) {
+      setStatusFilter(nextStatus);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status]);
 
   const columns = useMemo<TableColumnsType<OrderItem>>(() => {
     const baseColumns: TableColumnsType<OrderItem> = [
@@ -375,25 +409,34 @@ export function OrderTable({ title, description, scope, status, showStatusFilter
             </Space>
           );
         }
+        if (isFollowup) {
+          return (
+            <Button loading={updatingId === record.id} onClick={() => router.push(`/academic/orders/${record.id}`)}>
+              跟进
+            </Button>
+          );
+        }
         return (
           <Space>
             <Button loading={updatingId === record.id} onClick={() => claimOrder(record.id)}>
               领取
             </Button>
-            <Select
-              value={record.orderStatus}
-              options={orderStatusOptions}
-              style={{ width: 132 }}
-              onChange={(nextStatus) => patchOrder(record.id, { order_status: nextStatus }, '订单状态已更新')}
-              disabled={updatingId === record.id}
-            />
+            {isClaimPool ? null : (
+              <Select
+                value={record.orderStatus}
+                options={orderStatusOptions}
+                style={{ width: 132 }}
+                onChange={(nextStatus) => patchOrder(record.id, { order_status: nextStatus }, '订单状态已更新')}
+                disabled={updatingId === record.id}
+              />
+            )}
           </Space>
         );
       },
     });
 
     return baseColumns;
-  }, [actionMode, renderRowExtra, router, updatingId]);
+  }, [actionMode, isClaimPool, isFollowup, renderRowExtra, router, updatingId]);
 
   const displayItems = useMemo(
     () => (abnormalOnly ? items.filter((it) => it.orderStatus === 'abnormal') : items),
@@ -409,7 +452,7 @@ export function OrderTable({ title, description, scope, status, showStatusFilter
             {description ? <Typography.Paragraph type="secondary">{description}</Typography.Paragraph> : null}
           </div>
         <Space wrap>
-          {showStatusFilter ? (
+          {showStatusFilter && !isClaimPool ? (
             <Select
               value={statusFilter}
               style={{ width: 168 }}
@@ -420,13 +463,15 @@ export function OrderTable({ title, description, scope, status, showStatusFilter
               ]}
             />
           ) : null}
-          <Select
-            value={handoverFilter}
-            style={{ width: 144 }}
-            onChange={(value) => setHandoverFilter(value as HandoverStatusCode | '')}
-            options={HANDOVER_STATUS_OPTIONS}
-            placeholder="交接状态"
-          />
+          {!isClaimPool && !isFollowup ? (
+            <Select
+              value={handoverFilter}
+              style={{ width: 144 }}
+              onChange={(value) => setHandoverFilter(value as HandoverStatusCode | '')}
+              options={HANDOVER_STATUS_OPTIONS}
+              placeholder="交接状态"
+            />
+          ) : null}
           {actionMode === 'sales' || actionMode === 'academic' ? (
             <Select
               value={abnormalOnly ? 'abnormal' : 'all'}

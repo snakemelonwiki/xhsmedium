@@ -43,7 +43,7 @@ const METRIC_CARDS: MetricCard[] = [
   {
     key: 'inProgress',
     title: '进行中',
-    href: '/academic/orders?scope=academic&status=in_progress',
+    href: '/academic/followup?status=in_progress',
     description: '已认领、正在履约过程中的订单',
     icon: <PlayCircleOutlined />,
     accent: '#13c2c2',
@@ -51,7 +51,7 @@ const METRIC_CARDS: MetricCard[] = [
   {
     key: 'waitingMaterial',
     title: '待客户资料',
-    href: '/academic/orders?scope=academic&status=awaiting_client_info',
+    href: '/academic/followup?status=awaiting_client_info',
     description: '等客户提交资料 / 补充信息的订单',
     icon: <FileSearchOutlined />,
     accent: '#722ed1',
@@ -59,7 +59,7 @@ const METRIC_CARDS: MetricCard[] = [
   {
     key: 'waitingTeacher',
     title: '待老师安排',
-    href: '/academic/orders?scope=academic&status=awaiting_teacher',
+    href: '/academic/followup?status=awaiting_teacher',
     description: '等老师档期 / 排课的订单',
     icon: <UserAddOutlined />,
     accent: '#eb2f96',
@@ -67,7 +67,7 @@ const METRIC_CARDS: MetricCard[] = [
   {
     key: 'nearDue',
     title: '即将到期',
-    href: '/academic/orders?scope=academic&status=near_due',
+    href: '/academic/followup?status=near_due',
     description: '5 天内无进展、需重点跟进的订单',
     icon: <ClockCircleOutlined />,
     accent: '#fa8c16',
@@ -85,9 +85,15 @@ const METRIC_CARDS: MetricCard[] = [
 const QUICK_ENTRIES = [
   {
     title: '订单池',
-    description: '查看待领取与进行中的履约订单。',
+    description: '领取销售已交接、等待教务接单的订单。',
     href: '/academic/orders',
     icon: <OrderedListOutlined />,
+  },
+  {
+    title: '订单跟进',
+    description: '维护已领取订单的交付信息与履约节点。',
+    href: '/academic/followup',
+    icon: <ScheduleOutlined />,
   },
   {
     title: '异常订单',
@@ -184,7 +190,7 @@ export default function AcademicHomePage() {
       </div>
       <Row gutter={[16, 16]}>
         {QUICK_ENTRIES.map((card) => (
-          <Col xs={24} md={8} key={card.href}>
+          <Col xs={24} md={6} key={card.href}>
             <Link href={card.href}>
               <Card hoverable>
                 <Space direction="vertical" size={12} style={{ width: '100%' }}>

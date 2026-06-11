@@ -1,6 +1,6 @@
 import type { PageQuery } from '@/shared/types/pagination';
 
-export type OrderScope = 'academic' | 'sales' | 'all';
+export type OrderScope = 'academic' | 'sales' | 'all' | 'pool' | 'assigned' | 'mine';
 
 export type OrderStatusCode =
   | 'to_receive'
@@ -55,6 +55,7 @@ export interface OrderFollowRecord {
   nodeType: string;
   content?: string | null;
   nextRemindAt?: string | null;
+  remindStage?: string | null;
   createdAt?: string;
 }
 
@@ -64,6 +65,112 @@ export interface OrderListQuery extends PageQuery {
   handoverStatus?: string;
   abnormal?: boolean;
 }
+
+export interface OrderDeliveryOrderFields {
+  id?: string;
+  orderNumber?: string | null;
+  customerName?: string | null;
+  degreeLevel?: string | null;
+  majorDirection?: string | null;
+  requiredZone?: string | null;
+  paperUse?: string | null;
+  registrationFormStatus?: string | null;
+  infoSentToTeacherAt?: string | null;
+  fundInfo?: string | null;
+  submissionEmail?: string | null;
+  submissionEmailPassword?: string | null;
+  authorRegistrationUrl?: string | null;
+  authorRegistrationName?: string | null;
+  operationMethod?: string | null;
+  plagiarismRequirement?: string | null;
+  responsibleTeacher?: string | null;
+  statusStage?: string | null;
+  paperProgress?: string | null;
+  assignedTeacher?: string | null;
+  backupTeacher?: string | null;
+  teacherPhone?: string | null;
+  teacherStability?: string | null;
+  innovationReviewStatus?: string | null;
+  innovationReviewAt?: string | null;
+  firstDraftReviewStatus?: string | null;
+  firstDraftReviewAt?: string | null;
+  editorReviewStatus?: string | null;
+  editorReviewAt?: string | null;
+  authorInfoChecked?: string | null;
+  authorInfoCheckedAt?: string | null;
+  salesContact?: string | null;
+  academicOwner?: string | null;
+  lastTeacherUpdateAt?: string | null;
+  customerComplaint?: string | null;
+  needsSupervisor?: string | null;
+  emergencyStatus?: string | null;
+  supervisorNote?: string | null;
+  nextFollowUpAt?: string | null;
+  riskLevel?: string | null;
+  journalStatus?: string | null;
+  submittedExpectedAt?: string | null;
+  withEditorExpectedAt?: string | null;
+  underReviewExpectedAt?: string | null;
+  revisionExpectedAt?: string | null;
+  acceptedExpectedAt?: string | null;
+  proofingExpectedAt?: string | null;
+  onlineExpectedAt?: string | null;
+  indexedExpectedAt?: string | null;
+  firstWeekCheckAt?: string | null;
+  nextJournalCheckAt?: string | null;
+  reminderLetterStatus?: string | null;
+  revisionStatus?: string | null;
+  revisionDueAt?: string | null;
+  pageFeeStatus?: string | null;
+  proofingStatus?: string | null;
+  onlineStatus?: string | null;
+  onlineAt?: string | null;
+  indexingStatus?: string | null;
+  indexingAt?: string | null;
+  reviewReportStatus?: string | null;
+}
+
+export interface OrderDeliveryAuthor {
+  id?: string;
+  orderId?: string;
+  authorOrder?: number;
+  name?: string | null;
+  email?: string | null;
+  degree?: string | null;
+  school?: string | null;
+  zipCode?: string | null;
+  nameEn?: string | null;
+}
+
+export interface OrderDeliverySubmission {
+  id?: string;
+  orderId?: string;
+  submissionNo?: number;
+  paperTitle?: string | null;
+  journalName?: string | null;
+  journalUrl?: string | null;
+  account?: string | null;
+  password?: string | null;
+  submitTime?: string | null;
+}
+
+export interface OrderDeliveryFinance {
+  orderAmount?: string | null;
+  customerPaid?: string | null;
+  customerPending?: string | null;
+  teacherPrice?: string | null;
+  teacherPaid?: string | null;
+  teacherPending?: string | null;
+}
+
+export interface OrderDeliveryDetail {
+  order: OrderDeliveryOrderFields;
+  authors: OrderDeliveryAuthor[];
+  submissions: OrderDeliverySubmission[];
+  finance: OrderDeliveryFinance;
+}
+
+export type OrderDeliveryPayload = Partial<OrderDeliveryDetail>;
 
 // ─── 订单异常反馈 ──────────────────────────────────────────────────────────
 

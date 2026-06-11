@@ -1,17 +1,27 @@
 'use client';
 
-import { DownloadOutlined, ExclamationCircleOutlined } from '@ant-design/icons';
-import { Button, Card, DatePicker, Descriptions, Empty, Form, Input, Modal, Select, Space, Spin, Table, Tag, Timeline, Tooltip, Typography, Upload, message } from 'antd';
+import { DeleteOutlined, DownloadOutlined, ExclamationCircleOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons';
+import { Button, Card, Col, DatePicker, Descriptions, Empty, Form, Input, Modal, Row, Select, Space, Spin, Table, Tag, Timeline, Tooltip, Typography, Upload, message } from 'antd';
 import type { UploadProps } from 'antd';
+import dayjs, { type Dayjs } from 'dayjs';
 import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
-import { createAbnormalFeedback, closeAbnormalFeedback, createOrderFollowRecord, getOrderDetail, listAbnormalFeedbacks, listOrderFollowRecords } from '@/shared/api/orders';
+import {
+  createAbnormalFeedback,
+  closeAbnormalFeedback,
+  createOrderFollowRecord,
+  getOrderDelivery,
+  getOrderDetail,
+  listAbnormalFeedbacks,
+  listOrderFollowRecords,
+  updateOrderDelivery,
+} from '@/shared/api/orders';
 import { createExport, downloadExportUrl, getExport } from '@/shared/api/exports';
 import { uploadFile } from '@/shared/api/uploads';
 import { readStoredUser } from '@/shared/auth/auth';
 import { handoverStatusMeta, orderStatusMeta, paidStatusMeta } from '@/shared/api/enums';
-import type { AbnormalTypeCode, ExpectedHelperCode, OrderAbnormalFeedback, OrderFollowRecord, OrderItem } from '@/shared/types/orders';
+import type { AbnormalTypeCode, ExpectedHelperCode, OrderAbnormalFeedback, OrderDeliveryDetail, OrderFollowRecord, OrderItem } from '@/shared/types/orders';
 import { formatDateTime } from '@/shared/utils/date-format';
 
 function emptyText(value?: string | null) {
@@ -56,6 +66,221 @@ const ABNORMAL_STATUS_META: Record<string, { label: string; color: string }> = {
   closed: { label: '已关闭', color: 'green' },
 };
 
+const DELIVERY_DATE_FIELDS = [
+  'infoSentToTeacherAt',
+  'innovationReviewAt',
+  'firstDraftReviewAt',
+  'editorReviewAt',
+  'authorInfoCheckedAt',
+  'lastTeacherUpdateAt',
+  'nextFollowUpAt',
+  'submittedExpectedAt',
+  'withEditorExpectedAt',
+  'underReviewExpectedAt',
+  'revisionExpectedAt',
+  'acceptedExpectedAt',
+  'proofingExpectedAt',
+  'onlineExpectedAt',
+  'indexedExpectedAt',
+  'firstWeekCheckAt',
+  'nextJournalCheckAt',
+  'revisionDueAt',
+  'onlineAt',
+  'indexingAt',
+] as const;
+
+type DeliveryFieldConfig = {
+  name: string;
+  label: string;
+  type?: 'date';
+  options?: { label: string; value: string }[];
+  disabled?: boolean;
+};
+
+function options(values: string[]) {
+  return values.map((value) => ({ label: value, value }));
+}
+
+const BASIC_DELIVERY_FIELDS: readonly DeliveryFieldConfig[] = [
+  { name: 'orderNumber', label: '订单编号', disabled: true },
+  { name: 'customerName', label: '客户姓名' },
+  { name: 'degreeLevel', label: '学历层级' },
+  { name: 'majorDirection', label: '专业方向' },
+  { name: 'requiredZone', label: '所需区位' },
+  { name: 'paperUse', label: '文章用途' },
+  { name: 'submissionEmail', label: '投稿邮箱' },
+  { name: 'submissionEmailPassword', label: '投稿邮箱密码' },
+] as const;
+
+const REGISTRATION_STATUS_OPTIONS = [
+  { label: '未索要', value: '未索要' },
+  { label: '已索要', value: '已索要' },
+  { label: '已收到', value: '已收到' },
+  { label: '已传老师', value: '已传老师' },
+];
+
+const OPERATION_METHOD_OPTIONS = [
+  { label: '一稿一投', value: '一稿一投' },
+  { label: '两稿两投', value: '两稿两投' },
+  { label: '三稿三投', value: '三稿三投' },
+];
+
+const PLAGIARISM_OPTIONS = [
+  { label: '未确认', value: '未确认' },
+  { label: '需要查重', value: '需要查重' },
+  { label: '已查重', value: '已查重' },
+  { label: '不需要查重', value: '不需要查重' },
+];
+
+const DELIVERY_SELECT_OPTIONS: Record<string, { label: string; value: string }[]> = {
+  degreeLevel: options(['专科', '本科', '硕士', '博士', '职称']),
+  statusStage: options(['销售建单', '待补资料', '待教务审核', '待分配老师', '老师已接单', '写作中', '待投稿', '已投稿', '审稿中', '返修中', '已录用', '待见刊', '已完成', '异常处理中']),
+  paperProgress: options(['待分配', '进行中', '待投稿', '已投稿', '返修中', '已录用']),
+  teacherStability: options(['新老师', '稳定老师']),
+  innovationReviewStatus: options(['未提交', '待审核', '已通过', '需修改', '稳定老师跳过']),
+  firstDraftReviewStatus: options(['未提交', '待审核', '已通过', '需修改']),
+  editorReviewStatus: options(['未提交', '待审查', '已通过', '需修改']),
+  authorInfoChecked: options(['未核对', '已核对无误', '有问题待确认']),
+  riskLevel: options(['正常', '提醒', '预警', '高风险', '应急']),
+  customerComplaint: options(['否', '是']),
+  needsSupervisor: options(['否', '是']),
+  emergencyStatus: options(['正常', '待处理', '处理中', '已解决']),
+  journalStatus: options(['未投稿', 'Submitted', 'With Editor', 'Under Review', 'Revision', 'Accepted', 'Proofing', 'Online', 'Indexed', 'Rejected']),
+  reminderLetterStatus: options(['不需要', '需提醒老师发送', '老师已发送']),
+  revisionStatus: options(['无返修', '待提醒老师', '老师返修中', '已提交返修']),
+  pageFeeStatus: options(['未录用', '待提醒客户缴纳', '已提醒客户', '客户已缴纳']),
+  proofingStatus: options(['未到校稿', '待客户确认', '客户有修改需求', '老师校稿中', '已提交校稿']),
+  onlineStatus: options(['未online', '已online待提醒作者', '已提醒作者']),
+  indexingStatus: options(['未检索', '已检索待开报告', '已提醒开检索报告']),
+  reviewReportStatus: options(['未开', '已提醒', '已完成']),
+};
+
+function renderDeliveryControl(field: DeliveryFieldConfig) {
+  const selectOptions = field.options ?? DELIVERY_SELECT_OPTIONS[field.name];
+  if (field.type === 'date') {
+    return <DatePicker showTime style={{ width: '100%' }} />;
+  }
+  if (selectOptions) {
+    return <Select options={selectOptions} placeholder={`请选择${field.label}`} allowClear />;
+  }
+  if (field.name === 'paperUse') {
+    return <Input disabled={field.disabled} allowClear placeholder="毕业 / 评职称 / 项目结题" />;
+  }
+  return <Input disabled={field.disabled} allowClear />;
+}
+
+const PROGRESS_DELIVERY_FIELDS: readonly DeliveryFieldConfig[] = [
+  { name: 'responsibleTeacher', label: '派单老师' },
+  { name: 'statusStage', label: '订单阶段' },
+  { name: 'paperProgress', label: '论文进度' },
+  { name: 'assignedTeacher', label: '接单老师' },
+  { name: 'backupTeacher', label: '备用老师' },
+  { name: 'teacherPhone', label: '老师电话' },
+  { name: 'teacherStability', label: '老师稳定性' },
+  { name: 'innovationReviewStatus', label: '创新点审核' },
+  { name: 'innovationReviewAt', label: '创新点审核时间', type: 'date' },
+  { name: 'firstDraftReviewStatus', label: '初稿审核' },
+  { name: 'firstDraftReviewAt', label: '初稿审核时间', type: 'date' },
+  { name: 'editorReviewStatus', label: '编辑老师审查' },
+  { name: 'editorReviewAt', label: '编辑审查时间', type: 'date' },
+  { name: 'authorInfoChecked', label: '投稿前作者信息核对' },
+  { name: 'authorInfoCheckedAt', label: '作者核对时间', type: 'date' },
+  { name: 'salesContact', label: '对接销售' },
+  { name: 'academicOwner', label: '负责教务' },
+  { name: 'nextFollowUpAt', label: '下次跟进时间', type: 'date' },
+  { name: 'lastTeacherUpdateAt', label: '老师最近反馈', type: 'date' },
+  { name: 'riskLevel', label: '风险等级' },
+  { name: 'customerComplaint', label: '是否投诉' },
+  { name: 'needsSupervisor', label: '主管关注' },
+  { name: 'emergencyStatus', label: '应急状态' },
+] as const;
+
+const STATUS_DELIVERY_FIELDS: readonly DeliveryFieldConfig[] = [
+  { name: 'journalStatus', label: '当前真实阶段' },
+  { name: 'submittedExpectedAt', label: 'Submitted预计产出', type: 'date' },
+  { name: 'withEditorExpectedAt', label: 'With Editor预计产出', type: 'date' },
+  { name: 'underReviewExpectedAt', label: 'Under Review预计产出', type: 'date' },
+  { name: 'revisionExpectedAt', label: 'Revision预计产出', type: 'date' },
+  { name: 'acceptedExpectedAt', label: 'Accepted预计产出', type: 'date' },
+  { name: 'proofingExpectedAt', label: 'Proofing预计产出', type: 'date' },
+  { name: 'onlineExpectedAt', label: 'Online预计产出', type: 'date' },
+  { name: 'indexedExpectedAt', label: 'Indexed预计产出', type: 'date' },
+  { name: 'firstWeekCheckAt', label: '首周查稿时间', type: 'date' },
+  { name: 'nextJournalCheckAt', label: '下次查稿时间', type: 'date' },
+  { name: 'reminderLetterStatus', label: '催稿信状态' },
+  { name: 'revisionStatus', label: '返修状态' },
+  { name: 'revisionDueAt', label: '返修截止时间', type: 'date' },
+  { name: 'pageFeeStatus', label: '版面费状态' },
+  { name: 'proofingStatus', label: '校稿状态' },
+  { name: 'onlineStatus', label: 'Online状态' },
+  { name: 'onlineAt', label: 'Online时间', type: 'date' },
+  { name: 'indexingStatus', label: '检索状态' },
+  { name: 'indexingAt', label: '检索时间', type: 'date' },
+  { name: 'reviewReportStatus', label: '检索审查报告' },
+] as const;
+
+const DEFAULT_DELIVERY: OrderDeliveryDetail = {
+  order: {},
+  authors: [],
+  submissions: [],
+  finance: {},
+};
+
+function toDayjs(value?: string | null): Dayjs | null {
+  if (!value) return null;
+  const parsed = dayjs(value);
+  return parsed.isValid() ? parsed : null;
+}
+
+function hydrateDeliveryForm(detail: OrderDeliveryDetail) {
+  const order: Record<string, unknown> = { ...detail.order };
+  DELIVERY_DATE_FIELDS.forEach((field) => {
+    order[field] = toDayjs(detail.order[field]);
+  });
+  return {
+    order,
+    authors: detail.authors.length ? detail.authors : [{ authorOrder: 1 }],
+    submissions: detail.submissions.length
+      ? detail.submissions.map((item) => ({ ...item, submitTime: toDayjs(item.submitTime) }))
+      : [{ submissionNo: 1 }, { submissionNo: 2 }, { submissionNo: 3 }],
+    finance: detail.finance,
+  };
+}
+
+function serializeDate(value: unknown): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (!value) return null;
+  if (dayjs.isDayjs(value)) return value.toISOString();
+  return String(value);
+}
+
+function serializeDeliveryForm(values: any) {
+  const order = { ...(values.order || {}) };
+  DELIVERY_DATE_FIELDS.forEach((field) => {
+    order[field] = serializeDate(order[field]);
+  });
+  return {
+    order,
+    authors: Array.isArray(values.authors) ? values.authors : [],
+    submissions: Array.isArray(values.submissions)
+      ? values.submissions.map((item: any) => ({ ...item, submitTime: serializeDate(item?.submitTime) }))
+      : [],
+    finance: values.finance || {},
+  };
+}
+
+function calculatePendingAmount(total: unknown, paid: unknown, fallback?: string | null) {
+  const totalText = total === undefined || total === null ? '' : String(total).trim();
+  const paidText = paid === undefined || paid === null ? '' : String(paid).trim();
+  if (!totalText && !paidText) return fallback ?? '';
+
+  const totalNumber = totalText ? Number(totalText) : 0;
+  const paidNumber = paidText ? Number(paidText) : 0;
+  if (!Number.isFinite(totalNumber) || !Number.isFinite(paidNumber)) return '';
+
+  return (totalNumber - paidNumber).toFixed(2);
+}
+
 /**
  * 教务端订单详情 + 进度跟进。
  * - 详情面板复用销售端结构，但 actionable 集中在新增跟进节点
@@ -71,6 +296,7 @@ export default function AcademicOrderDetailPage() {
   const isAdminLike = currentUser?.role === 'admin' || currentUser?.role === 'owner';
 
   const [order, setOrder] = useState<OrderItem>();
+  const [delivery, setDelivery] = useState<OrderDeliveryDetail>(DEFAULT_DELIVERY);
   const [records, setRecords] = useState<OrderFollowRecord[]>([]);
   const [abnormalFeedbacks, setAbnormalFeedbacks] = useState<OrderAbnormalFeedback[]>([]);
   const [loading, setLoading] = useState(false);
@@ -79,25 +305,42 @@ export default function AcademicOrderDetailPage() {
   const [abnormalSubmitting, setAbnormalSubmitting] = useState(false);
   const [closingId, setClosingId] = useState('');
   const [exporting, setExporting] = useState(false);
+  const [savingDelivery, setSavingDelivery] = useState(false);
   const [attachmentUrl, setAttachmentUrl] = useState('');
   const [attachmentName, setAttachmentName] = useState('');
   const [abnormalForm] = Form.useForm();
   const [form] = Form.useForm();
+  const [deliveryForm] = Form.useForm();
+  const financeValues = Form.useWatch('finance', deliveryForm) || {};
+  const customerPending = calculatePendingAmount(
+    financeValues.orderAmount,
+    financeValues.customerPaid,
+    delivery.finance.customerPending,
+  );
+  const teacherPending = calculatePendingAmount(
+    financeValues.teacherPrice,
+    financeValues.teacherPaid,
+    delivery.finance.teacherPending,
+  );
 
   async function loadDetail() {
     setLoading(true);
     try {
-      const [detail, followRecords, feedbacks] = await Promise.all([
+      const [detail, followRecords, feedbacks, deliveryDetail] = await Promise.all([
         getOrderDetail(orderId),
         listOrderFollowRecords(orderId),
         listAbnormalFeedbacks(orderId).catch(() => [] as OrderAbnormalFeedback[]),
+        getOrderDelivery(orderId).catch(() => DEFAULT_DELIVERY),
       ]);
       setOrder(detail);
       setRecords(followRecords);
       setAbnormalFeedbacks(feedbacks);
+      setDelivery(deliveryDetail);
+      deliveryForm.setFieldsValue(hydrateDeliveryForm(deliveryDetail));
     } catch (err) {
       message.error(err instanceof Error ? err.message : '订单详情加载失败');
       setOrder(undefined);
+      setDelivery(DEFAULT_DELIVERY);
       setRecords([]);
       setAbnormalFeedbacks([]);
     } finally {
@@ -110,7 +353,7 @@ export default function AcademicOrderDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.id]);
 
-  async function submit(values: { nodeType: string; content?: string; nextRemindAt?: any }) {
+  async function submit(values: { nodeType: string; content?: string; remindStage?: string; nextRemindAt?: any }) {
     if (!values.nodeType?.trim()) {
       message.warning('请填写节点类型');
       return;
@@ -120,6 +363,7 @@ export default function AcademicOrderDetailPage() {
       await createOrderFollowRecord(orderId, {
         nodeType: values.nodeType.trim(),
         content: values.content?.trim() || undefined,
+        remindStage: values.remindStage || undefined,
         nextRemindAt: values.nextRemindAt?.toISOString?.() || null,
         attachmentUrl: attachmentUrl || undefined,
         attachmentName: attachmentName || undefined,
@@ -133,6 +377,37 @@ export default function AcademicOrderDetailPage() {
       message.error(err instanceof Error ? err.message : '添加失败');
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function submitDelivery(values: any) {
+    setSavingDelivery(true);
+    try {
+      await updateOrderDelivery(orderId, serializeDeliveryForm(values));
+      message.success('交付信息已保存');
+      const next = await getOrderDelivery(orderId);
+      setDelivery(next);
+      deliveryForm.setFieldsValue(hydrateDeliveryForm(next));
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '交付信息保存失败');
+    } finally {
+      setSavingDelivery(false);
+    }
+  }
+
+  async function uploadAuthorRegistration(file: File) {
+    try {
+      const result = await uploadFile(file, 'order-author-registrations');
+      deliveryForm.setFieldsValue({
+        order: {
+          ...(deliveryForm.getFieldValue('order') || {}),
+          authorRegistrationUrl: result.url,
+          authorRegistrationName: result.originalName || file.name,
+        },
+      });
+      message.success('作者登记表上传成功，请保存交付信息');
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '作者登记表上传失败');
     }
   }
 
@@ -277,18 +552,260 @@ export default function AcademicOrderDetailPage() {
             />
           </Card>
 
-          <Card title="交付要求与资料">
-            <Descriptions
-              bordered
-              column={{ xs: 1, md: 2 }}
-              size="small"
-              items={[
-                { key: 'deliveryRequirement', label: '交付要求', children: emptyText(order?.deliveryRequirement) },
-                { key: 'materialStatus', label: '资料情况', children: emptyText(order?.materialStatus) },
-                { key: 'teacher', label: '老师/专家', children: emptyText(order?.teacher) },
-                { key: 'remark', label: '备注', children: emptyText(order?.remark) },
-              ]}
-            />
+          <Card
+            title="交付信息"
+            extra={
+              <Typography.Text type="secondary">
+                保存后同步到订单交付资料。
+              </Typography.Text>
+            }
+          >
+            <Form form={deliveryForm} layout="vertical" onFinish={submitDelivery}>
+              <Typography.Title level={5}>基础与投稿资料</Typography.Title>
+              <Row gutter={12}>
+                {BASIC_DELIVERY_FIELDS.map((field) => (
+                  <Col xs={24} md={8} key={field.name}>
+                    <Form.Item name={['order', field.name]} label={field.label}>
+                      {renderDeliveryControl(field)}
+                    </Form.Item>
+                  </Col>
+                ))}
+              </Row>
+
+              <Row gutter={12}>
+                <Col xs={24} md={8}>
+                  <Form.Item label="作者登记表上传">
+                    <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                      <Upload
+                        accept=".txt,.json,.csv,.pdf,.doc,.docx,.xls,.xlsx"
+                        showUploadList={false}
+                        beforeUpload={(file) => {
+                          void uploadAuthorRegistration(file);
+                          return false;
+                        }}
+                      >
+                        <Button icon={<UploadOutlined />}>选择文件</Button>
+                      </Upload>
+                      <Form.Item name={['order', 'authorRegistrationUrl']} hidden>
+                        <Input />
+                      </Form.Item>
+                      <Form.Item name={['order', 'authorRegistrationName']} noStyle>
+                        <Input readOnly placeholder="未选择任何文件" />
+                      </Form.Item>
+                    </Space>
+                  </Form.Item>
+                </Col>
+                <Col xs={24} md={8}>
+                  <Form.Item name={['order', 'registrationFormStatus']} label="个人信息登记表状态">
+                    <Select options={REGISTRATION_STATUS_OPTIONS} placeholder="请选择登记表状态" allowClear />
+                  </Form.Item>
+                </Col>
+                <Col xs={24} md={8}>
+                  <Form.Item name={['order', 'infoSentToTeacherAt']} label="传递给老师时间">
+                    <DatePicker showTime style={{ width: '100%' }} />
+                  </Form.Item>
+                </Col>
+                <Col xs={24} md={8}>
+                  <Form.Item name={['order', 'operationMethod']} label="操作方式">
+                    <Select options={OPERATION_METHOD_OPTIONS} placeholder="请选择操作方式" allowClear />
+                  </Form.Item>
+                </Col>
+                <Col xs={24} md={8}>
+                  <Form.Item name={['order', 'plagiarismRequirement']} label="是否查重">
+                    <Select options={PLAGIARISM_OPTIONS} placeholder="请选择查重要求" allowClear />
+                  </Form.Item>
+                </Col>
+                <Col xs={24}>
+                  <Form.Item name={['order', 'fundInfo']} label="基金信息">
+                    <Input.TextArea
+                      rows={3}
+                      placeholder="基金名称、编号；没有可填无"
+                      allowClear
+                    />
+                  </Form.Item>
+                </Col>
+              </Row>
+
+              <Typography.Title level={5}>作者信息</Typography.Title>
+              <Form.List name="authors">
+                {(fields, { add, remove }) => (
+                  <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                    {fields.map((field, index) => (
+                      <Row gutter={8} key={field.key} align="middle">
+                        <Col xs={12} md={2}>
+                          <Form.Item name={[field.name, 'authorOrder']} label={index === 0 ? '位次' : ' '}>
+                            <Input placeholder="1" />
+                          </Form.Item>
+                        </Col>
+                        <Col xs={12} md={4}>
+                          <Form.Item name={[field.name, 'name']} label={index === 0 ? '姓名' : ' '}>
+                            <Input allowClear />
+                          </Form.Item>
+                        </Col>
+                        <Col xs={24} md={5}>
+                          <Form.Item name={[field.name, 'email']} label={index === 0 ? '邮箱' : ' '}>
+                            <Input allowClear />
+                          </Form.Item>
+                        </Col>
+                        <Col xs={12} md={3}>
+                          <Form.Item name={[field.name, 'degree']} label={index === 0 ? '学历' : ' '}>
+                            <Input allowClear />
+                          </Form.Item>
+                        </Col>
+                        <Col xs={12} md={4}>
+                          <Form.Item name={[field.name, 'school']} label={index === 0 ? '学校/单位' : ' '}>
+                            <Input allowClear />
+                          </Form.Item>
+                        </Col>
+                        <Col xs={12} md={3}>
+                          <Form.Item name={[field.name, 'zipCode']} label={index === 0 ? '邮编' : ' '}>
+                            <Input allowClear />
+                          </Form.Item>
+                        </Col>
+                        <Col xs={20} md={2}>
+                          <Form.Item name={[field.name, 'nameEn']} label={index === 0 ? '英文信息' : ' '}>
+                            <Input allowClear />
+                          </Form.Item>
+                        </Col>
+                        <Col xs={4} md={1}>
+                          <Button aria-label="删除作者" icon={<DeleteOutlined />} onClick={() => remove(field.name)} />
+                        </Col>
+                      </Row>
+                    ))}
+                    <Button icon={<PlusOutlined />} onClick={() => add({ authorOrder: fields.length + 1 })}>
+                      添加作者
+                    </Button>
+                  </Space>
+                )}
+              </Form.List>
+
+              <Typography.Title level={5} style={{ marginTop: 20 }}>投稿信息</Typography.Title>
+              <Form.List name="submissions">
+                {(fields, { add, remove }) => (
+                  <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                    {fields.map((field, index) => (
+                      <Row gutter={8} key={field.key} align="middle">
+                        <Col xs={12} md={2}>
+                          <Form.Item name={[field.name, 'submissionNo']} label={index === 0 ? '序号' : ' '}>
+                            <Input placeholder="1" />
+                          </Form.Item>
+                        </Col>
+                        <Col xs={24} md={5}>
+                          <Form.Item name={[field.name, 'paperTitle']} label={index === 0 ? '论文名称' : ' '}>
+                            <Input allowClear />
+                          </Form.Item>
+                        </Col>
+                        <Col xs={24} md={4}>
+                          <Form.Item name={[field.name, 'journalName']} label={index === 0 ? '投稿期刊' : ' '}>
+                            <Input allowClear />
+                          </Form.Item>
+                        </Col>
+                        <Col xs={24} md={4}>
+                          <Form.Item name={[field.name, 'journalUrl']} label={index === 0 ? '投稿网址' : ' '}>
+                            <Input allowClear />
+                          </Form.Item>
+                        </Col>
+                        <Col xs={12} md={3}>
+                          <Form.Item name={[field.name, 'account']} label={index === 0 ? '投稿账号' : ' '}>
+                            <Input allowClear />
+                          </Form.Item>
+                        </Col>
+                        <Col xs={12} md={3}>
+                          <Form.Item name={[field.name, 'password']} label={index === 0 ? '投稿密码' : ' '}>
+                            <Input allowClear />
+                          </Form.Item>
+                        </Col>
+                        <Col xs={20} md={2}>
+                          <Form.Item name={[field.name, 'submitTime']} label={index === 0 ? '投稿时间' : ' '}>
+                            <DatePicker showTime style={{ width: '100%' }} />
+                          </Form.Item>
+                        </Col>
+                        <Col xs={4} md={1}>
+                          <Button aria-label="删除投稿" icon={<DeleteOutlined />} onClick={() => remove(field.name)} />
+                        </Col>
+                      </Row>
+                    ))}
+                    <Button icon={<PlusOutlined />} onClick={() => add({ submissionNo: fields.length + 1 })}>
+                      添加投稿
+                    </Button>
+                  </Space>
+                )}
+              </Form.List>
+
+              <Typography.Title level={5} style={{ marginTop: 20 }}>履约进度</Typography.Title>
+              <Row gutter={12}>
+                {PROGRESS_DELIVERY_FIELDS.map((field) => (
+                  <Col xs={24} md={6} key={field.name}>
+                    <Form.Item name={['order', field.name]} label={field.label}>
+                      {renderDeliveryControl(field)}
+                    </Form.Item>
+                  </Col>
+                ))}
+                <Col xs={24}>
+                  <Form.Item name={['order', 'supervisorNote']} label="主管备注 / 风险说明">
+                    <Input.TextArea
+                      rows={3}
+                      placeholder="记录异常原因、应急安排、客户投诉等"
+                      allowClear
+                    />
+                  </Form.Item>
+                </Col>
+              </Row>
+
+              <Typography.Title level={5}>期刊与交付状态</Typography.Title>
+              <Row gutter={12}>
+                {STATUS_DELIVERY_FIELDS.map((field) => (
+                  <Col xs={24} md={6} key={field.name}>
+                    <Form.Item name={['order', field.name]} label={field.label}>
+                      {renderDeliveryControl(field)}
+                    </Form.Item>
+                  </Col>
+                ))}
+              </Row>
+
+              <Typography.Title level={5}>财务信息</Typography.Title>
+              <Row gutter={12}>
+                <Col xs={24} md={4}>
+                  <Form.Item name={['finance', 'orderAmount']} label="订单额">
+                    <Input allowClear />
+                  </Form.Item>
+                </Col>
+                <Col xs={24} md={4}>
+                  <Form.Item name={['finance', 'customerPaid']} label="订单已付款">
+                    <Input allowClear />
+                  </Form.Item>
+                </Col>
+                <Col xs={24} md={4}>
+                  <Form.Item label="订单待支付">
+                    <Input value={customerPending} disabled />
+                  </Form.Item>
+                </Col>
+                <Col xs={24} md={4}>
+                  <Form.Item name={['finance', 'teacherPrice']} label="老师接单价格">
+                    <Input allowClear />
+                  </Form.Item>
+                </Col>
+                <Col xs={24} md={4}>
+                  <Form.Item name={['finance', 'teacherPaid']} label="老师已付款">
+                    <Input allowClear />
+                  </Form.Item>
+                </Col>
+                <Col xs={24} md={4}>
+                  <Form.Item label="老师待付款">
+                    <Input value={teacherPending} disabled />
+                  </Form.Item>
+                </Col>
+              </Row>
+
+              <Space>
+                <Button type="primary" htmlType="submit" loading={savingDelivery}>
+                  保存交付信息
+                </Button>
+                <Button onClick={() => deliveryForm.setFieldsValue(hydrateDeliveryForm(delivery))}>
+                  还原
+                </Button>
+              </Space>
+            </Form>
           </Card>
 
           <Card title="销售跟进摘要">
@@ -403,6 +920,14 @@ export default function AcademicOrderDetailPage() {
               <Form.Item name="content">
                 <Input placeholder="备注（选填）" style={{ width: 240 }} />
               </Form.Item>
+              <Form.Item name="remindStage">
+                <Select
+                  options={DELIVERY_SELECT_OPTIONS.journalStatus}
+                  placeholder="提醒阶段（选填）"
+                  allowClear
+                  style={{ width: 180 }}
+                />
+              </Form.Item>
               <Form.Item name="nextRemindAt">
                 <DatePicker showTime placeholder="下次提醒（选填）" format="YYYY年MM月DD日 HH:mm:ss" />
               </Form.Item>
@@ -450,6 +975,9 @@ export default function AcademicOrderDetailPage() {
                     <Space direction="vertical" size={2}>
                       <Typography.Text strong>{record.nodeType}</Typography.Text>
                       <Typography.Text>{emptyText(record.content)}</Typography.Text>
+                      {record.remindStage ? (
+                        <Typography.Text type="secondary">提醒阶段：{record.remindStage}</Typography.Text>
+                      ) : null}
                       <Typography.Text type="secondary">
                         {formatDateTime(record.createdAt)}
                         {record.nextRemindAt ? ` | 下次提醒：${formatDateTime(record.nextRemindAt)}` : ''}

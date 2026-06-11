@@ -275,6 +275,64 @@ export class OrdersController {
     }
   }
 
+  @Get('orders/:id/delivery')
+  async getDelivery(
+    @Param('id') id: string,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    const session = (req as any).session;
+    const userId = getSessionUserId(req) || '';
+    const role = session?.role || '';
+    try {
+      const canAccess = await this.ordersService.canAccessOrder(id, { userId, role });
+      if (!canAccess) {
+        return res.status(404).json({ ok: false, message: 'not found' });
+      }
+      const data = await this.ordersService.getOrderDelivery(id);
+      return res.json(data);
+    } catch (err: any) {
+      const code = err?.status || 404;
+      return res.status(code).json({ ok: false, message: err?.message || 'not found' });
+    }
+  }
+
+  @Patch('orders/:id/delivery')
+  async updateDelivery(
+    @Param('id') id: string,
+    @Body() body: any,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    const session = (req as any).session;
+    const userId = getSessionUserId(req) || '';
+    const role = session?.role || '';
+    try {
+      const canAccess = await this.ordersService.canAccessOrder(id, { userId, role });
+      if (!canAccess) {
+        return res.status(404).json({ ok: false, message: 'not found' });
+      }
+      await this.ordersService.saveOrderDelivery(id, {
+        order: body?.order || {},
+        authors: Array.isArray(body?.authors) ? body.authors : undefined,
+        submissions: Array.isArray(body?.submissions) ? body.submissions : undefined,
+        finance: body?.finance || undefined,
+      });
+      await this.logSafe({
+        userId,
+        action: OPERATION_LOG_ACTIONS.UPDATE,
+        targetType: OPERATION_LOG_TARGET_TYPES.ORDER,
+        targetId: id,
+        detail: { section: 'delivery' },
+        req,
+      });
+      return res.json({ ok: true });
+    } catch (err: any) {
+      const code = err?.status || 422;
+      return res.status(code).json({ ok: false, message: err?.message || 'invalid' });
+    }
+  }
+
   @Patch('orders/:id')
   async update(
     @Param('id') id: string,
@@ -348,6 +406,7 @@ export class OrdersController {
         nodeType: body?.nodeType,
         content: body?.content,
         nextRemindAt: body?.nextRemindAt,
+        remindStage: body?.remindStage,
         attachmentUrl: body?.attachmentUrl,
         attachmentName: body?.attachmentName,
       });
@@ -362,6 +421,7 @@ export class OrdersController {
           nodeType: body?.nodeType,
           content: body?.content,
           nextRemindAt: body?.nextRemindAt,
+          remindStage: body?.remindStage,
         },
         req,
       });

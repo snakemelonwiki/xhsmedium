@@ -227,6 +227,13 @@ export const APP_MENU_ITEMS: AppMenuItem[] = [
     roles: ['academic'],
   },
   {
+    key: 'academic-followup',
+    label: '订单跟进',
+    path: '/academic/followup',
+    icon: <ScheduleOutlined />,
+    roles: ['academic'],
+  },
+  {
     key: 'academic-abnormal',
     label: '异常订单',
     path: '/academic/abnormal',

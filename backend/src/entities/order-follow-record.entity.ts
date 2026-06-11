@@ -24,6 +24,9 @@ export class OrderFollowRecord {
   @Column({ name: 'next_remind_at', type: 'datetime', nullable: true })
   nextRemindAt: Date | null;
 
+  @Column({ name: 'remind_stage', type: 'varchar', length: 32, nullable: true })
+  remindStage: string | null;
+
   @Column({ name: 'reminder_sent_at', type: 'datetime', nullable: true })
   reminderSentAt: Date | null;
 

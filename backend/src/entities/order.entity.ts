@@ -81,6 +81,192 @@ export class Order {
   @Column({ name: 'order_code', length: 32, nullable: true })
   orderCode: string | null;
 
+  @Column({ name: 'product_type', length: 64, nullable: true })
+  productType: string | null;
+
+  @Column({ name: 'guarantee_type', length: 64, nullable: true })
+  guaranteeType: string | null;
+
+  @Column({ name: 'payment_stage', length: 64, nullable: true })
+  paymentStage: string | null;
+
+  @Column({ name: 'customer_name', length: 128, nullable: true })
+  customerName: string | null;
+
+  @Column({ name: 'education_level', length: 32, nullable: true })
+  educationLevel: string | null;
+
+  @Column({ length: 128, nullable: true })
+  major: string | null;
+
+  @Column({ length: 128, nullable: true })
+  area: string | null;
+
+  @Column({ name: 'article_purpose', length: 128, nullable: true })
+  articlePurpose: string | null;
+
+  @Column({ name: 'submit_email', length: 128, nullable: true })
+  submitEmail: string | null;
+
+  @Column({ name: 'submit_email_password', length: 128, nullable: true })
+  submitEmailPassword: string | null;
+
+  @Column({ name: 'fund_info', type: 'text', nullable: true })
+  fundInfo: string | null;
+
+  @Column({ name: 'registration_status', length: 32, nullable: true })
+  registrationStatus: string | null;
+
+  @Column({ name: 'author_registration_url', length: 500, nullable: true })
+  authorRegistrationUrl: string | null;
+
+  @Column({ name: 'author_registration_name', length: 255, nullable: true })
+  authorRegistrationName: string | null;
+
+  @Column({ name: 'operation_method', length: 32, nullable: true })
+  operationMethod: string | null;
+
+  @Column({ name: 'handover_to_teacher_at', type: 'datetime', nullable: true })
+  handoverToTeacherAt: Date | null;
+
+  @Column({ name: 'checked_duplicate', type: 'tinyint', default: 0 })
+  checkedDuplicate: boolean;
+
+  @Column({ name: 'dispatched_teacher_id', length: 64, nullable: true })
+  dispatchedTeacherId: string | null;
+
+  @Column({ name: 'teacher_id', length: 64, nullable: true })
+  teacherId: string | null;
+
+  @Column({ name: 'backup_teacher', length: 128, nullable: true })
+  backupTeacher: string | null;
+
+  @Column({ name: 'teacher_phone', length: 64, nullable: true })
+  teacherPhone: string | null;
+
+  @Column({ name: 'teacher_stability', length: 16, nullable: true })
+  teacherStability: string | null;
+
+  @Column({ name: 'innovation_review_status', length: 16, nullable: true })
+  innovationReviewStatus: string | null;
+
+  @Column({ name: 'innovation_review_at', type: 'datetime', nullable: true })
+  innovationReviewAt: Date | null;
+
+  @Column({ name: 'draft_review_status', length: 16, nullable: true })
+  draftReviewStatus: string | null;
+
+  @Column({ name: 'draft_review_at', type: 'datetime', nullable: true })
+  draftReviewAt: Date | null;
+
+  @Column({ name: 'editor_review_status', length: 16, nullable: true })
+  editorReviewStatus: string | null;
+
+  @Column({ name: 'editor_review_at', type: 'datetime', nullable: true })
+  editorReviewAt: Date | null;
+
+  @Column({ name: 'author_verify_status', length: 16, nullable: true })
+  authorVerifyStatus: string | null;
+
+  @Column({ name: 'author_verify_at', type: 'datetime', nullable: true })
+  authorVerifyAt: Date | null;
+
+  @Column({ name: 'sales_contact', length: 128, nullable: true })
+  salesContact: string | null;
+
+  @Column({ name: 'academic_owner', length: 128, nullable: true })
+  academicOwner: string | null;
+
+  @Column({ name: 'last_teacher_update_at', type: 'datetime', nullable: true })
+  lastTeacherUpdateAt: Date | null;
+
+  @Column({ name: 'customer_complaint', length: 16, nullable: true })
+  customerComplaint: string | null;
+
+  @Column({ name: 'needs_supervisor', length: 16, nullable: true })
+  needsSupervisor: string | null;
+
+  @Column({ name: 'emergency_status', length: 32, nullable: true })
+  emergencyStatus: string | null;
+
+  @Column({ name: 'supervisor_note', type: 'text', nullable: true })
+  supervisorNote: string | null;
+
+  @Column({ name: 'paper_progress', length: 32, nullable: true })
+  paperProgress: string | null;
+
+  @Column({ name: 'current_stage', length: 32, nullable: true })
+  currentStage: string | null;
+
+  @Column({ name: 'submitted_expected_at', type: 'datetime', nullable: true })
+  submittedExpectedAt: Date | null;
+
+  @Column({ name: 'with_editor_expected_at', type: 'datetime', nullable: true })
+  withEditorExpectedAt: Date | null;
+
+  @Column({ name: 'under_review_expected_at', type: 'datetime', nullable: true })
+  underReviewExpectedAt: Date | null;
+
+  @Column({ name: 'revision_expected_at', type: 'datetime', nullable: true })
+  revisionExpectedAt: Date | null;
+
+  @Column({ name: 'accepted_expected_at', type: 'datetime', nullable: true })
+  acceptedExpectedAt: Date | null;
+
+  @Column({ name: 'proofing_expected_at', type: 'datetime', nullable: true })
+  proofingExpectedAt: Date | null;
+
+  @Column({ name: 'online_expected_at', type: 'datetime', nullable: true })
+  onlineExpectedAt: Date | null;
+
+  @Column({ name: 'indexed_expected_at', type: 'datetime', nullable: true })
+  indexedExpectedAt: Date | null;
+
+  @Column({ name: 'first_week_check_at', type: 'datetime', nullable: true })
+  firstWeekCheckAt: Date | null;
+
+  @Column({ name: 'next_check_at', type: 'datetime', nullable: true })
+  nextCheckAt: Date | null;
+
+  @Column({ name: 'urge_letter_status', length: 16, nullable: true })
+  urgeLetterStatus: string | null;
+
+  @Column({ name: 'revision_status', length: 16, nullable: true })
+  revisionStatus: string | null;
+
+  @Column({ name: 'revision_due_at', type: 'datetime', nullable: true })
+  revisionDueAt: Date | null;
+
+  @Column({ name: 'page_fee_status', length: 16, nullable: true })
+  pageFeeStatus: string | null;
+
+  @Column({ name: 'proof_status', length: 16, nullable: true })
+  proofStatus: string | null;
+
+  @Column({ name: 'online_status', length: 16, nullable: true })
+  onlineStatus: string | null;
+
+  @Column({ name: 'online_at', type: 'datetime', nullable: true })
+  onlineAt: Date | null;
+
+  @Column({ name: 'indexed_status', length: 16, nullable: true })
+  indexedStatus: string | null;
+
+  @Column({ name: 'indexing_at', type: 'datetime', nullable: true })
+  indexingAt: Date | null;
+
+  @Column({ name: 'index_review_report', length: 500, nullable: true })
+  indexReviewReport: string | null;
+
+  @Column({ name: 'risk_level', length: 16, nullable: true })
+  riskLevel: string | null;
+
+  @Column({ name: 'order_stage', length: 64, nullable: true })
+  orderStage: string | null;
+
+  @Column({ name: 'next_follow_at', type: 'datetime', nullable: true })
+  nextFollowAt: Date | null;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 
