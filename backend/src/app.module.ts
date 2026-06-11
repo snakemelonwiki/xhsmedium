@@ -79,7 +79,6 @@ import { TokenRefreshInterceptor } from './common/token-refresh.interceptor';
         username: config.get('MYSQL_USER', 'root'),
         password: config.get('MYSQL_PASSWORD', ''),
         database: config.get('MYSQL_DATABASE', 'lan_dual_role_system'),
-<<<<<<< HEAD
         entities: [
           User,
           Employee,
