@@ -155,6 +155,7 @@ type Lead = {
   latestFollowNote?: string;
   latestFollowAt?: string;
   sourcePostTitle?: string;
+  sourcePostUrl?: string;
   sourceAccountName?: string;
   accountId?: string;
   postId?: string;
@@ -551,7 +552,7 @@ export default function AdminLeadsPage() {
       dataIndex: 'sourcePostTitle',
       width: 120,
       render: (v?: string, record?: Lead) => (
-        <PostTitleCell title={v} postId={record?.postId} maxChars={8} />
+        <PostTitleCell title={v} postId={record?.postId} postUrl={record?.sourcePostUrl} maxChars={8} />
       ),
     },
     { title: '来源账号', dataIndex: 'sourceAccountName', width: 100, render: (v?: string) => v || '-' },
@@ -631,7 +632,7 @@ export default function AdminLeadsPage() {
       dataIndex: 'postTitle',
       width: 200,
       render: (v: string, record: AdminLeadPostAggregate) => (
-        <PostTitleCell title={v} postId={record.postId} maxChars={16} />
+        <PostTitleCell title={v} postId={record.postId} postUrl={record.postUrl} maxChars={16} />
       ),
     },
     {

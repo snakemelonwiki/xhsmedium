@@ -257,6 +257,7 @@ export default function OperationLeadsPage() {
         <PostTitleCell
           title={record.source?.postTitle || (record.source?.postId ? `作品 ${record.source.postId}` : '')}
           postId={record.source?.postId}
+          postUrl={record.source?.postUrl}
           maxChars={8}
         />
       ),

@@ -457,6 +457,8 @@ export interface PostTitleCellProps {
   title?: string | null;
   /** Post id used to build the navigation href. When missing, cell is read-only. */
   postId?: string | number | null;
+  /** External platform URL (e.g. xiaohongshu/douyin link). When present, clicking opens this in a new tab. */
+  postUrl?: string | null;
   /** Maximum characters to display before truncating with "...". Default 8. */
   maxChars?: number;
   /** Optional override for the navigation href. */
@@ -479,6 +481,7 @@ function truncate(s: string, maxChars: number): string {
 export function PostTitleCell({
   title,
   postId,
+  postUrl,
   maxChars = DEFAULT_MAX_CHARS,
   href,
   className,
@@ -489,12 +492,17 @@ export function PostTitleCell({
   const truncated = truncate(safeTitle, maxChars);
   const isTruncated = truncated !== safeTitle;
 
-  // Click handler — uses router.push so it respects the Next.js app router
-  // and works inside nested layouts. We stop propagation so the click does
-  // not also trigger the surrounding Table row's row-selection behavior.
+  // Click handler — prefer opening the external platform URL (postUrl) in a new
+  // tab so users land on the original post. Fall back to an internal route.
+  // We stop propagation so the click does not trigger the surrounding Table
+  // row's row-selection behavior.
   const handleClick = (e: React.MouseEvent<HTMLSpanElement>) => {
     e.stopPropagation();
     if (!hasPostId) return;
+    if (postUrl) {
+      window.open(postUrl, '_blank', 'noopener,noreferrer');
+      return;
+    }
     const target = href || `/admin/posts/${encodeURIComponent(String(postId))}`;
     router.push(target);
   };
