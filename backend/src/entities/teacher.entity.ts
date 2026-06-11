@@ -66,8 +66,8 @@ export class Teacher {
   @Column({ length: 16, default: 'new' })
   stability: TeacherStabilityCode;
 
-  /** 质量评分（0-10，DECIMAL(3,1)）。教务对接单交付质量的主观打分，作为后续派单参考。 */
-  @Column({ name: 'quality_score', type: 'decimal', precision: 3, scale: 1, nullable: true })
+  /** 质量评分（A/B/C）。教务对接单交付质量的主观评级，作为后续派单参考。 */
+  @Column({ name: 'quality_score', length: 16, nullable: true })
   qualityScore: string | null;
 
   /** 备注（自由文本：合作历史、注意事项、特殊偏好等）。 */

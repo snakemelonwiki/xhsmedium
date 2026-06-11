@@ -745,7 +745,7 @@ CREATE TABLE IF NOT EXISTS teachers (
   specialty       VARCHAR(255) NULL COMMENT '专业能力',
   direction       VARCHAR(255) NULL COMMENT '接单方向',
   stability       VARCHAR(16)  NOT NULL DEFAULT 'new' COMMENT '稳定性：stable稳定/new新老师/probation试合作',
-  quality_score   DECIMAL(3,1) NULL COMMENT '质量评分(0-10)',
+  quality_score   VARCHAR(16)  NULL COMMENT '质量评分：A/B/C',
   remark          TEXT         NULL COMMENT '备注',
   status          VARCHAR(16)  NOT NULL DEFAULT 'idle' COMMENT '接单状态：idle空闲/working接单中/full满载',
   current_orders  INT          NOT NULL DEFAULT 0 COMMENT '当前接单数（实时统计缓存）',

@@ -213,6 +213,13 @@ export const APP_MENU_ITEMS: AppMenuItem[] = [
     roles: ['academic'],
   },
   {
+    key: 'academic-teachers',
+    label: '稳定老师库',
+    path: '/academic/teachers',
+    icon: <TeamOutlined />,
+    roles: ['academic'],
+  },
+  {
     key: 'academic-orders',
     label: '订单池',
     path: '/academic/orders',

@@ -57,6 +57,7 @@ import { ScrapingModule } from './modules/scraping/scraping.module';
 import { UploadsModule } from './modules/uploads/uploads.module';
 import { SalesModule } from './modules/sales/sales.module';
 import { EnumsModule } from './modules/enums/enums.module';
+import { TeachersModule } from './modules/teachers/teachers.module';
 import { StorageModule } from './shared/storage/storage.service';
 import { CacheModule } from './shared/cache.service';
 import { FormattedSqlLogger } from './common/sql-logger';
@@ -78,7 +79,7 @@ import { TokenRefreshInterceptor } from './common/token-refresh.interceptor';
         username: config.get('MYSQL_USER', 'root'),
         password: config.get('MYSQL_PASSWORD', ''),
         database: config.get('MYSQL_DATABASE', 'lan_dual_role_system'),
-        entities: [User, Employee, Account, Post, Lead, LeadFollowRecord, LeadDraft, CollaborationTask, Order, OrderFollowRecord, OrderAbnormalFeedback, ImportTask, Notification, Favorite, PostMetricsHistory, ExportTask, OperationLog, SupervisorSuggestion, ScrapingAlert],
+        entities: [User, Employee, Account, Post, Lead, LeadFollowRecord, LeadDraft, CollaborationTask, Order, OrderFollowRecord, OrderAbnormalFeedback, ImportTask, Notification, Favorite, PostMetricsHistory, ExportTask, OperationLog, SupervisorSuggestion, ScrapingAlert, Teacher],
         synchronize: false,
         charset: 'utf8mb4',
         logging: true,
@@ -128,6 +129,7 @@ import { TokenRefreshInterceptor } from './common/token-refresh.interceptor';
     UploadsModule,
     SalesModule,
     EnumsModule,
+    TeachersModule,
     StorageModule,
     CacheModule,
   ],

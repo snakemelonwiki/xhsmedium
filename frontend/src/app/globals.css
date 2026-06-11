@@ -396,3 +396,20 @@ body {
     flex-direction: column;
   }
 }
+
+/* 固定操作列在最右侧并确保在最上层 */
+.ant-table-cell-fix-right {
+  z-index: 10 !important;
+  background: #fff;
+}
+
+.ant-table-cell-fix-right::before {
+  content: '';
+  position: absolute;
+  left: -8px;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  background: linear-gradient(to right, transparent, rgb(255 255 255 / 80%));
+  pointer-events: none;
+}
