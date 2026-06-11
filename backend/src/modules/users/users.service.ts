@@ -16,6 +16,8 @@ function toSafeUser(u: User): Record<string, any> {
     role: u.role,
     employeeId: u.employeeId,
     status: u.status,
+    capacityPaused: Boolean((u as any).capacityPaused),
+    capacityPausedAt: (u as any).capacityPausedAt ?? null,
     createdAt: (u as any).createdAt,
     updatedAt: (u as any).updatedAt,
   };
@@ -53,6 +55,7 @@ export class UsersService {
   /**
    * 查询可分配销售账号候选，仅返回 active sales 的安全字段。
    * 同时从 employees 表加载真实姓名（employeeName）供下拉展示。
+   * 包含容量上限状态（capacityPaused），惰性自动恢复超过1小时的记录。
    */
   async findAssignableSalesUsersPaged(options: { limit: number; offset: number }): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
     const safeLimit = this.clampLimit(options.limit);
@@ -76,14 +79,89 @@ export class UsersService {
       employeeNameMap = new Map(employees.map((e) => [e.id, e.name]));
     }
 
+    // 惰性自动恢复：检查 capacity_paused_at 超过1小时的记录
+    const now = new Date();
+    const ONE_HOUR_MS = 60 * 60 * 1000;
+    for (const u of rows) {
+      if (u.capacityPaused && u.capacityPausedAt) {
+        const elapsed = now.getTime() - new Date(u.capacityPausedAt).getTime();
+        if (elapsed > ONE_HOUR_MS) {
+          // 自动恢复
+          await this.userRepository.update(u.id, {
+            capacityPaused: 0 as any,
+            capacityPausedAt: null as any,
+          });
+          u.capacityPaused = 0 as any;
+          u.capacityPausedAt = null as any;
+        }
+      }
+    }
+
     return {
       items: rows.map((u) => ({
         ...toSafeUser(u),
         employeeName: u.employeeId ? (employeeNameMap.get(u.employeeId) ?? null) : null,
+        capacityPaused: Boolean(u.capacityPaused),
+        capacityPausedAt: u.capacityPausedAt ?? null,
       })),
       total,
       limit: safeLimit,
       offset: safeOffset,
+    };
+  }
+
+  /**
+   * 切换销售的客资容量上限状态。
+   * 仅允许 sales 角色自行操作，其他人不可干预。
+   */
+  async toggleCapacityPaused(userId: string): Promise<{ capacityPaused: boolean; capacityPausedAt: Date | null }> {
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    if (!user) {
+      throw new Error('用户不存在');
+    }
+    if (user.role !== 'sales') {
+      throw new Error('仅销售角色可操作客资上限状态');
+    }
+
+    const currentlyPaused = Boolean(user.capacityPaused);
+    const nextPaused = !currentlyPaused;
+    const updates: any = {
+      capacityPaused: nextPaused ? 1 : 0,
+      capacityPausedAt: nextPaused ? new Date() : null,
+    };
+    await this.userRepository.update(userId, updates);
+
+    return {
+      capacityPaused: nextPaused,
+      capacityPausedAt: nextPaused ? updates.capacityPausedAt : null,
+    };
+  }
+
+  /**
+   * 查询单个用户的容量上限状态（含惰性自动恢复）。
+   */
+  async getCapacityStatus(userId: string): Promise<{ capacityPaused: boolean; capacityPausedAt: Date | null }> {
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    if (!user) {
+      throw new Error('用户不存在');
+    }
+
+    // 惰性自动恢复
+    if (user.capacityPaused && user.capacityPausedAt) {
+      const ONE_HOUR_MS = 60 * 60 * 1000;
+      const elapsed = new Date().getTime() - new Date(user.capacityPausedAt).getTime();
+      if (elapsed > ONE_HOUR_MS) {
+        await this.userRepository.update(userId, {
+          capacityPaused: 0 as any,
+          capacityPausedAt: null as any,
+        });
+        return { capacityPaused: false, capacityPausedAt: null };
+      }
+    }
+
+    return {
+      capacityPaused: Boolean(user.capacityPaused),
+      capacityPausedAt: user.capacityPausedAt ?? null,
     };
   }
 

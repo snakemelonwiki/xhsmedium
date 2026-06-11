@@ -42,6 +42,24 @@ export class UsersController {
   ) {}
 
   /**
+   * 查询当前用户的客资容量上限状态。
+   * 必须在 @Get(':id') 之前声明，避免 'self' 被当作 id 参数匹配。
+   */
+  @Get('self/capacity')
+  async getCapacity(@Req() req: Request, @Res() res: Response) {
+    const userId = getSessionUserId(req);
+    if (!userId) {
+      return res.status(401).json({ ok: false, message: '未登录' });
+    }
+    try {
+      const result = await this.usersService.getCapacityStatus(userId);
+      return res.json({ ok: true, ...result });
+    } catch (err: any) {
+      return res.status(400).json({ ok: false, message: err?.message || '查询失败' });
+    }
+  }
+
+  /**
    * 查询用户详情。
    */
   @Get(':id')
@@ -289,9 +307,25 @@ export class UsersController {
   }
 
   /**
-   * 当前登录用户自行修改密码。
-   * 需提供旧密码验证，新密码明文存储。
+   * 切换当前销售用户的客资容量上限状态。
+   * 仅 sales 角色可操作，其他人不可干预。
    */
+  @Patch('self/capacity')
+  async toggleCapacity(@Req() req: Request, @Res() res: Response) {
+    const userId = getSessionUserId(req);
+    if (!userId) {
+      return res.status(401).json({ ok: false, message: '未登录' });
+    }
+    try {
+      const result = await this.usersService.toggleCapacityPaused(userId);
+      return res.json({ ok: true, ...result });
+    } catch (err: any) {
+      const msg = err?.message || '操作失败';
+      const status = msg.includes('不存在') ? 404 : msg.includes('仅销售') ? 403 : 400;
+      return res.status(status).json({ ok: false, message: msg });
+    }
+  }
+
   @Patch('self/change-password')
   async changeSelfPassword(@Body() body: any, @Req() req: Request, @Res() res: Response) {
     const userId = getSessionUserId(req);

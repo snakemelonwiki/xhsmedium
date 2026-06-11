@@ -1,6 +1,6 @@
 'use client';
 
-import { Button, Card, Form, Input, message, Modal, Radio, Select, Space, Typography } from 'antd';
+import { Button, Card, Form, Input, message, Modal, Radio, Select, Space, Tag, Typography } from 'antd';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
@@ -242,7 +242,26 @@ export default function OperationLeadNewPage() {
                         ? '选择销售账号'
                         : '暂无可分配销售账号'
                   }
-                  options={salesUsers.map((item) => ({ label: item.name, value: item.id }))}
+                  options={salesUsers.map((item) => ({
+                    label: item.name,
+                    value: item.id,
+                    style: item.capacityPaused
+                      ? { borderLeft: '3px solid #ff4d4f', paddingLeft: 8 }
+                      : { borderLeft: '3px solid #52c41a', paddingLeft: 8 },
+                  }))}
+                  optionRender={(option) => {
+                    const isPaused = salesUsers.find((u) => u.id === option.value)?.capacityPaused;
+                    return (
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <span>{option.label}</span>
+                        {isPaused ? (
+                          <Tag color="red" style={{ marginRight: 0 }}>已达上限</Tag>
+                        ) : (
+                          <Tag color="green" style={{ marginRight: 0 }}>可接</Tag>
+                        )}
+                      </div>
+                    );
+                  }}
                 />
               </Form.Item>
               <Form.Item name="nickname" label="客户昵称">

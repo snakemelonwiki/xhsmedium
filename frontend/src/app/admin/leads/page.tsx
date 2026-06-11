@@ -970,9 +970,28 @@ export default function AdminLeadsPage() {
             placeholder="选择新的销售"
             value={selectedSalesUserId}
             onChange={setSelectedSalesUserId}
-            options={salesUsers.map((item) => ({ label: item.name, value: item.id }))}
+            options={salesUsers.map((item) => ({
+              label: item.name,
+              value: item.id,
+              style: item.capacityPaused
+                ? { borderLeft: '3px solid #ff4d4f', paddingLeft: 8 }
+                : { borderLeft: '3px solid #52c41a', paddingLeft: 8 },
+            }))}
             optionFilterProp="label"
             style={{ width: '100%' }}
+            optionRender={(option) => {
+              const isPaused = salesUsers.find((u) => u.id === option.value)?.capacityPaused;
+              return (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span>{option.label}</span>
+                  {isPaused ? (
+                    <Tag color="red" style={{ marginRight: 0 }}>已达上限</Tag>
+                  ) : (
+                    <Tag color="green" style={{ marginRight: 0 }}>可接</Tag>
+                  )}
+                </div>
+              );
+            }}
           />
         </Space>
       </Modal>

@@ -84,6 +84,8 @@ CREATE TABLE IF NOT EXISTS users (
   password     VARCHAR(255) NOT NULL                           COMMENT '登录密码：bcrypt hash 或历史明文',
   role         ENUM('admin','staff','owner','sales','academic','operation','supervisor') NOT NULL
                                                                 COMMENT '账号角色：admin/supervisor主管 | staff/operation运营员工 | owner总后台 | sales销售 | academic教务',
+  capacity_paused   TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否已达客资上限：0可接客资 | 1已达上限（运营端红色警示）',
+  capacity_paused_at DATETIME NULL COMMENT '点击"已达上限"的时间，超过1小时自动恢复',
   failed_login_count INT NOT NULL DEFAULT 0 COMMENT '登录失败次数（>=5次触发账号锁定）',
   last_failed_at    DATETIME NULL COMMENT '最近一次登录失败时间（UTC），成功登录后重置为NULL',
   employee_id  VARCHAR(64)  NULL                               COMMENT '关联员工ID（employees.id）；owner 等纯账号可为空',

@@ -1,8 +1,10 @@
 'use client';
 
 import {
+  CheckCircleOutlined,
   FileTextOutlined,
   FireOutlined,
+  PauseCircleOutlined,
   ReloadOutlined,
   SearchOutlined,
   SwapOutlined,
@@ -39,6 +41,7 @@ import {
   updateLeadIntentionLevel,
 } from '@/shared/api/leads';
 import { apiClient } from '@/shared/api/apiClient';
+import { getCapacityStatus, toggleCapacityPaused } from '@/shared/api/catalog';
 import { ReminderButton } from '@/shared/components/notifications/ReminderButton';
 import { StatusTag } from '@/shared/components/status';
 import { formatDateTime } from '@/shared/utils/date-format';
@@ -149,6 +152,12 @@ export default function SalesLeadsPage() {
 
   const [submitting, setSubmitting] = useState(false);
 
+  // 客资容量上限状态
+  const [capacityPaused, setCapacityPaused] = useState(false);
+  const [capacityPausedAt, setCapacityPausedAt] = useState<string | null>(null);
+  const [capacityLoading, setCapacityLoading] = useState(false);
+  const [remainSeconds, setRemainSeconds] = useState(0);
+
   async function loadLeads(nextPage = page, nextPageSize = pageSize, nextFilters: Filters = filters) {
     setLoading(true);
     setError('');
@@ -175,6 +184,42 @@ export default function SalesLeadsPage() {
     loadLeads(1, pageSize, filters);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters.status, filters.addStatus, filters.intentionLevel, filters.dateRange?.start.valueOf(), filters.dateRange?.end.valueOf(), filters.search]);
+
+  // 加载客资容量上限状态
+  useEffect(() => {
+    getCapacityStatus()
+      .then((result) => {
+        setCapacityPaused(result.capacityPaused);
+        setCapacityPausedAt(result.capacityPausedAt);
+      })
+      .catch(() => {
+        // 静默失败，不影响主流程
+      });
+  }, []);
+
+  // 倒计时：已达上限后显示剩余自动恢复时间
+  useEffect(() => {
+    if (!capacityPaused || !capacityPausedAt) {
+      setRemainSeconds(0);
+      return;
+    }
+    const ONE_HOUR_MS = 60 * 60 * 1000;
+    const pausedAt = new Date(capacityPausedAt).getTime();
+
+    function tick() {
+      const elapsed = Date.now() - pausedAt;
+      const remain = Math.max(0, Math.ceil((ONE_HOUR_MS - elapsed) / 1000));
+      setRemainSeconds(remain);
+      if (remain <= 0) {
+        // 自动恢复
+        setCapacityPaused(false);
+        setCapacityPausedAt(null);
+      }
+    }
+    tick();
+    const timer = setInterval(tick, 1000);
+    return () => clearInterval(timer);
+  }, [capacityPaused, capacityPausedAt]);
 
   const sortedItems = useMemo(() => {
     // 「我的客资」= 待处理客资（未添加 + 中间态），已添加的（addStatus=added）应去「客资跟进」。
@@ -346,6 +391,26 @@ export default function SalesLeadsPage() {
     } catch (err) {
       message.error(err instanceof Error ? err.message : '操作失败');
     }
+  }
+
+  async function handleToggleCapacity() {
+    setCapacityLoading(true);
+    try {
+      const result = await toggleCapacityPaused();
+      setCapacityPaused(result.capacityPaused);
+      setCapacityPausedAt(result.capacityPausedAt);
+      message.success(result.capacityPaused ? '已标记为已达上限，1小时后自动恢复' : '已恢复为可接客资');
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '操作失败');
+    } finally {
+      setCapacityLoading(false);
+    }
+  }
+
+  function formatRemainTime(seconds: number): string {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m}:${String(s).padStart(2, '0')}`;
   }
 
   const columns = useMemo<TableColumnsType<SalesLead>>(() => [
@@ -532,6 +597,42 @@ export default function SalesLeadsPage() {
 
   return (
     <Space direction="vertical" size={16} className="page-stack">
+      {/* 容量上限状态横幅：仅在"已达上限"时显示 */}
+      {capacityPaused ? (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '10px 16px',
+            background: '#fff2f0',
+            border: '1px solid #ffccc7',
+            borderRadius: 8,
+          }}
+        >
+          <Space size={8}>
+            <PauseCircleOutlined style={{ color: '#ff4d4f', fontSize: 18 }} />
+            <Typography.Text strong style={{ color: '#ff4d4f' }}>
+              当前已达客资上限，运营端将看到红色提示
+            </Typography.Text>
+            {remainSeconds > 0 ? (
+              <Typography.Text type="secondary" style={{ fontSize: 13 }}>
+                {formatRemainTime(remainSeconds)} 后自动恢复
+              </Typography.Text>
+            ) : null}
+          </Space>
+          <Button
+            danger
+            type="primary"
+            icon={<CheckCircleOutlined />}
+            loading={capacityLoading}
+            onClick={handleToggleCapacity}
+          >
+            恢复接客资
+          </Button>
+        </div>
+      ) : null}
+
       <div className="toolbar-row">
         <div>
           <Typography.Title level={2}>我的客资</Typography.Title>
@@ -575,6 +676,19 @@ export default function SalesLeadsPage() {
           />
           <Button icon={<ReloadOutlined />} onClick={() => loadLeads()} loading={loading}>
             刷新
+          </Button>
+          <Button
+            type={capacityPaused ? 'default' : 'primary'}
+            icon={capacityPaused ? <CheckCircleOutlined /> : <PauseCircleOutlined />}
+            loading={capacityLoading}
+            onClick={handleToggleCapacity}
+            style={
+              !capacityPaused
+                ? { borderColor: '#52c41a', color: '#52c41a' }
+                : undefined
+            }
+          >
+            {capacityPaused ? '可接客资' : '已达上限'}
           </Button>
         </Space>
       </div>

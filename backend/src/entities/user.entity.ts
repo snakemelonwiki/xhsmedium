@@ -64,6 +64,21 @@ export class User {
   status: string;
 
   /**
+   * 是否已达客资上限。
+   * 销售端手动 toggle：true = 已达上限（运营端红色警示），false = 可接客资。
+   * 点击后 capacity_paused_at 记录时间，超过1小时惰性自动恢复为 false。
+   */
+  @Column({ name: 'capacity_paused', default: () => '0', comment: '是否已达客资上限：0可接客资 | 1已达上限（运营端红色警示）' })
+  capacityPaused: number;
+
+  /**
+   * 点击"已达上限"的时间戳（UTC）。
+   * 用于惰性计算是否超过1小时自动恢复。
+   */
+  @Column({ name: 'capacity_paused_at', type: 'datetime', nullable: true, comment: '点击"已达上限"的时间，超过1小时自动恢复' })
+  capacityPausedAt: Date | null;
+
+  /**
    * 连续登录失败次数。
    * - 0     表示无失败记录
    * - 1..4  表示最近失败次数（未到锁定阈值）

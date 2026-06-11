@@ -10,6 +10,7 @@ export type CatalogOption = {
   employeeId?: string;
   platform?: string;
   parentId?: string;
+  capacityPaused?: boolean;
 };
 
 function text(value: unknown): string | undefined {
@@ -33,6 +34,7 @@ export async function listAssignableSalesUsers(): Promise<CatalogOption[]> {
       id: text(item.id) ?? '',
       name: text(item.employeeName) ?? text(item.name) ?? text(item.username) ?? '未命名账号',
       employeeId: text(item.employeeId),
+      capacityPaused: Boolean(item.capacityPaused),
     }))
     .filter((item) => item.id);
 }
@@ -53,6 +55,22 @@ export async function listSourceAccounts(): Promise<CatalogOption[]> {
 /**
  * 读取来源作品候选；传入账号后只显示该账号下作品。
  */
+
+/**
+ * 查询当前用户的客资容量上限状态。
+ */
+export async function getCapacityStatus(): Promise<{ capacityPaused: boolean; capacityPausedAt: string | null }> {
+  const result = await apiClient.get<unknown>('/users/self/capacity');
+  return result as { capacityPaused: boolean; capacityPausedAt: string | null };
+}
+
+/**
+ * 切换当前用户的客资容量上限状态（仅 sales 角色）。
+ */
+export async function toggleCapacityPaused(): Promise<{ capacityPaused: boolean; capacityPausedAt: string | null }> {
+  const result = await apiClient.request<unknown>('/users/self/capacity', { method: 'PATCH' });
+  return result as { capacityPaused: boolean; capacityPausedAt: string | null };
+}
 export async function listSourcePosts(accountId?: string): Promise<CatalogOption[]> {
   const result = await listPosts({ pageSize: 200, accountId });
   return result.items.map((item) => ({
