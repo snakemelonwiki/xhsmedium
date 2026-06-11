@@ -1,6 +1,6 @@
 'use client';
 
-import { Alert, Button, Card, Empty, Form, Input, Modal, Segmented, Select, Space, Spin, Typography, message } from 'antd';
+import { Alert, Button, Card, DatePicker, Empty, Form, Input, Modal, Segmented, Select, Space, Spin, Typography, message } from 'antd';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
@@ -157,7 +157,7 @@ export default function SalesFollowupsPage() {
             />
           </Form.Item>
           <Form.Item name="nextFollowTime" label="下次跟进时间">
-            <Input type="datetime-local" />
+            <DatePicker showTime format="YYYY/MM/DD HH:mm" style={{ width: '100%' }} placeholder="选择下次跟进时间" />
           </Form.Item>
           <Form.Item name="content" label="跟进备注" rules={[{ required: true, message: '请输入跟进备注' }]}>
             <Input.TextArea rows={4} placeholder="记录本次沟通情况和下一步动作" />

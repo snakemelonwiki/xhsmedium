@@ -37,3 +37,57 @@ export function formatDate(value?: string | number | Date | null): string {
   if (Number.isNaN(date.getTime())) return '-';
   return `${date.getFullYear()}年${PAD(date.getMonth() + 1)}月${PAD(date.getDate())}日`;
 }
+
+/**
+ * 相对时间格式化，用于提醒场景：
+ * - 已过期 → "已过期3天" / "已过期2小时"
+ * - 今天 → "今天 14:30"
+ * - 明天 → "明天 14:30"
+ * - 其他 → "06月09日 14:30"
+ *
+ * 返回 { label, color } 供 Ant Design Tag 直接使用：
+ *   color = 'red' | 'orange' | 'blue' | 'default'
+ */
+export function formatRemindTimeTag(
+  value?: string | number | Date | null,
+): { label: string; color: string } {
+  if (!value) return { label: '-', color: 'default' };
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return { label: '-', color: 'default' };
+
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMin = Math.floor(diffMs / 60000);
+  const diffHour = Math.floor(diffMs / 3600000);
+  const diffDay = Math.floor(diffMs / 86400000);
+
+  const time = `${PAD(date.getHours())}:${PAD(date.getMinutes())}`;
+
+  // 已过期
+  if (diffMs > 0) {
+    if (diffDay > 0) return { label: `已过期${diffDay}天`, color: 'red' };
+    if (diffHour > 0) return { label: `已过期${diffHour}小时`, color: 'red' };
+    if (diffMin > 0) return { label: `已过期${diffMin}分钟`, color: 'red' };
+    return { label: '刚刚到期', color: 'red' };
+  }
+
+  // 未到期
+  const isToday =
+    date.getFullYear() === now.getFullYear() &&
+    date.getMonth() === now.getMonth() &&
+    date.getDate() === now.getDate();
+  if (isToday) return { label: `今天 ${time}`, color: 'orange' };
+
+  const tomorrow = new Date(now);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const isTomorrow =
+    date.getFullYear() === tomorrow.getFullYear() &&
+    date.getMonth() === tomorrow.getMonth() &&
+    date.getDate() === tomorrow.getDate();
+  if (isTomorrow) return { label: `明天 ${time}`, color: 'orange' };
+
+  return {
+    label: `${PAD(date.getMonth() + 1)}月${PAD(date.getDate())}日 ${time}`,
+    color: 'blue',
+  };
+}

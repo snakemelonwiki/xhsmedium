@@ -10,7 +10,12 @@ body {
 }
 
 .app-shell {
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.app-shell > .ant-layout {
+  overflow-y: auto;
 }
 
 .app-sider {
@@ -42,7 +47,9 @@ body {
 }
 
 .app-header {
-  position: relative;
+  position: sticky;
+  top: 0;
+  z-index: 10;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -106,6 +113,23 @@ body {
 
 .app-content {
   padding: 24px 28px 32px;
+}
+
+/* 页面标题 + 筛选栏固定在顶部（筛选/搜索/导出按钮随时可达） */
+.app-content > .page-stack > .toolbar-row {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: #f4f6f8;
+  padding-bottom: 8px;
+}
+
+/* 表格表头固定（长列表滚动时列名不丢失） */
+.ant-table-thead > tr > th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: #fafafa;
 }
 
 .page-stack {

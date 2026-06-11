@@ -30,7 +30,7 @@ export class LeadsController {
   async findAll(
     @Req() req: Request,
     @Res() res: Response,
-    @Query('scope') scope?: 'self' | 'employee' | 'all',
+    @Query('scope') scope?: string,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
     @Query('employeeId') employeeId?: string,
@@ -148,9 +148,12 @@ export class LeadsController {
     return res.json(result);
   }
 
-  private resolveScope(role?: string, scope?: 'self' | 'employee' | 'all'): 'self' | 'employee' | 'all' {
+  private resolveScope(role?: string, scope?: string): 'self' | 'employee' | 'all' {
     if (role === 'admin' || role === 'owner') {
-      return scope || 'all';
+      return (scope as any) || 'all';
+    }
+    if (role === 'academic' && scope === 'academic-orders') {
+      return 'academic-orders' as any;
     }
     return 'self';
   }

@@ -38,6 +38,7 @@ import {
   reassignLead,
   updateLeadIntentionLevel,
 } from '@/shared/api/leads';
+import { apiClient } from '@/shared/api/apiClient';
 import { ReminderButton } from '@/shared/components/notifications/ReminderButton';
 import { StatusTag } from '@/shared/components/status';
 import { formatDateTime } from '@/shared/utils/date-format';
@@ -282,6 +283,18 @@ export default function SalesLeadsPage() {
         document.body.removeChild(textarea);
       }
       message.success('微信已复制');
+      // 复制成功后更新处理状态为"待通过"（如果当前是"未联系"）
+      if (lead.processStatus === 'not_contacted') {
+        try {
+          await apiClient.request(`/leads/${lead.id}/status`, {
+            method: 'PATCH',
+            body: { processStatus: 'waiting_pass' },
+          });
+          await loadLeads(page, pageSize, filters);
+        } catch {
+          // 静默失败，不影响复制体验
+        }
+      }
     } catch (err) {
       message.error(err instanceof Error ? err.message : '复制失败');
     }

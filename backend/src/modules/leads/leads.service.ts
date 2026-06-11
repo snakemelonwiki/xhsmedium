@@ -44,7 +44,7 @@ interface FollowRecordDto {
 }
 
 interface LeadFilterOptions {
-  scope?: 'self' | 'employee' | 'all';
+  scope?: 'self' | 'employee' | 'all' | 'academic-orders';
   employeeId?: string;
   actorEmployeeId?: string;
   actorUserId?: string;
@@ -459,6 +459,11 @@ export class LeadsService {
       // 标记 employeeId 已被 scope 层处理,避免 applyLeadFilters 重复 andWhere
       // 同名字段(TypeORM QueryBuilder 会报"duplicate parameter"或 AND 条件重复)。
       (filters as any)._employeeIdHandled = true;
+    } else if (scope === 'academic-orders') {
+      qb.andWhere(
+        `l.id IN (SELECT o.lead_id FROM orders o WHERE o.academic_user_id = :academicUserId AND o.deleted_at IS NULL)`,
+        { academicUserId: filters.actorUserId || '' }
+      );
     }
     // v1.3 / CROSS-1: 销售端任何列表/统计查询必须 WHERE is_dispatched = 0，
     // 主管端 admin/owner 不限制（与文档 §10 销售端约束一致）。

@@ -8,7 +8,7 @@ import { useEffect, useState } from 'react';
 
 import { apiClient } from '@/shared/api/apiClient';
 import { orderStatusMeta } from '@/shared/api/enums';
-import { formatDateTime } from '@/shared/utils/date-format';
+import { formatDateTime, formatRemindTimeTag } from '@/shared/utils/date-format';
 
 type ReminderRow = {
   id: string;
@@ -87,22 +87,23 @@ export default function AcademicRemindersPage() {
     {
       title: '提醒时间',
       dataIndex: 'nextRemindAt',
-      width: 180,
+      width: 160,
       render: (value: string | null, record) => {
         if (!value) return '-';
-        const date = formatDateTime(value);
-        if (record.isOverdue) {
-          return <Tag color="red">已到期 · {date}</Tag>;
-        }
-        return <Tag color="orange">{date}</Tag>;
+        const tag = formatRemindTimeTag(value);
+        return <Tag color={tag.color}>{tag.label}</Tag>;
       },
     },
     {
       title: '已发送',
       dataIndex: 'reminderSentAt',
-      width: 100,
+      width: 140,
       render: (value: string | null) =>
-        value ? <Tag color="green">已发</Tag> : <Tag color="default">未发</Tag>,
+        value ? (
+          <Tag color="green">已发 · {formatDateTime(value).split(' ')[1] || ''}</Tag>
+        ) : (
+          <Tag color="default">未发</Tag>
+        ),
     },
     {
       title: '内容',

@@ -89,6 +89,11 @@ export default function AdminEmployeesPage() {
   const [createUserForm] = Form.useForm();
   const [createUserLoading, setCreateUserLoading] = useState(false);
 
+  // 重置密码弹窗
+  const [resetPwdModalOpen, setResetPwdModalOpen] = useState(false);
+  const [resetPwdResult, setResetPwdResult] = useState<{ username: string; newPassword: string } | null>(null);
+  const [resetPwdLoading, setResetPwdLoading] = useState(false);
+
   async function load(page = pagination.current, pageSize = pagination.pageSize) {
     setLoading(true);
     try {
@@ -205,6 +210,26 @@ export default function AdminEmployeesPage() {
     setCreateUserModalOpen(true);
   }
 
+  async function handleResetPassword(record: Employee) {
+    setResetPwdLoading(true);
+    try {
+      const res = await apiClient.request<{ ok: boolean; username: string; newPassword: string; message?: string }>(
+        `/employees/${record.id}/reset-password`,
+        { method: 'POST' },
+      );
+      if (res.ok) {
+        setResetPwdResult({ username: res.username, newPassword: res.newPassword });
+        setResetPwdModalOpen(true);
+      } else {
+        messageApi.error(res.message || '重置失败');
+      }
+    } catch (err: unknown) {
+      messageApi.error((err as Error)?.message || '重置失败');
+    } finally {
+      setResetPwdLoading(false);
+    }
+  }
+
   async function submitCreateUser(values: { username: string; password: string }) {
     if (!bindingEmployee) return;
     setCreateUserLoading(true);
@@ -301,6 +326,11 @@ export default function AdminEmployeesPage() {
       render: (_: unknown, record: Employee) => (
         <Space size={4}>
           <Button size="small" onClick={() => startEdit(record)}>编辑</Button>
+          {record.userId && (
+            <Button size="small" loading={resetPwdLoading} onClick={() => handleResetPassword(record)}>
+              重置密码
+            </Button>
+          )}
           {record.status !== '停用' && (
             <Button size="small" danger type="text" onClick={() => openDeactivateConfirm(record)}>
               停用
@@ -543,6 +573,51 @@ export default function AdminEmployeesPage() {
             </Form.Item>
           </Form>
         </Space>
+      </Modal>
+
+      {/* 重置密码结果弹窗 */}
+      <Modal
+        title="密码已重置"
+        open={resetPwdModalOpen}
+        onCancel={() => { setResetPwdModalOpen(false); setResetPwdResult(null); }}
+        footer={[
+          <Button key="close" onClick={() => { setResetPwdModalOpen(false); setResetPwdResult(null); }}>
+            关闭
+          </Button>,
+        ]}
+        width={440}
+      >
+        {resetPwdResult && (
+          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            <Card size="small" style={{ background: '#fffbe6', borderColor: '#ffe58f' }}>
+              <Paragraph type="warning" style={{ marginBottom: 0 }}>
+                新密码仅显示一次，请务必复制保存后告知员工。关闭后将无法再次查看。
+              </Paragraph>
+            </Card>
+            <div>
+              <Text type="secondary" style={{ fontSize: 12 }}>登录用户名</Text>
+              <Input value={resetPwdResult.username} readOnly style={{ marginTop: 4 }} />
+            </div>
+            <div>
+              <Text type="secondary" style={{ fontSize: 12 }}>新密码</Text>
+              <Space.Compact style={{ marginTop: 4, width: '100%' }}>
+                <Input value={resetPwdResult.newPassword} readOnly style={{ fontFamily: 'monospace', fontWeight: 600, letterSpacing: 1 }} />
+                <Button
+                  type="primary"
+                  onClick={() => {
+                    navigator.clipboard.writeText(resetPwdResult.newPassword).then(() => {
+                      messageApi.success('密码已复制到剪贴板，请发送给员工并提醒保存');
+                    }).catch(() => {
+                      messageApi.error('复制失败，请手动选中后 Ctrl+C 复制');
+                    });
+                  }}
+                >
+                  复制密码
+                </Button>
+              </Space.Compact>
+            </div>
+          </Space>
+        )}
       </Modal>
     </Space>
   );

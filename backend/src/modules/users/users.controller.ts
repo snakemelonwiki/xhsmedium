@@ -287,4 +287,57 @@ export class UsersController {
     }
     return res.json({ ok: true });
   }
+
+  /**
+   * 当前登录用户自行修改密码。
+   * 需提供旧密码验证，新密码明文存储。
+   */
+  @Patch('self/change-password')
+  async changeSelfPassword(@Body() body: any, @Req() req: Request, @Res() res: Response) {
+    const userId = getSessionUserId(req);
+    if (!userId) {
+      return res.status(401).json({ ok: false, message: '未登录' });
+    }
+    const { oldPassword, newPassword } = body || {};
+    if (!oldPassword || !newPassword) {
+      return res.status(400).json({ ok: false, message: '请提供旧密码和新密码' });
+    }
+    if (String(newPassword).length < 6) {
+      return res.status(400).json({ ok: false, message: '新密码至少需要6个字符' });
+    }
+    if (!/[a-zA-Z]/.test(String(newPassword)) || !/[0-9]/.test(String(newPassword))) {
+      return res.status(400).json({ ok: false, message: '新密码必须包含字母和数字' });
+    }
+    const user = await this.usersService.findById(userId);
+    if (!user) {
+      return res.status(404).json({ ok: false, message: '用户不存在' });
+    }
+    // 验证旧密码（兼容 bcrypt 和明文）
+    let oldPasswordValid = false;
+    const storedPw = (user as any).password || '';
+    if (storedPw.startsWith('$2b$') || storedPw.startsWith('$2a$')) {
+      const bcrypt = await import('bcrypt');
+      oldPasswordValid = await bcrypt.compare(String(oldPassword), storedPw);
+    } else {
+      oldPasswordValid = storedPw === String(oldPassword);
+    }
+    if (!oldPasswordValid) {
+      return res.status(400).json({ ok: false, message: '旧密码不正确' });
+    }
+    // 存储新密码（明文）
+    await this.usersService.updatePassword(userId, String(newPassword));
+    try {
+      await this.operationLogs.log({
+        userId,
+        action: OPERATION_LOG_ACTIONS.UPDATE,
+        targetType: OPERATION_LOG_TARGET_TYPES.USER,
+        targetId: userId,
+        detail: stringifyDetail({ action: 'changeSelfPassword' }),
+        ip: parseIp(req),
+      });
+    } catch (logErr) {
+      console.error('[users] operation log failed', (logErr as any)?.message || logErr);
+    }
+    return res.json({ ok: true, message: '密码修改成功' });
+  }
 }

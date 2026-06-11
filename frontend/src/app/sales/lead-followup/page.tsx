@@ -4,6 +4,7 @@ import {
   Alert,
   Button,
   Card,
+  DatePicker,
   Empty,
   Form,
   Input,
@@ -224,6 +225,23 @@ export default function SalesLeadFollowupPage() {
       render: (_v, lead) => <StatusTag kind="processStatus" code={lead.processStatus ?? LeadProcessStatus.NOT_CONTACTED} />,
     },
     {
+      title: '成交状态',
+      key: 'dealStatus',
+      width: 100,
+      render: (_v, lead) => {
+        if (!lead.dealStatus) return <Typography.Text type="secondary">未产生订单</Typography.Text>;
+        const map: Record<string, { label: string; color: string }> = {
+          not_deal: { label: '未成交', color: 'default' },
+          deal_pending: { label: '成交中', color: 'processing' },
+          deal_done: { label: '已成交', color: 'success' },
+          refunded: { label: '已退款', color: 'error' },
+          invalid: { label: '无效', color: 'default' },
+        };
+        const m = map[lead.dealStatus] || { label: lead.dealStatus, color: 'default' };
+        return <Tag color={m.color}>{m.label}</Tag>;
+      },
+    },
+    {
       title: '最近跟进',
       key: 'latestFollow',
       width: 150,
@@ -364,7 +382,7 @@ export default function SalesLeadFollowupPage() {
               <Input placeholder="如：明天下午 3 点发修改方案" />
             </Form.Item>
             <Form.Item name="nextFollowTime" label="下次跟进时间" className="full-row">
-              <Input type="datetime-local" />
+              <DatePicker showTime format="YYYY/MM/DD HH:mm" style={{ width: '100%' }} placeholder="选择下次跟进时间" />
             </Form.Item>
             <Form.Item name="content" label="跟进备注" className="full-row" rules={[{ required: true, message: '请输入跟进内容' }]}>
               <Input.TextArea rows={3} placeholder="记录本次沟通重点和下一步动作" />

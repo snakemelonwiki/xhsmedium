@@ -1382,6 +1382,11 @@ export class OrdersService {
       requirementNote: lead.requirementNote,
       intentionLevel: lead.intentionLevel,
       nextFollowAt: lead.nextFollowTime,
+      contactInfo: lead.contactInfo ?? null,
+      nickname: lead.nickname ?? null,
+      budget: lead.budget ?? null,
+      majorContent: lead.majorContent ?? null,
+      salesFeedback: lead.salesFeedback ?? null,
     };
   }
 

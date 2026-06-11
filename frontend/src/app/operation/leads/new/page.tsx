@@ -127,6 +127,21 @@ export default function OperationLeadNewPage() {
       message.warning('未识别到可回填字段');
       return;
     }
+    // 尝试用账号名匹配已加载的来源账号
+    const accountName = parsed._accountName;
+    if (accountName && accounts.length > 0) {
+      const matched = accounts.find(
+        (a) => a.name && (a.name.includes(accountName) || accountName.includes(a.name)),
+      );
+      if (matched) {
+        parsed.accountId = matched.id;
+      } else {
+        message.warning(`未找到与"${accountName}"匹配的来源账号，请手动选择`);
+      }
+      delete parsed._accountName;
+    } else if (parsed._accountName) {
+      delete parsed._accountName;
+    }
     form.setFieldsValue(parsed);
     message.success('已识别并回填客资信息');
   }
@@ -295,6 +310,10 @@ function parseLeadText(raw: string): Record<string, string> {
       if (accountMatch) {
         result._accountName = accountMatch[1].trim();
       }
+    }
+    // 单独的账号字段
+    else if (/账号/.test(keyNorm) && valueNorm) {
+      result._accountName = valueNorm;
     }
     // 预算
     else if (/预算/.test(keyNorm) && valueNorm) {

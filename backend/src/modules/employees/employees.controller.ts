@@ -77,6 +77,40 @@ export class EmployeesController {
     return res.json({ exists });
   }
 
+  /**
+   * 重置员工登录账号密码。
+   * 生成随机密码，返回明文（仅一次），同时解除可能的锁定状态。
+   */
+  @Post(':id/reset-password')
+  async resetPassword(@Param('id') id: string, @Req() req: Request, @Res() res: Response) {
+    if (!ensureEmployeeAdmin(req, res)) return;
+    const userId = getSessionUserId(req);
+    try {
+      const result = await this.employeesService.resetPassword(id);
+      try {
+        await this.operationLogs.log({
+          userId,
+          action: OPERATION_LOG_ACTIONS.UPDATE,
+          targetType: OPERATION_LOG_TARGET_TYPES.EMPLOYEE,
+          targetId: id,
+          detail: stringifyDetail({ action: 'resetPassword', username: result.username }),
+          ip: parseIp(req),
+        });
+      } catch (logErr) {
+        console.error('[employees] operation log failed', (logErr as any)?.message || logErr);
+      }
+      return res.json({ ok: true, ...result });
+    } catch (err: any) {
+      if (err.status === 404) {
+        return res.status(404).json({ ok: false, message: err.message });
+      }
+      if (err.status === 400) {
+        return res.status(400).json({ ok: false, message: err.message });
+      }
+      throw err;
+    }
+  }
+
   @Get(':id')
   async findById(@Param('id') id: string, @Req() req: Request, @Res() res: Response) {
     if (!ensureEmployeeAdmin(req, res)) return;

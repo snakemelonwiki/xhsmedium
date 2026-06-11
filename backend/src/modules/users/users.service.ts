@@ -193,4 +193,8 @@ export class UsersService {
   async updateStatus(id: string, status: string): Promise<void> {
     await this.userRepository.update(id, { status });
   }
+
+  async updatePassword(id: string, newPassword: string): Promise<void> {
+    await this.userRepository.update(id, { password: newPassword });
+  }
 }

@@ -337,6 +337,33 @@ export class EmployeesService {
   }
 
   /**
+   * 重置员工关联登录账号的密码，同时解除锁定状态。
+   * 生成随机密码并返回明文（仅返回一次），库中只存 bcrypt 哈希。
+   */
+  async resetPassword(id: string): Promise<{ userId: string; username: string; newPassword: string }> {
+    const employee = await this.findById(id);
+    if (!employee) {
+      throw new NotFoundException('员工不存在');
+    }
+    const linkedUser = await this.userRepository.findOne({ where: { employeeId: id } });
+    if (!linkedUser) {
+      throw new BadRequestException('该员工未绑定登录账号，无法重置密码');
+    }
+    const newPassword = this.generateRandomPassword();
+    await this.userRepository.update(linkedUser.id, {
+      password: newPassword,
+      failedLoginCount: 0,
+      lastFailedAt: null,
+      status: linkedUser.status === 'locked' ? 'active' : linkedUser.status,
+    });
+    return {
+      userId: linkedUser.id,
+      username: linkedUser.username,
+      newPassword,
+    };
+  }
+
+  /**
    * 批量给员工列表附加关联的 user.role。
    * 一次查询全部关联 user，避免 N+1。
    */

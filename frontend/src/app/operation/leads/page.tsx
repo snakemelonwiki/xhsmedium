@@ -159,6 +159,18 @@ export default function OperationLeadsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters]);
 
+  // 页面切回可见时自动刷新数据（销售端操作后运营端能及时看到变化）
+  useEffect(() => {
+    function handleVisibilityChange() {
+      if (document.visibilityState === 'visible') {
+        void load(pagination.current, pagination.pageSize, filters).catch(() => {});
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filters, pagination.current, pagination.pageSize]);
+
   async function handleExport() {
     setExporting(true);
     try {
