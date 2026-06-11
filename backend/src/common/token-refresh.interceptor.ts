@@ -11,6 +11,11 @@ export class TokenRefreshInterceptor implements NestInterceptor {
     const request = context.switchToHttp().getRequest();
     const response = context.switchToHttp().getResponse();
 
+    // 登出请求不续期：token 即将被撤销，签发新 token 无意义
+    if (request.path === '/api/auth/logout') {
+      return next.handle();
+    }
+
     return next.handle().pipe(
       tap(() => {
         const authHeader = request.headers.authorization;
@@ -18,7 +23,7 @@ export class TokenRefreshInterceptor implements NestInterceptor {
 
         const token = authHeader.substring(7);
         try {
-          const payload = this.jwtService.decode(token) as any;
+          const payload = this.jwtService.verify(token) as any;
           if (!payload || !payload.exp) return;
 
           const now = Math.floor(Date.now() / 1000);
@@ -34,8 +39,8 @@ export class TokenRefreshInterceptor implements NestInterceptor {
             });
             response.setHeader('X-New-Token', newToken);
           }
-        } catch (err) {
-          // Token 解析失败，忽略
+        } catch {
+          // Token 无效或已过期，忽略（不做续期）
         }
       }),
     );

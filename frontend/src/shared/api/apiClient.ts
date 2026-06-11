@@ -103,6 +103,12 @@ export function createApiClient(options: ApiClientOptions = {}) {
       body,
     });
 
+    // 消费后端 TokenRefreshInterceptor 自动续期的 X-New-Token 响应头
+    const newToken = response.headers.get('X-New-Token');
+    if (newToken && typeof window !== 'undefined') {
+      window.localStorage.setItem(TOKEN_KEY, newToken);
+    }
+
     if (response.status === 401) {
       // 401 不再立即 clearToken：先尝试一次 /auth/refresh 续签并重放原请求。
       // 仅 refresh 也失败时才视为"登录已失效"并清 token。

@@ -5,7 +5,7 @@ import { Avatar, App, Button, Dropdown, Form, Input, Layout, Menu, Modal, Space,
 import type { MenuProps } from 'antd';
 import { usePathname, useRouter } from 'next/navigation';
 import type { ReactNode } from 'react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   clearAuth,
@@ -39,6 +39,7 @@ export function AppLayout({ role, title, children }: AppLayoutProps) {
   const [pwModalOpen, setPwModalOpen] = useState(false);
   const [pwLoading, setPwLoading] = useState(false);
   const [pwForm] = Form.useForm();
+  const logoutInProgress = useRef(false);
   const handleAuthenticated = useCallback((nextUser: AppUser) => setUser(nextUser), []);
   const prefetchMenuItem = useCallback((path: string) => router.prefetch(path), [router]);
 
@@ -63,7 +64,14 @@ export function AppLayout({ role, title, children }: AppLayoutProps) {
       key: 'logout',
       icon: <LogoutOutlined />,
       label: '退出登录',
-      onClick: () => {
+      onClick: async () => {
+        if (logoutInProgress.current) return;
+        logoutInProgress.current = true;
+        try {
+          await apiClient.post('/auth/logout');
+        } catch {
+          // 后端登出失败不应阻塞前端清理
+        }
         clearAuth();
         router.replace('/login');
       },
