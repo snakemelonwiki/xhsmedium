@@ -26,7 +26,7 @@ async function init() {
 
 async function loadData() {
   const firstPage = "limit=20&offset=0";
-  const requests = state.user.role === "admin" || state.user.role === "owner"
+  const requests = state.user.role === "admin" || state.user.role === "owner" || state.user.role === "supervisor"
     ? [
         api("/api/dashboard/summary"),
         api("/api/dashboard/post-type-distribution"),
@@ -100,7 +100,7 @@ async function loadData() {
   state.salesLeadLocalProfiles = state.user.role === "sales" ? loadSalesLeadLocalProfiles() : {};
   state.salesTomorrowFollowupIds = state.user.role === "sales" ? loadSalesTomorrowFollowupIds() : [];
   state.leadTomorrowFollowups = undefined; // 让 renderApp 触发 loadTomorrowFollowups 拉 next_follow_time
-  if (state.user.role === "admin" || state.user.role === "owner") {
+  if (state.user.role === "admin" || state.user.role === "owner" || state.user.role === "supervisor") {
     state.reviewHighlights = loadReviewCollection("review_highlights");
     state.reviewSamples = loadReviewCollection("review_samples");
   }
@@ -169,7 +169,11 @@ function renderLogin() {
       if (typeof initNotificationSocket === "function") initNotificationSocket();
       renderApp();
     } catch (error) {
-      showToast("error", "登录失败", error.message);
+      if (error.data?.locked) {
+        showToast("error", "账号已锁定", `连续多次密码错误，账号已被锁定。请等待30分钟后再试，或联系管理员解锁。`);
+      } else {
+        showToast("error", "登录失败", error.message || "请检查用户名和密码");
+      }
     }
   });
 }

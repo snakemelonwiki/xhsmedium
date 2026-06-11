@@ -413,6 +413,21 @@ a {
   flex: 0 0 auto;
 }
 
+.flash-error {
+  background: linear-gradient(180deg, #fef2f2 0%, #fee2e2 100%);
+  border-color: #fca5a5;
+}
+
+.flash-warn {
+  background: linear-gradient(180deg, #fffbeb 0%, #fef3c7 100%);
+  border-color: #fcd34d;
+}
+
+.flash-info {
+  background: linear-gradient(180deg, #eff6ff 0%, #dbeafe 100%);
+  border-color: #93c5fd;
+}
+
 .page-desc {
   margin: 8px 0 0;
   max-width: 780px;
@@ -6732,4 +6747,14 @@ tbody tr:nth-child(even):hover {
 .input-success {
   border-color: #10b981 !important;
   background-color: #f0fdf4 !important;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
 }

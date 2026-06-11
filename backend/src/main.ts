@@ -7,6 +7,7 @@ import { AppModule } from './app.module';
 import * as path from 'path';
 import { createBodySizeGuard } from './common/body-size.middleware';
 import { AuthGuard } from './common/auth.guard';
+import { AllExceptionsFilter } from './common/all-exceptions.filter';
 import { AuthService } from './modules/auth/auth.service';
 
 // HTTP request logger
@@ -111,6 +112,9 @@ async function bootstrap() {
       transform: true,
     }),
   );
+
+  // 全局异常过滤器：统一错误响应格式，必须在静态文件中间件之前注册
+  app.useGlobalFilters(new AllExceptionsFilter());
 
   const expressApp = app.getHttpAdapter().getInstance();
 

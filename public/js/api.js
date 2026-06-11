@@ -120,12 +120,18 @@ async function api(path, options = {}) {
           await _handle401();
         }
         const data = await response.json().catch(() => ({ message: "认证失败" }));
-        throw new Error(data.message || "认证失败");
+        const err = new Error(data.message || "认证失败");
+        err.status = 401;
+        err.data = data;
+        throw err;
       }
 
       if (!response.ok) {
         const data = await response.json().catch(() => ({ message: "请求失败" }));
-        throw new Error(data.message || "请求失败");
+        const err = new Error(data.message || "请求失败");
+        err.status = response.status;
+        err.data = data;  // 保留完整响应（含 locked, failedLoginCount 等扩展字段）
+        throw err;
       }
       return response.json();
     } finally {
@@ -188,3 +194,13 @@ function throttle(fn, wait = 300) {
     return fn.apply(this, args);
   };
 }
+
+// ===== P0: 全局未捕获 Promise 异常兜底 =====
+window.addEventListener('unhandledrejection', (e) => {
+  console.error('[unhandledrejection]', e.reason);
+  // AbortError 是请求取消，不需要提示用户
+  if (e.reason?.name === 'AbortError') return;
+  // DOMException("Request cancelled") 也不需要提示
+  if (e.reason instanceof DOMException) return;
+  showToast('error', '系统异常', '发生了未预期的错误，请刷新页面重试。');
+});

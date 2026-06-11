@@ -202,6 +202,14 @@ legacyApp.use(express.static(PUBLIC_DIR));
 legacyApp.get("*", (_req, res) => {
   res.sendFile(path.join(PUBLIC_DIR, "index.html"));
 });
+// ===== P0: 全局 Express 错误兜底 =====
+legacyApp.use((err, req, res, next) => {
+  console.error('[server.js][globalError]', err?.message || err);
+  // 如果响应头已经发送，Express 要求走默认错误处理
+  if (res.headersSent) return next(err);
+  res.status(500).json({ ok: false, message: '服务暂时不可用，请稍后重试' });
+});
+
 legacyApp.listen(PORT, "0.0.0.0", () => {
   console.log(`legacy proxy 已启动: http://0.0.0.0:${PORT} -> ${BACKEND_URL}`);
 });
@@ -218,6 +226,12 @@ if (OWNER_PORT !== PORT) {
   ownerApp.get("*", (_req, res) => {
     const target = `${FRONTEND_PUBLIC_URL.replace(/\/$/, "")}/owner`;
     res.redirect(302, target);
+  });
+  // ===== P0: 全局 Express 错误兜底 =====
+  ownerApp.use((err, req, res, next) => {
+    console.error('[server.js][globalError]', err?.message || err);
+    if (res.headersSent) return next(err);
+    res.status(500).json({ ok: false, message: '服务暂时不可用，请稍后重试' });
   });
   ownerApp.listen(OWNER_PORT, "0.0.0.0", () => {
     console.log(`owner port 已启动: http://0.0.0.0:${OWNER_PORT} -> 302 ${FRONTEND_PUBLIC_URL}/owner`);
@@ -236,6 +250,12 @@ if (ALL_ROLES_PORT !== PORT && ALL_ROLES_PORT !== OWNER_PORT) {
   allRolesApp.use(express.static(PUBLIC_DIR));
   allRolesApp.get("*", (_req, res) => {
     res.sendFile(path.join(PUBLIC_DIR, "index.html"));
+  });
+  // ===== P0: 全局 Express 错误兜底 =====
+  allRolesApp.use((err, req, res, next) => {
+    console.error('[server.js][globalError]', err?.message || err);
+    if (res.headersSent) return next(err);
+    res.status(500).json({ ok: false, message: '服务暂时不可用，请稍后重试' });
   });
   allRolesApp.listen(ALL_ROLES_PORT, "0.0.0.0", () => {
     console.log(`all-roles port 已启动: http://0.0.0.0:${ALL_ROLES_PORT} (统一登录入口，全角色放行；owner 仍走 ${OWNER_PORT})`);

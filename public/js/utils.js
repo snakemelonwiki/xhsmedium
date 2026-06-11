@@ -520,6 +520,52 @@ function showToast(type, title, message = "", duration = 3000) {
   }
 }
 
+/**
+ * 自定义确认弹窗（替代 window.confirm）
+ * @param {string} title - 标题
+ * @param {string} message - 提示内容
+ * @param {object} options - 可选配置
+ * @returns {Promise<boolean>} 用户确认返回 true，取消返回 false
+ */
+function confirmModal(title, message, options = {}) {
+  return new Promise((resolve) => {
+    const { confirmText = "确认", cancelText = "取消", danger = false } = options;
+
+    // 确保容器存在
+    let overlay = document.getElementById("confirmModalOverlay");
+    if (overlay) overlay.remove();
+
+    overlay = document.createElement("div");
+    overlay.id = "confirmModalOverlay";
+    overlay.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:100000;display:flex;align-items:center;justify-content:center;animation:fadeIn 0.15s ease;";
+
+    const btnColor = danger ? "#ef4444" : "#3b82f6";
+    const btnBg = danger ? "#fef2f2" : "#eff6ff";
+
+    overlay.innerHTML = `
+      <div style="background:white;border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,0.2);padding:28px 32px;max-width:400px;width:90%;animation:scaleIn 0.15s ease;">
+        <div style="font-weight:700;font-size:16px;color:#111827;margin-bottom:8px;">${escapeHtml(title)}</div>
+        <div style="font-size:14px;color:#6b7280;line-height:1.6;margin-bottom:24px;">${escapeHtml(message)}</div>
+        <div style="display:flex;gap:12px;justify-content:flex-end;">
+          <button id="confirmModalCancel" style="padding:8px 20px;border-radius:8px;border:1px solid #e5e7eb;background:white;font-size:14px;color:#6b7280;cursor:pointer;">${escapeHtml(cancelText)}</button>
+          <button id="confirmModalOk" style="padding:8px 20px;border-radius:8px;border:none;background:${btnColor};color:white;font-size:14px;cursor:pointer;font-weight:500;">${escapeHtml(confirmText)}</button>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(overlay);
+
+    const cleanup = (result) => {
+      overlay.remove();
+      resolve(result);
+    };
+
+    document.getElementById("confirmModalCancel").onclick = () => cleanup(false);
+    document.getElementById("confirmModalOk").onclick = () => cleanup(true);
+    overlay.onclick = (e) => { if (e.target === overlay) cleanup(false); };
+  });
+}
+
 function formatDate(value) {
   return new Date(value).toLocaleString("zh-CN", { hour12: false });
 }

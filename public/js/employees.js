@@ -243,7 +243,7 @@ async function submitEmployee(event) {
 
 // ===== L5430-L5437 deleteEmployee =====
 async function deleteEmployee(id) {
-  if (!window.confirm("确认删除该员工及其关联数据吗？")) return;
+  if (!await confirmModal("确认删除", "确认删除该员工及其关联数据吗？此操作不可撤销。", { danger: true, confirmText: "确认删除" })) return;
   try {
     await api(`/api/employees/${id}`, { method: "DELETE" });
     state.editingEmployeeId = state.editingEmployeeId === id ? "" : state.editingEmployeeId;
