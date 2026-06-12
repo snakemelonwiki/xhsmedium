@@ -346,9 +346,12 @@ export class EmployeesService {
 
   /**
    * 重置员工关联登录账号的密码，同时解除锁定状态。
-   * 生成随机密码并返回明文（仅返回一次），库中只存 bcrypt 哈希。
+   * 若未提供 newPassword，则生成随机密码；按当前项目兼容要求，库中存明文密码。
    */
-  async resetPassword(id: string): Promise<{ userId: string; username: string; newPassword: string }> {
+  async resetPassword(
+    id: string,
+    newPassword?: string,
+  ): Promise<{ userId: string; username: string; newPassword: string }> {
     const employee = await this.findById(id);
     if (!employee) {
       throw new NotFoundException('员工不存在');
@@ -357,9 +360,9 @@ export class EmployeesService {
     if (!linkedUser) {
       throw new BadRequestException('该员工未绑定登录账号，无法重置密码');
     }
-    const newPassword = this.generateRandomPassword();
+    const finalPassword = String(newPassword || '').trim() || this.generateRandomPassword();
     await this.userRepository.update(linkedUser.id, {
-      password: newPassword,
+      password: finalPassword,
       failedLoginCount: 0,
       lastFailedAt: null,
       status: linkedUser.status === 'locked' ? 'active' : linkedUser.status,
@@ -367,7 +370,7 @@ export class EmployeesService {
     return {
       userId: linkedUser.id,
       username: linkedUser.username,
-      newPassword,
+      newPassword: finalPassword,
     };
   }
 

@@ -1,15 +1,21 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   canAccessPath,
+  clearAuth,
   getAuthRedirectPath,
   getDefaultHomePath,
   getPortHomePath,
   isAppRole,
+  persistAuth,
   readAuthenticatedUser,
   STORAGE_KEYS,
   type AppRole,
 } from './auth';
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe('auth route helpers', () => {
   it('maps each role to its default home path', () => {
@@ -67,5 +73,44 @@ describe('auth route helpers', () => {
     };
 
     expect(readAuthenticatedUser(storage)).toBeUndefined();
+  });
+
+  it('rejects stored users when token belongs to another user', () => {
+    const tokenPayload = btoa(JSON.stringify({ sub: 'academic-1', role: 'academic' }))
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+    const storage = {
+      getItem: (key: string) => {
+        if (key === STORAGE_KEYS.token) return `header.${tokenPayload}.signature`;
+        if (key === STORAGE_KEYS.user) return JSON.stringify({ id: 'admin-1', name: 'admin2', role: 'admin' });
+        return null;
+      },
+    };
+
+    expect(readAuthenticatedUser(storage)).toBeUndefined();
+  });
+
+  it('notifies listeners after auth storage changes', () => {
+    const events: string[] = [];
+    const target = new EventTarget();
+    const storage = {
+      setItem: () => undefined,
+      removeItem: () => undefined,
+    };
+    const listener = () => events.push('changed');
+    vi.stubGlobal('window', {
+      addEventListener: target.addEventListener.bind(target),
+      removeEventListener: target.removeEventListener.bind(target),
+      dispatchEvent: target.dispatchEvent.bind(target),
+    });
+
+    window.addEventListener('xhsmedium:auth-changed', listener);
+
+    persistAuth('token-1', { id: '1', name: '主管', role: 'admin' }, storage);
+    clearAuth(storage);
+
+    window.removeEventListener('xhsmedium:auth-changed', listener);
+    expect(events).toEqual(['changed', 'changed']);
   });
 });

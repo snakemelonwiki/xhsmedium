@@ -75,6 +75,27 @@ describe('AuthService refreshToken', () => {
     });
   });
 
+  it('issues a new token when the old token only expired', async () => {
+    const expiredError = new Error('jwt expired');
+    (expiredError as any).name = 'TokenExpiredError';
+    jwtService.verify.mockImplementationOnce(() => {
+      throw expiredError;
+    });
+    jwtService.verify.mockReturnValueOnce({
+      sub: 'user-1',
+      username: 'alice',
+      role: 'staff',
+      employeeId: 'emp-1',
+    });
+    const service = createService();
+
+    const result = await service.refreshToken('expired-token');
+
+    expect(jwtService.verify).toHaveBeenNthCalledWith(1, 'expired-token');
+    expect(jwtService.verify).toHaveBeenNthCalledWith(2, 'expired-token', { ignoreExpiration: true });
+    expect(result.token).toBe('new-token');
+  });
+
   it('rejects invalid or inactive sessions', async () => {
     userRepository.findOne.mockResolvedValueOnce(null);
     const service = createService();
