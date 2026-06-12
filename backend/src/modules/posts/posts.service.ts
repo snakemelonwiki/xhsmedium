@@ -252,6 +252,8 @@ export class PostsService {
     /** 抓取截图：原图 / 缩略图（同源低分辨率图）。抓取失败时为空串。 */
     coverImageUrl: string;
     coverThumbUrl: string;
+    /** 发布日期（小红书页面解析，YYYY-MM-DD） */
+    publishedAt?: string;
     parsed: boolean;
     warning?: string;
   }> {
@@ -305,6 +307,7 @@ export class PostsService {
         shares: Number(scraped.shares || 0),
         coverImageUrl: scraped.coverImageUrl || '',
         coverThumbUrl: scraped.coverThumbUrl || '',
+        publishedAt: scraped.publishedAt || undefined,
         parsed: true,
       };
     } catch (err: any) {

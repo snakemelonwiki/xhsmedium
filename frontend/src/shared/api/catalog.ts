@@ -9,6 +9,8 @@ export type CatalogOption = {
   name: string;
   employeeId?: string;
   platform?: string;
+  accountUid?: string | null;
+  profileUrl?: string | null;
   parentId?: string;
   capacityPaused?: boolean;
 };
@@ -49,6 +51,8 @@ export async function listSourceAccounts(): Promise<CatalogOption[]> {
     name: item.accountName,
     employeeId: item.employeeId,
     platform: item.platform,
+    accountUid: item.accountUid,
+    profileUrl: item.profileUrl,
   }));
 }
 

@@ -20,6 +20,8 @@ interface AccountOption {
   id: string;
   name?: string;
   platform?: string;
+  accountUid?: string | null;
+  profileUrl?: string | null;
 }
 
 export default function OperationPostNewPage() {
@@ -47,7 +49,13 @@ export default function OperationPostNewPage() {
         if (cancelled) return;
         const list: any[] = Array.isArray(res) ? res : res?.items || [];
         setAccountOptions(
-          list.map((a) => ({ id: a.id, name: a.name || a.accountName, platform: a.platform })),
+          list.map((a) => ({
+            id: a.id,
+            name: a.name || a.accountName,
+            platform: a.platform,
+            accountUid: a.accountUid,
+            profileUrl: a.profileUrl,
+          })),
         );
       })
       .catch(() => {
@@ -125,7 +133,7 @@ export default function OperationPostNewPage() {
       if (platformKey) {
         nextValues.platform = platformKey;
       }
-      if (data?.title && !form.getFieldValue('title')) {
+      if (data?.title) {
         nextValues.title = data.title;
       }
 
@@ -134,11 +142,20 @@ export default function OperationPostNewPage() {
         nextValues.copywriting = data.title;
       }
 
-      // 作者信息回填：匹配账号下拉列表
-      if (data?.authorName && !form.getFieldValue('accountId')) {
-        const matched = accountOptions.find(
-          (a) => a.name === data.authorName || a.id === data.authorId,
-        );
+      // 作者信息回填：优先按账号 UID 精确匹配，其次按名称模糊匹配
+      if (data?.authorId || data?.authorName) {
+        const matchedByUid = data?.authorId
+          ? accountOptions.find((a) => a.accountUid && a.accountUid === data.authorId)
+          : undefined;
+        const matchedByName = data?.authorName
+          ? accountOptions.find((a) => {
+              if (!a.name || !data.authorName) return false;
+              const n1 = a.name.trim().toLowerCase();
+              const n2 = String(data.authorName).trim().toLowerCase();
+              return n1 === n2 || n1.includes(n2) || n2.includes(n1);
+            })
+          : undefined;
+        const matched = matchedByUid || matchedByName;
         if (matched) {
           nextValues.accountId = matched.id;
         }
@@ -173,6 +190,11 @@ export default function OperationPostNewPage() {
         nextValues.title = inferTitleFromUrl(rawUrl);
       }
       form.setFieldsValue(nextValues);
+
+      // 发布日期：小红书解析成功后回填
+      if (data?.publishedAt) {
+        form.setFieldValue('publishedAt', dayjs(data.publishedAt));
+      }
 
       if (data?.parsed) {
         const hasCover = !!(data.coverImageUrl);
@@ -505,6 +527,7 @@ export default function OperationPostNewPage() {
             <Form.Item className="full-row" name="coverImageUrl" label="封面图">
               <ImageUploadField
                 bucket="post-covers"
+                listenGlobalPaste
                 onThumbChange={(url) => { latestThumbRef.current = url; }}
                 // T10.2：粘贴截图后自动调 OCR（占位），把可识别的字段回填；
                 // onPastedImage 仅在用户粘贴时触发，点击上传不会触发 OCR。

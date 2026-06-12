@@ -277,7 +277,7 @@ export default function OperationLeadNewPage() {
                 <Input.TextArea rows={4} placeholder="客户诉求、专业方向和其他备注" />
               </Form.Item>
               <Form.Item className="full-row" name="captureImageUrl" label="引流截图">
-                <ImageUploadField bucket="lead-captures" />
+                <ImageUploadField bucket="lead-captures" listenGlobalPaste />
               </Form.Item>
             </div>
             <Button type="primary" htmlType="submit" loading={submitting}>提交客资</Button>

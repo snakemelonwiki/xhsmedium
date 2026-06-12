@@ -112,6 +112,8 @@ body {
 }
 
 .app-content {
+  min-height: 0;
+  overflow-y: auto;
   padding: 24px 28px 32px;
 }
 

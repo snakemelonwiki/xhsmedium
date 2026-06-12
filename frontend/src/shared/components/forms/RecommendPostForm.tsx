@@ -16,6 +16,8 @@ interface AccountOption {
   id: string;
   name?: string;
   platform?: string;
+  accountUid?: string | null;
+  profileUrl?: string | null;
 }
 
 export interface RecommendPostFormProps {
@@ -99,14 +101,24 @@ export function RecommendPostForm({
       const nextValues: Record<string, string | number> = {};
       const platformKey = mapPlatformToKey(data?.platform) || inferPlatformFromUrl(rawUrl);
       if (platformKey) nextValues.platform = platformKey;
-      if (data?.title && !form.getFieldValue('title')) nextValues.title = data.title;
+      if (data?.title) nextValues.title = data.title;
       if (data?.parsed && data?.title && !form.getFieldValue('copywriting') && data?.platform === '抖音') {
         nextValues.copywriting = data.title;
       }
-      if (data?.authorName && !form.getFieldValue('accountId')) {
-        const matched = accountOptions.find(
-          (a) => a.name === data.authorName || a.id === data.authorId,
-        );
+      // 作者信息回填：优先按账号 UID 精确匹配，其次按名称模糊匹配
+      if (data?.authorId || data?.authorName) {
+        const matchedByUid = data?.authorId
+          ? accountOptions.find((a) => a.accountUid && a.accountUid === data.authorId)
+          : undefined;
+        const matchedByName = data?.authorName
+          ? accountOptions.find((a) => {
+              if (!a.name || !data.authorName) return false;
+              const n1 = a.name.trim().toLowerCase();
+              const n2 = String(data.authorName).trim().toLowerCase();
+              return n1 === n2 || n1.includes(n2) || n2.includes(n1);
+            })
+          : undefined;
+        const matched = matchedByUid || matchedByName;
         if (matched) nextValues.accountId = matched.id;
       }
       if (data?.parsed === true) {
@@ -123,6 +135,11 @@ export function RecommendPostForm({
         nextValues.title = inferTitleFromUrl(rawUrl);
       }
       form.setFieldsValue(nextValues);
+
+      // 发布日期：小红书解析成功后回填
+      if (data?.publishedAt) {
+        form.setFieldValue('publishedAt', dayjs(data.publishedAt));
+      }
 
       if (data?.parsed) {
         message.success(data.coverImageUrl ? '已根据链接回填标题、指标与封面' : '已根据链接回填标题与指标');
@@ -319,6 +336,7 @@ export function RecommendPostForm({
             <Form.Item className="full-row" name="coverImageUrl" label="封面图">
               <ImageUploadField
                 bucket="post-covers"
+                listenGlobalPaste
                 onThumbChange={(url) => { latestThumbRef.current = url; }}
               />
             </Form.Item>

@@ -134,10 +134,10 @@ export class NotificationsService {
     const sql = `
       SELECT
         COALESCE(n.sender_id, '') AS sender_id,
-        u.username AS sender_name,
+        u.username COLLATE utf8mb4_unicode_ci AS sender_name,
         COUNT(*) AS cnt
       FROM notifications n
-      LEFT JOIN users u ON u.id = n.sender_id
+      LEFT JOIN users u ON u.id = n.sender_id COLLATE utf8mb4_unicode_ci
       WHERE ${whereParts.join(' AND ')}
       GROUP BY n.sender_id, u.username
       ORDER BY cnt DESC, n.sender_id ASC
