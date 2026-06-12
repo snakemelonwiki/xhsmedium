@@ -41,7 +41,8 @@ const LOGIN_WALL_PATTERNS = [/登录页/, /登录后/, /未登录/, /login_requi
 const PLAYWRIGHT_MISSING_PATTERNS = [
   /Executable doesn't exist/i,
   /playwright install/i,
-  /chromium-/i,
+  /chromium-\d+\s+not found/i,
+  /browser is not supported/i,
 ];
 
 function classifyError(err) {
@@ -86,12 +87,15 @@ async function fetchWithRetry(url, { retry = 3, timeout = 20000, log = () => {} 
         data: {
           platform: data.platform || platform,
           title: data.title || "",
+          authorName: data.authorName || "",
+          authorId: data.authorId || "",
           likes: Number(data.likes || 0),
           comments: Number(data.comments || 0),
           favorites: Number(data.favorites || 0),
           shares: Number(data.shares || 0),
           coverImageUrl: data.coverImageUrl || "",
           coverThumbUrl: data.coverThumbUrl || "",
+          publishedAt: data.publishedAt || "",
           metricsUpdatedAt: data.metricsUpdatedAt || new Date().toISOString(),
         },
       };

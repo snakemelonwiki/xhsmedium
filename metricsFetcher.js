@@ -80,29 +80,53 @@ async function getContext(platform) {
     }
   }
   const profileDir = getProfileDir(platform);
-  clearSingletonLocks(profileDir);
-  console.log(`[metricsFetcher] 创建 ${platform} 浏览器上下文（冷启动）`);
-  // 抖音使用有头浏览器（headless: false）绕过反爬检测；
-  // 小红书保持无头（headless: true）+ 资源拦截加速。
+
+  // 抖音对 GPU/渲染较敏感，Windows 也常因驱动/虚拟桌面崩溃，统一加 --disable-gpu；
+  // Linux 还加 --no-sandbox / --disable-dev-shm-usage。
   const isHeadless = platform !== "抖音";
-  // Linux 特有参数：Docker/root 下需要 --no-sandbox；
-  // 有头模式需要 --disable-gpu 避免无 GPU 时的渲染问题。
-  const linuxArgs = [];
-  if (process.platform === "linux") {
-    linuxArgs.push("--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage");
+  const baseArgs = [];
+  if (platform === "抖音") {
+    baseArgs.push("--disable-gpu");
   }
-  const ctx = await chromium.launchPersistentContext(profileDir, {
-    headless: isHeadless,
-    viewport: { width: 1440, height: 1100 },
-    args: [
-      ...(isHeadless ? ["--disable-remote-fonts"] : []),
-      ...linuxArgs,
-    ],
-    userAgent:
-      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-  });
-  pooledContexts.set(platform, ctx);
-  return ctx;
+  if (process.platform === "linux") {
+    baseArgs.push("--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage");
+  }
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      // 每次启动前清理单例锁文件，防止上一次崩溃残留锁
+      clearSingletonLocks(profileDir);
+      if (attempt > 0) {
+        console.warn(`[metricsFetcher] ${platform} 浏览器启动失败，额外清理 journal 后重试`);
+        // 更激进地清理可能导致锁定的文件
+        for (const name of ["SingletonLock", "SingletonCookie", "SingletonSocket", "Default/Cookies-journal", "Default/Network/Cookies-journal"]) {
+          try { fs.rmSync(path.join(profileDir, name), { force: true, recursive: true }); } catch {}
+        }
+      }
+      console.log(`[metricsFetcher] 创建 ${platform} 浏览器上下文（冷启动，attempt=${attempt + 1}）`);
+      const attemptArgs = [...baseArgs];
+      if (attempt > 0 && platform === "抖音" && process.platform === "win32") {
+        // 二次尝试：Windows 下抖音偶发 GPU/沙箱崩溃，追加 --no-sandbox 兜底
+        attemptArgs.push("--no-sandbox");
+      }
+      const ctx = await chromium.launchPersistentContext(profileDir, {
+        headless: isHeadless,
+        viewport: { width: 1440, height: 1100 },
+        args: [
+          ...(isHeadless ? ["--disable-remote-fonts"] : []),
+          ...attemptArgs,
+        ],
+        userAgent:
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+      });
+      pooledContexts.set(platform, ctx);
+      return ctx;
+    } catch (err) {
+      console.warn(`[metricsFetcher] ${platform} 浏览器上下文启动失败 (attempt=${attempt + 1}): ${err?.message || err}`);
+      if (attempt === 1) throw err;
+    }
+  }
+  throw new Error(`${platform} 浏览器上下文启动失败`);
 }
 
 function releaseContext(platform) {
@@ -228,6 +252,194 @@ function extractDouyinVideoId(url) {
   return null;
 }
 
+function extractDouyinFromDetail(detail) {
+  if (!detail || typeof detail !== "object") return null;
+  try {
+    // 抖音数据来源有两种结构：
+    // 1. API /aweme/v1/web/aweme/detail/ 返回：detail.statistics（snake_case）+ detail.author
+    // 2. RSC flight data（图文/笔记页 awemeType=68）：detail.stats（camelCase）+ detail.authorInfo
+    const apiStats = detail.statistics || {};
+    const rscStats = detail.stats || {};
+    const stats = {
+      digg_count: apiStats.digg_count ?? rscStats.diggCount,
+      comment_count: apiStats.comment_count ?? rscStats.commentCount,
+      collect_count: apiStats.collect_count ?? rscStats.collectCount,
+      share_count: apiStats.share_count ?? rscStats.shareCount,
+    };
+
+    const author = detail.author || detail.authorInfo || {};
+    const video = detail.video || {};
+
+    // 封面：视频页取 video.cover；图文/笔记页（awemeType 68）取 images[0]
+    const pickCover = (o) =>
+      Array.isArray(o?.url_list)
+        ? o.url_list.find((u) => typeof u === "string" && /^https?:\/\//.test(u) && !isPlaceholderCoverUrl(u))
+        : "";
+    const pickCoverCamel = (o) =>
+      Array.isArray(o?.urlList)
+        ? o.urlList.find((u) => typeof u === "string" && /^https?:\/\//.test(u) && !isPlaceholderCoverUrl(u))
+        : "";
+    const pickStringCover = (url) => (typeof url === "string" && /^https?:\/\//.test(url) && !isPlaceholderCoverUrl(url) ? url : "");
+    const noteCover = Array.isArray(detail.images) && detail.images.length > 0
+      ? pickCoverCamel(detail.images[0]) || pickCover(detail.images[0])
+      : "";
+    const coverImageUrl =
+      noteCover ||
+      pickCover(video.cover) ||
+      pickCoverCamel(video.cover) ||
+      pickStringCover(video.cover) ||
+      pickStringCover(video.coverUrl) ||
+      pickCover(video.dynamic_cover) ||
+      pickCoverCamel(video.dynamicCover) ||
+      pickCover(video.origin_cover) ||
+      pickCoverCamel(video.originCover) ||
+      pickStringCover(video.originCover) ||
+      pickStringCover(video.dynamicCover) ||
+      "";
+
+    let publishDate = "";
+    const ts = detail.create_time ?? detail.createTime;
+    if (ts) {
+      const d = new Date(Number(ts) * 1000);
+      publishDate = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+    }
+
+    return {
+      title: String(detail.desc || "").trim(),
+      authorName: String(author.nickname || "").trim(),
+      authorId: String(author.uid || author.short_id || author.user_id || "").trim(),
+      authorUrl: author.sec_uid || author.secUid ? `https://www.douyin.com/user/${author.sec_uid || author.secUid}` : "",
+      publishDate,
+      likes: Number(stats.digg_count ?? 0),
+      comments: Number(stats.comment_count ?? 0),
+      favorites: Number(stats.collect_count ?? 0),
+      shares: Number(stats.share_count ?? 0),
+      coverImageUrl,
+    };
+  } catch (err) {
+    console.warn(`[metricsFetcher] extractDouyinFromDetail failed: ${err?.message || err}`);
+    return null;
+  }
+}
+
+/**
+ * 判断抖音封面 URL 是否是占位图/纯色图。
+ * 抖音常用 `~noop.jpeg` 作为无意义占位封面，需要跳过。
+ */
+function isPlaceholderCoverUrl(url) {
+  if (!url || typeof url !== "string") return true;
+  const lower = url.toLowerCase();
+  return lower.includes("noop.jpeg") || lower.includes("noop.webp") || lower.includes("placeholder");
+}
+
+function setupDouyinDetailInterceptor(page) {
+  let detail = null;
+  page.on("response", (response) => {
+    const url = response.url();
+    if (!url.includes("/aweme/v1/web/aweme/detail/") && !url.includes("/aweme/v1/web/aweme/related/")) return;
+    response
+      .json()
+      .then((json) => {
+        if (json?.aweme_detail) detail = json.aweme_detail;
+      })
+      .catch(() => {});
+  });
+  return () => detail;
+}
+
+/**
+ * 从抖音 React Server Components (RSC) flight data 中提取作品详情。
+ * 2026-06 抖音笔记/图文页（/note/xxx，awemeType=68）不再把详情塞进 <script id="RENDER_DATA">，
+ * 而是通过 `self.__pace_f.push([1, "7:[\\"$\\",\\"$L9\\",null,{...}]"])` 形式的 RSC payload 下发。
+ * 本函数从 page HTML 中还原该 payload 并返回 aweme.detail 对象。
+ */
+async function readDouyinRscFlightData(page) {
+  try {
+    const html = await page.content();
+    return extractDouyinDetailFromRscHtml(html);
+  } catch (err) {
+    console.warn(`[metricsFetcher] 抖音 RSC flight data 读取失败: ${err?.message || err}`);
+    return null;
+  }
+}
+
+function extractDouyinDetailFromRscHtml(html) {
+  if (!html || !html.includes("__pace_f")) return null;
+
+  // 收集所有 __pace_f.push([1, "..."]) 的字符串参数
+  const payloads = [];
+  const pushRe = /self\.__pace_f\.push\(\[1,"([\s\S]*?)"\]\)/g;
+  let m;
+  while ((m = pushRe.exec(html)) !== null) {
+    payloads.push(m[1]);
+  }
+  if (!payloads.length) return null;
+
+  // 还原 JS 字符串字面量：只还原 \" 和 \\，保留 \n 等转义序列让 JSON 继续解析
+  const unescapeJsString = (s) => s.replace(/\\"/g, '"').replace(/\\\\/g, "\\");
+
+  for (const raw of payloads) {
+    const unescaped = unescapeJsString(raw);
+    // 找到包含 awemeId 的 RSC 行（7:["$","$L9",null,{...}]）
+    const idx = unescaped.indexOf('"awemeId"');
+    if (idx === -1) continue;
+
+    // 向前找到该对象的起始大括号
+    let start = -1;
+    let braceCount = 0;
+    for (let i = idx; i >= 0; i--) {
+      if (unescaped[i] === "}") braceCount++;
+      if (unescaped[i] === "{") {
+        if (braceCount === 0) {
+          start = i;
+          break;
+        }
+        braceCount--;
+      }
+    }
+    if (start === -1) continue;
+
+    // 向后找到匹配的大括号
+    braceCount = 0;
+    let inString = false;
+    let escape = false;
+    let end = start;
+    for (let i = start; i < unescaped.length; i++) {
+      const c = unescaped[i];
+      if (escape) { escape = false; continue; }
+      if (c === "\\") { escape = true; continue; }
+      if (c === '"') { inString = !inString; continue; }
+      if (inString) continue;
+      if (c === "{") braceCount++;
+      if (c === "}") {
+        braceCount--;
+        if (braceCount === 0) {
+          end = i + 1;
+          break;
+        }
+      }
+    }
+    if (end <= start) continue;
+
+    let jsonStr = unescaped.slice(start, end);
+    jsonStr = jsonStr.replace(/"\$undefined"/g, "null").replace(/"\$L\d+"/g, "null");
+    jsonStr = jsonStr.replace(/:\$undefined([,}])/g, ":null$1");
+
+    try {
+      const data = JSON.parse(jsonStr);
+      const detail = data?.aweme?.detail || data?.detail || data;
+      if (detail?.awemeId || detail?.aweme_id) {
+        console.log(`[metricsFetcher] 抖音 RSC flight data 命中 awemeId=${detail.awemeId || detail.aweme_id}`);
+        return detail;
+      }
+    } catch (parseErr) {
+      console.warn(`[metricsFetcher] 抖音 RSC payload JSON 解析失败: ${parseErr?.message || parseErr}`);
+      continue;
+    }
+  }
+  return null;
+}
+
 async function inferDouyinCountsFromHtml(page, videoId) {
   const html = await page.content().catch(() => "");
   if (!html) {
@@ -334,8 +546,8 @@ async function readXiaohongshuEngageBar(page) {
   }).catch(() => null);
 }
 
-async function readXiaohongshuInitialState(page) {
-  return page.evaluate(() => {
+async function readXiaohongshuInitialState(page, preferredNoteId) {
+  return page.evaluate((targetId) => {
     const root = window.__INITIAL_STATE__ || window.__initialState__ || null;
     if (!root || typeof root !== "object") return null;
 
@@ -366,6 +578,17 @@ async function readXiaohongshuInitialState(page) {
       const target = raw.note || raw.data?.note || raw.noteData || raw;
       if (target && typeof target === "object") {
         notes.push(target);
+      }
+    }
+
+    // 优先使用与当前 URL 笔记 ID 匹配的 note
+    if (targetId) {
+      const idx = notes.findIndex((n) =>
+        String(n.id || n.note_id || n.noteId || "").trim() === targetId,
+      );
+      if (idx > 0) {
+        const [matched] = notes.splice(idx, 1);
+        notes.unshift(matched);
       }
     }
 
@@ -501,11 +724,169 @@ async function readXiaohongshuMetaTags(page) {
   }).catch(() => null);
 }
 
+async function readXiaohongshuTitleByXPath(page) {
+  try {
+    const title = await page.evaluate(() => {
+      try {
+        const result = document.evaluate(
+          '//*[@id="detail-title"]',
+          document,
+          null,
+          XPathResult.FIRST_ORDERED_NODE_TYPE,
+          null,
+        );
+        const node = result.singleNodeValue;
+        return node ? (node.textContent || "").trim() : "";
+      } catch {
+        return "";
+      }
+    });
+    if (title) {
+      console.log(`[metricsFetcher] 小红书 XPath 标题命中: ${title.slice(0, 80)}`);
+      return title;
+    }
+  } catch (err) {
+    console.warn(`[metricsFetcher] 小红书 XPath 标题读取失败: ${err?.message || err}`);
+  }
+  return "";
+}
+
+function pad2(n) {
+  return String(n).padStart(2, "0");
+}
+
+function parseXiaohongshuDateText(text) {
+  if (!text) return null;
+  const raw = String(text).trim();
+  const now = new Date();
+  const currentYear = now.getFullYear();
+
+  // 2024-06-12 / 2024/06/12
+  let m = raw.match(/(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})/);
+  if (m) return `${m[1]}-${pad2(m[2])}-${pad2(m[3])}`;
+
+  // 2024年06月12日
+  m = raw.match(/(\d{4})年(\d{1,2})月(\d{1,2})日/);
+  if (m) return `${m[1]}-${pad2(m[2])}-${pad2(m[3])}`;
+
+  // 06-12 / 06/12（默认当年）
+  m = raw.match(/(\d{1,2})[\/-](\d{1,2})/);
+  if (m) return `${currentYear}-${pad2(m[1])}-${pad2(m[2])}`;
+
+  // 昨天 / 今天
+  if (/昨天/.test(raw)) {
+    const d = new Date(now.getTime() - 86400000);
+    return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+  }
+  if (/今天/.test(raw)) {
+    return `${currentYear}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
+  }
+
+  return null;
+}
+
+async function readXiaohongshuPublishDate(page) {
+  try {
+    const dateText = await page.evaluate(() => {
+      try {
+        // 用户提供的 CSS Path
+        const el = document.querySelector(
+          "#noteContainer > div.interaction-container > div.note-scroller > div.note-content > div.bottom-container > span.date",
+        );
+        if (el) return (el.textContent || "").trim();
+        // 兜底：任意 #noteContainer 下的 .date
+        const fallback = document.querySelector("#noteContainer span.date");
+        return fallback ? (fallback.textContent || "").trim() : "";
+      } catch {
+        return "";
+      }
+    });
+    const parsed = parseXiaohongshuDateText(dateText);
+    if (parsed) {
+      console.log(`[metricsFetcher] 小红书发布日期命中: ${parsed} (raw=${dateText})`);
+      return parsed;
+    }
+    if (dateText) {
+      console.warn(`[metricsFetcher] 小红书发布日期未识别: ${dateText}`);
+    }
+  } catch (err) {
+    console.warn(`[metricsFetcher] 小红书发布日期读取失败: ${err?.message || err}`);
+  }
+  return null;
+}
+
+async function readXiaohongshuAuthorNameFromDom(page) {
+  try {
+    const name = await page.evaluate(() => {
+      try {
+        // 用户提供的 CSS Path
+        const el = document.querySelector(
+          "#noteContainer > div.interaction-container > div.author-container > div > div.info > a > span",
+        );
+        if (el) return (el.textContent || "").trim();
+        // 兜底：#noteContainer 下 .author-container .info a span
+        const fallback = document.querySelector("#noteContainer .author-container .info a span");
+        if (fallback) return (fallback.textContent || "").trim();
+        // 再兜底：常见昵称选择器
+        const fallback2 = document.querySelector("#noteContainer .author-wrapper .nickname, #noteContainer .author-info .username");
+        return fallback2 ? (fallback2.textContent || "").trim() : "";
+      } catch {
+        return "";
+      }
+    });
+    if (name) {
+      console.log(`[metricsFetcher] 小红书 DOM 作者命中: ${name.slice(0, 60)}`);
+      return name;
+    }
+  } catch (err) {
+    console.warn(`[metricsFetcher] 小红书 DOM 作者读取失败: ${err?.message || err}`);
+  }
+  return "";
+}
+
+async function readXiaohongshuAuthorUrlFromDom(page) {
+  try {
+    const href = await page.evaluate(() => {
+      try {
+        // 用户提供的 CSS Path（取 a 标签的 href）
+        const el = document.querySelector(
+          "#noteContainer > div.interaction-container > div.author-container > div > div.info > a",
+        );
+        if (el?.href) return el.href;
+        // 兜底
+        const fallback = document.querySelector("#noteContainer .author-container .info a");
+        return fallback?.href || "";
+      } catch {
+        return "";
+      }
+    });
+    if (href) {
+      console.log(`[metricsFetcher] 小红书作者主页命中: ${href.slice(0, 120)}`);
+      return href;
+    }
+  } catch (err) {
+    console.warn(`[metricsFetcher] 小红书作者主页读取失败: ${err?.message || err}`);
+  }
+  return "";
+}
+
+function extractXiaohongshuUserIdFromProfileUrl(url) {
+  const value = String(url || "");
+  const match = value.match(/\/user\/profile\/([a-zA-Z0-9]+)/);
+  return match ? match[1] : "";
+}
+
 async function scrapeXiaohongshu(page) {
-  const initialState = await readXiaohongshuInitialState(page);
+  const noteId = extractXiaohongshuNoteId(page.url());
+  const initialState = await readXiaohongshuInitialState(page, noteId);
   const precise = await readXiaohongshuEngageBar(page);
   const htmlFallback = await inferXiaohongshuCountsFromHtml(page);
   const metaTags = await readXiaohongshuMetaTags(page);
+  const xpathTitle = await readXiaohongshuTitleByXPath(page);
+  const publishDate = await readXiaohongshuPublishDate(page);
+  const domAuthorName = await readXiaohongshuAuthorNameFromDom(page);
+  const domAuthorUrl = await readXiaohongshuAuthorUrlFromDom(page);
+  const domAuthorId = extractXiaohongshuUserIdFromProfileUrl(domAuthorUrl);
   const likes = parseCount(initialState?.likes) ?? parseCount(precise?.likes) ?? await readCountBySelectors(page, [
     ".interactions.engage-bar .interact-container .like-wrapper .count",
     ".engage-bar .interact-container .like-wrapper .count",
@@ -531,11 +912,16 @@ async function scrapeXiaohongshu(page) {
     "[data-testid*='share'] [class*='count']"
   ]);
 
-  // 标题：INITIAL_STATE > meta og:title > empty
-  const title = initialState?.title || metaTags?.title || metaTags?.description || "";
-  // 作者：INITIAL_STATE > meta og:author > empty
-  const authorName = initialState?.authorName || metaTags?.authorName || "";
-  const authorId = initialState?.authorId || "";
+  // 标题：INITIAL_STATE > XPath #detail-title > meta og:title > empty
+  const title = initialState?.title || xpathTitle || metaTags?.title || metaTags?.description || "";
+  const titleSource = initialState?.title ? "initialState" : xpathTitle ? "xpath" : metaTags?.title ? "meta-title" : metaTags?.description ? "meta-description" : "empty";
+  console.log(`[metricsFetcher] 小红书标题来源: ${titleSource}, title=${title.slice(0, 80)}`);
+  // 作者：DOM > INITIAL_STATE > meta og:author > empty
+  const authorName = domAuthorName || initialState?.authorName || metaTags?.authorName || "";
+  // 作者 ID：优先从主页链接解析 userId，其次 SSR
+  const authorId = domAuthorId || initialState?.authorId || "";
+  const authorSource = domAuthorName ? "dom" : initialState?.authorName ? "initialState" : metaTags?.authorName ? "meta" : "empty";
+  console.log(`[metricsFetcher] 小红书作者来源: ${authorSource}, authorName=${authorName.slice(0, 60)}, authorId=${authorId}`);
 
   const fallback = await inferCountsFromBody(page);
   return {
@@ -543,6 +929,7 @@ async function scrapeXiaohongshu(page) {
     title,
     authorName,
     authorId,
+    publishDate,
     likes: likes ?? htmlFallback.likes ?? fallback.likes ?? 0,
     comments: comments ?? htmlFallback.comments ?? fallback.comments ?? 0,
     favorites: favorites ?? htmlFallback.favorites ?? fallback.favorites ?? 0,
@@ -647,7 +1034,20 @@ async function scrapeDouyin(page) {
   const videoId = extractDouyinVideoId(currentUrl);
   console.log(`[metricsFetcher] 抖音 scrapeDouyin: url=${currentUrl}, videoId=${videoId || '未提取'}`);
 
-  // ── Layer 0: HTML 正则，按 videoId 精确定位 ──
+  // ── Layer 0: RSC flight data（抖音笔记/图文页 SSR 数据） ──
+  const rscDetail = await readDouyinRscFlightData(page);
+  const rscMetrics = rscDetail ? extractDouyinFromDetail(rscDetail) : null;
+  if (rscMetrics) {
+    console.log(`[metricsFetcher] 抖音 RSC 层: title=${rscMetrics.title.slice(0, 60)}, author=${rscMetrics.authorName}, 赞${rscMetrics.likes} 评${rscMetrics.comments} 藏${rscMetrics.favorites} 分享${rscMetrics.shares}`);
+  }
+
+  // ── Layer 0.5: 传统 RENDER_DATA（兼容旧版视频页） ──
+  const renderData = await readDouyinRenderData(page);
+  if (renderData) {
+    console.log(`[metricsFetcher] 抖音 RENDER_DATA 层: 赞${renderData.likes} 评${renderData.comments} 藏${renderData.favorites} 分享${renderData.shares}`);
+  }
+
+  // ── Layer 1: HTML 正则，按 videoId 精确定位 ──
   const htmlFallback = await inferDouyinCountsFromHtml(page, videoId);
 
   // ── Layer 2: DOM 扫描 ──
@@ -762,9 +1162,11 @@ async function scrapeDouyin(page) {
 
   const fallback = await inferCountsFromBody(page);
 
-  // 优先级：HTML 正则（按 videoId 定位） > XPath > DOM 扫描 > body text
+  // 优先级：RSC/API detail > RENDER_DATA > HTML 正则 > XPath > DOM 扫描 > body text
   const sources = { likes: "", comments: "", favorites: "", shares: "" };
   const get = (k) => {
+    if (rscMetrics?.[k] != null && rscMetrics[k] > 0) { sources[k] = "rsc"; return rscMetrics[k]; }
+    if (renderData?.[k] != null) { sources[k] = "render-data"; return renderData[k]; }
     if (htmlFallback[k] != null) { sources[k] = "html-regex"; return htmlFallback[k]; }
     if (xpathCounts?.[k]) { sources[k] = "xpath"; return xpathCounts[k]; }
     if (interactiveCounts?.[k]) { sources[k] = "dom-scan"; return interactiveCounts[k]; }
@@ -774,16 +1176,23 @@ async function scrapeDouyin(page) {
   };
   const result = {
     bodyText: fallback.text,
+    title: rscMetrics?.title || renderData?.title || "",
+    authorName: rscMetrics?.authorName || "",
+    authorId: rscMetrics?.authorId || "",
+    publishDate: rscMetrics?.publishDate || "",
     likes: get("likes"),
     comments: get("comments"),
     favorites: get("favorites"),
     shares: get("shares"),
   };
   console.log(`[metricsFetcher] 抖音 最终数据来源: ${JSON.stringify(sources)}`);
-  console.log(`[metricsFetcher] 抖音 HTML层: 赞${htmlFallback.likes} 评${htmlFallback.comments} 藏${htmlFallback.favorites} 分享${htmlFallback.shares}`);
-  console.log(`[metricsFetcher] 抖音 XPath层: 赞${xpathCounts?.likes ?? 'null'} 评${xpathCounts?.comments ?? 'null'} 藏${xpathCounts?.favorites ?? 'null'} 分享${xpathCounts?.shares ?? 'null'}`);
-  console.log(`[metricsFetcher] 抖音 DOM层:  赞${interactiveCounts?.likes ?? 'null'} 评${interactiveCounts?.comments ?? 'null'} 藏${interactiveCounts?.favorites ?? 'null'} 分享${interactiveCounts?.shares ?? 'null'}`);
-  console.log(`[metricsFetcher] 抖音 body层: 赞${fallback.likes} 评${fallback.comments} 藏${fallback.favorites} 分享${fallback.shares}`);
+  console.log(`[metricsFetcher] 抖音 RSC层:    title=${result.title.slice(0, 60)} author=${result.authorName} date=${result.publishDate}`);
+  console.log(`[metricsFetcher] 抖音 RSC层:    赞${rscMetrics?.likes ?? 'null'} 评${rscMetrics?.comments ?? 'null'} 藏${rscMetrics?.favorites ?? 'null'} 分享${rscMetrics?.shares ?? 'null'}`);
+  console.log(`[metricsFetcher] 抖音 RENDER层: 赞${renderData?.likes ?? 'null'} 评${renderData?.comments ?? 'null'} 藏${renderData?.favorites ?? 'null'} 分享${renderData?.shares ?? 'null'}`);
+  console.log(`[metricsFetcher] 抖音 HTML层:   赞${htmlFallback.likes} 评${htmlFallback.comments} 藏${htmlFallback.favorites} 分享${htmlFallback.shares}`);
+  console.log(`[metricsFetcher] 抖音 XPath层:  赞${xpathCounts?.likes ?? 'null'} 评${xpathCounts?.comments ?? 'null'} 藏${xpathCounts?.favorites ?? 'null'} 分享${xpathCounts?.shares ?? 'null'}`);
+  console.log(`[metricsFetcher] 抖音 DOM层:    赞${interactiveCounts?.likes ?? 'null'} 评${interactiveCounts?.comments ?? 'null'} 藏${interactiveCounts?.favorites ?? 'null'} 分享${interactiveCounts?.shares ?? 'null'}`);
+  console.log(`[metricsFetcher] 抖音 body层:   赞${fallback.likes} 评${fallback.comments} 藏${fallback.favorites} 分享${fallback.shares}`);
   return result;
 }
 
@@ -967,6 +1376,13 @@ async function fetchMetricsFromUrl(url) {
       console.log(`[metricsFetcher] 抖音模式: targetVideoId=${targetVideoId}`);
     }
 
+    // ── 小红书：提取目标笔记 ID，用于匹配 SSR 数据 ──
+    let targetNoteId = null;
+    if (platform === "小红书") {
+      targetNoteId = extractXiaohongshuNoteId(targetUrl);
+      console.log(`[metricsFetcher] 小红书目标笔记ID: ${targetNoteId || "unknown"}`);
+    }
+
     await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: DEFAULT_TIMEOUT });
     const tLoad = Date.now();
 
@@ -978,16 +1394,39 @@ async function fetchMetricsFromUrl(url) {
       await page.waitForLoadState("networkidle", { timeout: 800 }).catch(() => {});
       await page.waitForTimeout(200);
     }
+
+    // 先关闭登录/引导浮层，避免 title/bodyText 被浮层文案污染导致误判
+    await dismissObstacles(page, platform).catch(() => {});
+    const obstacleCheck = await detectObstacleOverlay(page, platform);
+    if (obstacleCheck.detected) {
+      contextReleased = true;
+      releaseContext(platform);
+      throw new Error(`当前打开的是${platform}登录页/登录弹窗/新手引导，请先在"链接测试"里点"打开${platform}登录浏览器"完成一次登录。`);
+    }
+
     const pageTitle = await page.title().catch(() => "");
 
-    const payload = platform === "小红书" ? await scrapeXiaohongshu(page) : await scrapeDouyin(page);
+    const payload = platform === "小红书" ? await scrapeXiaohongshu(page, targetNoteId) : await scrapeDouyin(page);
+
+    // 小红书：校验目标笔记是否在 SSR 中；如果不在，说明当前页不是目标笔记详情（多为登录态失效或被重定向）
+    if (platform === "小红书" && targetNoteId) {
+      const notePresent = await isXiaohongshuNotePresent(page, targetNoteId);
+      console.log(`[metricsFetcher] 小红书目标笔记存在性: noteId=${targetNoteId}, present=${notePresent}`);
+      if (!notePresent) {
+        contextReleased = true;
+        releaseContext(platform);
+        throw new Error(`当前打开的是小红书登录页/未找到目标笔记，请先在"链接测试"里点"打开小红书登录浏览器"完成一次登录。`);
+      }
+    }
 
     // 抖音：DOM 层已抓到任意一项指标 → 页面有真实内容，不是登录墙。
+    // 小红书：已通过 isXiaohongshuNotePresent 校验，不再依赖 looksLikeLoginWall。
     // 导航栏的"登录后"文案会触发误判，用 DOM 结果覆盖。
     const hasDouyinData = platform === "抖音"
       && (payload.likes > 0 || payload.comments > 0 || payload.favorites > 0 || payload.shares > 0);
 
-    if (!hasDouyinData && looksLikeLoginWall(platform, payload.bodyText, pageTitle)) {
+    const shouldCheckLoginWall = platform !== "小红书" || !targetNoteId;
+    if (shouldCheckLoginWall && !hasDouyinData && looksLikeLoginWall(platform, payload.bodyText, pageTitle)) {
       // 登录墙 → 从池中移除，下次重新 launch
       contextReleased = true;
       releaseContext(platform);
@@ -1002,7 +1441,10 @@ async function fetchMetricsFromUrl(url) {
     let coverImageUrl = "";
     let coverThumbUrl = "";
     try {
-      const cover = await capturePostCover(page, platform);
+      const cover =
+        platform === "小红书"
+          ? await capturePostCover(page, platform, targetNoteId)
+          : await capturePostCover(page, platform);
       if (cover) {
         coverImageUrl = cover.coverImageUrl;
         coverThumbUrl = cover.coverThumbUrl;
@@ -1024,6 +1466,7 @@ async function fetchMetricsFromUrl(url) {
       shares: Number(payload.shares || 0),
       coverImageUrl,
       coverThumbUrl,
+      publishedAt: payload?.publishDate || "",
       metricsUpdatedAt: new Date().toISOString()
     };
     console.log(`[metricsFetcher] ${platform} 抓取完成: ${Date.now() - t0}ms (加载${tLoad - t0}ms) 赞${result.likes} 评${result.comments} 藏${result.favorites} 分享${result.shares}`);
@@ -1054,21 +1497,572 @@ async function fetchMetricsFromUrl(url) {
   }
 }
 
+// ── 通用浮层/蒙层检测与关闭 ───────────────────────────────────
+// 用于在截取封面前去掉登录弹窗、新手引导、操作提示等遮挡浮层。
+
+function getOverlayKeywords(platform) {
+  const base = platform === "小红书"
+    ? ["登录", "扫码", "立即登录", "手机号登录", "打开小红书App查看", "登录后推荐", "登录后评论"]
+    : ["登录", "扫码登录", "验证码登录", "登录后", "请登录"];
+  // 抖音新手引导 / 操作提示
+  const douyinObstacles = platform === "抖音"
+    ? ["我知道了", "新手引导", "滚动鼠标", "键盘上下键", "点击屏幕上的", "切换视频", "更多推荐视频"]
+    : [];
+  return [...base, ...douyinObstacles];
+}
+
+async function detectObstacleOverlay(page, platform) {
+  const keywords = getOverlayKeywords(platform);
+  const result = await page
+    .evaluate((words) => {
+      const hasWord = (el, list) => {
+        const matched = [];
+        for (const w of words) {
+          if (el.textContent.includes(w)) matched.push(w);
+        }
+        return matched;
+      };
+      const isOverlay = (el) => {
+        const style = window.getComputedStyle(el);
+        return (
+          style.position === "fixed" ||
+          style.position === "sticky" ||
+          Number(style.zIndex) > 100 ||
+          style.pointerEvents !== "none"
+        );
+      };
+      const nodes = document.querySelectorAll('div, section, dialog, [role="dialog"]');
+      const matchedWords = new Set();
+      let count = 0;
+      for (const el of nodes) {
+        if (!isOverlay(el)) continue;
+        const foundWords = hasWord(el, words);
+        if (foundWords.length > 0) {
+          count += 1;
+          foundWords.forEach((w) => matchedWords.add(w));
+        }
+      }
+      return {
+        detected: count > 0,
+        matchedWords: Array.from(matchedWords),
+        count,
+      };
+    }, keywords)
+    .catch((err) => {
+      console.warn(`[metricsFetcher] detectObstacleOverlay evaluate failed: ${err?.message || err}`);
+      return { detected: false, matchedWords: [], count: 0 };
+    });
+
+  if (result.detected) {
+    console.log(
+      `[metricsFetcher] 检测到${platform}遮挡浮层: count=${result.count}, keywords=[${result.matchedWords.join(", ")}]`,
+    );
+  } else {
+    console.log(`[metricsFetcher] 未检测到${platform}遮挡浮层`);
+  }
+  return result;
+}
+
+async function dismissObstacles(page, platform) {
+  const keywords = getOverlayKeywords(platform);
+  console.log(`[metricsFetcher] dismissObstacles start: platform=${platform}, keywords=[${keywords.join(", ")}]`);
+
+  // 1) 尝试常规关闭方式（登录弹窗 + 新手引导共用）
+  await page.keyboard.press("Escape").catch(() => {});
+  const closeSelectors = [
+    ".mask",
+    ".close",
+    '[class*="close"]',
+    '[class*="cancel"]',
+    'button:has-text("关闭")',
+    'button:has-text("取消")',
+    'button:has-text("以后再说")',
+    'button:has-text("我知道了")',
+  ];
+  let selectorClickCount = 0;
+  for (const sel of closeSelectors) {
+    try {
+      await page.locator(sel).first().click({ timeout: 300, force: true });
+      selectorClickCount += 1;
+      console.log(`[metricsFetcher] dismissObstacles clicked selector: ${sel}`);
+    } catch {}
+  }
+  console.log(`[metricsFetcher] dismissObstacles selector clicks: ${selectorClickCount}/${closeSelectors.length}`);
+
+  // 2) 暴力移除仍存在的浮层与常见蒙层
+  let removedByKeywordCount = 0;
+  await page.evaluate((words) => {
+    const hasWord = (el) => words.some((w) => el.textContent.includes(w));
+    const overlays = [];
+    const collect = (node) => {
+      if (node.nodeType !== 1) return;
+      const style = window.getComputedStyle(node);
+      if (
+        (style.position === "fixed" || style.position === "sticky" || Number(style.zIndex) > 100) &&
+        hasWord(node)
+      ) {
+        overlays.push(node);
+        return;
+      }
+      for (const c of node.children) collect(c);
+    };
+    collect(document.body);
+
+    overlays.forEach((el) => {
+      let target = el;
+      for (let i = 0; i < 2 && target && target.tagName !== "BODY"; i++) {
+        target = target.parentElement;
+      }
+      if (target && target.tagName !== "BODY") {
+        target.remove();
+      } else {
+        el.remove();
+      }
+    });
+
+    document
+      .querySelectorAll('.mask, .modal-mask, .overlay, [class*="backdrop"], [class*="mask"]')
+      .forEach((el) => el.remove());
+
+    document.body.style.overflow = "auto";
+    document.documentElement.style.overflow = "auto";
+    document.body.style.position = "static";
+
+    return overlays.length;
+  }, keywords).then((count) => {
+    removedByKeywordCount = count || 0;
+    console.log(`[metricsFetcher] dismissObstacles removed keyword overlays: ${removedByKeywordCount}`);
+  }).catch((err) => {
+    console.warn(`[metricsFetcher] dismissObstacles keyword remove failed: ${err?.message || err}`);
+  });
+
+  // 3) 对抖音特有的新手引导蒙层（通常是一个全屏半透明层 + 中央手指图标），暴力移除
+  let removedDouyinGuideCount = 0;
+  if (platform === "抖音") {
+    await page.evaluate(() => {
+      let count = 0;
+      const all = document.querySelectorAll('div, section');
+      for (const el of all) {
+        const style = window.getComputedStyle(el);
+        if (style.position !== 'fixed' && style.position !== 'absolute' && style.position !== 'sticky') continue;
+        const rect = el.getBoundingClientRect();
+        // 全屏或接近全屏的覆盖层，且包含引导文案
+        if (rect.width > window.innerWidth * 0.8 && rect.height > window.innerHeight * 0.5) {
+          const text = el.textContent || '';
+          if (/滚动[\s\S]*?鼠标|键盘[\s\S]*?上下键|点击屏幕|切换视频|更多推荐|我知道了/i.test(text)) {
+            el.remove();
+            count += 1;
+          }
+        }
+      }
+      return count;
+    }).then((count) => {
+      removedDouyinGuideCount = count || 0;
+      console.log(`[metricsFetcher] dismissObstacles removed douyin guide overlays: ${removedDouyinGuideCount}`);
+    }).catch((err) => {
+      console.warn(`[metricsFetcher] dismissObstacles douyin guide remove failed: ${err?.message || err}`);
+    });
+  }
+
+  console.log(`[metricsFetcher] dismissObstacles done: selectorClicks=${selectorClickCount}, keywordRemoved=${removedByKeywordCount}, douyinGuideRemoved=${removedDouyinGuideCount}`);
+}
+
+// ── 语义化封面提取（从平台 SSR 数据拿真实封面 URL） ─────────────
+
+function extractXiaohongshuNoteId(url) {
+  const value = String(url || "");
+  const longMatch = value.match(/\/explore\/([a-zA-Z0-9]+)/);
+  if (longMatch) return longMatch[1];
+  const legacyMatch = value.match(/\/discovery\/item\/([a-zA-Z0-9]+)/);
+  if (legacyMatch) return legacyMatch[1];
+  return "";
+}
+
+async function isXiaohongshuNotePresent(page, noteId) {
+  if (!noteId) return true;
+  return page
+    .evaluate((id) => {
+      const root = window.__INITIAL_STATE__ || window.__initialState__;
+      const map = root?.note?.noteDetailMap;
+      if (!map) return false;
+      if (map[id]) return true;
+      return Object.values(map).some((item) => {
+        const note = item?.note || item?.data?.note || item;
+        return String(note?.id || note?.note_id || note?.noteId || "").trim() === id;
+      });
+    }, noteId)
+    .catch(() => false);
+}
+
+async function extractXiaohongshuCoverUrl(page, preferredNoteId) {
+  const noteId = preferredNoteId || extractXiaohongshuNoteId(page.url());
+  console.log(`[metricsFetcher] extractXiaohongshuCoverUrl start: noteId=${noteId || "unknown"}`);
+
+  const result = await page
+    .evaluate((targetId) => {
+      const add = (url, list) => {
+        if (typeof url === "string" && /^https?:\/\//.test(url)) list.push(url);
+      };
+
+      const collectNoteFields = (note) => {
+        const urls = [];
+        if (!note || typeof note !== "object") return urls;
+        // 优先取专用 cover 字段
+        add(note.cover, urls);
+        add(note.coverUrl, urls);
+        // 再取 imageList 第一张（纯图文笔记）
+        if (Array.isArray(note.imageList)) {
+          note.imageList.forEach((img) => {
+            add(img?.url, urls);
+            add(img?.urlDefault, urls);
+            add(img?.infoList?.[0]?.url, urls);
+          });
+        }
+        if (Array.isArray(note.images)) {
+          note.images.forEach((img) => add(img?.url, urls));
+        }
+        // 视频笔记兜底
+        add(note.video?.url, urls);
+        add(note.videoUrl, urls);
+
+        const card = note.noteCard || note;
+        if (Array.isArray(card.imageList)) {
+          card.imageList.forEach((img) => add(img?.url, urls));
+        }
+        add(card.cover, urls);
+        return urls;
+      };
+
+      const root = window.__INITIAL_STATE__ || window.__initialState__;
+      const map = root?.note?.noteDetailMap;
+      const debug = {
+        targetId,
+        mapKeys: map ? Object.keys(map).slice(0, 10) : [],
+        directHit: false,
+        idMatchHit: null,
+        source: "none",
+      };
+
+      // 1) 直接按 key 匹配
+      if (targetId && map?.[targetId]) {
+        const note = map[targetId].note || map[targetId].data?.note || map[targetId];
+        const urls = collectNoteFields(note);
+        if (urls.length > 0) {
+          debug.directHit = true;
+          debug.source = "noteDetailMap-direct";
+          return { urls, debug, title: String(note?.title || note?.display_title || "").slice(0, 60) };
+        }
+      }
+
+      // 2) 按内部 note.id / note_id 匹配
+      if (targetId && map) {
+        for (const [key, item] of Object.entries(map)) {
+          const note = item?.note || item?.data?.note || item;
+          const id = String(note?.id || note?.note_id || note?.noteId || "").trim();
+          if (id && id === targetId) {
+            const urls = collectNoteFields(note);
+            if (urls.length > 0) {
+              debug.idMatchHit = key;
+              debug.source = "noteDetailMap-id-match";
+              return { urls, debug, title: String(note?.title || note?.display_title || "").slice(0, 60) };
+            }
+          }
+        }
+      }
+
+      // 3) 兜底：遍历全部
+      const fallback = [];
+      if (map) {
+        Object.values(map).forEach((item) => fallback.push(...collectNoteFields(item?.note || item?.data?.note || item)));
+      }
+      if (root?.noteData?.data?.noteData) fallback.push(...collectNoteFields(root.noteData.data.noteData));
+      if (root?.noteData?.noteData) fallback.push(...collectNoteFields(root.noteData.noteData));
+      if (root?.data?.noteData?.data?.noteData) fallback.push(...collectNoteFields(root.data.noteData.data.noteData));
+      if (root?.noteCard) fallback.push(...collectNoteFields(root.noteCard));
+      if (fallback.length > 0) {
+        debug.source = "fallback";
+        return { urls: fallback, debug, title: "" };
+      }
+
+      // 4) meta 兜底
+      const meta = document.querySelector('meta[property="og:image"]');
+      const metaUrl = meta?.getAttribute("content");
+      if (metaUrl) {
+        debug.source = "meta";
+        return { urls: [metaUrl], debug, title: "" };
+      }
+
+      return { urls: [], debug, title: "" };
+    })
+    .catch((err) => {
+      console.warn(`[metricsFetcher] extractXiaohongshuCoverUrl failed: ${err?.message || err}`);
+      return null;
+    });
+
+  if (!result) return null;
+
+  const { urls, debug, title } = result;
+  console.log(
+    `[metricsFetcher] 小红书封面解析: source=${debug.source}, directHit=${debug.directHit}, idMatchHit=${debug.idMatchHit || "null"}, mapKeys=[${debug.mapKeys.join(", ")}], title=${title || "empty"}`,
+  );
+  if (urls.length > 0) {
+    console.log(`[metricsFetcher] 小红书语义封面候选: count=${urls.length}, first=${urls[0]}`);
+    return urls[0];
+  }
+  console.log(`[metricsFetcher] 小红书未找到语义封面 URL`);
+  return null;
+}
+
+async function extractDouyinCoverUrl(page) {
+  console.log(`[metricsFetcher] extractDouyinCoverUrl start`);
+
+  // ── 优先：RSC flight data（图文/笔记页 awemeType=68 的封面在 detail.images） ──
+  const html = await page.content().catch(() => "");
+  const rscDetail = html ? extractDouyinDetailFromRscHtml(html) : null;
+  if (rscDetail) {
+    const rscMetrics = extractDouyinFromDetail(rscDetail);
+    if (rscMetrics?.coverImageUrl) {
+      console.log(`[metricsFetcher] 抖音 RSC 封面命中: ${rscMetrics.coverImageUrl.slice(0, 120)}`);
+      return rscMetrics.coverImageUrl;
+    }
+  }
+
+  const fromRender = await page
+    .evaluate(() => {
+      try {
+        const el = document.querySelector('script#RENDER_DATA');
+        if (!el) return { hasScript: false, candidates: [] };
+        let txt = el.textContent.trim();
+        try { txt = decodeURIComponent(txt); } catch {}
+        if (txt.startsWith("%")) {
+          try { txt = decodeURIComponent(txt); } catch {}
+        }
+        const data = JSON.parse(txt);
+        const candidates = [];
+        const walk = (obj, depth) => {
+          if (!obj || typeof obj !== "object" || depth > 12) return;
+          if (obj.video && typeof obj.video === "object") {
+            const v = obj.video;
+            const pick = (o) =>
+              Array.isArray(o?.url_list)
+                ? o.url_list.find((u) => typeof u === "string" && /^https?:\/\//.test(u))
+                : null;
+            const url =
+              pick(v.cover) || pick(v.dynamic_cover) || pick(v.origin_cover) || pick(v.ai_dynamic_cover);
+            if (url) {
+              candidates.push({
+                url,
+                awemeId: obj.aweme_id || obj.awemeId || obj.video?.aweme_id || obj.video?.awemeId,
+                desc: String(obj.desc || obj.title || "").slice(0, 60),
+              });
+            }
+          }
+          for (const val of Object.values(obj)) walk(val, depth + 1);
+        };
+        walk(data, 0);
+        return { hasScript: true, candidates };
+      } catch (err) {
+        return { hasScript: true, candidates: [], error: String(err?.message || err) };
+      }
+    })
+    .catch((err) => {
+      console.warn(`[metricsFetcher] extractDouyinCoverUrl RENDER_DATA evaluate failed: ${err?.message || err}`);
+      return { hasScript: false, candidates: [] };
+    });
+
+  console.log(
+    `[metricsFetcher] 抖音 RENDER_DATA: hasScript=${fromRender.hasScript}, candidates=${fromRender.candidates.length}${fromRender.error ? ", error=" + fromRender.error : ""}`,
+  );
+  if (fromRender.candidates.length > 0) {
+    fromRender.candidates.slice(0, 3).forEach((c, i) => {
+      console.log(`[metricsFetcher] 抖音封面候选${i}: url=${c.url}, awemeId=${c.awemeId || "unknown"}, desc=${c.desc || ""}`);
+    });
+    return fromRender.candidates[0].url;
+  }
+
+  const fromDom = await page
+    .evaluate(() => {
+      const v = document.querySelector("video");
+      if (v?.poster) return v.poster;
+      const img = document.querySelector("#sliderVideo img, #douyin-right-container img");
+      return img?.src || null;
+    })
+    .catch((err) => {
+      console.warn(`[metricsFetcher] extractDouyinCoverUrl DOM fallback failed: ${err?.message || err}`);
+      return null;
+    });
+
+  if (fromDom) {
+    console.log(`[metricsFetcher] 抖音 DOM 兜底封面: ${fromDom}`);
+    return fromDom;
+  }
+
+  console.log(`[metricsFetcher] 抖音未找到语义封面 URL`);
+  return null;
+}
+
 /**
- * 截取作品页视口作封面，sharp 缩放压成低分辨率 JPEG 落到 uploads/post-covers/。
- *
- * 历史策略：先 locator（平台特定选择器）→ video poster → og:image → first img → 视口兜底。
- *   实测抖音/小红书里 locator 选择器经常命中 32×32 头像、og:image 经常是 52×90 分享卡，
- *   "first img" 因 lazy load 拿到的是不可见的占位图，5 路并行下经常拿到的是错的。
- *   视口截图拿的是页面真实首屏，最稳。
- *
- * 优化：page.screenshot 用 omitBackground=false + clip 选作品主区（避开顶部导航）。
- *   整体 1.2s 上限；写入落盘 ~150ms。
+ * 抖音会把图文笔记转成视频播放，其 metadata 封面（cover/originCover）经常是一张纯色/占位图。
+ * 本函数在页面内暂停视频并 seek 到开头，对 video 元素截图，拿到真实首帧作为封面。
  */
-async function capturePostCover(page, platform) {
+async function captureDouyinVideoFirstFrame(page) {
   try {
-    // 抖音有头模式：字体正常加载，直接用 page.screenshot()。
-    // 小红书无头模式：locator.screenshot() 绕过 CDP 字体等待。
+    const video = page.locator("video").first();
+    const count = await video.count().catch(() => 0);
+    if (!count) {
+      console.log(`[metricsFetcher] 页面无 video 元素，跳过首帧截图`);
+      return null;
+    }
+
+    await video.evaluate((el) => {
+      try {
+        el.pause();
+        if (el.currentTime > 0) el.currentTime = 0;
+        el.style.objectFit = "contain";
+      } catch {}
+    });
+    await page.waitForTimeout(500);
+
+    const buf = await video.screenshot({ type: "jpeg", quality: 92, timeout: 8000 });
+    console.log(`[metricsFetcher] 抖音视频首帧截图: ${buf?.length || 0} bytes`);
+    return buf || null;
+  } catch (err) {
+    console.warn(`[metricsFetcher] 抖音视频首帧截图失败: ${err?.message || err}`);
+    return null;
+  }
+}
+
+async function fetchCoverImage(page, url) {
+  if (!url) {
+    console.log(`[metricsFetcher] fetchCoverImage skipped: url empty`);
+    return null;
+  }
+  try {
+    console.log(`[metricsFetcher] fetchCoverImage start: ${url.slice(0, 120)}`);
+    // page.request 与页面共享 Cookie，且不走 page.route 拦截，能绕过小红书的图片资源屏蔽
+    const resp = await page.request.get(url, { headers: { referer: page.url() } });
+    const status = resp.status();
+    const contentType = resp.headers()["content-type"] || "unknown";
+    if (!resp.ok()) {
+      console.warn(`[metricsFetcher] fetchCoverImage HTTP ${status}, content-type=${contentType}, url=${url.slice(0, 120)}`);
+      return null;
+    }
+    const buf = await resp.body();
+    console.log(`[metricsFetcher] fetchCoverImage OK: status=${status}, content-type=${contentType}, size=${buf?.length || 0}`);
+    return buf;
+  } catch (err) {
+    console.warn(`[metricsFetcher] fetchCoverImage failed: ${err?.message || err}, url=${url.slice(0, 120)}`);
+    return null;
+  }
+}
+
+async function validateCoverBuffer(buf) {
+  if (!buf || buf.length < 5 * 1024) {
+    console.warn(`[metricsFetcher] validateCoverBuffer rejected: size=${buf?.length || 0} < 5KB`);
+    return false;
+  }
+  try {
+    const meta = await sharp(buf).metadata();
+    if (!meta || meta.width < 200 || meta.height < 200) {
+      console.warn(`[metricsFetcher] validateCoverBuffer rejected: ${meta?.width || 0}x${meta?.height || 0}`);
+      return false;
+    }
+    console.log(`[metricsFetcher] validateCoverBuffer OK: ${meta.width}x${meta.height}, size=${buf.length}`);
+    return true;
+  } catch (err) {
+    console.warn(`[metricsFetcher] validateCoverBuffer sharp failed: ${err?.message || err}`);
+    return false;
+  }
+}
+
+/**
+ * 暂停页面上所有正在播放的视频，避免视口截图时抓到黑屏或动态模糊帧。
+ */
+async function pauseAllVideos(page) {
+  try {
+    const result = await page.evaluate(() => {
+      const videos = Array.from(document.querySelectorAll('video'));
+      let pausedCount = 0;
+      videos.forEach((v) => {
+        try {
+          if (!v.paused) {
+            v.pause();
+            pausedCount += 1;
+          }
+          // 把进度拉回开头，防止暂停在黑屏或片尾
+          if (v.currentTime > 0.1) {
+            v.currentTime = 0;
+          }
+        } catch (e) {
+          // 某些视频元素可能禁止 seek，忽略
+        }
+      });
+      return { total: videos.length, paused: pausedCount };
+    });
+    console.log(`[metricsFetcher] pauseAllVideos: total=${result.total}, paused=${result.paused}`);
+    if (result.total > 0) {
+      await page.waitForTimeout(300);
+    }
+  } catch (err) {
+    console.warn(`[metricsFetcher] pauseAllVideos failed: ${err?.message || err}`);
+  }
+}
+
+/**
+ * 截取/提取作品封面。
+ *
+ * 策略（按优先级）：
+ *   1. 先关闭/移除登录弹窗等遮挡浮层；
+ *   2. 暂停页面视频，避免截图模糊/黑屏；
+ *   3. 从平台 SSR 数据提取真实封面 URL 并下载；
+ *      小红书 __INITIAL_STATE__ / 抖音 RSC flight data + RENDER_DATA
+ *   4. 抖音：视频首帧截图（图文笔记常被转成视频，metadata 封面可能是纯色占位图）；
+ *   5. 兜底：视口截图。
+ */
+async function capturePostCover(page, platform, preferredNoteId) {
+  console.log(`[metricsFetcher] capturePostCover start: platform=${platform}, noteId=${preferredNoteId || "unknown"}`);
+  try {
+    // 1. 去掉登录弹窗/新手引导/遮挡蒙层
+    console.log(`[metricsFetcher] capturePostCover step 1: dismissObstacles`);
+    await dismissObstacles(page, platform);
+
+    // 2. 暂停视频（兜底截图时避免动态模糊/黑屏）
+    console.log(`[metricsFetcher] capturePostCover step 2: pauseAllVideos`);
+    await pauseAllVideos(page);
+
+    // 3. 优先拿语义化封面原图
+    console.log(`[metricsFetcher] capturePostCover step 3: extract semantic cover url`);
+    const semanticUrl =
+      platform === "小红书"
+        ? await extractXiaohongshuCoverUrl(page, preferredNoteId)
+        : await extractDouyinCoverUrl(page);
+    console.log(`[metricsFetcher] capturePostCover semanticUrl: ${semanticUrl ? semanticUrl.slice(0, 120) : "null"}`);
+    if (semanticUrl) {
+      const buf = await fetchCoverImage(page, semanticUrl);
+      if (buf && (await validateCoverBuffer(buf))) {
+        const cover = await writeCoverJpeg(buf, "semantic");
+        console.log(`[metricsFetcher] 语义封面写入: ${cover?.coverImageUrl || "null"}`);
+        return cover;
+      }
+      console.warn(`[metricsFetcher] capturePostCover semantic cover invalid, fallback to video first frame`);
+    } else {
+      console.log(`[metricsFetcher] capturePostCover no semantic url, fallback to video first frame`);
+    }
+
+    // 4. 抖音兜底：视频首帧截图（图文笔记常被转成视频，metadata 封面可能是纯色占位图）
+    if (platform === "抖音") {
+      console.log(`[metricsFetcher] capturePostCover step 4: capture video first frame`);
+      const frameBuf = await captureDouyinVideoFirstFrame(page);
+      if (frameBuf && (await validateCoverBuffer(frameBuf))) {
+        const cover = await writeCoverJpeg(frameBuf, "video-frame");
+        console.log(`[metricsFetcher] 抖音视频首帧封面写入: ${cover?.coverImageUrl || "null"}`);
+        return cover;
+      }
+      console.warn(`[metricsFetcher] capturePostCover video first frame invalid, fallback to viewport screenshot`);
+    }
+
+    // 5. 兜底：视口截图
+    console.log(`[metricsFetcher] capturePostCover step 5: viewport screenshot`);
     const useLocator = process.env.PLAYWRIGHT_HEADLESS !== "0" && platform !== "抖音";
     let buf;
     if (useLocator) {
@@ -1076,16 +2070,17 @@ async function capturePostCover(page, platform) {
     } else {
       buf = await page.screenshot({ type: "png", clip: { x: 0, y: 0, width: 1440, height: 1080 }, timeout: 10000 });
     }
-    console.log(`[metricsFetcher] 截图 buffer: ${buf ? buf.length : 'null'} bytes`);
-    if (buf && buf.length > 1024) {
+    console.log(`[metricsFetcher] 截图 buffer: ${buf ? buf.length : "null"} bytes`);
+    if (buf && (await validateCoverBuffer(buf))) {
       const cover = await writeCoverJpeg(buf, "viewport");
-      console.log(`[metricsFetcher] 封面写入: ${cover?.coverImageUrl || 'null'}`);
+      console.log(`[metricsFetcher] 视口封面写入: ${cover?.coverImageUrl || "null"}`);
       return cover;
     }
-    console.warn(`[metricsFetcher] 截图 buffer 过小(${buf?.length || 0} bytes)，跳过封面`);
+    console.warn(`[metricsFetcher] 截图 buffer 无效(${buf?.length || 0} bytes)，跳过封面`);
   } catch (err) {
-    console.warn(`[metricsFetcher] viewport screenshot failed: ${err?.message || err}`);
+    console.warn(`[metricsFetcher] capturePostCover failed: ${err?.message || err}`);
   }
+  console.log(`[metricsFetcher] capturePostCover end: no cover produced`);
   return null;
 }
 

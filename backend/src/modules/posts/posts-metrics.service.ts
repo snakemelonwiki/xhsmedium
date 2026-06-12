@@ -16,6 +16,8 @@ export interface ScrapedMetrics {
   /** 抓取时同步截的封面（低分辨率 jpeg，可直接当 coverImageUrl + coverThumbUrl） */
   coverImageUrl?: string;
   coverThumbUrl?: string;
+  /** 发布日期（小红书从页面解析到的 YYYY-MM-DD） */
+  publishedAt?: string;
   /**
    * 抓取时间戳。
    * 用 Date 类型以匹配 postsService.updateMetrics 的入参约束（DB 写入要 Date），
@@ -79,12 +81,15 @@ export class PostsMetricsService {
     const scraped: ScrapedMetrics = {
       platform: d.platform,
       title: d.title,
+      authorName: d.authorName || undefined,
+      authorId: d.authorId || undefined,
       likes: Number(d.likes || 0),
       comments: Number(d.comments || 0),
       favorites: Number(d.favorites || 0),
       shares: Number(d.shares || 0),
       coverImageUrl: d.coverImageUrl || '',
       coverThumbUrl: d.coverThumbUrl || '',
+      publishedAt: d.publishedAt || undefined,
       metricsUpdatedAt: d.metricsUpdatedAt ? new Date(d.metricsUpdatedAt) : new Date(),
     };
     this.cacheService.set(cacheKey, scraped, CACHE_TTL_MS);

@@ -22,6 +22,10 @@ export interface ParserSuccess {
   data: {
     platform: string;
     title: string;
+    /** 作者昵称（抖音/小红书页面解析） */
+    authorName?: string;
+    /** 作者平台 ID（抖音/小红书页面解析） */
+    authorId?: string;
     likes: number;
     comments: number;
     favorites: number;
@@ -29,6 +33,8 @@ export interface ParserSuccess {
     /** 抓取截图：原图 / 缩略图（同源低分辨率图）。失败时为空串。 */
     coverImageUrl?: string;
     coverThumbUrl?: string;
+    /** 发布日期（抖音/小红书页面解析，格式 YYYY-MM-DD） */
+    publishedAt?: string;
     metricsUpdatedAt: string;
   };
 }
