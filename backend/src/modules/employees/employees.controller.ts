@@ -78,15 +78,21 @@ export class EmployeesController {
   }
 
   /**
-   * 重置员工登录账号密码。
-   * 生成随机密码，返回明文（仅一次），同时解除可能的锁定状态。
+   * 修改/重置员工登录账号密码。
+   * 若 body 提供 newPassword，则按指定密码修改并校验强度；
+   * 否则生成随机密码（保留兼容行为）。
    */
   @Post(':id/reset-password')
-  async resetPassword(@Param('id') id: string, @Req() req: Request, @Res() res: Response) {
+  async resetPassword(
+    @Param('id') id: string,
+    @Body() body: any,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
     if (!ensureEmployeeAdmin(req, res)) return;
     const userId = getSessionUserId(req);
     try {
-      const result = await this.employeesService.resetPassword(id);
+      const result = await this.employeesService.resetPassword(id, body?.newPassword);
       try {
         await this.operationLogs.log({
           userId,

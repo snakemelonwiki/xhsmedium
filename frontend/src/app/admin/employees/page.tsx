@@ -9,6 +9,7 @@ import { useEffect, useState } from 'react';
 import { apiClient } from '@/shared/api/apiClient';
 import { listAdminEmployees, saveAdminEmployee } from '@/shared/api/admin';
 import type { AdminEmployee } from '@/shared/types/admin';
+import { validatePasswordStrength } from '@/shared/utils/password';
 
 const { Text, Paragraph } = Typography;
 
@@ -87,10 +88,12 @@ export default function AdminEmployeesPage() {
   const [createUserForm] = Form.useForm();
   const [createUserLoading, setCreateUserLoading] = useState(false);
 
-  // 重置密码弹窗
-  const [resetPwdModalOpen, setResetPwdModalOpen] = useState(false);
-  const [resetPwdResult, setResetPwdResult] = useState<{ username: string; newPassword: string } | null>(null);
-  const [resetPwdLoading, setResetPwdLoading] = useState(false);
+  // 修改密码弹窗
+  const [changePwdModalOpen, setChangePwdModalOpen] = useState(false);
+  const [changingPwdEmployee, setChangingPwdEmployee] = useState<Employee>();
+  const [changePwdForm] = Form.useForm();
+  const [changePwdLoading, setChangePwdLoading] = useState(false);
+  const [changePwdResult, setChangePwdResult] = useState<{ username: string; newPassword: string } | null>(null);
 
   async function load(page = pagination.current, pageSize = pagination.pageSize) {
     setLoading(true);
@@ -208,23 +211,39 @@ export default function AdminEmployeesPage() {
     setCreateUserModalOpen(true);
   }
 
-  async function handleResetPassword(record: Employee) {
-    setResetPwdLoading(true);
+  function openChangePasswordModal(record: Employee) {
+    setChangingPwdEmployee(record);
+    setChangePwdResult(null);
+    changePwdForm.resetFields();
+    setChangePwdModalOpen(true);
+  }
+
+  async function submitChangePassword(values: { newPassword: string; confirmPassword: string }) {
+    if (!changingPwdEmployee) return;
+    const strength = validatePasswordStrength(values.newPassword);
+    if (!strength.valid) {
+      messageApi.error(strength.message);
+      return;
+    }
+    setChangePwdLoading(true);
     try {
       const res = await apiClient.request<{ ok: boolean; username: string; newPassword: string; message?: string }>(
-        `/employees/${record.id}/reset-password`,
-        { method: 'POST' },
+        `/employees/${changingPwdEmployee.id}/reset-password`,
+        {
+          method: 'POST',
+          body: { newPassword: values.newPassword },
+        },
       );
       if (res.ok) {
-        setResetPwdResult({ username: res.username, newPassword: res.newPassword });
-        setResetPwdModalOpen(true);
+        setChangePwdResult({ username: res.username, newPassword: res.newPassword });
+        messageApi.success('密码修改成功');
       } else {
-        messageApi.error(res.message || '重置失败');
+        messageApi.error(res.message || '修改失败');
       }
     } catch (err: unknown) {
-      messageApi.error((err as Error)?.message || '重置失败');
+      messageApi.error((err as Error)?.message || '修改失败');
     } finally {
-      setResetPwdLoading(false);
+      setChangePwdLoading(false);
     }
   }
 
@@ -303,10 +322,7 @@ export default function AdminEmployeesPage() {
       render: (v, record) => {
         if (v) {
           return (
-            <Space size={4}>
-              <Tag color="blue">{v}</Tag>
-              <Button size="small" type="link" onClick={() => openBindModal(record!)}>改绑定</Button>
-            </Space>
+            <Tag color="blue">{v}</Tag>
           );
         }
         return (
@@ -325,8 +341,8 @@ export default function AdminEmployeesPage() {
         <Space size={4}>
           <Button size="small" onClick={() => startEdit(record)}>编辑</Button>
           {record.userId && (
-            <Button size="small" loading={resetPwdLoading} onClick={() => handleResetPassword(record)}>
-              重置密码
+            <Button size="small" onClick={() => openChangePasswordModal(record)}>
+              修改密码
             </Button>
           )}
           {record.status !== '停用' && (
@@ -609,37 +625,35 @@ export default function AdminEmployeesPage() {
         </Space>
       </Modal>
 
-      {/* 重置密码结果弹窗 */}
+      {/* 修改密码弹窗 */}
       <Modal
-        title="密码已重置"
-        open={resetPwdModalOpen}
-        onCancel={() => { setResetPwdModalOpen(false); setResetPwdResult(null); }}
-        footer={[
-          <Button key="close" onClick={() => { setResetPwdModalOpen(false); setResetPwdResult(null); }}>
-            关闭
-          </Button>,
-        ]}
+        title="修改密码"
+        open={changePwdModalOpen}
+        onCancel={() => { setChangePwdModalOpen(false); setChangePwdResult(null); }}
+        onOk={() => changePwdForm.submit()}
+        confirmLoading={changePwdLoading}
+        destroyOnClose
         width={440}
       >
-        {resetPwdResult && (
+        {changePwdResult ? (
           <Space direction="vertical" size={12} style={{ width: '100%' }}>
             <Card size="small" style={{ background: '#fffbe6', borderColor: '#ffe58f' }}>
               <Paragraph type="warning" style={{ marginBottom: 0 }}>
-                新密码仅显示一次，请务必复制保存后告知员工。关闭后将无法再次查看。
+                密码修改成功。新密码仅显示一次，请务必复制保存后告知员工。关闭后将无法再次查看。
               </Paragraph>
             </Card>
             <div>
               <Text type="secondary" style={{ fontSize: 12 }}>登录用户名</Text>
-              <Input value={resetPwdResult.username} readOnly style={{ marginTop: 4 }} />
+              <Input value={changePwdResult.username} readOnly style={{ marginTop: 4 }} />
             </div>
             <div>
               <Text type="secondary" style={{ fontSize: 12 }}>新密码</Text>
               <Space.Compact style={{ marginTop: 4, width: '100%' }}>
-                <Input value={resetPwdResult.newPassword} readOnly style={{ fontFamily: 'monospace', fontWeight: 600, letterSpacing: 1 }} />
+                <Input value={changePwdResult.newPassword} readOnly style={{ fontFamily: 'monospace', fontWeight: 600, letterSpacing: 1 }} />
                 <Button
                   type="primary"
                   onClick={() => {
-                    navigator.clipboard.writeText(resetPwdResult.newPassword).then(() => {
+                    navigator.clipboard.writeText(changePwdResult.newPassword).then(() => {
                       messageApi.success('密码已复制到剪贴板，请发送给员工并提醒保存');
                     }).catch(() => {
                       messageApi.error('复制失败，请手动选中后 Ctrl+C 复制');
@@ -650,6 +664,55 @@ export default function AdminEmployeesPage() {
                 </Button>
               </Space.Compact>
             </div>
+          </Space>
+        ) : (
+          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            <Text>
+              为员工 <Text strong>{changingPwdEmployee?.name}</Text> 修改登录密码
+            </Text>
+            <Form
+              form={changePwdForm}
+              layout="vertical"
+              onFinish={submitChangePassword}
+              preserve={false}
+            >
+              <Form.Item
+                name="newPassword"
+                label="新密码"
+                rules={[
+                  { required: true, message: '请输入新密码' },
+                  {
+                    validator: (_, value) => {
+                      const result = validatePasswordStrength(value);
+                      return result.valid ? Promise.resolve() : Promise.reject(new Error(result.message));
+                    },
+                  },
+                ]}
+              >
+                <Input.Password placeholder="请输入新密码" />
+              </Form.Item>
+              <Form.Item
+                name="confirmPassword"
+                label="确认新密码"
+                dependencies={['newPassword']}
+                rules={[
+                  { required: true, message: '请确认新密码' },
+                  ({ getFieldValue }) => ({
+                    validator(_, value) {
+                      if (!value || getFieldValue('newPassword') === value) {
+                        return Promise.resolve();
+                      }
+                      return Promise.reject(new Error('两次输入的密码不一致'));
+                    },
+                  }),
+                ]}
+              >
+                <Input.Password placeholder="请再次输入新密码" />
+              </Form.Item>
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                密码强度要求：8-20 位，不含空格，且至少包含大写字母、小写字母、数字、特殊字符中的两种。
+              </Text>
+            </Form>
           </Space>
         )}
       </Modal>

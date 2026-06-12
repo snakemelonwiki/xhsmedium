@@ -345,8 +345,10 @@ export class EmployeesService {
   }
 
   /**
-   * 重置员工关联登录账号的密码，同时解除锁定状态。
-   * 若未提供 newPassword，则生成随机密码；按当前项目兼容要求，库中存明文密码。
+   * 修改/重置员工关联登录账号的密码，同时解除锁定状态。
+   * - 若提供 newPassword 且非空，按指定密码修改并校验强度；
+   * - 否则生成随机密码；
+   * - 落库时统一使用 bcrypt 哈希（auth.service 同时兼容明文与哈希校验）。
    */
   async resetPassword(
     id: string,
@@ -360,9 +362,15 @@ export class EmployeesService {
     if (!linkedUser) {
       throw new BadRequestException('该员工未绑定登录账号，无法重置密码');
     }
+
     const finalPassword = String(newPassword || '').trim() || this.generateRandomPassword();
+    if (String(newPassword || '').trim()) {
+      this.assertPasswordStrength(finalPassword);
+    }
+
+    const hashedPassword = await bcrypt.hash(finalPassword, 10);
     await this.userRepository.update(linkedUser.id, {
-      password: finalPassword,
+      password: hashedPassword,
       failedLoginCount: 0,
       lastFailedAt: null,
       status: linkedUser.status === 'locked' ? 'active' : linkedUser.status,
@@ -449,5 +457,27 @@ export class EmployeesService {
     let pwd = pick(upper) + pick(lower) + pick(digits);
     for (let i = 0; i < 5; i++) pwd += pick(all);
     return pwd;
+  }
+
+  /**
+   * 校验密码强度：8-20 位，不含空格，且至少包含大写字母、小写字母、数字、特殊字符中的 2 种。
+   * 与前端 validatePasswordStrength 保持一致。
+   */
+  private assertPasswordStrength(password: string): void {
+    const value = String(password || '');
+    if (value.length < 8 || value.length > 20) {
+      throw new BadRequestException('密码长度需为 8-20 位');
+    }
+    if (/\s/.test(value)) {
+      throw new BadRequestException('密码不能包含空格');
+    }
+    let types = 0;
+    if (/[A-Z]/.test(value)) types += 1;
+    if (/[a-z]/.test(value)) types += 1;
+    if (/\d/.test(value)) types += 1;
+    if (/[^A-Za-z0-9\s]/.test(value)) types += 1;
+    if (types < 2) {
+      throw new BadRequestException('密码需包含大写字母、小写字母、数字、特殊字符中的至少两种');
+    }
   }
 }
