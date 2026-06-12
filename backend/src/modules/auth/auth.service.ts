@@ -218,7 +218,19 @@ export class AuthService {
     let payload: any;
     try {
       payload = this.jwtService.verify(token);
-    } catch (_error) {
+    } catch (error: any) {
+      if (error?.name === 'TokenExpiredError') {
+        try {
+          payload = this.jwtService.verify(token, { ignoreExpiration: true });
+        } catch {
+          throw new UnauthorizedException({ message: '登录已失效，请重新登录' });
+        }
+      } else {
+        throw new UnauthorizedException({ message: '登录已失效，请重新登录' });
+      }
+    }
+
+    if (!payload?.sub) {
       throw new UnauthorizedException({ message: '登录已失效，请重新登录' });
     }
 

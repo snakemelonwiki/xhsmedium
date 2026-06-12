@@ -1,4 +1,5 @@
 import type { PagedResult, PageQuery } from '@/shared/types/pagination';
+import { notifyAuthChanged, readTokenUserId, STORAGE_KEYS, type AppUser } from '@/shared/auth/auth';
 
 export class AuthExpiredError extends Error {
   constructor(message = '登录已失效，请重新登录') {
@@ -19,7 +20,7 @@ export interface RequestOptions extends Omit<RequestInit, 'body'> {
   body?: BodyInit | Record<string, unknown> | null;
 }
 
-const TOKEN_KEY = 'xhsmedium.token';
+const TOKEN_KEY = STORAGE_KEYS.token;
 
 function defaultGetToken(): string | null {
   if (typeof window === 'undefined') return null;
@@ -29,7 +30,36 @@ function defaultGetToken(): string | null {
 function defaultClearToken(): void {
   if (typeof window === 'undefined') return;
   window.localStorage.removeItem(TOKEN_KEY);
-  window.localStorage.removeItem('xhsmedium.user');
+  window.localStorage.removeItem(STORAGE_KEYS.user);
+  notifyAuthChanged();
+}
+
+function getStoredUser(): AppUser | null {
+  if (typeof window === 'undefined') return null;
+  const raw = window.localStorage.getItem(STORAGE_KEYS.user);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as AppUser;
+  } catch {
+    return null;
+  }
+}
+
+function isTokenForStoredUser(token: string): boolean {
+  const user = getStoredUser();
+  if (!user?.id) return true;
+  const tokenUserId = readTokenUserId(token);
+  return String(tokenUserId || '') === String(user.id);
+}
+
+function persistRefreshedToken(token: string): void {
+  if (typeof window === 'undefined') return;
+  if (!isTokenForStoredUser(token)) {
+    console.warn('[apiClient] ignored refreshed token for a different user');
+    return;
+  }
+  window.localStorage.setItem(TOKEN_KEY, token);
+  notifyAuthChanged();
 }
 
 function appendQuery(url: URL, query?: PageQuery): void {
@@ -106,7 +136,7 @@ export function createApiClient(options: ApiClientOptions = {}) {
     // 消费后端 TokenRefreshInterceptor 自动续期的 X-New-Token 响应头
     const newToken = response.headers.get('X-New-Token');
     if (newToken && typeof window !== 'undefined') {
-      window.localStorage.setItem(TOKEN_KEY, newToken);
+      persistRefreshedToken(newToken);
     }
 
     if (response.status === 401) {
@@ -214,9 +244,7 @@ async function doRefresh(): Promise<boolean> {
     const data = (await parseResponse(resp)) as { token?: string } | null;
     const newToken = data && typeof data === 'object' ? (data as any).token : null;
     if (typeof newToken !== 'string' || !newToken) return false;
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem(TOKEN_KEY, newToken);
-    }
+    persistRefreshedToken(newToken);
     return true;
   } catch {
     return false;
