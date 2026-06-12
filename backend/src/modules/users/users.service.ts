@@ -60,32 +60,31 @@ export class UsersService {
   async findAssignableSalesUsersPaged(options: { limit: number; offset: number }): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
     const safeLimit = this.clampLimit(options.limit);
     const safeOffset = Math.max(Number(options.offset) || 0, 0);
-    const [rows, total] = await this.userRepository.findAndCount({
-      where: { role: 'sales', status: 'active' },
-      order: { createdAt: 'DESC' },
-      skip: safeOffset,
-      take: safeLimit,
-    });
 
-    // 加载员工姓名（employees.name）与状态，供前端下拉显示真实姓名并过滤停用员工
+    const disabledStatuses = ['离职', '停用', 'inactive', 'disabled', 'leave', 'resign', 'stopped'];
+
+    // 只返回绑定了有效员工（未离职/停用）的销售账号，避免未绑定员工或历史测试账号出现在分配销售下拉框
+    const [rows, total] = await this.userRepository
+      .createQueryBuilder('u')
+      .innerJoin('employees', 'e', 'u.employeeId = e.id')
+      .where('u.role = :role', { role: 'sales' })
+      .andWhere('u.status = :status', { status: 'active' })
+      .andWhere('e.status NOT IN (:...disabledStatuses)', { disabledStatuses })
+      .orderBy('u.createdAt', 'DESC')
+      .skip(safeOffset)
+      .take(safeLimit)
+      .getManyAndCount();
+
+    // 加载员工姓名（employees.name）供前端下拉显示真实姓名
     let employeeNameMap = new Map<string, string>();
     const employeeIds = rows.map((u) => u.employeeId).filter(Boolean) as string[];
     if (employeeIds.length > 0) {
       const placeholders = employeeIds.map(() => '?').join(',');
-      const employees: Array<{ id: string; name: string; status: string }> = await this.userRepository.manager.query(
-        `SELECT id, name, status FROM employees WHERE id IN (${placeholders})`,
+      const employees: Array<{ id: string; name: string }> = await this.userRepository.manager.query(
+        `SELECT id, name FROM employees WHERE id IN (${placeholders})`,
         employeeIds,
       );
       employeeNameMap = new Map(employees.map((e) => [e.id, e.name]));
-
-      // 过滤掉 employee.status 为离职/停用的用户（防御性：防止 user.status 未同步）
-      const disabledStatuses = new Set(['离职', '停用', 'inactive', 'disabled', 'leave', 'resign', 'stopped']);
-      const activeEmployeeIds = new Set(
-        employees.filter((e) => !disabledStatuses.has(e.status)).map((e) => e.id),
-      );
-      const filteredRows = rows.filter((u) => !u.employeeId || activeEmployeeIds.has(u.employeeId));
-      rows.length = 0;
-      rows.push(...filteredRows);
     }
 
     // 惰性自动恢复：检查 capacity_paused_at 超过1小时的记录
