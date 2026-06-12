@@ -53,6 +53,7 @@ import { useSubmitLock } from '@/shared/hooks/useSubmitLock';
 import { formatDateTime } from '@/shared/utils/date-format';
 import type { DealStatusCode, IntentionLevelCode, LeadTimelineItem, SalesLead } from '@/shared/types/leads';
 import type { OrderItem } from '@/shared/types/orders';
+import { buildOperationReminderTarget } from '../leadReminderTarget';
 
 const FOLLOW_TYPE_OPTIONS = [
   { label: '电话沟通', value: 'phone' },
@@ -269,6 +270,7 @@ export default function SalesLeadDetailPage() {
     return lead.status === LeadStatus.IN_FOLLOWUP || lead.addStatus === LeadAddStatus.ADDED;
   }, [lead]);
   const isHalfPriceLead = lead?.sourcePostQualityStatus === 'unqualified' || Number(lead?.leadPriceMultiplier || 1) === 0.5;
+  const reminderTarget = lead ? buildOperationReminderTarget(lead) : { recipientId: '', recipientName: undefined };
 
   return (
     <Space direction="vertical" size={16} className="page-stack">
@@ -282,9 +284,10 @@ export default function SalesLeadDetailPage() {
           <Button onClick={() => router.push(`/sales/collaboration?leadId=${leadId}`)}>打开协同页</Button>
           <Button onClick={() => setIntentionOpen(true)}>更新意向程度</Button>
           <Button onClick={() => setDealStatusOpen(true)}>更新成交状态</Button>
-          {lead?.sales?.id ? (
+          {reminderTarget.recipientId ? (
             <ReminderButton
-              recipientId={String(lead.sales.id)}
+              recipientId={reminderTarget.recipientId}
+              recipientName={reminderTarget.recipientName}
               recipientRole="operation"
               relatedType="lead"
               relatedId={leadId}

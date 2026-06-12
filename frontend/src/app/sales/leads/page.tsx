@@ -47,6 +47,7 @@ import { StatusTag } from '@/shared/components/status';
 import { formatDateTime } from '@/shared/utils/date-format';
 import { QuickRangePicker } from '@/shared/components/date';
 import type { DateRangeValue } from '@/shared/components/date';
+import { buildOperationReminderTarget } from './leadReminderTarget';
 import {
   LeadAddStatus,
   LeadProcessStatus,
@@ -539,58 +540,61 @@ export default function SalesLeadsPage() {
     {
       title: '操作',
       key: 'actions',
-      render: (_v, lead) => (
-        <Space direction="vertical" size={4} style={{ width: '100%' }}>
-          <Space size={4} wrap>
-            <Tooltip title="查看客资详情">
-              <Button size="small" onClick={() => router.push(`/sales/leads/${lead.id}`)}>详情</Button>
-            </Tooltip>
-            {/* 「我的客资」页不开放"写跟进"按钮（写跟进统一去「客资跟进」页操作）。 */}
-            {/* 已添加联系方式：仅对 addStatus=not_added 的客资显示，
-                点击后 addStatus=added，客资从「我的客资」消失并出现在「客资跟进」。 */}
-            {lead.addStatus === LeadAddStatus.NOT_ADDED ? (
+      render: (_v, lead) => {
+        const reminderTarget = buildOperationReminderTarget(lead);
+        return (
+          <Space direction="vertical" size={4} style={{ width: '100%' }}>
+            <Space size={4} wrap>
+              <Tooltip title="查看客资详情">
+                <Button size="small" onClick={() => router.push(`/sales/leads/${lead.id}`)}>详情</Button>
+              </Tooltip>
+              {/* 「我的客资」页不开放"写跟进"按钮（写跟进统一去「客资跟进」页操作）。 */}
+              {/* 已添加联系方式：仅对 addStatus=not_added 的客资显示，
+                  点击后 addStatus=added，客资从「我的客资」消失并出现在「客资跟进」。 */}
+              {lead.addStatus === LeadAddStatus.NOT_ADDED ? (
+                <Button
+                  size="small"
+                  type="primary"
+                  onClick={() => handleMarkContactAdded(lead)}
+                >
+                  已添加联系方式
+                </Button>
+              ) : null}
+            </Space>
+            <Space size={4} wrap>
               <Button
                 size="small"
-                type="primary"
-                onClick={() => handleMarkContactAdded(lead)}
+                icon={<TagOutlined />}
+                onClick={() => openIntention(lead)}
               >
-                已添加联系方式
+                意向程度
               </Button>
-            ) : null}
-          </Space>
-          <Space size={4} wrap>
-            <Button
-              size="small"
-              icon={<TagOutlined />}
-              onClick={() => openIntention(lead)}
-            >
-              意向程度
-            </Button>
-            {/* v1.3 / SA-12: 改派 — 调整当前销售归属（主管/销售本人都可发起） */}
-            <Button
-              size="small"
-              icon={<SwapOutlined />}
-              onClick={() => openReassign(lead)}
-            >
-              改派
-            </Button>
-            {lead.sales?.id ? (
-              <ReminderButton
+              {/* v1.3 / SA-12: 改派 — 调整当前销售归属（主管/销售本人都可发起） */}
+              <Button
                 size="small"
-                recipientId={String(lead.sales.id)}
-                recipientName={lead.sales?.name}
-                recipientRole="operation"
-                relatedType="lead"
-                relatedId={String(lead.id)}
-                relatedTitle={lead.customerName || lead.leadCode}
-                content={`客资 ${lead.customerName || lead.id} 需要运营协助`}
+                icon={<SwapOutlined />}
+                onClick={() => openReassign(lead)}
               >
-                提醒
-              </ReminderButton>
-            ) : null}
+                改派
+              </Button>
+              {reminderTarget.recipientId ? (
+                <ReminderButton
+                  size="small"
+                  recipientId={reminderTarget.recipientId}
+                  recipientName={reminderTarget.recipientName}
+                  recipientRole="operation"
+                  relatedType="lead"
+                  relatedId={String(lead.id)}
+                  relatedTitle={lead.customerName || lead.leadCode}
+                  content={`客资 ${lead.customerName || lead.id} 需要运营协助`}
+                >
+                  提醒
+                </ReminderButton>
+              ) : null}
+            </Space>
           </Space>
-        </Space>
-      ),
+        );
+      },
     },
   // eslint-disable-next-line react-hooks/exhaustive-deps
   ], [router]);
