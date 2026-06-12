@@ -62,30 +62,63 @@ export class UsersService {
     const safeOffset = Math.max(Number(options.offset) || 0, 0);
 
     const disabledStatuses = ['离职', '停用', 'inactive', 'disabled', 'leave', 'resign', 'stopped'];
+    const statusPlaceholders = disabledStatuses.map(() => '?').join(',');
 
-    // 只返回绑定了有效员工（未离职/停用）的销售账号，避免未绑定员工或历史测试账号出现在分配销售下拉框
-    const [rows, total] = await this.userRepository
-      .createQueryBuilder('u')
-      .innerJoin('employees', 'e', 'u.employeeId = e.id')
-      .where('u.role = :role', { role: 'sales' })
-      .andWhere('u.status = :status', { status: 'active' })
-      .andWhere('e.status NOT IN (:...disabledStatuses)', { disabledStatuses })
-      .orderBy('u.createdAt', 'DESC')
-      .skip(safeOffset)
-      .take(safeLimit)
-      .getManyAndCount();
+    // 每个员工只保留一个最新创建的有效销售账号，避免同一员工绑定多个 sales 账号导致下拉框数量多于员工管理列表
+    const rows: Array<{
+      id: string | number;
+      username: string;
+      role: string;
+      employeeId: string | number;
+      status: string;
+      capacityPaused: number;
+      capacityPausedAt: Date | string | null;
+      createdAt: Date | string;
+      employeeName: string;
+    }> = await this.userRepository.manager.query(
+      `
+      SELECT
+        u.id,
+        u.username,
+        u.role,
+        u.employee_id AS employeeId,
+        u.status,
+        u.capacity_paused AS capacityPaused,
+        u.capacity_paused_at AS capacityPausedAt,
+        u.created_at AS createdAt,
+        e.name AS employeeName
+      FROM users u
+      INNER JOIN employees e ON u.employee_id = e.id
+      WHERE u.role = ?
+        AND u.status = 'active'
+        AND e.status NOT IN (${statusPlaceholders})
+        AND u.id = (
+          SELECT u2.id
+          FROM users u2
+          WHERE u2.employee_id = u.employee_id
+            AND u2.role = 'sales'
+            AND u2.status = 'active'
+          ORDER BY u2.created_at DESC, u2.id DESC
+          LIMIT 1
+        )
+      ORDER BY u.created_at DESC
+      LIMIT ? OFFSET ?
+      `,
+      ['sales', ...disabledStatuses, safeLimit, safeOffset],
+    );
 
-    // 加载员工姓名（employees.name）供前端下拉显示真实姓名
-    let employeeNameMap = new Map<string, string>();
-    const employeeIds = rows.map((u) => u.employeeId).filter(Boolean) as string[];
-    if (employeeIds.length > 0) {
-      const placeholders = employeeIds.map(() => '?').join(',');
-      const employees: Array<{ id: string; name: string }> = await this.userRepository.manager.query(
-        `SELECT id, name FROM employees WHERE id IN (${placeholders})`,
-        employeeIds,
-      );
-      employeeNameMap = new Map(employees.map((e) => [e.id, e.name]));
-    }
+    const countResult: Array<{ total: number }> = await this.userRepository.manager.query(
+      `
+      SELECT COUNT(DISTINCT u.employee_id) AS total
+      FROM users u
+      INNER JOIN employees e ON u.employee_id = e.id
+      WHERE u.role = ?
+        AND u.status = 'active'
+        AND e.status NOT IN (${statusPlaceholders})
+      `,
+      ['sales', ...disabledStatuses],
+    );
+    const total = Number(countResult[0]?.total) || 0;
 
     // 惰性自动恢复：检查 capacity_paused_at 超过1小时的记录
     const now = new Date();
@@ -95,7 +128,7 @@ export class UsersService {
         const elapsed = now.getTime() - new Date(u.capacityPausedAt).getTime();
         if (elapsed > ONE_HOUR_MS) {
           // 自动恢复
-          await this.userRepository.update(u.id, {
+          await this.userRepository.update(String(u.id), {
             capacityPaused: 0 as any,
             capacityPausedAt: null as any,
           });
@@ -107,10 +140,15 @@ export class UsersService {
 
     return {
       items: rows.map((u) => ({
-        ...toSafeUser(u),
-        employeeName: u.employeeId ? (employeeNameMap.get(u.employeeId) ?? null) : null,
+        id: String(u.id),
+        username: u.username,
+        role: u.role,
+        employeeId: u.employeeId ? String(u.employeeId) : null,
+        status: u.status,
+        employeeName: u.employeeName ?? null,
         capacityPaused: Boolean(u.capacityPaused),
-        capacityPausedAt: u.capacityPausedAt ?? null,
+        capacityPausedAt: u.capacityPausedAt ? new Date(u.capacityPausedAt).toISOString() : null,
+        createdAt: u.createdAt ? new Date(u.createdAt).toISOString() : null,
       })),
       total,
       limit: safeLimit,
