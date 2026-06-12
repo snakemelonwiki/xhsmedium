@@ -287,6 +287,14 @@ export class EmployeesService {
     const linkedUser = await this.userRepository.findOne({ where: { employeeId: id } });
     if (linkedUser) {
       const userUpdates: Partial<User> = {};
+
+      // 同步员工启停状态到 user.status
+      if (input.status !== undefined) {
+        const disabledStatuses = ['离职', '停用', 'inactive', 'disabled'];
+        const isDisable = disabledStatuses.includes(input.status);
+        userUpdates.status = isDisable ? 'inactive' : 'active';
+      }
+
       if (input.loginPassword !== undefined && input.loginPassword !== null && String(input.loginPassword).length > 0) {
         userUpdates.password = await bcrypt.hash(String(input.loginPassword), 10);
       }
@@ -373,16 +381,27 @@ export class EmployeesService {
     const users = employeeIds.length
       ? await this.userRepository.find({ where: { employeeId: In(employeeIds) } })
       : [];
-    const roleByEmployeeId = new Map<string, string | null>();
+    const userByEmployeeId = new Map<string, User>();
+    // 优先保留角色更具体的用户记录（非 staff 优先），处理历史遗留的同一 employeeId 多 user 问题
+    users.sort((a, b) => {
+      const aIsStaff = a.role === 'staff' ? 1 : 0;
+      const bIsStaff = b.role === 'staff' ? 1 : 0;
+      return aIsStaff - bIsStaff;
+    });
     for (const u of users) {
-      if (u.employeeId && !roleByEmployeeId.has(u.employeeId)) {
-        roleByEmployeeId.set(u.employeeId, u.role);
+      if (u.employeeId && !userByEmployeeId.has(u.employeeId)) {
+        userByEmployeeId.set(u.employeeId, u);
       }
     }
-    return items.map((emp) => ({
-      ...emp,
-      role: roleByEmployeeId.get(emp.id) || null,
-    }));
+    return items.map((emp) => {
+      const linkedUser = userByEmployeeId.get(emp.id);
+      return {
+        ...emp,
+        userId: linkedUser?.id ?? null,
+        username: linkedUser?.username ?? null,
+        role: linkedUser?.role ?? null,
+      };
+    });
   }
 
   /**

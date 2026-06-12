@@ -67,16 +67,25 @@ export class UsersService {
       take: safeLimit,
     });
 
-    // 加载员工姓名（employees.name），供前端下拉显示真实姓名而非登录用户名
+    // 加载员工姓名（employees.name）与状态，供前端下拉显示真实姓名并过滤停用员工
     let employeeNameMap = new Map<string, string>();
     const employeeIds = rows.map((u) => u.employeeId).filter(Boolean) as string[];
     if (employeeIds.length > 0) {
       const placeholders = employeeIds.map(() => '?').join(',');
-      const employees: Array<{ id: string; name: string }> = await this.userRepository.manager.query(
-        `SELECT id, name FROM employees WHERE id IN (${placeholders})`,
+      const employees: Array<{ id: string; name: string; status: string }> = await this.userRepository.manager.query(
+        `SELECT id, name, status FROM employees WHERE id IN (${placeholders})`,
         employeeIds,
       );
       employeeNameMap = new Map(employees.map((e) => [e.id, e.name]));
+
+      // 过滤掉 employee.status 为离职/停用的用户（防御性：防止 user.status 未同步）
+      const disabledStatuses = new Set(['离职', '停用', 'inactive', 'disabled', 'leave', 'resign', 'stopped']);
+      const activeEmployeeIds = new Set(
+        employees.filter((e) => !disabledStatuses.has(e.status)).map((e) => e.id),
+      );
+      const filteredRows = rows.filter((u) => !u.employeeId || activeEmployeeIds.has(u.employeeId));
+      rows.length = 0;
+      rows.push(...filteredRows);
     }
 
     // 惰性自动恢复：检查 capacity_paused_at 超过1小时的记录
@@ -233,10 +242,12 @@ export class UsersService {
     status: string;
   }): Promise<void> {
     const hashedPassword = normalizePasswordForStorage(dto.password);
+    // 查询该员工已有的任意登录账号（不限制 role），避免同一 employeeId 下创建多个 user 导致显示错乱
     const existing = await this.userRepository.findOne({
-      where: { employeeId: dto.employeeId, role: 'staff' },
+      where: { employeeId: dto.employeeId },
     });
     if (existing) {
+      // 更新已有账号时保留原始 role，不将其修改为 'staff'
       await this.userRepository.update(existing.id, {
         username: dto.username,
         password: hashedPassword,

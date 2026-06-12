@@ -6,7 +6,7 @@ import {
 import type { TableColumnsType, TablePaginationConfig } from 'antd';
 import { useEffect, useState } from 'react';
 
-import { apiClient, normalizePagedResult } from '@/shared/api/apiClient';
+import { apiClient } from '@/shared/api/apiClient';
 import { listAdminEmployees, saveAdminEmployee } from '@/shared/api/admin';
 import type { AdminEmployee } from '@/shared/types/admin';
 
@@ -18,13 +18,6 @@ type Employee = AdminEmployee & {
   role?: string;
   department?: string;
   roleType?: string;
-};
-
-type UserRecord = {
-  id?: string;
-  employeeId?: string;
-  username?: string;
-  role?: string;
 };
 
 const ROLE_OPTIONS = [
@@ -84,6 +77,11 @@ export default function AdminEmployeesPage() {
   const [deactivateEmployee, setDeactivateEmployee] = useState<Employee>();
   const [deactivateLoading, setDeactivateLoading] = useState(false);
 
+  // 删除确认弹窗
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [deleteEmployee, setDeleteEmployee] = useState<Employee>();
+  const [deleteLoading, setDeleteLoading] = useState(false);
+
   // 新建登录账号弹窗
   const [createUserModalOpen, setCreateUserModalOpen] = useState(false);
   const [createUserForm] = Form.useForm();
@@ -98,29 +96,9 @@ export default function AdminEmployeesPage() {
     setLoading(true);
     try {
       const result = await listAdminEmployees({ page, pageSize, keyword: keyword.trim() || undefined });
-      // 拉全量用户账号（带分页），用于按 employeeId 关联出每个员工的 role / username。
-      // 后端在传 limit 时返回 paged 结果 {items, total, ...}，需用 normalizePagedResult 抽出 items。
-      const usersPayload = await apiClient.get<unknown>('/users', { query: { limit: 500 } }).catch(() => null);
-      const userList: UserRecord[] = (() => {
-        if (!usersPayload) return [];
-        const paged = normalizePagedResult<UserRecord>(usersPayload);
-        return Array.isArray(paged.items) ? paged.items : [];
-      })();
-      const userByEmployeeId = new Map<string, UserRecord>();
-      userList.forEach((u) => {
-        if (u.employeeId) userByEmployeeId.set(u.employeeId, u);
-      });
-      // 补充员工关联的登录账号信息
-      const enriched = result.items.map((emp) => {
-        const matched = userByEmployeeId.get(emp.id);
-        return {
-          ...emp,
-          userId: matched?.id,
-          username: matched?.username,
-          role: matched?.role,
-        } as Employee;
-      });
-      setItems(enriched);
+      // 员工数据已由后端 enrichWithRoles 关联 userId / username / role，
+      // 直接使用，无需额外查询 /users
+      setItems(result.items as Employee[]);
       setPagination({ current: result.page, pageSize: result.pageSize, total: result.total });
     } catch {
       setItems([]);
@@ -201,6 +179,26 @@ export default function AdminEmployeesPage() {
       messageApi.error((err as Error)?.message || '停用失败');
     } finally {
       setDeactivateLoading(false);
+    }
+  }
+
+  function openDeleteConfirm(record: Employee) {
+    setDeleteEmployee(record);
+    setDeleteModalOpen(true);
+  }
+
+  async function confirmDelete() {
+    if (!deleteEmployee) return;
+    setDeleteLoading(true);
+    try {
+      await apiClient.request(`/employees/${deleteEmployee.id}`, { method: 'DELETE' });
+      messageApi.success(`员工"${deleteEmployee.name}"已删除`);
+      setDeleteModalOpen(false);
+      void load();
+    } catch (err: unknown) {
+      messageApi.error((err as Error)?.message || '删除失败');
+    } finally {
+      setDeleteLoading(false);
     }
   }
 
@@ -321,7 +319,7 @@ export default function AdminEmployeesPage() {
     {
       title: '操作',
       key: 'action',
-      width: 180,
+      width: 200,
       fixed: 'right',
       render: (_: unknown, record: Employee) => (
         <Space size={4}>
@@ -334,6 +332,11 @@ export default function AdminEmployeesPage() {
           {record.status !== '停用' && (
             <Button size="small" danger type="text" onClick={() => openDeactivateConfirm(record)}>
               停用
+            </Button>
+          )}
+          {record.status !== '离职' && (
+            <Button size="small" danger type="text" onClick={() => openDeleteConfirm(record)}>
+              删除
             </Button>
           )}
         </Space>
@@ -504,6 +507,37 @@ export default function AdminEmployeesPage() {
             </ul>
           </Card>
           <Text type="secondary">如需继续，请点击"确认停用"。</Text>
+        </Space>
+      </Modal>
+
+      {/* 删除确认弹窗 */}
+      <Modal
+        title="删除员工确认"
+        open={deleteModalOpen}
+        onCancel={() => setDeleteModalOpen(false)}
+        footer={[
+          <Button key="cancel" onClick={() => setDeleteModalOpen(false)}>取消</Button>,
+          <Button key="confirm" type="primary" danger loading={deleteLoading} onClick={confirmDelete}>
+            确认删除
+          </Button>,
+        ]}
+      >
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Paragraph>
+            即将删除员工：<Text strong>{deleteEmployee?.name}</Text>
+          </Paragraph>
+          <Card size="small" type="inner">
+            <Paragraph type="warning" style={{ marginBottom: 8 }}>
+              删除后将会产生以下影响：
+            </Paragraph>
+            <ul style={{ marginBottom: 0, paddingLeft: 20 }}>
+              <li>该员工的登录账号将被停用，无法登录系统</li>
+              <li>该员工关联的运营账号将无法正常使用</li>
+              <li>该员工负责的客资将变为待分配状态</li>
+              <li>该员工关联的订单将需要重新分配跟进人</li>
+            </ul>
+          </Card>
+          <Text type="warning">此操作不可撤销，确认删除吗？</Text>
         </Space>
       </Modal>
 

@@ -56,6 +56,8 @@ function mapEmployee(raw: RawRecord): AdminEmployee {
     status: text(raw.status),
     department: text(raw.department) ?? null,
     createdAt: text(raw.createdAt),
+    userId: text(raw.userId),
+    username: text(raw.username),
     roleType: text(raw.roleType),
     role: text(raw.role),
   };

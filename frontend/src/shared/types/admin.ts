@@ -40,9 +40,13 @@ export interface AdminEmployee {
   status?: string;
   department?: string | null;
   createdAt?: string;
+  /** 员工关联的登录账号 ID（来自 enrichWithRoles 关联） */
+  userId?: string | null;
+  /** 员工关联的登录账号用户名（来自 enrichWithRoles 关联） */
+  username?: string | null;
   /** 表单字段：员工关联登录账号的角色（运营/销售/教务/主管/管理员），值与后端 User.role enum 对齐 */
   roleType?: string;
-  /** 后端嵌入返回的角色（同 user.role）；列表 load() 用 /users 关联填充 */
+  /** 后端嵌入返回的角色（同 user.role）；列表 load() 用 enrichWithRoles 关联填充 */
   role?: string;
 }
 
