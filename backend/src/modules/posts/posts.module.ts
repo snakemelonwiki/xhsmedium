@@ -4,6 +4,7 @@ import { Post } from '../../entities/post.entity';
 import { Lead } from '../../entities/lead.entity';
 import { PostMetricsHistory } from '../../entities/post-metrics-history.entity';
 import { PostMetrics } from '../../entities/post-metrics.entity';
+import { AppSetting } from '../../entities/app-setting.entity';
 import { PostsController } from './posts.controller';
 import { PostsService } from './posts.service';
 import { PostsMetricsService } from './posts-metrics.service';
@@ -15,7 +16,7 @@ import { PlazaConfigModule } from '../plaza-config/plaza-config.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Post, Lead, PostMetricsHistory, PostMetrics]),
+    TypeOrmModule.forFeature([Post, Lead, PostMetricsHistory, PostMetrics, AppSetting]),
     OperationLogsModule,
     ParserModule,
     FavoritesModule,

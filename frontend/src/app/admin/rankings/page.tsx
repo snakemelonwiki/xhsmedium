@@ -1,7 +1,7 @@
 'use client';
 
 import { DownloadOutlined } from '@ant-design/icons';
-import { Alert, Button, Card, Empty, message, Pagination, Radio, Space, Table, Typography } from 'antd';
+import { Alert, Button, Card, Empty, Form, InputNumber, message, Pagination, Radio, Space, Table, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
 import { useEffect, useState } from 'react';
@@ -12,6 +12,11 @@ import { isPresetMatch } from '@/shared/utils/date-range';
 import type { DateRangePreset } from '@/shared/utils/date-range';
 import { apiClient } from '@/shared/api/apiClient';
 import { createExport, downloadExportUrl, getExport } from '@/shared/api/exports';
+import {
+  getLearningBoardThresholds,
+  updateLearningBoardThresholds,
+  type LearningBoardThresholds,
+} from '@/shared/api/learning-board';
 
 import { buildRankingExportFilter } from './exportFilter';
 
@@ -52,6 +57,9 @@ export default function AdminRankingsPage() {
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string>();
+  const [thresholdForm] = Form.useForm<LearningBoardThresholds>();
+  const [thresholdLoading, setThresholdLoading] = useState(false);
+  const [thresholdSaving, setThresholdSaving] = useState(false);
   const pageSize = 20;
 
   /** 根据当前 dateRange 生成请求参数：预设命中则发 period，否则发 from/to */
@@ -95,6 +103,11 @@ export default function AdminRankingsPage() {
     void load(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dateRange]);
+
+  useEffect(() => {
+    void loadThresholds();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const columns: ColumnsType<RankingRow> = [
     { title: '排名', width: 80, render: (_, __, index) => (page - 1) * pageSize + index + 1 },
@@ -141,6 +154,34 @@ export default function AdminRankingsPage() {
     }
   }
 
+  async function loadThresholds() {
+    setThresholdLoading(true);
+    try {
+      const thresholds = await getLearningBoardThresholds();
+      thresholdForm.setFieldsValue(thresholds);
+    } catch (err) {
+      message.warning(err instanceof Error ? err.message : '学习榜单门槛加载失败');
+    } finally {
+      setThresholdLoading(false);
+    }
+  }
+
+  async function saveThresholds(values: LearningBoardThresholds) {
+    setThresholdSaving(true);
+    try {
+      const thresholds = await updateLearningBoardThresholds({
+        minLeads: Number(values.minLeads ?? 0),
+        minTraffic: Number(values.minTraffic ?? 0),
+      });
+      thresholdForm.setFieldsValue(thresholds);
+      message.success('学习榜单门槛已保存');
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '学习榜单门槛保存失败');
+    } finally {
+      setThresholdSaving(false);
+    }
+  }
+
   return (
     <Space direction="vertical" size={16} className="page-stack">
       <div>
@@ -150,6 +191,29 @@ export default function AdminRankingsPage() {
         </Typography.Paragraph>
       </div>
       <Card>
+        <Form
+          form={thresholdForm}
+          layout="inline"
+          disabled={thresholdLoading}
+          initialValues={{ minLeads: 10, minTraffic: 10000 }}
+          onFinish={saveThresholds}
+          style={{ marginBottom: 16 }}
+        >
+          <Form.Item label="学习榜单门槛" style={{ marginRight: 8 }}>
+            <Typography.Text type="secondary">客资或流量任一达标才展示</Typography.Text>
+          </Form.Item>
+          <Form.Item name="minLeads" label="客资不少于">
+            <InputNumber min={0} precision={0} addonAfter="条" style={{ width: 140 }} />
+          </Form.Item>
+          <Form.Item name="minTraffic" label="流量不少于">
+            <InputNumber min={0} precision={0} addonAfter="次" style={{ width: 160 }} />
+          </Form.Item>
+          <Form.Item>
+            <Button type="primary" htmlType="submit" loading={thresholdSaving}>
+              保存门槛
+            </Button>
+          </Form.Item>
+        </Form>
         <Space size={16} wrap style={{ marginBottom: 16 }}>
           <Radio.Group value={type} onChange={(e) => { setType(e.target.value); void load(1, e.target.value, platform); }}>
             <Radio.Button value="posts">作品榜</Radio.Button>

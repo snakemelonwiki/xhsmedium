@@ -6,7 +6,7 @@ import { makeId } from '../../shared/utils/id-generator';
 import { todayString } from '../../shared/utils/date-utils';
 import { DebounceGuard } from '../../common/debounce.guard';
 import { OperationLogsService } from '../operation-logs/operation-logs.service';
-import { getSessionUserId } from '../../common/session.utils';
+import { getSessionRole, getSessionUserId } from '../../common/session.utils';
 import { AuthGuard, Public } from '../../common/auth.guard';
 import {
   OPERATION_LOG_ACTIONS,
@@ -381,6 +381,38 @@ export class PostsController {
       { employeeId: session?.employeeId, role: String(session?.role || '').toLowerCase() },
     );
     return res.json({ ok: true, ...result });
+  }
+
+  /**
+   * 读取学习榜单基础展示门槛。
+   */
+  @Get('learning-board/thresholds')
+  async getLearningBoardThresholds(@Res() res: Response) {
+    const thresholds = await this.postsService.getLearningBoardThresholds();
+    return res.json({ ok: true, ...thresholds });
+  }
+
+  /**
+   * 主管端配置学习榜单基础展示门槛。
+   */
+  @Put('learning-board/thresholds')
+  async updateLearningBoardThresholds(
+    @Req() req: Request,
+    @Res() res: Response,
+    @Body() body: any,
+  ) {
+    const role = getSessionRole(req);
+    if (!['supervisor', 'admin', 'owner'].includes(role)) {
+      return res.status(403).json({ ok: false, message: '仅主管/管理员可配置学习榜单门槛' });
+    }
+    const thresholds = await this.postsService.saveLearningBoardThresholds(
+      {
+        minLeads: body?.minLeads,
+        minTraffic: body?.minTraffic,
+      },
+      getSessionUserId(req),
+    );
+    return res.json({ ok: true, ...thresholds });
   }
 
   /**

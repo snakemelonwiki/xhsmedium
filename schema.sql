@@ -34,6 +34,7 @@ DROP TABLE IF EXISTS operation_logs;
 DROP TABLE IF EXISTS exports;
 DROP TABLE IF EXISTS revoked_tokens;
 DROP TABLE IF EXISTS supervisor_suggestions;
+DROP TABLE IF EXISTS app_settings;
 DROP TABLE IF EXISTS users;
 DROP TABLE IF EXISTS employees;
 DROP TABLE IF EXISTS teachers;
@@ -49,6 +50,18 @@ CREATE TABLE IF NOT EXISTS _migrations (
   filename    VARCHAR(255) NOT NULL,
   applied_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='数据库迁移记录表';
+
+-- ============================================================
+-- 0.1 app_settings
+-- backend/src/entities/app-setting.entity.ts
+-- 轻量业务配置表：用于学习榜单展示门槛等少量系统配置。
+-- ============================================================
+CREATE TABLE IF NOT EXISTS app_settings (
+  setting_key   VARCHAR(128) PRIMARY KEY,
+  setting_value TEXT         NOT NULL,
+  updated_by    VARCHAR(64)  NULL,
+  updated_at    TIMESTAMP    NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='系统轻量配置表';
 
 -- ============================================================
 -- 1. employees

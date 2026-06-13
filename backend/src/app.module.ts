@@ -23,6 +23,7 @@ import { PostMetricsHistory } from './entities/post-metrics-history.entity';
 import { ExportTask } from './entities/export-task.entity';
 import { OperationLog } from './entities/operation-log.entity';
 import { SupervisorSuggestion } from './entities/supervisor-suggestion.entity';
+import { AppSetting } from './entities/app-setting.entity';
 import { ScrapingAlert } from './modules/scraping/scraping-alert.entity';
 // v1.3 增量（教务端表 M25）
 import { Teacher } from './entities/teacher.entity';
@@ -102,6 +103,7 @@ import { TokenRefreshInterceptor } from './common/token-refresh.interceptor';
           ExportTask,
           OperationLog,
           SupervisorSuggestion,
+          AppSetting,
           ScrapingAlert,
           Teacher,
           OrderAuthor,

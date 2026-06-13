@@ -5,6 +5,7 @@ import { Post } from '../../entities/post.entity';
 import { Lead } from '../../entities/lead.entity';
 import { PostMetricsHistory } from '../../entities/post-metrics-history.entity';
 import { PostMetrics } from '../../entities/post-metrics.entity';
+import { AppSetting } from '../../entities/app-setting.entity';
 import { makeId } from '../../shared/utils/id-generator';
 import { normalizePostType, normalizeTrafficByType, normalizeExternalUrl, normalizeMediaUrl } from '../../shared/utils/normalize';
 import { PostsMetricsService } from './posts-metrics.service';
@@ -88,6 +89,17 @@ export type SupervisorQualityStatus = 'normal' | 'excellent' | 'unqualified';
 
 const SUPERVISOR_QUALITY_STATUSES: SupervisorQualityStatus[] = ['normal', 'excellent', 'unqualified'];
 
+const LEARNING_BOARD_THRESHOLD_SETTING_KEY = 'learning_board_thresholds';
+const DEFAULT_LEARNING_BOARD_THRESHOLDS = {
+  minLeads: 10,
+  minTraffic: 10000,
+};
+
+export interface LearningBoardThresholds {
+  minLeads: number;
+  minTraffic: number;
+}
+
 /**
  * viewer 上下文：用于按当前登录用户计算 isFavorited 等个人化字段。
  * 透传自 controller，使用 getSessionUserId / getSessionRole 提取。
@@ -109,6 +121,8 @@ export class PostsService {
     private readonly metricsHistoryRepository: Repository<PostMetricsHistory>,
     @InjectRepository(PostMetrics)
     private readonly postMetricsRepository: Repository<PostMetrics>,
+    @InjectRepository(AppSetting)
+    private readonly appSettingRepository?: Repository<AppSetting>,
     @Optional()
     private readonly postsMetricsService?: PostsMetricsService,
     @Optional()
@@ -121,6 +135,41 @@ export class PostsService {
     const rows = await this.postRepository.find({ order: { publishedAt: 'DESC', createdAt: 'DESC' } });
     const items = await this.attachJoinNames(rows.map((r) => this.mapPost(r)));
     return this.decorateWithFavorites(items, viewer);
+  }
+
+  /**
+   * 读取学习榜单展示门槛。默认要求客资数或流量至少一项达标。
+   */
+  async getLearningBoardThresholds(): Promise<LearningBoardThresholds> {
+    if (!this.appSettingRepository) {
+      return { ...DEFAULT_LEARNING_BOARD_THRESHOLDS };
+    }
+    await this.ensureAppSettingsTable();
+    const row = await this.appSettingRepository.findOne({
+      where: { settingKey: LEARNING_BOARD_THRESHOLD_SETTING_KEY },
+    });
+    return this.normalizeLearningBoardThresholds(row?.settingValue);
+  }
+
+  /**
+   * 保存学习榜单展示门槛，供主管端配置。
+   */
+  async saveLearningBoardThresholds(
+    input: Partial<LearningBoardThresholds>,
+    updatedBy?: string,
+  ): Promise<LearningBoardThresholds> {
+    const next = this.normalizeLearningBoardThresholds(input);
+    if (!this.appSettingRepository) {
+      return next;
+    }
+    await this.ensureAppSettingsTable();
+    await this.appSettingRepository.save({
+      settingKey: LEARNING_BOARD_THRESHOLD_SETTING_KEY,
+      settingValue: JSON.stringify(next),
+      updatedBy: updatedBy || null,
+      updatedAt: new Date(),
+    });
+    return next;
   }
 
   async findByEmployee(employeeId: string, viewer?: PostsListViewer): Promise<any[]> {
@@ -660,10 +709,25 @@ export class PostsService {
 
     const whereParts: string[] = ['p.published_at >= ?'];
     const whereParams: any[] = [cutoffStr];
+    const thresholds = await this.getLearningBoardThresholds();
 
     if (platform) {
       whereParts.push('p.platform = ?');
       whereParams.push(platform);
+    }
+
+    if (thresholds.minLeads > 0 && thresholds.minTraffic > 0) {
+      whereParts.push(`(
+        COALESCE(lc.cnt, 0) >= ?
+        OR (COALESCE(p.likes, 0) + COALESCE(p.comments, 0) + COALESCE(p.favorites, 0)) >= ?
+      )`);
+      whereParams.push(thresholds.minLeads, thresholds.minTraffic);
+    } else if (thresholds.minLeads > 0) {
+      whereParts.push('COALESCE(lc.cnt, 0) >= ?');
+      whereParams.push(thresholds.minLeads);
+    } else if (thresholds.minTraffic > 0) {
+      whereParts.push('(COALESCE(p.likes, 0) + COALESCE(p.comments, 0) + COALESCE(p.favorites, 0)) >= ?');
+      whereParams.push(thresholds.minTraffic);
     }
 
     const whereClause = whereParts.join(' AND ');
@@ -742,7 +806,41 @@ export class PostsService {
       return bDate.localeCompare(aDate);
     });
 
-    return { dimension, items };
+    return { dimension, items, thresholds } as any;
+  }
+
+  private normalizeLearningBoardThresholds(input?: string | Partial<LearningBoardThresholds> | null): LearningBoardThresholds {
+    let raw: Partial<LearningBoardThresholds> = {};
+    if (typeof input === 'string' && input.trim()) {
+      try {
+        raw = JSON.parse(input) as Partial<LearningBoardThresholds>;
+      } catch {
+        raw = {};
+      }
+    } else if (input && typeof input === 'object') {
+      raw = input;
+    }
+    return {
+      minLeads: this.toSafeThreshold(raw.minLeads, DEFAULT_LEARNING_BOARD_THRESHOLDS.minLeads),
+      minTraffic: this.toSafeThreshold(raw.minTraffic, DEFAULT_LEARNING_BOARD_THRESHOLDS.minTraffic),
+    };
+  }
+
+  private toSafeThreshold(value: unknown, fallback: number): number {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return fallback;
+    return Math.max(0, Math.floor(parsed));
+  }
+
+  private async ensureAppSettingsTable(): Promise<void> {
+    await this.postRepository.query(`
+      CREATE TABLE IF NOT EXISTS app_settings (
+        setting_key VARCHAR(128) NOT NULL PRIMARY KEY,
+        setting_value TEXT NOT NULL,
+        updated_by VARCHAR(64) NULL,
+        updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
   }
 
   /**
