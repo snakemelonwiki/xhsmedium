@@ -21,6 +21,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiClient } from '@/shared/api/apiClient';
 import { getAccountTimeseries, getAllAccountsTimeseries } from '@/shared/api/content';
 import type { AccountInfo } from '@/shared/api/content';
+import { ACCOUNT_ANALYSIS_LEGEND } from '@/shared/constants/account-analysis';
 import type { AccountTimeseries, AccountTimeseriesDay, AccountTimeseriesPost } from '@/shared/types/content';
 import { mapPlatformToKey } from '@/shared/utils/platform-key';
 
@@ -308,9 +309,9 @@ export default function AdminAccountAnalysisPage() {
               }
               extra={
                 <Space size={8} wrap>
-                  <Badge color="#fa8c16" text="高获客" />
-                  <Badge color="#52c41a" text="有帖" />
-                  <Badge color="#d9d9d9" text="未发" />
+                  <Badge color={ACCOUNT_ANALYSIS_LEGEND.leadPost.color} text={ACCOUNT_ANALYSIS_LEGEND.leadPost.text} />
+                  <Badge color={ACCOUNT_ANALYSIS_LEGEND.personaPost.color} text={ACCOUNT_ANALYSIS_LEGEND.personaPost.text} />
+                  <Badge color={ACCOUNT_ANALYSIS_LEGEND.empty.color} text={ACCOUNT_ANALYSIS_LEGEND.empty.text} />
                   <span style={{ width: 1, height: 12, background: '#d9d9d9' }} />
                   <Space size={4} align="center">
                     <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: '#ff2442' }} />
@@ -353,9 +354,9 @@ export default function AdminAccountAnalysisPage() {
                       }
                       extra={
                         <Space size={8} wrap>
-                          <Badge color="#fa8c16" text="高获客" />
-                          <Badge color="#52c41a" text="有帖" />
-                          <Badge color="#d9d9d9" text="未发" />
+                          <Badge color={ACCOUNT_ANALYSIS_LEGEND.leadPost.color} text={ACCOUNT_ANALYSIS_LEGEND.leadPost.text} />
+                          <Badge color={ACCOUNT_ANALYSIS_LEGEND.personaPost.color} text={ACCOUNT_ANALYSIS_LEGEND.personaPost.text} />
+                          <Badge color={ACCOUNT_ANALYSIS_LEGEND.empty.color} text={ACCOUNT_ANALYSIS_LEGEND.empty.text} />
                         </Space>
                       }
                     >

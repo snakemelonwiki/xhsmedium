@@ -21,6 +21,7 @@ import { apiClient } from '@/shared/api/apiClient';
 import { getAccountTimeseries, getAllAccountsTimeseries } from '@/shared/api/content';
 import type { AccountInfo } from '@/shared/api/content';
 import { readAuthenticatedUser } from '@/shared/auth/auth';
+import { ACCOUNT_ANALYSIS_LEGEND } from '@/shared/constants/account-analysis';
 import type { AccountTimeseries, AccountTimeseriesDay, AccountTimeseriesPost } from '@/shared/types/content';
 import { mapPlatformToKey } from '@/shared/utils/platform-key';
 
@@ -241,9 +242,9 @@ export default function AccountAnalysisPage() {
           }
           extra={
             <Space size={8} wrap>
-              <Badge color="#fa8c16" text="高获客" />
-              <Badge color="#52c41a" text="有帖" />
-              <Badge color="#d9d9d9" text="未发" />
+              <Badge color={ACCOUNT_ANALYSIS_LEGEND.leadPost.color} text={ACCOUNT_ANALYSIS_LEGEND.leadPost.text} />
+              <Badge color={ACCOUNT_ANALYSIS_LEGEND.personaPost.color} text={ACCOUNT_ANALYSIS_LEGEND.personaPost.text} />
+              <Badge color={ACCOUNT_ANALYSIS_LEGEND.empty.color} text={ACCOUNT_ANALYSIS_LEGEND.empty.text} />
               <span style={{ width: 1, height: 12, background: '#d9d9d9' }} />
               <Space size={4} align="center">
                 <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: '#ff2442' }} />
@@ -286,9 +287,9 @@ export default function AccountAnalysisPage() {
                   }
                   extra={
                     <Space size={8} wrap>
-                      <Badge color="#fa8c16" text="高获客" />
-                      <Badge color="#52c41a" text="有帖" />
-                      <Badge color="#d9d9d9" text="未发" />
+                      <Badge color={ACCOUNT_ANALYSIS_LEGEND.leadPost.color} text={ACCOUNT_ANALYSIS_LEGEND.leadPost.text} />
+                      <Badge color={ACCOUNT_ANALYSIS_LEGEND.personaPost.color} text={ACCOUNT_ANALYSIS_LEGEND.personaPost.text} />
+                      <Badge color={ACCOUNT_ANALYSIS_LEGEND.empty.color} text={ACCOUNT_ANALYSIS_LEGEND.empty.text} />
                     </Space>
                   }
                 >
@@ -315,8 +316,8 @@ export default function AccountAnalysisPage() {
 
 /**
  * 账号日历视图：横轴日期，颜色按 OP-23 编码
- * - 橙 = 当日有 is_lead_post=1 且 leads>=1（高获客）
- * - 绿 = 有帖但无高获客
+ * - 橙 = 获客帖
+ * - 绿 = 人设帖
  * - 灰 = 未发帖
  */
 function AccountCalendarGrid({ days }: { days: AccountTimeseriesDay[] }) {
@@ -454,7 +455,7 @@ const POST_TYPE_GROUPS: { type: string; label: string; color: string }[] = [
 /**
  * 鼠标悬停 tooltip：按"获客贴 / 话题贴 / 素人贴"三栏分组展示。
  * - 顶部仍保留日期 + 当日总作品/客资/流量 4 行汇总
- * - 下方三栏各列该类型作品，标题 · 平台 · 客资 · 流量；高获客作品 ⭐ 标记
+ * - 下方三栏各列该类型作品，标题 · 平台 · 客资 · 流量；获客帖 ⭐ 标记
  * - 未知类型归入"其他"以防遗漏
  */
 function PostGroupedTooltip({
