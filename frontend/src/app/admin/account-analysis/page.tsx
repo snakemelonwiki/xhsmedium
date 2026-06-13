@@ -95,7 +95,7 @@ export default function AdminAccountAnalysisPage() {
   const loadEmployees = useCallback(async () => {
     setLoadingEmployees(true);
     try {
-      const payload = await apiClient.get<any>('/employees', { query: { limit: 500, offset: 0 } });
+      const payload = await apiClient.get<any>('/employees', { query: { limit: 500, offset: 0, role: 'staff' } });
       const data = payload?.items ?? payload ?? [];
       setEmployees(Array.isArray(data) ? data : []);
     } catch {

@@ -24,7 +24,7 @@ describe('ParserService', () => {
   it('parse 接收 url + opts 并返回 ParserResult', async () => {
     // mock fetchWithRetry：parser-core 是 require 进 service 的，直接测集成需运行 Playwright 太重
     // 这里用 spy 简单打桩，验证参数透传
-    const spy = jest.spyOn(require('../../../../scripts/parser-core'), 'fetchWithRetry');
+    const spy = jest.spyOn(require('../../../scripts/parser-core'), 'fetchWithRetry');
     spy.mockResolvedValue({
       ok: true,
       data: { platform: '小红书', title: '测试', likes: 1, comments: 2, favorites: 3, shares: 4, metricsUpdatedAt: 'x' },
@@ -36,7 +36,7 @@ describe('ParserService', () => {
   });
 
   it('parse 不传 opts 时使用默认值', async () => {
-    const spy = jest.spyOn(require('../../../../scripts/parser-core'), 'fetchWithRetry');
+    const spy = jest.spyOn(require('../../../scripts/parser-core'), 'fetchWithRetry');
     spy.mockResolvedValue({ ok: true, data: {} as any });
     await service.parse('https://example.com');
     expect(spy).toHaveBeenCalledWith('https://example.com', expect.objectContaining({ retry: 3, timeout: 20000 }));
@@ -45,7 +45,7 @@ describe('ParserService', () => {
 
   describe('登录态', () => {
     it('getLoginStatus 接受有效平台', () => {
-      const spy = jest.spyOn(require('../../../../scripts/parser-core'), 'getLoginStatus');
+      const spy = jest.spyOn(require('../../../scripts/parser-core'), 'getLoginStatus');
       spy.mockReturnValue({ platform: '小红书', hasSession: true });
       const result = service.getLoginStatus('小红书');
       expect(result.platform).toBe('小红书');
@@ -57,7 +57,7 @@ describe('ParserService', () => {
     });
 
     it('getAllLoginStatus 返回 2 个平台', () => {
-      const spy = jest.spyOn(require('../../../../scripts/parser-core'), 'getLoginStatus');
+      const spy = jest.spyOn(require('../../../scripts/parser-core'), 'getLoginStatus');
       spy.mockImplementation((p: string) => ({ platform: p, hasSession: false }));
       const items = service.getAllLoginStatus();
       expect(items).toHaveLength(2);

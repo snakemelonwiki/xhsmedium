@@ -9,6 +9,11 @@ const nextConfig = {
         source: '/api/:path*',
         destination: `${backendUrl}/api/:path*`,
       },
+      // 封面图和上传文件转发到后端静态目录
+      {
+        source: '/uploads/:path*',
+        destination: `${backendUrl}/uploads/:path*`,
+      },
     ];
   },
 };

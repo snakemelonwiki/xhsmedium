@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ScrapingLockService } from '../scraping/scraping-lock.service';
 import { ScrapingAlertService } from '../scraping/scraping-alert.service';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const parserCore = require('../../../../scripts/parser-core');
+const parserCore = require('../../../scripts/parser-core');
 
 export interface ParserOptions {
   retry?: number;
