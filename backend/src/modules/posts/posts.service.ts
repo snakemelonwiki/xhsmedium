@@ -9,6 +9,7 @@ import { makeId } from '../../shared/utils/id-generator';
 import { normalizePostType, normalizeTrafficByType, normalizeExternalUrl, normalizeMediaUrl } from '../../shared/utils/normalize';
 import { PostsMetricsService } from './posts-metrics.service';
 import { FavoritesService } from '../favorites/favorites.service';
+import { PlazaConfigService } from '../plaza-config/plaza-config.service';
 
 /**
  * T4.2 (2026-06-09): 把"小红书" / "抖音"前端枚举映射到 DB 中实际可能存在的所有写法。
@@ -112,6 +113,8 @@ export class PostsService {
     private readonly postsMetricsService?: PostsMetricsService,
     @Optional()
     private readonly favoritesService?: FavoritesService,
+    @Optional()
+    private readonly plazaConfigService?: PlazaConfigService,
   ) {}
 
   async findAll(viewer?: PostsListViewer): Promise<any[]> {
@@ -372,7 +375,40 @@ export class PostsService {
       params.push(filters.userId || '');
     }
 
+    // T8/T9: 应用作品广场门槛配置（按作品类型差异化过滤）
+    const thresholdParts: string[] = [];
+    const thresholdParams: any[] = [];
+    if (this.plazaConfigService) {
+      try {
+        const config = await this.plazaConfigService.getConfig();
+        // 营销帖（获客贴/营销贴）门槛
+        if (config.marketingMinLeads > 0) {
+          thresholdParts.push(`(p.post_type NOT IN ('获客贴','营销贴') OR COALESCE(lc.cnt, 0) >= ?)`);
+          thresholdParams.push(config.marketingMinLeads);
+        }
+        // 人设帖门槛
+        if (config.personaMinTraffic > 0) {
+          thresholdParts.push(`(p.post_type != '人设贴' OR p.traffic >= ?)`);
+          thresholdParams.push(config.personaMinTraffic);
+        }
+        // 通用默认门槛（全部作品）
+        if (config.minLeads > 0) {
+          thresholdParts.push(`COALESCE(lc.cnt, 0) >= ?`);
+          thresholdParams.push(config.minLeads);
+        }
+        if (config.minTraffic > 0) {
+          thresholdParts.push(`p.traffic >= ?`);
+          thresholdParams.push(config.minTraffic);
+        }
+      } catch {
+        // 配置读取失败时跳过门槛过滤，避免阻断广场展示
+      }
+    }
+
     const havingClause = filters.view === 'excellent' ? 'HAVING lc.cnt >= 5' : '';
+    const thresholdClause = thresholdParts.length > 0
+      ? `AND (${thresholdParts.join(' AND ')})`
+      : '';
 
     // Count query for total
     // 优化：使用预聚合子表替代相关子查询，消除 N+1 问题
@@ -389,9 +425,10 @@ export class PostsService {
       ) lc ON lc.post_id COLLATE utf8mb4_unicode_ci = p.id COLLATE utf8mb4_unicode_ci
       ${favoriteJoin}
       WHERE ${whereParts.join(' AND ')}
+      ${thresholdClause}
       ${havingClause}
     `;
-    const countParams = [...params];
+    const countParams = [...params, ...thresholdParams];
     const countResult = await this.postRepository.query(countSql, countParams);
     const total = Number((countResult[0] as any)?.total || 0);
 
@@ -435,6 +472,7 @@ export class PostsService {
       ) fav_user ON fav_user.target_id COLLATE utf8mb4_unicode_ci = p.id COLLATE utf8mb4_unicode_ci
       ${favoriteJoin}
       WHERE ${whereParts.join(' AND ')}
+      ${thresholdClause}
       ${havingClause}
       ORDER BY COALESCE(lc.cnt, 0) DESC, p.likes DESC, p.published_at DESC, p.created_at DESC
       LIMIT ? OFFSET ?
@@ -442,7 +480,7 @@ export class PostsService {
 
     // dataParams: params 已经包含 userId（首元素）和过滤条件；末尾追加 pageSize 和 offset
     // 注意：不要再追加 filters.userId，否则会重复（之前导致 LIMIT 收到 userId 字符串而非数字）
-    const dataParams = [...params, safePageSize, offset];
+    const dataParams = [...params, ...thresholdParams, safePageSize, offset];
     const rows = await this.postRepository.query(sql, dataParams);
     return { items: (rows as any[]).map((row) => this.mapPostRow(row, viewer)), total };
   }

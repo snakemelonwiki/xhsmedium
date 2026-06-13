@@ -10,6 +10,8 @@ import { PostsMetricsService } from './posts-metrics.service';
 import { OperationLogsModule } from '../operation-logs/operation-logs.module';
 import { ParserModule } from '../parser/parser.module';
 import { FavoritesModule } from '../favorites/favorites.module';
+// T8/T9: 作品广场门槛配置
+import { PlazaConfigModule } from '../plaza-config/plaza-config.module';
 
 @Module({
   imports: [
@@ -17,6 +19,7 @@ import { FavoritesModule } from '../favorites/favorites.module';
     OperationLogsModule,
     ParserModule,
     FavoritesModule,
+    PlazaConfigModule,
   ],
   controllers: [PostsController],
   providers: [PostsService, PostsMetricsService],
