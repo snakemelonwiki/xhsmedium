@@ -2,12 +2,9 @@
 
 import {
   AppstoreOutlined,
-  BlockOutlined,
-  CommentOutlined,
   DownloadOutlined,
   EyeOutlined,
   HeartOutlined,
-  LikeOutlined,
   StarOutlined,
 } from '@ant-design/icons';
 import {
@@ -40,6 +37,7 @@ import { getPostDetail, togglePostFavorite } from '@/shared/api/content';
 import { QuickRangePicker, RANGE_PRESETS_FULL } from '@/shared/components/date';
 import type { DateRangeValue } from '@/shared/components/date';
 import type { ContentPost } from '@/shared/types/content';
+import { InteractionMetricsGrid } from './InteractionMetricsGrid';
 import { formatStudyPlatform, getStudyPlatformColor } from './platformDisplay';
 
 type StudyPeriod = '7' | '14' | '30';
@@ -489,12 +487,12 @@ export default function StudyRankingsPage() {
       title: '互动指标',
       width: 180,
       render: (_: unknown, record: LearningPost) => (
-        <Space wrap size={[4, 4]}>
-          <Tag icon={<LikeOutlined />}>赞 {record.likes}</Tag>
-          <Tag icon={<CommentOutlined />}>评 {record.comments}</Tag>
-          <Tag icon={<HeartOutlined />}>藏 {record.favorites}</Tag>
-          <Tag icon={<BlockOutlined />}>转 {record.shares}</Tag>
-        </Space>
+        <InteractionMetricsGrid
+          likes={record.likes}
+          comments={record.comments}
+          favorites={record.favorites}
+          shares={record.shares}
+        />
       ),
     },
     {
@@ -682,12 +680,12 @@ export default function StudyRankingsPage() {
       title: '互动指标',
       width: 180,
       render: (_: unknown, record: LearningPost) => (
-        <Space wrap size={[4, 4]}>
-          <Tag icon={<LikeOutlined />}>赞 {record.likes}</Tag>
-          <Tag icon={<CommentOutlined />}>评 {record.comments}</Tag>
-          <Tag icon={<HeartOutlined />}>藏 {record.favorites}</Tag>
-          <Tag icon={<BlockOutlined />}>转 {record.shares}</Tag>
-        </Space>
+        <InteractionMetricsGrid
+          likes={record.likes}
+          comments={record.comments}
+          favorites={record.favorites}
+          shares={record.shares}
+        />
       ),
     },
     {
