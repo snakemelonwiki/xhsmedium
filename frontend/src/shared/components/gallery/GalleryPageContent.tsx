@@ -6,6 +6,7 @@ import {
   Card,
   DatePicker,
   Empty,
+  Form,
   InputNumber,
   Modal,
   Pagination,
@@ -22,6 +23,7 @@ import { useEffect, useState } from 'react';
 
 import { listSourceAccounts, type CatalogOption } from '@/shared/api/catalog';
 import { listGalleryPosts, togglePostFavorite } from '@/shared/api/content';
+import { getPlazaConfig, updatePlazaConfig, type PlazaConfig } from '@/shared/api/plaza-config';
 import type { ContentPost } from '@/shared/types/content';
 
 const platformOptions = [
@@ -60,10 +62,12 @@ type GalleryFilters = {
 
 type GalleryPageContentProps = {
   description?: string;
+  showConfigPanel?: boolean;
 };
 
 export function GalleryPageContent({
   description = '浏览全公司作品，收藏学习。客户联系方式、跟进记录、成交信息等敏感字段对运营端不展示。',
+  showConfigPanel = false,
 }: GalleryPageContentProps) {
   const [items, setItems] = useState<ContentPost[]>([]);
   const [total, setTotal] = useState(0);
@@ -72,6 +76,9 @@ export function GalleryPageContent({
   const [accounts, setAccounts] = useState<CatalogOption[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
+  const [configForm] = Form.useForm<PlazaConfig>();
+  const [configLoading, setConfigLoading] = useState(false);
+  const [configSaving, setConfigSaving] = useState(false);
   const [detailModal, setDetailModal] = useState<{ open: boolean; post?: ContentPost }>({ open: false });
 
   const pageSize = 15;
@@ -117,6 +124,15 @@ export function GalleryPageContent({
       .catch(() => setAccounts([]));
   }, []);
 
+  useEffect(() => {
+    if (!showConfigPanel) return;
+    setConfigLoading(true);
+    getPlazaConfig()
+      .then((config) => configForm.setFieldsValue(config))
+      .catch((err) => message.warning(err instanceof Error ? err.message : '作品广场条件加载失败'))
+      .finally(() => setConfigLoading(false));
+  }, [configForm, showConfigPanel]);
+
   function applyFilter<K extends keyof GalleryFilters>(key: K, value: GalleryFilters[K]) {
     const next = { ...filters, [key]: value };
     setFilters(next);
@@ -160,6 +176,25 @@ export function GalleryPageContent({
     setDetailModal({ open: true, post });
   }
 
+  async function saveConfig(values: PlazaConfig) {
+    setConfigSaving(true);
+    try {
+      const next = await updatePlazaConfig({
+        minLeads: Number(values.minLeads ?? 0),
+        minTraffic: Number(values.minTraffic ?? 0),
+        marketingMinLeads: Number(values.marketingMinLeads ?? 1),
+        personaMinTraffic: Number(values.personaMinTraffic ?? 10000),
+      });
+      configForm.setFieldsValue(next);
+      message.success('作品广场展示条件已保存');
+      load(1);
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '作品广场展示条件保存失败');
+    } finally {
+      setConfigSaving(false);
+    }
+  }
+
   return (
     <Space direction="vertical" size={16} className="page-stack">
       <div className="toolbar-row">
@@ -171,6 +206,39 @@ export function GalleryPageContent({
 
       {error ? (
         <Alert type="warning" showIcon message="作品广场暂不可用" description={error} />
+      ) : null}
+
+      {showConfigPanel ? (
+        <Card>
+          <Form
+            form={configForm}
+            layout="inline"
+            disabled={configLoading}
+            initialValues={{ minLeads: 0, minTraffic: 0, marketingMinLeads: 1, personaMinTraffic: 10000 }}
+            onFinish={saveConfig}
+          >
+            <Form.Item label="展示条件" style={{ marginRight: 8 }}>
+              <Typography.Text type="secondary">营销帖按客资过滤，人设帖按流量过滤</Typography.Text>
+            </Form.Item>
+            <Form.Item name="marketingMinLeads" label="营销帖客资不少于">
+              <InputNumber min={0} precision={0} addonAfter="条" style={{ width: 150 }} />
+            </Form.Item>
+            <Form.Item name="personaMinTraffic" label="人设帖流量不少于">
+              <InputNumber min={0} precision={0} addonAfter="次" style={{ width: 160 }} />
+            </Form.Item>
+            <Form.Item name="minLeads" label="全部作品客资不少于">
+              <InputNumber min={0} precision={0} addonAfter="条" style={{ width: 150 }} />
+            </Form.Item>
+            <Form.Item name="minTraffic" label="全部作品流量不少于">
+              <InputNumber min={0} precision={0} addonAfter="次" style={{ width: 160 }} />
+            </Form.Item>
+            <Form.Item>
+              <Button type="primary" htmlType="submit" loading={configSaving}>
+                保存条件
+              </Button>
+            </Form.Item>
+          </Form>
+        </Card>
       ) : null}
 
       <Card loading={loading}>

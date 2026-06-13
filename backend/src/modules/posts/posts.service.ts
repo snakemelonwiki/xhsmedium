@@ -437,7 +437,7 @@ export class PostsService {
         }
         // 人设帖门槛
         if (config.personaMinTraffic > 0) {
-          thresholdParts.push(`(p.post_type != '人设贴' OR p.traffic >= ?)`);
+          thresholdParts.push(`(p.post_type NOT IN ('人设贴','素人贴') OR p.traffic >= ?)`);
           thresholdParams.push(config.personaMinTraffic);
         }
         // 通用默认门槛（全部作品）
