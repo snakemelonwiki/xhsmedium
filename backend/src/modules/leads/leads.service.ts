@@ -137,6 +137,74 @@ export class LeadsService {
   ) {}
 
   /**
+   * T5: 自动轮转销售分配（按运营账号维度）。
+   * 内存级 round-robin，每次分配后 index + 1。
+   */
+  private lastAssignedSalesIndex = new Map<string, number>();
+
+  async autoAssignSales(employeeId: string): Promise<{ userId: string; userName: string } | null> {
+    const disabledStatuses = ['离职', '停用', 'inactive', 'disabled', 'leave', 'resign', 'stopped'];
+    const statusPlaceholders = disabledStatuses.map(() => '?').join(',');
+    const rows: Array<{
+      id: string;
+      username: string;
+      employeeName: string;
+      capacityPaused: number;
+      capacityPausedAt: Date | null;
+    }> = await this.userRepository.manager.query(
+      `
+      SELECT
+        u.id,
+        u.username,
+        e.name AS employeeName,
+        u.capacity_paused AS capacityPaused,
+        u.capacity_paused_at AS capacityPausedAt
+      FROM users u
+      INNER JOIN employees e ON u.employee_id = e.id COLLATE utf8mb4_unicode_ci
+      WHERE u.role = ?
+        AND u.status = 'active'
+        AND e.status NOT IN (${statusPlaceholders})
+        AND u.id = (
+          SELECT u2.id
+          FROM users u2
+          WHERE u2.employee_id = u.employee_id
+            AND u2.role = 'sales'
+            AND u2.status = 'active'
+          ORDER BY u2.created_at DESC, u2.id DESC
+          LIMIT 1
+        )
+      ORDER BY u.created_at ASC
+      `,
+      ['sales', ...disabledStatuses],
+    );
+    const now = new Date();
+    const ONE_HOUR_MS = 60 * 60 * 1000;
+    const available = rows.filter((u) => {
+      if (!u.capacityPaused) return true;
+      if (!u.capacityPausedAt) return true;
+      const elapsed = now.getTime() - new Date(u.capacityPausedAt).getTime();
+      return elapsed > ONE_HOUR_MS;
+    });
+    if (available.length === 0) return null;
+    const key = employeeId || '_global';
+    const currentIndex = this.lastAssignedSalesIndex.get(key) || 0;
+    const nextIndex = currentIndex % available.length;
+    this.lastAssignedSalesIndex.set(key, currentIndex + 1);
+    const chosen = available[nextIndex];
+    // 惰性恢复 capacityPaused
+    if (chosen.capacityPaused && chosen.capacityPausedAt) {
+      const elapsed = now.getTime() - new Date(chosen.capacityPausedAt).getTime();
+      if (elapsed > ONE_HOUR_MS) {
+        await this.userRepository.update(chosen.id, {
+          capacityPaused: 0 as any,
+          capacityPausedAt: null as any,
+        });
+      }
+    }
+    return { userId: chosen.id, userName: chosen.employeeName || chosen.username };
+  }
+
+  /**
    * Resolve users.id given an employees.id by looking at users.employee_id.
    * Used to route notifications addressed at "the source operations user"
    * since leads only store the employee_id.

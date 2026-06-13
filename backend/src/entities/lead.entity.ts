@@ -155,6 +155,14 @@ export class Lead {
   @Column({ name: 'follow_action_at', type: 'datetime', nullable: true })
   followActionAt: Date | null;
 
+  /** 客资微信号（销售推老师微信后填写） */
+  @Column({ name: 'wechat', length: 128, nullable: true })
+  wechat: string | null;
+
+  /** 无效原因（销售标记客资为无效时填写） */
+  @Column({ name: 'invalid_reason', length: 255, nullable: true })
+  invalidReason: string | null;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 

@@ -199,16 +199,34 @@ export class LeadsController {
     try {
       const session = (req as any).session;
       // v1.3 / OP-5 / CROSS-1: 是否分流
-      //   0 = 未分流：必传 assignedSalesUserId（service 层强校验）
+      //   0 = 未分流：必传 assignedSalesUserId（service 层强校验），但支持 autoAssign 自动轮转分配
       //   1 = 已分流：销售字段置空
       // 未传时按未分流处理，保留旧默认。
       const isDispatchedRaw = body.isDispatched;
       const isDispatched: 0 | 1 =
         isDispatchedRaw === 1 || isDispatchedRaw === '1' || isDispatchedRaw === true ? 1 : 0;
-      const rawSalesId = body.assignedSalesUserId ? String(body.assignedSalesUserId) : '';
-      const assignedSalesUserId = isDispatched === 1 ? null : rawSalesId || null;
-      const assignedSalesUserName =
-        isDispatched === 1 ? '' : body.assignedSalesUserName || '';
+
+      // T5: 支持 autoAssign 自动轮转分配
+      let assignedSalesUserId: string | null = null;
+      let assignedSalesUserName = '';
+      if (isDispatched === 0) {
+        const rawSalesId = body.assignedSalesUserId ? String(body.assignedSalesUserId) : '';
+        const autoAssign = body.autoAssign === true || body.autoAssign === 'true' || body.autoAssign === 1 || body.autoAssign === '1';
+        if (rawSalesId) {
+          assignedSalesUserId = rawSalesId;
+          assignedSalesUserName = body.assignedSalesUserName || '';
+        } else if (autoAssign) {
+          const autoResult = await this.leadsService.autoAssignSales(session?.employeeId || '');
+          if (autoResult) {
+            assignedSalesUserId = autoResult.userId;
+            assignedSalesUserName = autoResult.userName;
+          } else {
+            return res.status(400).json({ ok: false, message: '当前没有可自动分配的销售账号' });
+          }
+        } else {
+          return res.status(400).json({ ok: false, message: '未分流的客资必须选择销售或开启自动分配' });
+        }
+      }
 
       await this.leadsService.create({
         id: makeId(),

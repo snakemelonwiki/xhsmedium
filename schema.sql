@@ -227,6 +227,8 @@ CREATE TABLE IF NOT EXISTS leads (
   objection_point          TEXT         NULL COMMENT '异议点',
   follow_action            TEXT         NULL COMMENT '具体跟进措施',
   follow_action_at         DATETIME     NULL COMMENT '具体跟进时间',
+  wechat                   VARCHAR(128) NULL COMMENT '客资微信号（销售推老师微信后填写）',
+  invalid_reason           VARCHAR(255) NULL COMMENT '无效原因（标记无效客资时填写）',
   created_at               DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at               DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 

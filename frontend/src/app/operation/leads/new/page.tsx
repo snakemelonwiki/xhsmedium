@@ -27,6 +27,7 @@ export default function OperationLeadNewPage() {
   const [submitted, setSubmitted] = useState(false);
   const [pasteText, setPasteText] = useState('');
   const [todayCount, setTodayCount] = useState(0);
+  const [autoAssign, setAutoAssign] = useState(false);
 
   // 计算今日日期字符串
   const todayStr = (() => {
@@ -43,6 +44,11 @@ export default function OperationLeadNewPage() {
       .then(([nextSalesUsers, nextAccounts]) => {
         setSalesUsers(nextSalesUsers);
         setAccounts(nextAccounts);
+        // T6: 自动匹配第一个老师（销售）
+        if (nextSalesUsers.length > 0) {
+          const firstSalesId = nextSalesUsers[0].id;
+          form.setFieldValue('assignedSalesUserId', firstSalesId);
+        }
       })
       .catch((err) => {
         message.warning(err instanceof Error ? err.message : '基础数据加载失败');
@@ -66,13 +72,14 @@ export default function OperationLeadNewPage() {
   async function submit(values: Record<string, unknown>) {
     const nextIsDispatched: DispatchMode =
       values.isDispatched === 1 || values.isDispatched === '1' ? 1 : 0;
+    const nextAutoAssign = nextIsDispatched === 0 && (values.autoAssign === true || values.autoAssign === 'true');
     const assignedSalesUserId = nextIsDispatched === 1
       ? undefined
       : values.assignedSalesUserId
         ? String(values.assignedSalesUserId)
         : undefined;
-    if (nextIsDispatched === 0 && !assignedSalesUserId) {
-      message.error('未分流的客资必须选择销售账号');
+    if (nextIsDispatched === 0 && !assignedSalesUserId && !nextAutoAssign) {
+      message.error('未分流的客资必须选择销售账号或开启自动分配');
       return;
     }
     const selectedSalesUser = assignedSalesUserId
@@ -88,6 +95,7 @@ export default function OperationLeadNewPage() {
           addStatus: 'not_added',
           processStatus: 'not_contacted',
           isDispatched: nextIsDispatched,
+          autoAssign: nextAutoAssign ? true : undefined,
         });
         clearDraft(DRAFT_KEY);
 
@@ -223,10 +231,30 @@ export default function OperationLeadNewPage() {
                   <Radio.Button value={1}>已分流</Radio.Button>
                 </Radio.Group>
               </Form.Item>
+              {/* T5: 自动分配开关 */}
+              {salesRequired && (
+                <Form.Item name="autoAssign" valuePropName="checked">
+                  <Radio.Group
+                    optionType="button"
+                    buttonStyle="solid"
+                    value={autoAssign}
+                    onChange={(e) => {
+                      const next = e.target.value === true || e.target.value === 'auto';
+                      setAutoAssign(next);
+                      if (next) {
+                        form.setFieldValue('assignedSalesUserId', undefined);
+                      }
+                    }}
+                  >
+                    <Radio.Button value={false}>手动分配</Radio.Button>
+                    <Radio.Button value={'auto'}>自动分配</Radio.Button>
+                  </Radio.Group>
+                </Form.Item>
+              )}
               <Form.Item
                 name="assignedSalesUserId"
-                label="分配销售"
-                rules={salesRequired ? [{ required: true, message: '未分流的客资必须选择销售' }] : []}
+                label={autoAssign ? '自动分配销售' : '分配销售'}
+                rules={salesRequired && !autoAssign ? [{ required: true, message: '未分流的客资必须选择销售' }] : []}
                 tooltip={salesRequired ? undefined : '已分流客资不进销售看板，无需分配销售'}
               >
                 <Select
@@ -234,13 +262,15 @@ export default function OperationLeadNewPage() {
                   showSearch
                   loading={catalogLoading}
                   optionFilterProp="label"
-                  disabled={!salesRequired}
+                  disabled={!salesRequired || autoAssign}
                   placeholder={
                     !salesRequired
                       ? '已分流，无需分配销售'
-                      : salesUsers.length > 0
-                        ? '选择销售账号'
-                        : '暂无可分配销售账号'
+                      : autoAssign
+                        ? '将自动轮转到可用销售'
+                        : salesUsers.length > 0
+                          ? '选择销售账号'
+                          : '暂无可分配销售账号'
                   }
                   options={salesUsers.map((item) => ({
                     label: item.name,

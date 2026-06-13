@@ -201,6 +201,16 @@ export class EmployeesController {
       // createLoginAccount 默认 true（除非显式 false）
       const createLoginAccount = body.createLoginAccount === false ? false : true;
 
+      // T10: 当需要创建登录账号时，loginUsername 和 loginPassword 必填
+      if (createLoginAccount) {
+        if (!body.loginUsername || !String(body.loginUsername).trim()) {
+          return res.status(400).json({ ok: false, message: '创建登录账号时，loginUsername 为必填字段' });
+        }
+        if (!body.loginPassword || !String(body.loginPassword).trim()) {
+          return res.status(400).json({ ok: false, message: '创建登录账号时，loginPassword 为必填字段' });
+        }
+      }
+
       const result = await this.employeesService.createWithLogin(employeeCode, {
         name: body.name,
         phone: body.phone || null,
