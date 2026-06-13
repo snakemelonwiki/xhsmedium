@@ -9,6 +9,7 @@ import {
   InputNumber,
   Modal,
   Pagination,
+  Radio,
   Select,
   Space,
   Tag,
@@ -39,6 +40,11 @@ const typeOptions = [
   { label: '营销贴', value: '营销贴' },
 ];
 
+const primaryTypeTabs = [
+  { label: '营销帖', value: '营销贴' },
+  { label: '人设帖', value: '素人贴' },
+];
+
 type GalleryFilters = {
   platform?: string;
   postType?: string;
@@ -56,7 +62,7 @@ export default function OperationGalleryPage() {
   const [items, setItems] = useState<ContentPost[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
-  const [filters, setFilters] = useState<GalleryFilters>({});
+  const [filters, setFilters] = useState<GalleryFilters>({ postType: '营销贴' });
   const [accounts, setAccounts] = useState<CatalogOption[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
@@ -113,6 +119,10 @@ export default function OperationGalleryPage() {
     load(1, next);
   }
 
+  function applyTypeTab(value: string) {
+    applyFilter('postType', value);
+  }
+
   function handleDateRangeChange(dates: any) {
     const next = {
       ...filters,
@@ -167,6 +177,14 @@ export default function OperationGalleryPage() {
 
       <Card loading={loading}>
         {/* Filter bar */}
+        <Radio.Group
+          value={filters.postType}
+          optionType="button"
+          buttonStyle="solid"
+          options={primaryTypeTabs}
+          onChange={(event) => applyTypeTab(event.target.value)}
+          style={{ marginBottom: 12 }}
+        />
         <Space size={8} wrap style={{ marginBottom: 16 }}>
           <Select
             allowClear

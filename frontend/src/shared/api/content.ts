@@ -169,23 +169,17 @@ export async function listPosts(query: PageQuery = {}): Promise<PagedResult<Cont
 }
 
 export async function listGalleryPosts(query: PageQuery = {}): Promise<PagedResult<ContentPost>> {
-  const { page, pageSize, limit, offset } = withPaging(query);
-  try {
-    const payload = await apiClient.get<unknown>('/posts', {
-      query: { scope: 'all', ...query, limit, offset },
-    });
-    const paged = normalizePagedResult<RawRecord>(payload);
-    return { ...paged, page, pageSize, items: paged.items.map(mapPost) };
-  } catch {
-    // Fallback to /posts/plaza endpoint which now supports server-side pagination
-    const payload = await apiClient.get<unknown>('/posts/plaza', {
-      query: { view: 'all', page, pageSize },
-    });
-    const data = payload as { items?: unknown[]; rows?: unknown[]; total?: number };
-    const items = rawItems(data).map(mapPost);
-    const total = Number(data?.total ?? items.length);
-    return { items, total, page, pageSize };
-  }
+  const { page, pageSize } = withPaging(query);
+  const filters = { ...query };
+  delete filters.limit;
+  delete filters.offset;
+  const payload = await apiClient.get<unknown>('/posts/plaza', {
+    query: { view: 'all', ...filters, page, pageSize },
+  });
+  const data = payload as { items?: unknown[]; rows?: unknown[]; total?: number };
+  const items = rawItems(data).map(mapPost);
+  const total = Number(data?.total ?? items.length);
+  return { items, total, page, pageSize };
 }
 
 export async function refreshPostMetrics(id: string, postUrl?: string) {
