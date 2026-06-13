@@ -603,35 +603,68 @@ function ExtendedSections({
 }
 
 // ----- 1. 双平台分布（3 个饼图：作品 / 流量 / 客资）-----
+// 固定平台颜色，确保三个饼图使用同一套图例，避免颜色随数据顺序变化。
+const PLATFORM_COLOR_MAP: Record<string, string> = {
+  小红书: '#fa8c16',
+  抖音: '#1677ff',
+};
+
 function PlatformDistPies({ extended, loading }: { extended?: SupervisorExtended; loading: boolean }) {
   const items = extended?.platformDistribution ?? [];
   const dataPost = items.map((it) => ({ name: it.platform, value: it.postCount }));
   const dataTraffic = items.map((it) => ({ name: it.platform, value: it.traffic }));
   const dataLead = items.map((it) => ({ name: it.platform, value: it.leadCount }));
   return (
-    <Row gutter={8}>
-      <Col span={8}>
-        <PieBlock data={dataPost} title="作品占比" color={['#fa8c16', '#1677ff']} loading={loading} />
-      </Col>
-      <Col span={8}>
-        <PieBlock data={dataTraffic} title="流量占比" color={['#fa541c', '#13c2c2']} loading={loading} />
-      </Col>
-      <Col span={8}>
-        <PieBlock data={dataLead} title="客资占比" color={['#52c41a', '#722ed1']} loading={loading} />
-      </Col>
-    </Row>
+    <>
+      {/* 统一图例：两个平台颜色保持一致，便于跨图表对比 */}
+      <Row justify="center" style={{ marginBottom: 12 }}>
+        <Space size={16}>
+          <Space size={4} align="center">
+            <span
+              style={{
+                width: 12,
+                height: 12,
+                borderRadius: '50%',
+                backgroundColor: PLATFORM_COLOR_MAP['小红书'],
+              }}
+            />
+            <Typography.Text style={{ fontSize: 13 }}>小红书</Typography.Text>
+          </Space>
+          <Space size={4} align="center">
+            <span
+              style={{
+                width: 12,
+                height: 12,
+                borderRadius: '50%',
+                backgroundColor: PLATFORM_COLOR_MAP['抖音'],
+              }}
+            />
+            <Typography.Text style={{ fontSize: 13 }}>抖音</Typography.Text>
+          </Space>
+        </Space>
+      </Row>
+      <Row gutter={8}>
+        <Col span={8}>
+          <PieBlock data={dataPost} title="作品占比" loading={loading} />
+        </Col>
+        <Col span={8}>
+          <PieBlock data={dataTraffic} title="流量占比" loading={loading} />
+        </Col>
+        <Col span={8}>
+          <PieBlock data={dataLead} title="客资占比" loading={loading} />
+        </Col>
+      </Row>
+    </>
   );
 }
 
 function PieBlock({
   data,
   title,
-  color,
   loading,
 }: {
   data: { name: string; value: number }[];
   title: string;
-  color: string[];
   loading: boolean;
 }) {
   const { containerRef, chartRef, echartsReady } = useEchartsChart();
@@ -645,13 +678,25 @@ function PieBlock({
     buildOption: (d) => ({
       title: { text: title, textStyle: { fontSize: 13, fontWeight: 'normal' }, left: 'center', top: 4 },
       tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
-      color,
       series: [
         {
           type: 'pie',
           radius: ['45%', '70%'],
-          data: d.filter((it) => it.value > 0),
-          label: { show: true, formatter: '{b}\n{d}%', fontSize: 10 },
+          data: d
+            .filter((it) => it.value > 0)
+            .map((it) => ({
+              ...it,
+              itemStyle: { color: PLATFORM_COLOR_MAP[it.name] },
+            })),
+          label: {
+            show: true,
+            position: 'inside',
+            formatter: '{d}%',
+            fontSize: 13,
+            fontWeight: 'bold',
+            color: '#000',
+          },
+          labelLine: { show: false },
         },
       ],
     }),
