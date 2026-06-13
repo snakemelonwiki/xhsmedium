@@ -32,7 +32,7 @@ describe('catalog API helpers', () => {
     });
 
     await expect(listAssignableSalesUsers()).resolves.toEqual([
-      { id: 'user-1', name: 'sales-a', employeeId: undefined },
+      { id: 'user-1', name: 'sales-a', employeeId: undefined, capacityPaused: false },
     ]);
 
     expect(getMock).toHaveBeenCalledWith('/users', {
