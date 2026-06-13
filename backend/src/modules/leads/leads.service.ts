@@ -1047,6 +1047,9 @@ export class LeadsService {
       nextAddStatus !== current.addStatus;
 
     if (nextAddStatus === 'added') {
+      if (['not_contacted', 'waiting_pass'].includes(nextProcessStatus)) {
+        next.processStatus = 'communicating';
+      }
       next.status = 'added_success';
       return;
     }

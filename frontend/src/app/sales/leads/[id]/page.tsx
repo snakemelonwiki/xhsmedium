@@ -95,6 +95,7 @@ type FollowFormValues = {
   clientMajorResearch?: string;
   clientTimeRequirement?: string;
   objectionPoint?: string;
+  wechat?: string;
   intentionLevel?: IntentionLevelCode;
   followAction?: string;
   content?: string;
