@@ -3,7 +3,6 @@
 import { LinkOutlined } from '@ant-design/icons';
 import { Button, Card, DatePicker, Form, Input, InputNumber, Segmented, Select, Space, Typography, message } from 'antd';
 import dayjs from 'dayjs';
-import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 
 import { apiClient } from '@/shared/api/apiClient';
@@ -27,7 +26,6 @@ interface AccountOption {
 export default function OperationPostNewPage() {
   const [form] = Form.useForm();
   const { submitting, run } = useSubmitLock();
-  const router = useRouter();
   const latestThumbRef = useRef<string>('');
   /**
    * 解析请求 in-flight 序号：每次粘贴/回车/按钮触发解析都 +1，
@@ -352,19 +350,11 @@ export default function OperationPostNewPage() {
         coverThumbUrl,
         publishedAt,
       });
-      message.success('作品已录入');
+      message.success('作品已录入，可继续录入下一条');
       form.resetFields();
       latestThumbRef.current = '';
-      const today = formatLocalDate(new Date());
-
-      // 修复 (2026-06-05)：TC-OP-120 要求提交成功后直接跳转到"我的作品"今日筛选。
-      //   之前用 Modal.confirm 让用户手动点"查看今日记录"——绝大多数用户点"继续录入"或
-      //   关闭弹窗，体感上就是"提交后没跳转"；现在改为自动 router.push，URL 带 from/to 参数。
-      router.push(`/operation/posts?from=${today}&to=${today}`);
-      // 修复 (2026-06-05)：router.push 命中 Next.js 路由缓存（默认 staleTimes.dynamic 30s）
-      //   时，列表页 useEffect([fromParam, toParam]) 不会重新触发，停留在旧数据上 —— 用户体感
-      //   是"跳过去没数据，要刷新一下才有"。router.refresh() 让当前路由重新走一次数据流。
-      router.refresh();
+      // 修复 (2026-06-13)：6月11日优化意见要求提交成功后不自动跳转，
+      //   停留在录入页面直接录下一个，避免重复点击"作品录入"。
     });
   }
 
@@ -550,13 +540,6 @@ export default function OperationPostNewPage() {
       </Card>
     </Space>
   );
-}
-
-function formatLocalDate(date: Date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
 }
 
 function inferTitleFromUrl(rawUrl: string): string {
