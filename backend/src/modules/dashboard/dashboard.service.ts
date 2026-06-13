@@ -1947,6 +1947,7 @@ export class DashboardService {
       `SELECT DISTINCT
          e.id AS employee_id,
          e.name,
+         e.created_at AS employee_created_at,
          (SELECT COUNT(*) FROM accounts a WHERE a.employee_id = e.id${accountPlatformClause}) AS account_count,
          (SELECT COUNT(*) FROM posts p WHERE p.employee_id = e.id AND ${dateClause}${platformClause}) AS today_posts,
          (SELECT COUNT(*) FROM leads l WHERE l.employee_id = e.id AND ${leadDateClause}${leadPlatformClause}) AS today_leads,
