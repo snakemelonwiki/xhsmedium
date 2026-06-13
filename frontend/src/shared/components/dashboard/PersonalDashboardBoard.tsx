@@ -165,7 +165,7 @@ export function PersonalDashboardBoard({ employeeId, showRefreshButton = true }:
   // 旧的三个 useEffect + useCallback 加载逻辑已下沉到 usePersonalDashboardData，组件只保留 UI 状态。
 
   const rankingNode = useMemo(() => {
-    if (!overview) return <Empty description="暂无名次数据" image={Empty.PRESENTED_IMAGE_SIMPLE} />;
+    if (!overview || !overview.ranking) return <Empty description="暂无名次数据" image={Empty.PRESENTED_IMAGE_SIMPLE} />;
     const { rank, total, gapToPrev, metricValue } = overview.ranking;
     if (rank === null || rank === undefined) {
       return <Empty description="暂无足够数据" image={Empty.PRESENTED_IMAGE_SIMPLE} />;
@@ -289,6 +289,18 @@ export function PersonalDashboardBoard({ employeeId, showRefreshButton = true }:
       <Row gutter={[12, 12]}>
         <Col xs={24} md={8}>
           <Card size="small" title={<><PieChartOutlined /> 双平台分布</>}>
+            <Row justify="center" style={{ marginBottom: 8 }}>
+              <Space size={16}>
+                <Space size={4} align="center">
+                  <span style={{ width: 12, height: 12, borderRadius: '50%', backgroundColor: '#fa8c16' }} />
+                  <Typography.Text style={{ fontSize: 13 }}>小红书</Typography.Text>
+                </Space>
+                <Space size={4} align="center">
+                  <span style={{ width: 12, height: 12, borderRadius: '50%', backgroundColor: '#1677ff' }} />
+                  <Typography.Text style={{ fontSize: 13 }}>抖音</Typography.Text>
+                </Space>
+              </Space>
+            </Row>
             <Row gutter={8}>
               <Col span={8}>
                 <PlatformPieChart items={platformDist} metric="postCount" loading={loadingDualPlatform} />
@@ -390,6 +402,10 @@ export function PersonalDashboardBoard({ employeeId, showRefreshButton = true }:
 }
 
 // ============ v1.3 OP-18 双平台饼状图（echarts） ============
+const PLATFORM_COLOR_MAP: Record<string, string> = {
+  小红书: '#fa8c16',
+  抖音: '#1677ff',
+};
 
 function PlatformPieChart({ items, metric, loading }: { items: PlatformDistributionItem[]; metric: 'postCount' | 'traffic' | 'leadCount'; loading: boolean }) {
   const { containerRef, chartRef, echartsReady } = useEchartsChart();
@@ -414,14 +430,24 @@ function PlatformPieChart({ items, metric, loading }: { items: PlatformDistribut
       return {
         title: { text: title, textStyle: { fontSize: 14, fontWeight: 'normal' }, left: 'center' },
         tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
-        legend: { bottom: 0 },
-        color: ['#fa8c16', '#1677ff'],
+        legend: { show: false },
         series: [
           {
             type: 'pie',
             radius: ['40%', '70%'],
-            data,
-            label: { show: true, formatter: '{b}: {c}' },
+            data: data.map((it) => ({
+              ...it,
+              itemStyle: { color: PLATFORM_COLOR_MAP[it.name] },
+            })),
+            label: {
+              show: true,
+              position: 'inside',
+              formatter: '{d}%',
+              fontSize: 13,
+              fontWeight: 'bold',
+              color: '#000',
+            },
+            labelLine: { show: false },
           },
         ],
       };

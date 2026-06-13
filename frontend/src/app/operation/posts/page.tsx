@@ -251,9 +251,23 @@ export default function OperationPostsPage() {
             <div style={{ width: 88, height: 64, background: '#f0f0f0', borderRadius: 6, flex: '0 0 auto' }} />
           )}
           <Space direction="vertical" size={2} style={{ minWidth: 0 }}>
-            <Typography.Text strong ellipsis style={{ maxWidth: 210 }}>
-              {record.title || '未命名作品'}
-            </Typography.Text>
+            {record.postUrl ? (
+              <a
+                href={record.postUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ textDecoration: 'none' }}
+                title="打开原帖"
+              >
+                <Typography.Text strong ellipsis style={{ maxWidth: 210, color: '#1677ff' }}>
+                  {record.title || '未命名作品'}
+                </Typography.Text>
+              </a>
+            ) : (
+              <Typography.Text strong ellipsis style={{ maxWidth: 210 }}>
+                {record.title || '未命名作品'}
+              </Typography.Text>
+            )}
             <Typography.Text type="secondary" ellipsis style={{ maxWidth: 210, fontSize: 12 }}>
               {record.copywriting || record.note || '暂无文案'}
             </Typography.Text>

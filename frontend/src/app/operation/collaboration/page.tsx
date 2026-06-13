@@ -203,7 +203,6 @@ export default function OperationCollaborationPage() {
               type="primary"
               onClick={() => {
                 void openDetail(record);
-                setHandleOpen(true);
               }}
             >
               处理

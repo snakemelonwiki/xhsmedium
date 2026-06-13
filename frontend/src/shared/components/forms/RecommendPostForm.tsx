@@ -81,6 +81,7 @@ export function RecommendPostForm({
     }
     const mySeq = ++parseSeqRef.current;
     setParsing(true);
+    const hideLoading = message.loading('正在解析链接中，请稍等...', 0);
     try {
       const ac = new AbortController();
       const timeoutId = window.setTimeout(() => ac.abort(), 90_000);
@@ -93,6 +94,7 @@ export function RecommendPostForm({
 
       const data = (payload as any)?.data;
       if (!data) {
+        hideLoading();
         message.warning('后端返回数据为空，请重试');
         return;
       }
@@ -142,23 +144,31 @@ export function RecommendPostForm({
       }
 
       if (data?.parsed) {
+        hideLoading();
         message.success(data.coverImageUrl ? '已根据链接回填标题、指标与封面' : '已根据链接回填标题与指标');
       } else if (data?.warning) {
+        hideLoading();
         message.warning(`已识别平台，但未抓取到指标：${data.warning}`);
       } else {
+        hideLoading();
         message.success('已根据链接回填平台和标题');
       }
     } catch (err) {
-      if (mySeq !== parseSeqRef.current) return;
+      if (mySeq !== parseSeqRef.current) {
+        hideLoading();
+        return;
+      }
       const nextValues: Record<string, string> = {};
       const inferred = inferPlatformFromUrl(rawUrl);
       if (inferred) nextValues.platform = inferred;
       if (!form.getFieldValue('title')) nextValues.title = inferTitleFromUrl(rawUrl);
       form.setFieldsValue(nextValues);
       latestThumbRef.current = '';
+      hideLoading();
       message.warning('后端解析失败，已根据域名自动识别平台');
     } finally {
       setParsing(false);
+      hideLoading();
     }
   }
 

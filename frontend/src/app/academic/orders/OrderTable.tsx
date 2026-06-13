@@ -329,12 +329,14 @@ export function OrderTable({
         key: 'orderStatus',
         render: renderOrderStatus,
       },
-      {
-        title: '交接',
-        dataIndex: 'handoverStatus',
-        key: 'handoverStatus',
-        render: (value?: string | null) => renderHandoverStatus(value),
-      },
+      ...(actionMode === 'academic' ? [] : [
+        {
+          title: '交接',
+          dataIndex: 'handoverStatus',
+          key: 'handoverStatus',
+          render: (value?: string | null) => renderHandoverStatus(value),
+        },
+      ] as any[]),
       {
         title: '付款状态',
         dataIndex: 'paidStatus',
@@ -445,7 +447,7 @@ export function OrderTable({
               ]}
             />
           ) : null}
-          {!isClaimPool && !isFollowup ? (
+          {!isClaimPool && !isFollowup && actionMode !== 'academic' ? (
             <Select
               value={handoverFilter}
               style={{ width: 144 }}

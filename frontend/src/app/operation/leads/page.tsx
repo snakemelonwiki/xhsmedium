@@ -310,6 +310,7 @@ export default function OperationLeadsPage() {
             <ReminderButton
               size="small"
               recipientId={recipientId}
+              recipientName={recipientName}
               recipientRole="sales"
               relatedType="lead"
               relatedId={String(record.id || '')}

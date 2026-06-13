@@ -88,7 +88,7 @@ export class UsersService {
         u.created_at AS createdAt,
         e.name AS employeeName
       FROM users u
-      INNER JOIN employees e ON u.employee_id = e.id
+      INNER JOIN employees e ON u.employee_id = e.id COLLATE utf8mb4_unicode_ci
       WHERE u.role = ?
         AND u.status = 'active'
         AND e.status NOT IN (${statusPlaceholders})
@@ -111,7 +111,7 @@ export class UsersService {
       `
       SELECT COUNT(DISTINCT u.employee_id) AS total
       FROM users u
-      INNER JOIN employees e ON u.employee_id = e.id
+      INNER JOIN employees e ON u.employee_id = e.id COLLATE utf8mb4_unicode_ci
       WHERE u.role = ?
         AND u.status = 'active'
         AND e.status NOT IN (${statusPlaceholders})

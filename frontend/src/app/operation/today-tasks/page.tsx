@@ -212,7 +212,7 @@ export default function OperationTodayTasksPage() {
                 )}
               />
             ) : (
-              <Typography.Text type="secondary">协同 inbox 已清空</Typography.Text>
+              <Typography.Text type="secondary">暂无待处理协同任务</Typography.Text>
             )}
           </Card>
         </Col>

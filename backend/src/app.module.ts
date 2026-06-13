@@ -110,11 +110,18 @@ import { TokenRefreshInterceptor } from './common/token-refresh.interceptor';
         charset: 'utf8mb4',
         logging: true,
         logger: new FormattedSqlLogger(),
+        // 连接稳定性：自动重试 + 连接保活
+        retryAttempts: 3,
+        retryDelay: 3000,
         extra: {
           connectionLimit: 50,
           waitForConnections: true,
           queueLimit: 0,
           connectTimeout: 10000,
+          acquireTimeout: 60000,
+          // TCP keepalive：防止 MySQL wait_timeout 超时断连
+          keepAlive: true,
+          keepAliveInitialDelay: 10000,
           charset: 'utf8mb4_unicode_ci',
         },
       }),

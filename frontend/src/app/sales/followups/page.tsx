@@ -124,6 +124,15 @@ export default function SalesFollowupsPage() {
         footer={null}
         destroyOnClose={false}
       >
+        {quickLead && (
+          <div style={{ marginBottom: 16, padding: 12, backgroundColor: '#f5f5f5', borderRadius: 8 }}>
+            <Space direction="vertical" size={4} style={{ width: '100%' }}>
+              <div><Typography.Text strong>客户姓名：</Typography.Text><Typography.Text>{quickLead.customerName || '-'}</Typography.Text></div>
+              <div><Typography.Text strong>联系方式：</Typography.Text><Typography.Text>{quickLead.contact || quickLead.phone || quickLead.wechat || '-'}</Typography.Text></div>
+              <div><Typography.Text strong>IP 地址：</Typography.Text><Typography.Text>{quickLead.ip || '-'}</Typography.Text></div>
+            </Space>
+          </div>
+        )}
         <Form form={form} layout="vertical" onFinish={submitQuickFollow} preserve>
           <Form.Item name="addStatus" label="添加状态" initialValue={quickLead?.addStatus ?? LeadAddStatus.APPLIED}>
             <Select

@@ -83,6 +83,7 @@ export default function OperationPostNewPage() {
     // 每次新解析都 +1，响应回来时校验序号，过期响应直接丢弃
     const mySeq = ++parseSeqRef.current;
     setParsing(true);
+    const hideLoading = message.loading('正在解析链接中，请稍等...', 0);
     try {
       // 后端抓取链路走 Playwright（无头浏览器 + sharp 截图），
       //   实测 13s，但网络抖动/重试时可能拉到 30~60s。给个 90s 客户端超时，
@@ -198,19 +199,23 @@ export default function OperationPostNewPage() {
 
       if (data?.parsed) {
         const hasCover = !!(data.coverImageUrl);
+        hideLoading();
         message.success(
           hasCover
             ? '已根据链接回填标题、指标与封面'
             : '已根据链接回填标题与指标',
         );
       } else if (data?.warning) {
+        hideLoading();
         message.warning(`已识别平台，但未抓取到指标：${data.warning}`);
       } else {
+        hideLoading();
         message.success('已根据链接回填平台和标题');
       }
     } catch (err) {
       // 过期响应：用户在中途又粘贴了新的 URL，旧的 catch 兜底也别写表单
       if (mySeq !== parseSeqRef.current) {
+        hideLoading();
         return;
       }
       // 后端解析失败时前端兜底
@@ -225,9 +230,11 @@ export default function OperationPostNewPage() {
       form.setFieldsValue(nextValues);
       // 兜底时也清掉旧的封面（避免用户看到上一个 URL 的封面残留）
       latestThumbRef.current = '';
+      hideLoading();
       message.warning('后端解析失败，已根据域名自动识别平台');
     } finally {
       setParsing(false);
+      hideLoading();
     }
   }
 

@@ -184,11 +184,6 @@ export function ReminderButton({
               />
             </Form.Item>
           </Form>
-          {relatedType && relatedId ? (
-            <Typography.Text type="secondary">
-              关联业务对象：<Typography.Text strong>{relatedTitle || `${relatedType}#${String(relatedId).slice(0, 8)}`}</Typography.Text>
-            </Typography.Text>
-          ) : null}
         </Space>
       </Modal>
     </>

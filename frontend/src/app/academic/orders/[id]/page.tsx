@@ -1,7 +1,7 @@
 'use client';
 
 import { DeleteOutlined, DownloadOutlined, ExclamationCircleOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons';
-import { Button, Card, Col, DatePicker, Descriptions, Empty, Form, Input, Modal, Row, Select, Space, Spin, Table, Tag, Timeline, Tooltip, Typography, Upload, message } from 'antd';
+import { Button, Card, Col, DatePicker, Descriptions, Empty, Form, Input, Modal, Row, Select, Space, Spin, Steps, Table, Tag, Timeline, Tooltip, Typography, Upload, message } from 'antd';
 import type { UploadProps } from 'antd';
 import dayjs, { type Dayjs } from 'dayjs';
 import { useParams, useRouter } from 'next/navigation';
@@ -219,6 +219,77 @@ const STATUS_DELIVERY_FIELDS: readonly DeliveryFieldConfig[] = [
   { name: 'reviewReportStatus', label: '检索审查报告' },
 ] as const;
 
+const PROGRESS_STAGES = [
+  {
+    key: 'init',
+    label: '初始',
+    statusValues: ['销售建单', '待补资料', '待教务审核'],
+    fields: ['responsibleTeacher', 'statusStage', 'paperProgress', 'academicOwner', 'salesContact'],
+  },
+  {
+    key: 'assign',
+    label: '分配老师',
+    statusValues: ['待分配老师', '老师已接单'],
+    fields: ['assignedTeacher', 'backupTeacher', 'teacherPhone', 'teacherStability'],
+  },
+  {
+    key: 'writing',
+    label: '写作审核',
+    statusValues: ['写作中'],
+    fields: [
+      'innovationReviewStatus',
+      'innovationReviewAt',
+      'firstDraftReviewStatus',
+      'firstDraftReviewAt',
+      'editorReviewStatus',
+      'editorReviewAt',
+    ],
+  },
+  {
+    key: 'preSubmit',
+    label: '投稿准备',
+    statusValues: ['待投稿'],
+    fields: ['authorInfoChecked', 'authorInfoCheckedAt'],
+  },
+  {
+    key: 'postSubmit',
+    label: '投稿后',
+    statusValues: ['已投稿', '审稿中', '返修中', '已录用', '待见刊', '已完成', '异常处理中'],
+    fields: [
+      'riskLevel',
+      'nextFollowUpAt',
+      'lastTeacherUpdateAt',
+      'customerComplaint',
+      'needsSupervisor',
+      'emergencyStatus',
+    ],
+  },
+] as const;
+
+const JOURNAL_STEPS = [
+  { key: '未投稿', label: '未投稿', fields: ['journalStatus', 'firstWeekCheckAt', 'nextJournalCheckAt'] },
+  { key: 'Submitted', label: 'Submitted', fields: ['submittedExpectedAt'] },
+  { key: 'With Editor', label: 'With Editor', fields: ['withEditorExpectedAt'] },
+  {
+    key: 'Under Review',
+    label: 'Under Review',
+    fields: ['underReviewExpectedAt', 'reminderLetterStatus'],
+  },
+  {
+    key: 'Revision',
+    label: 'Revision',
+    fields: ['revisionExpectedAt', 'revisionStatus', 'revisionDueAt'],
+  },
+  { key: 'Accepted', label: 'Accepted', fields: ['acceptedExpectedAt', 'pageFeeStatus'] },
+  { key: 'Proofing', label: 'Proofing', fields: ['proofingExpectedAt', 'proofingStatus'] },
+  { key: 'Online', label: 'Online', fields: ['onlineExpectedAt', 'onlineAt', 'onlineStatus'] },
+  {
+    key: 'Indexed',
+    label: 'Indexed',
+    fields: ['indexedExpectedAt', 'indexingAt', 'indexingStatus', 'reviewReportStatus'],
+  },
+] as const;
+
 const DEFAULT_DELIVERY: OrderDeliveryDetail = {
   order: {},
   authors: [],
@@ -308,9 +379,13 @@ export default function AcademicOrderDetailPage() {
   const [savingDelivery, setSavingDelivery] = useState(false);
   const [attachmentUrl, setAttachmentUrl] = useState('');
   const [attachmentName, setAttachmentName] = useState('');
+  const [activeProgressStep, setActiveProgressStep] = useState(0);
+  const [activeJournalStep, setActiveJournalStep] = useState(0);
   const [abnormalForm] = Form.useForm();
   const [form] = Form.useForm();
   const [deliveryForm] = Form.useForm();
+  const statusStage = Form.useWatch(['order', 'statusStage'], deliveryForm);
+  const journalStatus = Form.useWatch(['order', 'journalStatus'], deliveryForm);
   const financeValues = Form.useWatch('finance', deliveryForm) || {};
   const customerPending = calculatePendingAmount(
     financeValues.orderAmount,
@@ -383,7 +458,12 @@ export default function AcademicOrderDetailPage() {
   async function submitDelivery(values: any) {
     setSavingDelivery(true);
     try {
-      await updateOrderDelivery(orderId, serializeDeliveryForm(values));
+      const payload = serializeDeliveryForm(values);
+      // 教务端不提交财务信息（后端限制"付款信息只允许销售修改"）
+      if (isAcademic) {
+        delete (payload as Record<string, unknown>).finance;
+      }
+      await updateOrderDelivery(orderId, payload);
       message.success('交付信息已保存');
       const next = await getOrderDelivery(orderId);
       setDelivery(next);
@@ -740,47 +820,102 @@ export default function AcademicOrderDetailPage() {
                 )}
               </Form.List>
 
-              <Typography.Title level={5} style={{ marginTop: 20 }}>履约进度</Typography.Title>
-              <Row gutter={12}>
-                {PROGRESS_DELIVERY_FIELDS.map((field) => (
-                  <Col xs={24} md={6} key={field.name}>
-                    <Form.Item name={['order', field.name]} label={field.label}>
-                      {renderDeliveryControl(field)}
+              <Card title="履约进度" size="small" style={{ marginTop: 20 }}>
+                {(() => {
+                  const computedIndex = Math.max(
+                    0,
+                    PROGRESS_STAGES.findIndex((s) =>
+                      (s.statusValues as readonly string[]).includes(statusStage as string),
+                    ) ?? 0,
+                  );
+                  return (
+                    <>
+                      <Steps
+                        size="small"
+                        current={activeProgressStep}
+                        onChange={(step) => setActiveProgressStep(step)}
+                        items={PROGRESS_STAGES.map((s) => ({ title: s.label }))}
+                      />
+                      <Typography.Text
+                        type="secondary"
+                        style={{ display: 'block', marginTop: 12, marginBottom: 12 }}
+                      >
+                        当前阶段：{PROGRESS_STAGES[activeProgressStep]?.label || '—'}，下方展示该阶段需要填写的字段。
+                      </Typography.Text>
+                    </>
+                  );
+                })()}
+                <Row gutter={12}>
+                  {PROGRESS_DELIVERY_FIELDS.filter((field) => {
+                    const visibleFields = new Set<string>(PROGRESS_STAGES[activeProgressStep]?.fields ?? []);
+                    return visibleFields.has(field.name);
+                  }).map((field) => (
+                    <Col xs={24} md={6} key={field.name}>
+                      <Form.Item name={['order', field.name]} label={field.label}>
+                        {renderDeliveryControl(field)}
+                      </Form.Item>
+                    </Col>
+                  ))}
+                  <Col xs={24}>
+                    <Form.Item name={['order', 'supervisorNote']} label="主管备注 / 风险说明">
+                      <Input.TextArea
+                        rows={3}
+                        placeholder="记录异常原因、应急安排、客户投诉等"
+                        allowClear
+                      />
                     </Form.Item>
                   </Col>
-                ))}
-                <Col xs={24}>
-                  <Form.Item name={['order', 'supervisorNote']} label="主管备注 / 风险说明">
-                    <Input.TextArea
-                      rows={3}
-                      placeholder="记录异常原因、应急安排、客户投诉等"
-                      allowClear
-                    />
-                  </Form.Item>
-                </Col>
-              </Row>
+                </Row>
+              </Card>
 
-              <Typography.Title level={5}>期刊与交付状态</Typography.Title>
-              <Row gutter={12}>
-                {STATUS_DELIVERY_FIELDS.map((field) => (
-                  <Col xs={24} md={6} key={field.name}>
-                    <Form.Item name={['order', field.name]} label={field.label}>
-                      {renderDeliveryControl(field)}
-                    </Form.Item>
-                  </Col>
-                ))}
-              </Row>
+              <Card title="期刊与交付状态" size="small" style={{ marginTop: 16 }}>
+                {(() => {
+                  const allJournalKeys = JOURNAL_STEPS.map((s) => s.key);
+                  const computedIndex = Math.max(
+                    0,
+                    (allJournalKeys as string[]).indexOf(journalStatus as string) ?? 0,
+                  );
+                  return (
+                    <>
+                      <Steps
+                        size="small"
+                        current={activeJournalStep}
+                        onChange={(step) => setActiveJournalStep(step)}
+                        items={JOURNAL_STEPS.map((s) => ({ title: s.label }))}
+                      />
+                      <Typography.Text
+                        type="secondary"
+                        style={{ display: 'block', marginTop: 12, marginBottom: 12 }}
+                      >
+                        当前阶段：{JOURNAL_STEPS[activeJournalStep]?.label || '—'}，下方展示该阶段需要填写的字段。
+                      </Typography.Text>
+                    </>
+                  );
+                })()}
+                <Row gutter={12}>
+                  {STATUS_DELIVERY_FIELDS.filter((field) => {
+                    const visibleFields = new Set<string>(JOURNAL_STEPS[activeJournalStep]?.fields ?? []);
+                    return visibleFields.has(field.name);
+                  }).map((field) => (
+                    <Col xs={24} md={6} key={field.name}>
+                      <Form.Item name={['order', field.name]} label={field.label}>
+                        {renderDeliveryControl(field)}
+                      </Form.Item>
+                    </Col>
+                  ))}
+                </Row>
+              </Card>
 
               <Typography.Title level={5}>财务信息</Typography.Title>
               <Row gutter={12}>
                 <Col xs={24} md={4}>
                   <Form.Item name={['finance', 'orderAmount']} label="订单额">
-                    <Input allowClear />
+                    <Input disabled />
                   </Form.Item>
                 </Col>
                 <Col xs={24} md={4}>
                   <Form.Item name={['finance', 'customerPaid']} label="订单已付款">
-                    <Input allowClear />
+                    <Input disabled />
                   </Form.Item>
                 </Col>
                 <Col xs={24} md={4}>
@@ -790,12 +925,12 @@ export default function AcademicOrderDetailPage() {
                 </Col>
                 <Col xs={24} md={4}>
                   <Form.Item name={['finance', 'teacherPrice']} label="老师接单价格">
-                    <Input allowClear />
+                    <Input disabled />
                   </Form.Item>
                 </Col>
                 <Col xs={24} md={4}>
                   <Form.Item name={['finance', 'teacherPaid']} label="老师已付款">
-                    <Input allowClear />
+                    <Input disabled />
                   </Form.Item>
                 </Col>
                 <Col xs={24} md={4}>

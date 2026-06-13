@@ -343,6 +343,15 @@ export default function SalesLeadFollowupPage() {
         okText="保存跟进"
       >
         <Form form={followForm} layout="vertical" preserve={false}>
+          {followOpen && (
+            <div style={{ marginBottom: 16, padding: 12, backgroundColor: '#f5f5f5', borderRadius: 8 }}>
+              <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                <div><Typography.Text strong>客户姓名：</Typography.Text><Typography.Text>{followOpen.customerName || '-'}</Typography.Text></div>
+                <div><Typography.Text strong>联系方式：</Typography.Text><Typography.Text>{followOpen.contact || followOpen.phone || followOpen.wechat || '-'}</Typography.Text></div>
+                <div><Typography.Text strong>IP 地址：</Typography.Text><Typography.Text>{followOpen.ip || '-'}</Typography.Text></div>
+              </Space>
+            </div>
+          )}
           <div className="form-grid">
             <Form.Item name="clientDegree" label="客户学历">
               <Select
