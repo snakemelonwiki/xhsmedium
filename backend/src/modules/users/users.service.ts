@@ -64,7 +64,7 @@ export class UsersService {
     const disabledStatuses = ['离职', '停用', 'inactive', 'disabled', 'leave', 'resign', 'stopped'];
     const statusPlaceholders = disabledStatuses.map(() => '?').join(',');
 
-    // 每个员工只保留一个最新创建的有效销售账号，避免同一员工绑定多个 sales 账号导致下拉框数量多于员工管理列表
+    // 每个销售姓名只保留一个最新创建的有效销售账号，避免历史重复员工/测试账号污染客资分配下拉框。
     const rows: Array<{
       id: string | number;
       username: string;
@@ -91,29 +91,37 @@ export class UsersService {
       INNER JOIN employees e ON u.employee_id = e.id COLLATE utf8mb4_unicode_ci
       WHERE u.role = ?
         AND u.status = 'active'
+        AND u.username NOT REGEXP '^sales[0-9]+$'
+        AND e.name NOT REGEXP '^sales[0-9]+$'
         AND e.status NOT IN (${statusPlaceholders})
         AND u.id = (
           SELECT u2.id
           FROM users u2
-          WHERE u2.employee_id = u.employee_id
+          INNER JOIN employees e3 ON u2.employee_id = e3.id COLLATE utf8mb4_unicode_ci
+          WHERE (u2.employee_id = u.employee_id OR e3.name = e.name)
             AND u2.role = 'sales'
             AND u2.status = 'active'
+            AND u2.username NOT REGEXP '^sales[0-9]+$'
+            AND e3.name NOT REGEXP '^sales[0-9]+$'
+            AND e3.status NOT IN (${statusPlaceholders})
           ORDER BY u2.created_at DESC, u2.id DESC
           LIMIT 1
         )
       ORDER BY u.created_at DESC
       LIMIT ? OFFSET ?
       `,
-      ['sales', ...disabledStatuses, safeLimit, safeOffset],
+      ['sales', ...disabledStatuses, ...disabledStatuses, safeLimit, safeOffset],
     );
 
     const countResult: Array<{ total: number }> = await this.userRepository.manager.query(
       `
-      SELECT COUNT(DISTINCT u.employee_id) AS total
+      SELECT COUNT(DISTINCT e.name) AS total
       FROM users u
       INNER JOIN employees e ON u.employee_id = e.id COLLATE utf8mb4_unicode_ci
       WHERE u.role = ?
         AND u.status = 'active'
+        AND u.username NOT REGEXP '^sales[0-9]+$'
+        AND e.name NOT REGEXP '^sales[0-9]+$'
         AND e.status NOT IN (${statusPlaceholders})
       `,
       ['sales', ...disabledStatuses],

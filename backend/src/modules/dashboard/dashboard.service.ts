@@ -1944,7 +1944,7 @@ export class DashboardService {
     ];
 
     const raw = await this.employeeRepo.query(
-      `SELECT
+      `SELECT DISTINCT
          e.id AS employee_id,
          e.name,
          (SELECT COUNT(*) FROM accounts a WHERE a.employee_id = e.id${accountPlatformClause}) AS account_count,
@@ -1954,6 +1954,10 @@ export class DashboardService {
             FROM posts p WHERE p.employee_id = e.id AND ${dateClause}${platformClause}) AS today_traffic,
          (SELECT COUNT(*) FROM leads l WHERE l.employee_id = e.id AND ${leadDateClause}${leadPlatformClause} AND l.status = '已成交') AS today_deals
        FROM employees e
+       JOIN users u ON u.employee_id = e.id COLLATE utf8mb4_unicode_ci
+         AND u.role IN ('operation', 'staff')
+         AND u.status = 'active'
+       WHERE e.status NOT IN ('离职', '停用', 'inactive', 'disabled', 'leave', 'resign', 'stopped')
        ORDER BY e.created_at DESC`,
       params,
     );
