@@ -8,7 +8,7 @@ module.exports = {
       exec_mode: "fork",
       env: {
         NODE_ENV: "production",
-        PORT: 8089
+        PORT: 9099
       }
     },
     {
@@ -20,7 +20,31 @@ module.exports = {
       exec_mode: "fork",
       env: {
         NODE_ENV: "production",
-        NEXT_PUBLIC_BACKEND_URL: "http://127.0.0.1:8089"
+        NEXT_PUBLIC_BACKEND_URL: "http://127.0.0.1:9099"
+      }
+    },
+    {
+      name: "lan-cookie-refresh",
+      cwd: "/opt/lan-system",
+      script: "scripts/cookie-refresh.js",
+      instances: 1,
+      exec_mode: "fork",
+      autorestart: true,
+      max_memory_restart: "1G",
+      env: {
+        NODE_ENV: "production"
+      }
+    },
+    {
+      name: "lan-posts-metrics-refresh",
+      cwd: "/opt/lan-system",
+      script: "scripts/posts-metrics-refresh.js",
+      instances: 1,
+      exec_mode: "fork",
+      autorestart: true,
+      max_memory_restart: "1G",
+      env: {
+        NODE_ENV: "production"
       }
     }
   ]
