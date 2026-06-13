@@ -304,6 +304,13 @@ export const APP_MENU_ITEMS: AppMenuItem[] = [
     roles: ['admin', 'owner'],
   },
   {
+    key: 'admin-gallery',
+    label: '作品广场',
+    path: '/admin/gallery',
+    icon: <ShopOutlined />,
+    roles: ['admin', 'owner', 'supervisor'],
+  },
+  {
     key: 'admin-recommend',
     label: '推荐作品录入',
     path: '/admin/posts/recommend',
