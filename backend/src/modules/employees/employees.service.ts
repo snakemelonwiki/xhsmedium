@@ -47,19 +47,22 @@ export class EmployeesService {
 
   /**
    * 查询员工列表，附带关联的登录账号角色。
+   * 当指定 role 时，仅返回角色匹配的员工（operation/staff 视为等价）。
    */
-  async findAll(keyword = ''): Promise<any[]> {
+  async findAll(keyword = '', role?: string): Promise<any[]> {
     const items = await this.employeeRepository.find({
       order: { createdAt: 'DESC' },
       where: this.keywordWhere(keyword),
     });
-    return this.enrichWithRoles(items);
+    const enriched = await this.enrichWithRoles(items);
+    return this.filterByRole(enriched, role);
   }
 
   /**
    * 分页查询员工列表，附带关联的登录账号角色。
+   * 当指定 role 时，仅返回角色匹配的员工（operation/staff 视为等价）。
    */
-  async findAllPaged(limit: number, offset: number, keyword = ''): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
+  async findAllPaged(limit: number, offset: number, keyword = '', role?: string): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
     const [items, total] = await this.employeeRepository.findAndCount({
       order: { createdAt: 'DESC' },
       where: this.keywordWhere(keyword),
@@ -67,7 +70,8 @@ export class EmployeesService {
       skip: offset,
     });
     const enriched = await this.enrichWithRoles(items);
-    return { items: enriched, total, limit, offset };
+    const filtered = this.filterByRole(enriched, role);
+    return { items: filtered, total: filtered.length, limit, offset };
   }
 
   /**
@@ -412,6 +416,25 @@ export class EmployeesService {
         username: linkedUser?.username ?? null,
         role: linkedUser?.role ?? null,
       };
+    });
+  }
+
+  /**
+   * 按角色过滤员工列表。
+   * - operation / staff 视为等价（运营角色）。
+   * - 不传 role 时返回全部。
+   */
+  private filterByRole(items: any[], role?: string): any[] {
+    if (!role) return items;
+    // 统一处理：operation/staff 等价
+    const isOperationTarget = role === 'operation' || role === 'staff';
+    return items.filter((item) => {
+      const itemRole = item.role;
+      if (!itemRole) return false;
+      if (isOperationTarget) {
+        return itemRole === 'operation' || itemRole === 'staff';
+      }
+      return itemRole === role;
     });
   }
 

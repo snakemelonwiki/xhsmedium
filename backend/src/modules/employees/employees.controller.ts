@@ -140,6 +140,7 @@ export class EmployeesController {
     @Query('keyword') keyword?: string,
     @Query('search') search?: string,
     @Query('q') q?: string,
+    @Query('role') role?: string,
   ) {
     if (!ensureEmployeeAdmin(req, res)) return;
     const wantsPaging = limit !== undefined || offset !== undefined;
@@ -149,10 +150,11 @@ export class EmployeesController {
         Number(limit) || 20,
         Number(offset) || 0,
         nextKeyword,
+        role,
       );
       return res.json(result);
     }
-    const rows = await this.employeesService.findAll(nextKeyword);
+    const rows = await this.employeesService.findAll(nextKeyword, role);
     return res.json(rows);
   }
 
