@@ -425,8 +425,24 @@ function AccountCalendarGrid({ days }: { days: AccountTimeseriesDay[] }) {
                   cursor: 'pointer',
                   border: '1px solid #f0f0f0',
                   padding: '2px 0',
+                  position: 'relative',
                 }}
               >
+                {d.leadCount > 0 ? (
+                  <span
+                    title="有客资"
+                    style={{
+                      position: 'absolute',
+                      right: 4,
+                      bottom: 4,
+                      width: 7,
+                      height: 7,
+                      borderRadius: '50%',
+                      background: '#ff2442',
+                      boxShadow: '0 0 0 1px rgba(255,255,255,0.78)',
+                    }}
+                  />
+                ) : null}
                 <div style={{ fontWeight: 600 }}>{d.date.slice(5)}</div>
                 <div style={{ fontSize: 11, opacity: 0.9 }}>
                   {d.postCount > 0 ? `×${d.postCount}` : '—'}
