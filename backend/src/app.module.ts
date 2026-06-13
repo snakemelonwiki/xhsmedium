@@ -62,6 +62,8 @@ import { EnumsModule } from './modules/enums/enums.module';
 import { TeachersModule } from './modules/teachers/teachers.module';
 import { StorageModule } from './shared/storage/storage.service';
 import { CacheModule } from './shared/cache.service';
+// T8/T9: 作品广场配置模块
+import { PlazaConfigModule } from './modules/plaza-config/plaza-config.module';
 import { FormattedSqlLogger } from './common/sql-logger';
 import { JwtAuthMiddleware } from './common/jwt-auth.middleware';
 import { TokenRefreshInterceptor } from './common/token-refresh.interceptor';
@@ -168,6 +170,8 @@ import { TokenRefreshInterceptor } from './common/token-refresh.interceptor';
     TeachersModule,
     StorageModule,
     CacheModule,
+    // T8/T9: 作品广场配置模块
+    PlazaConfigModule,
   ],
   providers: [
     {
