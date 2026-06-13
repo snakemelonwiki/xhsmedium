@@ -38,6 +38,8 @@ interface FollowRecordDto {
   clientMajorResearch?: string | null;
   clientTimeRequirement?: string | null;
   objectionPoint?: string | null;
+  // T12: 客资微信号（销售推老师微信后填写）
+  wechat?: string | null;
   followAction?: string | null;
   followActionAt?: string | Date | null;
   requirementNote?: string | null;
@@ -821,6 +823,8 @@ export class LeadsService {
     if (dto.clientMajorResearch !== undefined) patch.clientMajorResearch = dto.clientMajorResearch || null;
     if (dto.clientTimeRequirement !== undefined) patch.clientTimeRequirement = dto.clientTimeRequirement || null;
     if (dto.objectionPoint !== undefined) patch.objectionPoint = dto.objectionPoint || null;
+    // T12: 跟进时允许更新客资微信号
+    if (dto.wechat !== undefined) patch.wechat = dto.wechat || null;
     if (dto.followAction !== undefined) patch.followAction = dto.followAction || null;
     if (dto.followActionAt !== undefined) {
       patch.followActionAt = dto.followActionAt ? new Date(dto.followActionAt) : new Date();

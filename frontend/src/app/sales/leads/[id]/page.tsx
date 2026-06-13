@@ -104,6 +104,7 @@ type FollowFormValues = {
 type DealStatusFormValues = {
   dealStatus: DealStatusCode;
   dealAmount?: number | string;
+  invalidReason?: string;
 };
 
 type IntentionFormValues = {
@@ -179,6 +180,7 @@ export default function SalesLeadDetailPage() {
           clientMajorResearch: values.clientMajorResearch || null,
           clientTimeRequirement: values.clientTimeRequirement || null,
           objectionPoint: values.objectionPoint || null,
+          wechat: values.wechat || null,
           followAction: values.followAction || null,
           followActionAt: new Date().toISOString(),
           intentionLevel: values.intentionLevel,
@@ -241,6 +243,7 @@ export default function SalesLeadDetailPage() {
       await updateLeadDealStatus(leadId, {
         dealStatus: values.dealStatus,
         dealAmount: values.dealAmount ?? null,
+        invalidReason: values.dealStatus === 'invalid' ? (values.invalidReason || null) : null,
       });
       message.success('成交状态已更新');
       setDealStatusOpen(false);
@@ -441,6 +444,10 @@ export default function SalesLeadDetailPage() {
                     </Form.Item>
                     <Form.Item name="objectionPoint" label="异议点">
                       <Input placeholder="如：价格太贵 / 导师不同意" />
+                    </Form.Item>
+                    {/* T12: 客资微信号（销售推老师微信后填写） */}
+                    <Form.Item name="wechat" label="客资微信号">
+                      <Input placeholder="客户微信号，推老师微信后填写" />
                     </Form.Item>
                     <Form.Item name="intentionLevel" label="意向程度">
                       <Select
@@ -657,6 +664,28 @@ export default function SalesLeadDetailPage() {
                 { label: '无效', value: 'invalid' },
               ]}
             />
+          </Form.Item>
+          {/* T13: 选择无效时显示无效原因输入框 */}
+          <Form.Item noStyle shouldUpdate={(prev, next) => prev.dealStatus !== next.dealStatus}>
+            {({ getFieldValue }) => {
+              const currentStatus = getFieldValue('dealStatus');
+              return currentStatus === 'invalid' ? (
+                <Form.Item name="invalidReason" label="无效原因" rules={[{ required: true, message: '请选择无效原因' }]}>
+                  <Select
+                    allowClear
+                    placeholder="请选择无效原因"
+                    options={[
+                      { label: '客户不需要', value: '客户不需要' },
+                      { label: '客户预算不足', value: '客户预算不足' },
+                      { label: '客户已流失', value: '客户已流失' },
+                      { label: '联系方式错误', value: '联系方式错误' },
+                      { label: '重复客资', value: '重复客资' },
+                      { label: '其他', value: '其他' },
+                    ]}
+                  />
+                </Form.Item>
+              ) : null;
+            }}
           </Form.Item>
           <Form.Item name="dealAmount" label="成交金额（元）">
             <InputNumber min={0} precision={2} style={{ width: '100%' }} placeholder="0.00" />

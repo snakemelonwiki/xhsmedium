@@ -287,7 +287,7 @@ export async function closeLeadDeal(id: string, body: CloseLeadDealPayload) {
  */
 export async function updateLeadDealStatus(
   id: string,
-  body: { dealStatus: 'not_deal' | 'deal_pending' | 'deal_done' | 'refunded' | 'invalid'; dealAmount?: number | string | null },
+  body: { dealStatus: 'not_deal' | 'deal_pending' | 'deal_done' | 'refunded' | 'invalid'; dealAmount?: number | string | null; invalidReason?: string | null },
 ) {
   return apiClient.patch<{ ok: boolean; lead?: SalesLead }>(`/leads/${id}/deal-status`, body);
 }

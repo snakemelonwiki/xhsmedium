@@ -69,6 +69,8 @@ export interface SalesLead {
   // v1.3 / SA-3 成交状态/金额
   dealStatus?: DealStatusCode | string | null;
   dealAmount?: string | null;
+  // T13: 无效原因（标记无效时填写）
+  invalidReason?: string | null;
   // v1.3 意向程度（已在 schema/intention_level）
   intentionLevel?: IntentionLevelCode | string | null;
   /** 来源作品质量状态。不合格作品的客资成单按 50% 入单。 */
