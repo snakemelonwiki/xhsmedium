@@ -444,13 +444,20 @@ export class OrdersService {
       this.lookupDisplayNamesForIds(rows.flatMap((r) => [r.salesUserId, r.academicUserId])),
       this.lookupLeadSnapshotsForIds(rows.map((r) => r.leadId)),
     ]);
-    return rows.map((r) => ({
-      ...this.mapOrder(r, {
+    return rows.map((r) => {
+      const mapped = this.mapOrder(r, {
         salesUserName: r.salesUserId ? namesById.get(r.salesUserId) || null : null,
         academicUserName: r.academicUserId ? namesById.get(r.academicUserId) || null : null,
-      }),
-      ...(leadSnapshots.get(r.leadId) || {}),
-    }));
+      });
+      // 教务角色隐藏金额
+      if (options.sessionRole === 'academic') {
+        mapped.amount = null;
+      }
+      return {
+        ...mapped,
+        ...(leadSnapshots.get(r.leadId) || {}),
+      };
+    });
   }
 
   /**
@@ -612,14 +619,22 @@ export class OrdersService {
       this.lookupDisplayNamesForIds(rows.flatMap((r) => [r.salesUserId, r.academicUserId])),
       this.lookupLeadSnapshotsForIds(rows.map((r) => r.leadId)),
     ]);
-    return {
-      items: rows.map((r) => ({
-        ...this.mapOrder(r, {
-          salesUserName: r.salesUserId ? namesById.get(r.salesUserId) || null : null,
-          academicUserName: r.academicUserId ? namesById.get(r.academicUserId) || null : null,
-        }),
+    const mappedItems = rows.map((r) => {
+      const mapped = this.mapOrder(r, {
+        salesUserName: r.salesUserId ? namesById.get(r.salesUserId) || null : null,
+        academicUserName: r.academicUserId ? namesById.get(r.academicUserId) || null : null,
+      });
+      // 教务角色隐藏金额
+      if (options.sessionRole === 'academic') {
+        mapped.amount = null;
+      }
+      return {
+        ...mapped,
         ...(leadSnapshots.get(r.leadId) || {}),
-      })),
+      };
+    });
+    return {
+      items: mappedItems,
       total,
       limit: safeLimit,
       offset: safeOffset,
@@ -742,8 +757,14 @@ export class OrdersService {
       this.leadRepository.findOne({ where: { id: order.leadId } }),
     ]);
     const names = await this.lookupUserNames([order.salesUserId, order.academicUserId]);
+    const mappedOrder = this.mapOrder(order, names);
+    // 教务角色隐藏金额
+    const role = actor?.role || '';
+    if (role === 'academic') {
+      mappedOrder.amount = null;
+    }
     return {
-      ...this.mapOrder(order, names),
+      ...mappedOrder,
       ...(lead ? this.mapLeadFollowSnapshot(lead) : {}),
       followRecords: followRecords.map((r) => this.mapFollowRecord(r)),
     };
@@ -753,7 +774,7 @@ export class OrdersService {
    * 查询教务端交付详情。
    * 聚合 orders 主表、order_authors、order_submissions、order_finance，供订单跟进页编辑。
    */
-  async getOrderDelivery(orderId: string): Promise<any> {
+  async getOrderDelivery(orderId: string, actor?: { userId?: string; role?: string }): Promise<any> {
     const order = await this.orderRepository.findOne({ where: { id: orderId } });
     if (!order) {
       throw new NotFoundException('order not found');
@@ -769,11 +790,27 @@ export class OrdersService {
       }),
       this.orderFinanceRepository.findOne({ where: { orderId } }),
     ]);
+    const mappedOrder = this.mapOrderDeliveryFields(order);
+    const role = actor?.role || '';
+    const isAcademic = role === 'academic';
+    // 教务角色隐藏订单金额信息
+    if (isAcademic) {
+      mappedOrder.amount = null;
+    }
+    const mappedFinance = this.mapOrderFinance(finance);
+    if (isAcademic) {
+      mappedFinance.orderAmount = null;
+      mappedFinance.customerPaid = null;
+      mappedFinance.customerPending = null;
+      mappedFinance.teacherPrice = null;
+      mappedFinance.teacherPaid = null;
+      mappedFinance.teacherPending = null;
+    }
     return {
-      order: this.mapOrderDeliveryFields(order),
+      order: mappedOrder,
       authors: authors.map((row) => this.mapOrderAuthor(row)),
       submissions: submissions.map((row) => this.mapOrderSubmission(row)),
-      finance: this.mapOrderFinance(finance),
+      finance: mappedFinance,
     };
   }
 
@@ -781,12 +818,23 @@ export class OrdersService {
    * 保存教务端交付详情。
    * 主表字段更新 orders；作者与投稿信息采用按订单整体替换，避免旧位次残留；
    * 财务表为 1:1 upsert，并自动计算客户/老师待付金额。
+   *
+   * 角色校验：付款信息（finance）只允许销售修改，其余角色直接报错。
    */
-  async saveOrderDelivery(orderId: string, dto: OrderDeliveryDto): Promise<void> {
+  async saveOrderDelivery(orderId: string, dto: OrderDeliveryDto, actorRole?: string): Promise<void> {
     const order = await this.orderRepository.findOne({ where: { id: orderId } });
     if (!order) {
       throw new NotFoundException('order not found');
     }
+
+    // 角色校验：付款信息只允许销售修改
+    const role = actorRole || '';
+    const isAdminLike = role === 'admin' || role === 'owner';
+    const isSales = role === 'sales';
+    if (dto.finance && Object.keys(dto.finance).length > 0 && !isSales && !isAdminLike) {
+      throw new ForbiddenException('付款信息只允许销售修改');
+    }
+
     const orderPatch = this.buildOrderDeliveryPatch(dto.order || {});
     if (Object.keys(orderPatch).length > 0) {
       await this.orderRepository.update(orderId, orderPatch);

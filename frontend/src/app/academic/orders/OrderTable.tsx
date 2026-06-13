@@ -341,12 +341,15 @@ export function OrderTable({
         key: 'paidStatus',
         render: renderPaidStatus,
       },
-      {
-        title: '金额',
-        dataIndex: 'amount',
-        key: 'amount',
-        render: (value?: string | null) => value || '-',
-      },
+      // 教务端订单列表不显示金额列
+      ...(actionMode === 'academic' ? [] : [
+        {
+          title: '金额',
+          dataIndex: 'amount',
+          key: 'amount',
+          render: (value?: string | null) => value || '-',
+        },
+      ] as any[]),
       {
         title: '更新时间',
         dataIndex: 'updatedAt',
@@ -369,30 +372,9 @@ export function OrderTable({
           );
         }
         if (actionMode === 'sales') {
-          const currentOrderStatus = (record.orderStatus as string) || 'to_receive';
-          const isCompleted = currentOrderStatus === 'completed' || currentOrderStatus === 'closed';
           return (
             <Space size={4} wrap>
               <Button onClick={() => router.push(`/sales/orders/${record.id}`)}>查看</Button>
-              <Select
-                size="small"
-                value={currentOrderStatus}
-                options={orderStatusOptions as { label: string; value: string }[]}
-                style={{ width: 124 }}
-                onChange={(next) =>
-                  patchOrder(record.id, { order_status: next }, `订单状态已更新为「${orderStatusMeta(next)?.label || next}」`)
-                }
-                disabled={updatingId === record.id}
-              />
-              <Button
-                size="small"
-                type="primary"
-                loading={updatingId === record.id}
-                disabled={isCompleted}
-                onClick={() => patchOrder(record.id, { order_status: 'completed' }, '已修改为已完成')}
-              >
-                {isCompleted ? '已完成' : '一键已完成'}
-              </Button>
             </Space>
           );
         }

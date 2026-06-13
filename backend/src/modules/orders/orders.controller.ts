@@ -289,7 +289,7 @@ export class OrdersController {
       if (!canAccess) {
         return res.status(404).json({ ok: false, message: 'not found' });
       }
-      const data = await this.ordersService.getOrderDelivery(id);
+      const data = await this.ordersService.getOrderDelivery(id, { userId, role });
       return res.json(data);
     } catch (err: any) {
       const code = err?.status || 404;
@@ -317,7 +317,7 @@ export class OrdersController {
         authors: Array.isArray(body?.authors) ? body.authors : undefined,
         submissions: Array.isArray(body?.submissions) ? body.submissions : undefined,
         finance: body?.finance || undefined,
-      });
+      }, role);
       await this.logSafe({
         userId,
         action: OPERATION_LOG_ACTIONS.UPDATE,
@@ -349,6 +349,11 @@ export class OrdersController {
       const canAccess = await this.ordersService.canAccessOrder(id, { userId, role });
       if (!canAccess) {
         return res.status(404).json({ ok: false, message: 'not found' });
+      }
+      // 订单状态只允许教务/主管/admin/owner 修改，其余角色不允许
+      const CAN_MODIFY_ORDER_STATUS = ['admin', 'owner', 'academic'];
+      if (body?.order_status !== undefined && !CAN_MODIFY_ORDER_STATUS.includes(role)) {
+        return res.status(403).json({ ok: false, message: '当前角色不允许修改订单状态' });
       }
       await this.ordersService.update(id, userId, {
         order_status: body?.order_status,

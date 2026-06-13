@@ -532,8 +532,15 @@ export default function AcademicOrderDetailPage() {
                 { key: 'id', label: '订单 ID', children: orderId },
                 { key: 'leadId', label: '客资 ID', children: emptyText(order?.leadId) },
                 { key: 'serviceType', label: '服务类型', children: emptyText(order?.serviceType) },
-                { key: 'amount', label: '金额', children: emptyText(order?.amount) },
-                { key: 'paidStatus', label: '付款状态', children: <Tag color={paidStatusMeta(order?.paidStatus).color}>{paidStatusMeta(order?.paidStatus).label}</Tag> },
+                // 教务端不显示金额，仅显示付款状态与付款比例
+                ...(isAcademic ? [] : [
+                  { key: 'amount', label: '金额', children: emptyText(order?.amount) },
+                ] as any[]),
+                {
+                  key: 'paidStatus',
+                  label: '付款状态',
+                  children: <Tag color={paidStatusMeta(order?.paidStatus).color}>{paidStatusMeta(order?.paidStatus).label}</Tag>,
+                },
                 { key: 'orderStatus', label: '订单状态', children: <Tag color={orderStatusMeta(order?.orderStatus).color}>{orderStatusMeta(order?.orderStatus).label}</Tag> },
                 {
                   key: 'handoverStatus',
@@ -675,6 +682,7 @@ export default function AcademicOrderDetailPage() {
                     <Button icon={<PlusOutlined />} onClick={() => add({ authorOrder: fields.length + 1 })}>
                       添加作者
                     </Button>
+                    <Button icon={<UploadOutlined />} onClick={() => message.info('作者等级表导入功能开发中，模板格式确认后开放')}>导入作者等级表</Button>
                   </Space>
                 )}
               </Form.List>
