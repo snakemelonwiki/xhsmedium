@@ -522,7 +522,7 @@ export default function AdminLeadsPage() {
       };
     }
     return {
-      total: stats.total,
+      total: stats.filteredTotal,
       newCount: stats.byStatus['new'] ?? 0,
       assigned: stats.assigned,
       pending: stats.byAddStatus['not_added'] ?? 0,
@@ -530,10 +530,8 @@ export default function AdminLeadsPage() {
       collaborating: stats.byStatus['in_collaboration'] ?? 0,
       dealDone: stats.byProcess['deal_done'] ?? 0,
       invalid: stats.byStatus['invalid'] ?? 0,
-      // v1.3 / T5.2: 当前筛选条件下平台对应的客资总数
-      // - 选了具体平台 → filteredTotal（与顶部筛选口径一致）
-      // - 全部平台 → total
-      platformTotal: filters.platform ? stats.filteredTotal : stats.total,
+      // T11: 顶部统计数字随全部筛选条件联动（统一用 filteredTotal）
+      platformTotal: stats.filteredTotal,
     };
   }, [stats, filters.platform]);
 
