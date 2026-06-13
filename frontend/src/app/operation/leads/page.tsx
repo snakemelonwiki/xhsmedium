@@ -56,7 +56,11 @@ export default function OperationLeadsPage() {
   const [items, setItems] = useState<SalesLead[]>([]);
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
-  const [filters, setFilters] = useState<LeadFilters>({ dateRange: null });
+  // T7: 默认只显示当天数据
+  const today = dayjs().format('YYYY-MM-DD');
+  const [filters, setFilters] = useState<LeadFilters>({
+    dateRange: { start: dayjs(today), end: dayjs(today) },
+  });
   const [pagination, setPagination] = useState({ current: 1, pageSize: 20, total: 0 });
 
   const [detailLead, setDetailLead] = useState<SalesLead | null>(null);
