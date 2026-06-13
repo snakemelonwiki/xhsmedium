@@ -26,6 +26,7 @@ DROP TABLE IF EXISTS post_metrics;
 DROP TABLE IF EXISTS post_metrics_history;
 DROP TABLE IF EXISTS posts;
 DROP TABLE IF EXISTS accounts;
+DROP TABLE IF EXISTS plaza_configs;
 DROP TABLE IF EXISTS favorites;
 DROP TABLE IF EXISTS notifications;
 DROP TABLE IF EXISTS import_tasks;
@@ -630,6 +631,23 @@ CREATE TABLE IF NOT EXISTS favorites (
   INDEX idx_fav_user_id            (user_id),
   INDEX idx_fav_target             (target_type, target_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='收藏表';
+
+-- ============================================================
+-- 15a. plaza_configs
+-- backend/src/entities/plaza-config.entity.ts + backend/src/modules/plaza-config
+-- 作品广场门槛配置表：按 config_key 存储 JSON/数值字符串，支持动态阈值
+-- 业务键：plaza.minLeads / plaza.minTraffic / plaza.marketingMinLeads /
+--        plaza.personaMinTraffic / plaza.defaultMinLeads / plaza.defaultMinTraffic
+-- ============================================================
+CREATE TABLE IF NOT EXISTS plaza_configs (
+  id           VARCHAR(64)  PRIMARY KEY,
+  config_key   VARCHAR(64)  NOT NULL UNIQUE COMMENT '配置键',
+  config_value TEXT         NOT NULL        COMMENT '配置值（JSON 或数值字符串）',
+  created_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+  UNIQUE INDEX uk_plaza_config_key (config_key)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='作品广场门槛配置表';
 
 -- ============================================================
 -- 16. post_metrics_history

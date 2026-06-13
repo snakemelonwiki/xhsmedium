@@ -111,9 +111,8 @@ async function getContext(platform) {
   }
   const profileDir = getProfileDir(platform);
 
-  // 抖音也改为无头模式运行，降低服务器资源占用。
-  // 通过 args 中的反检测参数绕过平台 headless 检测。
-  const isHeadless = true;
+  // 小红书有头（避免触发登录墙）；抖音无头（有头模式弹窗干扰）
+  const isHeadless = platform !== "小红书";
   const baseArgs = [];
   if (platform === "抖音") {
     baseArgs.push("--disable-gpu");
@@ -278,7 +277,10 @@ async function readCountBySelectors(page, selectors) {
 }
 
 function extractDouyinVideoId(url) {
-  // modal_id=xxx 或 /video/xxx 或 /note/xxx
+  // 支持多种抖音 URL 格式：
+  // 1. /video/xxx 或 /note/xxx
+  // 2. ?modal_id=xxx（含 /user/self?modal_id= 个人主页弹窗视频）
+  // 3. v.douyin.com 短链（在 page.goto 时由浏览器解析）
   const modalMatch = url.match(/[?&]modal_id=(\d+)/);
   if (modalMatch) return modalMatch[1];
   const pathMatch = url.match(/\/(?:video|note)\/(\d+)/);
@@ -375,6 +377,10 @@ function setupDouyinDetailInterceptor(page) {
       .json()
       .then((json) => {
         if (json?.aweme_detail) detail = json.aweme_detail;
+        // 兼容 aweme_list（个人主页弹窗视频场景）
+        if (!detail && json?.aweme_list && json.aweme_list.length > 0) {
+          detail = json.aweme_list[0];
+        }
       })
       .catch(() => {});
   });
@@ -910,8 +916,67 @@ function extractXiaohongshuUserIdFromProfileUrl(url) {
   return match ? match[1] : "";
 }
 
-async function scrapeXiaohongshu(page) {
+/**
+ * 小红书 feed API 响应拦截器。
+ * 新版小红书不再依赖 __INITIAL_STATE__ SSR 数据，而是通过
+ * POST /api/sns/web/v1/feed 接口异步获取笔记详情。
+ * 本拦截器在浏览器响应到达时解析 JSON，提取笔记的标题、作者、指标、封面。
+ */
+function setupXiaohongshuFeedInterceptor(page) {
+  let noteCard = null;
+  page.on("response", (response) => {
+    const url = response.url();
+    if (!url.includes("/api/sns/web/v1/feed") && !url.includes("/api/sns/web/v2/note")) return;
+    response
+      .json()
+      .then((json) => {
+        const items = json?.data?.items;
+        if (!items?.length) return;
+        const card = items[0]?.note_card || items[0]?.noteCard;
+        if (!card) return;
+        const info = card.interact_info || card.interactInfo || {};
+        noteCard = {
+          noteId: String(card.note_id || card.noteId || "").trim(),
+          title: String(card.title || card.desc || "").trim(),
+          authorName: String(card.user?.nickname || "").trim(),
+          authorId: String(card.user?.user_id || card.user?.userId || "").trim(),
+          avatar: card.user?.avatar || "",
+          likes: parseCount(info.liked_count || info.likedCount),
+          comments: parseCount(info.comment_count || info.commentCount),
+          favorites: parseCount(info.collected_count || info.collectedCount),
+          shares: parseCount(info.share_count || info.shareCount),
+          imageList: card.image_list || card.imageList || [],
+        };
+        console.log(`[metricsFetcher] 小红书 feed API 拦截: noteId=${noteCard.noteId}, title=${noteCard.title.slice(0, 60)}, 赞${noteCard.likes} 评${noteCard.comments} 藏${noteCard.favorites}`);
+      })
+      .catch((err) => {
+        // feed 响应可能不是 JSON（如 403），静默忽略
+        if (process.env.NODE_ENV !== "test") {
+          console.debug(`[metricsFetcher] 小红书 feed API 拦截失败: ${err?.message || err}`);
+        }
+      });
+  });
+  return () => noteCard;
+}
+
+async function scrapeXiaohongshu(page, targetNoteId, getFeedData) {
   const noteId = extractXiaohongshuNoteId(page.url());
+
+  // ── Layer 0: 读取 feed API 拦截数据（新版小红书优先） ──
+  let feedCard = null;
+  if (getFeedData) {
+    try {
+      // feed API 数据是在 page.goto 过程中异步拦截的，
+      // 此时响应应该已经到达，直接读取即可
+      feedCard = getFeedData();
+      if (feedCard?.title) {
+        console.log(`[metricsFetcher] 小红书 feed 层: title=${feedCard.title.slice(0, 60)}, author=${feedCard.authorName}, 赞${feedCard.likes} 评${feedCard.comments} 藏${feedCard.favorites} 分享${feedCard.shares}`);
+      }
+    } catch (err) {
+      console.warn(`[metricsFetcher] 小红书 feed 数据读取失败: ${err?.message || err}`);
+    }
+  }
+
   const initialState = await readXiaohongshuInitialState(page, noteId);
   const precise = await readXiaohongshuEngageBar(page);
   const htmlFallback = await inferXiaohongshuCountsFromHtml(page);
@@ -921,40 +986,42 @@ async function scrapeXiaohongshu(page) {
   const domAuthorName = await readXiaohongshuAuthorNameFromDom(page);
   const domAuthorUrl = await readXiaohongshuAuthorUrlFromDom(page);
   const domAuthorId = extractXiaohongshuUserIdFromProfileUrl(domAuthorUrl);
-  const likes = parseCount(initialState?.likes) ?? parseCount(precise?.likes) ?? await readCountBySelectors(page, [
+
+  // 指标优先级：feed API > SSR > EngageBar DOM > HTML正则
+  const likes = parseCount(feedCard?.likes) ?? parseCount(initialState?.likes) ?? parseCount(precise?.likes) ?? await readCountBySelectors(page, [
     ".interactions.engage-bar .interact-container .like-wrapper .count",
     ".engage-bar .interact-container .like-wrapper .count",
     "[class*='like'] [class*='count']",
     "[data-testid*='like'] [class*='count']"
   ]);
-  const comments = parseCount(initialState?.comments) ?? parseCount(precise?.comments) ?? await readCountBySelectors(page, [
+  const comments = parseCount(feedCard?.comments) ?? parseCount(initialState?.comments) ?? parseCount(precise?.comments) ?? await readCountBySelectors(page, [
     ".interactions.engage-bar .interact-container .chat-wrapper .count",
     ".engage-bar .interact-container .chat-wrapper .count",
     "[class*='chat'] [class*='count']",
     "[class*='comment'] [class*='count']"
   ]);
-  const favorites = parseCount(initialState?.favorites) ?? parseCount(precise?.favorites) ?? await readCountBySelectors(page, [
+  const favorites = parseCount(feedCard?.favorites) ?? parseCount(initialState?.favorites) ?? parseCount(precise?.favorites) ?? await readCountBySelectors(page, [
     ".interactions.engage-bar .interact-container .collect-wrapper .count",
     ".engage-bar .interact-container .collect-wrapper .count",
     "[class*='collect'] [class*='count']",
     "[class*='favorite'] [class*='count']"
   ]);
-  const shares = parseCount(initialState?.shares) ?? parseCount(precise?.shares) ?? await readCountBySelectors(page, [
+  const shares = parseCount(feedCard?.shares) ?? parseCount(initialState?.shares) ?? parseCount(precise?.shares) ?? await readCountBySelectors(page, [
     ".interactions.engage-bar .interact-container .share-wrapper .count",
     ".engage-bar .interact-container .share-wrapper .count",
     "[class*='share'] [class*='count']",
     "[data-testid*='share'] [class*='count']"
   ]);
 
-  // 标题：INITIAL_STATE > XPath #detail-title > meta og:title > empty
-  const title = initialState?.title || xpathTitle || metaTags?.title || metaTags?.description || "";
-  const titleSource = initialState?.title ? "initialState" : xpathTitle ? "xpath" : metaTags?.title ? "meta-title" : metaTags?.description ? "meta-description" : "empty";
+  // 标题优先级：feed API > SSR > XPath > meta
+  const title = feedCard?.title || initialState?.title || xpathTitle || metaTags?.title || metaTags?.description || "";
+  const titleSource = feedCard?.title ? "feed-api" : initialState?.title ? "initialState" : xpathTitle ? "xpath" : metaTags?.title ? "meta-title" : metaTags?.description ? "meta-description" : "empty";
   console.log(`[metricsFetcher] 小红书标题来源: ${titleSource}, title=${title.slice(0, 80)}`);
-  // 作者：DOM > INITIAL_STATE > meta og:author > empty
-  const authorName = domAuthorName || initialState?.authorName || metaTags?.authorName || "";
-  // 作者 ID：优先从主页链接解析 userId，其次 SSR
-  const authorId = domAuthorId || initialState?.authorId || "";
-  const authorSource = domAuthorName ? "dom" : initialState?.authorName ? "initialState" : metaTags?.authorName ? "meta" : "empty";
+
+  // 作者优先级：feed API > DOM > SSR > meta
+  const authorName = feedCard?.authorName || domAuthorName || initialState?.authorName || metaTags?.authorName || "";
+  const authorId = feedCard?.authorId || domAuthorId || initialState?.authorId || "";
+  const authorSource = feedCard?.authorName ? "feed-api" : domAuthorName ? "dom" : initialState?.authorName ? "initialState" : metaTags?.authorName ? "meta" : "empty";
   console.log(`[metricsFetcher] 小红书作者来源: ${authorSource}, authorName=${authorName.slice(0, 60)}, authorId=${authorId}`);
 
   const fallback = await inferCountsFromBody(page);
@@ -967,7 +1034,9 @@ async function scrapeXiaohongshu(page) {
     likes: likes ?? htmlFallback.likes ?? fallback.likes ?? 0,
     comments: comments ?? htmlFallback.comments ?? fallback.comments ?? 0,
     favorites: favorites ?? htmlFallback.favorites ?? fallback.favorites ?? 0,
-    shares: shares ?? htmlFallback.shares ?? fallback.shares ?? 0
+    shares: shares ?? htmlFallback.shares ?? fallback.shares ?? 0,
+    // feed API 封面候选
+    feedImageList: feedCard?.imageList || [],
   };
 }
 
@@ -1063,10 +1132,25 @@ async function readDouyinRenderData(page) {
   }
 }
 
-async function scrapeDouyin(page) {
+async function scrapeDouyin(page, getDouyinDetail) {
   const currentUrl = page.url();
   const videoId = extractDouyinVideoId(currentUrl);
   console.log(`[metricsFetcher] 抖音 scrapeDouyin: url=${currentUrl}, videoId=${videoId || '未提取'}`);
+
+  // ── Layer -1: API 拦截数据（个人主页弹窗视频场景 aweme/related） ──
+  let apiDetail = null;
+  let apiMetrics = null;
+  if (getDouyinDetail) {
+    try {
+      apiDetail = getDouyinDetail();
+      if (apiDetail) {
+        apiMetrics = extractDouyinFromDetail(apiDetail);
+        console.log(`[metricsFetcher] 抖音 API 拦截层: title=${apiMetrics?.title?.slice(0, 60) || 'null'}, author=${apiMetrics?.authorName || 'null'}, 赞${apiMetrics?.likes ?? 'null'} 评${apiMetrics?.comments ?? 'null'} 藏${apiMetrics?.favorites ?? 'null'} 分享${apiMetrics?.shares ?? 'null'}`);
+      }
+    } catch (err) {
+      console.warn(`[metricsFetcher] 抖音 API 拦截数据读取失败: ${err?.message || err}`);
+    }
+  }
 
   // ── Layer 0: RSC flight data（抖音笔记/图文页 SSR 数据） ──
   const rscDetail = await readDouyinRscFlightData(page);
@@ -1196,9 +1280,10 @@ async function scrapeDouyin(page) {
 
   const fallback = await inferCountsFromBody(page);
 
-  // 优先级：RSC/API detail > RENDER_DATA > HTML 正则 > XPath > DOM 扫描 > body text
+  // 优先级：API 拦截 > RSC > RENDER_DATA > HTML 正则 > XPath > DOM 扫描 > body text
   const sources = { likes: "", comments: "", favorites: "", shares: "" };
   const get = (k) => {
+    if (apiMetrics?.[k] != null && apiMetrics[k] > 0) { sources[k] = "api-detail"; return apiMetrics[k]; }
     if (rscMetrics?.[k] != null && rscMetrics[k] > 0) { sources[k] = "rsc"; return rscMetrics[k]; }
     if (renderData?.[k] != null) { sources[k] = "render-data"; return renderData[k]; }
     if (htmlFallback[k] != null) { sources[k] = "html-regex"; return htmlFallback[k]; }
@@ -1210,10 +1295,10 @@ async function scrapeDouyin(page) {
   };
   const result = {
     bodyText: fallback.text,
-    title: rscMetrics?.title || renderData?.title || "",
-    authorName: rscMetrics?.authorName || "",
-    authorId: rscMetrics?.authorId || "",
-    publishDate: rscMetrics?.publishDate || "",
+    title: apiMetrics?.title || rscMetrics?.title || renderData?.title || "",
+    authorName: apiMetrics?.authorName || rscMetrics?.authorName || "",
+    authorId: apiMetrics?.authorId || rscMetrics?.authorId || "",
+    publishDate: apiMetrics?.publishDate || rscMetrics?.publishDate || "",
     likes: get("likes"),
     comments: get("comments"),
     favorites: get("favorites"),
@@ -1438,16 +1523,28 @@ async function fetchMetricsFromUrl(url) {
       console.log(`[metricsFetcher] 小红书目标笔记ID: ${targetNoteId || "unknown"}`);
     }
 
+    // ── 小红书：在 page.goto 前设置 feed API 拦截器（必须在请求发出前挂载）
+    let getFeedData = null;
+    if (platform === "小红书") {
+      getFeedData = setupXiaohongshuFeedInterceptor(page);
+    }
+
+    // ── 抖音：在 page.goto 前设置 detail API 拦截器（个人主页弹窗视频依赖 aweme/related） ──
+    let getDouyinDetail = null;
+    if (platform === "抖音") {
+      getDouyinDetail = setupDouyinDetailInterceptor(page);
+    }
+
     await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: DEFAULT_TIMEOUT });
     const tLoad = Date.now();
 
-    // ── 等待策略：抖音需要完整 SPA 渲染（networkidle + 1s），小红书用优化等待 ──
+    // ── 等待策略：抖音需要完整 SPA 渲染（networkidle + 1s），
+    // 小红书需要等待 feed API 返回（networkidle + 500ms）
+    await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => {});
     if (platform === "抖音") {
-      await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => {});
       await page.waitForTimeout(1000);
     } else {
-      await page.waitForLoadState("networkidle", { timeout: 800 }).catch(() => {});
-      await page.waitForTimeout(200);
+      await page.waitForTimeout(500);
     }
 
     // 先关闭登录/引导浮层，避免 title/bodyText 被浮层文案污染导致误判
@@ -1461,7 +1558,7 @@ async function fetchMetricsFromUrl(url) {
 
     const pageTitle = await page.title().catch(() => "");
 
-    const payload = platform === "小红书" ? await scrapeXiaohongshu(page, targetNoteId) : await scrapeDouyin(page);
+    const payload = platform === "小红书" ? await scrapeXiaohongshu(page, targetNoteId, getFeedData) : await scrapeDouyin(page, getDouyinDetail);
 
     // 小红书：先检测笔记是否已失效（被删除/隐藏），再校验笔记存在性
     if (platform === "小红书" && payload?.bodyText) {
@@ -1507,7 +1604,7 @@ async function fetchMetricsFromUrl(url) {
     try {
       const cover =
         platform === "小红书"
-          ? await capturePostCover(page, platform, targetNoteId)
+          ? await capturePostCover(page, platform, targetNoteId, payload?.feedImageList)
           : await capturePostCover(page, platform);
       if (cover) {
         coverImageUrl = cover.coverImageUrl;
@@ -2083,7 +2180,7 @@ async function pauseAllVideos(page) {
  *   4. 抖音：视频首帧截图（图文笔记常被转成视频，metadata 封面可能是纯色占位图）；
  *   5. 兜底：视口截图。
  */
-async function capturePostCover(page, platform, preferredNoteId) {
+async function capturePostCover(page, platform, preferredNoteId, feedImageList) {
   console.log(`[metricsFetcher] capturePostCover start: platform=${platform}, noteId=${preferredNoteId || "unknown"}`);
   try {
     // 1. 去掉登录弹窗/新手引导/遮挡蒙层
@@ -2093,6 +2190,22 @@ async function capturePostCover(page, platform, preferredNoteId) {
     // 2. 暂停视频（兜底截图时避免动态模糊/黑屏）
     console.log(`[metricsFetcher] capturePostCover step 2: pauseAllVideos`);
     await pauseAllVideos(page);
+
+    // 3. 小红书新版：优先用 feed API 返回的图片列表
+    if (platform === "小红书" && Array.isArray(feedImageList) && feedImageList.length > 0) {
+      console.log(`[metricsFetcher] capturePostCover step 3: use feed API image_list`);
+      const first = feedImageList[0];
+      const feedImageUrl = first?.url || first?.urlDefault || first?.infoList?.[0]?.url || null;
+      if (feedImageUrl) {
+        const buf = await fetchCoverImage(page, feedImageUrl);
+        if (buf && (await validateCoverBuffer(buf))) {
+          const cover = await writeCoverJpeg(buf, "feed-api");
+          console.log(`[metricsFetcher] feed API 封面写入: ${cover?.coverImageUrl || "null"}`);
+          return cover;
+        }
+        console.warn(`[metricsFetcher] capturePostCover feed API 封面无效，降级到 SSR`);
+      }
+    }
 
     // 3. 优先拿语义化封面原图
     console.log(`[metricsFetcher] capturePostCover step 3: extract semantic cover url`);
