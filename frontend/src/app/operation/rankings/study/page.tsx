@@ -2,12 +2,9 @@
 
 import {
   AppstoreOutlined,
-  BlockOutlined,
-  CommentOutlined,
   DownloadOutlined,
   EyeOutlined,
   HeartOutlined,
-  LikeOutlined,
   StarOutlined,
 } from '@ant-design/icons';
 import {
@@ -40,6 +37,8 @@ import { getPostDetail, togglePostFavorite } from '@/shared/api/content';
 import { QuickRangePicker, RANGE_PRESETS_FULL } from '@/shared/components/date';
 import type { DateRangeValue } from '@/shared/components/date';
 import type { ContentPost } from '@/shared/types/content';
+import { InteractionMetricsGrid } from './InteractionMetricsGrid';
+import { formatStudyPlatform, getStudyPlatformColor } from './platformDisplay';
 
 type StudyPeriod = '7' | '14' | '30';
 type StudyTab = 'posts' | 'accounts' | 'picks';
@@ -461,7 +460,7 @@ export default function StudyRankingsPage() {
           <Space direction="vertical" size={4}>
             {record.title.length > 8 ? <Tooltip title={record.title}>{node}</Tooltip> : node}
             <Space wrap>
-              <Tag color={record.platform.includes('抖') ? 'blue' : 'red'}>{record.platform}</Tag>
+              <Tag color={getStudyPlatformColor(record.platform)}>{formatStudyPlatform(record.platform)}</Tag>
               <Tag>{record.postType || '未分类'}</Tag>
             </Space>
           </Space>
@@ -488,12 +487,12 @@ export default function StudyRankingsPage() {
       title: '互动指标',
       width: 180,
       render: (_: unknown, record: LearningPost) => (
-        <Space wrap size={[4, 4]}>
-          <Tag icon={<LikeOutlined />}>赞 {record.likes}</Tag>
-          <Tag icon={<CommentOutlined />}>评 {record.comments}</Tag>
-          <Tag icon={<HeartOutlined />}>藏 {record.favorites}</Tag>
-          <Tag icon={<BlockOutlined />}>转 {record.shares}</Tag>
-        </Space>
+        <InteractionMetricsGrid
+          likes={record.likes}
+          comments={record.comments}
+          favorites={record.favorites}
+          shares={record.shares}
+        />
       ),
     },
     {
@@ -584,7 +583,7 @@ export default function StudyRankingsPage() {
       dataIndex: 'platform',
       width: 100,
       render: (platform: string) => (
-        <Tag color={platform.includes('抖') ? 'blue' : 'red'}>{platform}</Tag>
+        <Tag color={getStudyPlatformColor(platform)}>{formatStudyPlatform(platform)}</Tag>
       ),
     },
     {
@@ -654,7 +653,7 @@ export default function StudyRankingsPage() {
             {record.title.length > 8 ? <Tooltip title={record.title}>{node}</Tooltip> : node}
             <Space wrap>
               <Tag color="gold">主管推荐</Tag>
-              <Tag color={record.platform.includes('抖') ? 'blue' : 'red'}>{record.platform}</Tag>
+              <Tag color={getStudyPlatformColor(record.platform)}>{formatStudyPlatform(record.platform)}</Tag>
               <Tag>{record.postType || '未分类'}</Tag>
             </Space>
           </Space>
@@ -681,12 +680,12 @@ export default function StudyRankingsPage() {
       title: '互动指标',
       width: 180,
       render: (_: unknown, record: LearningPost) => (
-        <Space wrap size={[4, 4]}>
-          <Tag icon={<LikeOutlined />}>赞 {record.likes}</Tag>
-          <Tag icon={<CommentOutlined />}>评 {record.comments}</Tag>
-          <Tag icon={<HeartOutlined />}>藏 {record.favorites}</Tag>
-          <Tag icon={<BlockOutlined />}>转 {record.shares}</Tag>
-        </Space>
+        <InteractionMetricsGrid
+          likes={record.likes}
+          comments={record.comments}
+          favorites={record.favorites}
+          shares={record.shares}
+        />
       ),
     },
     {
@@ -862,8 +861,8 @@ export default function StudyRankingsPage() {
             )}
             <Typography.Title level={4}>{selectedPost.title}</Typography.Title>
             <Space wrap>
-              <Tag color={selectedPost.platform.includes('抖') ? 'blue' : 'red'}>
-                {selectedPost.platform}
+              <Tag color={getStudyPlatformColor(selectedPost.platform)}>
+                {formatStudyPlatform(selectedPost.platform)}
               </Tag>
               <Tag>{selectedPost.postType || '未分类'}</Tag>
               {selectedPost.publishedAt && (
