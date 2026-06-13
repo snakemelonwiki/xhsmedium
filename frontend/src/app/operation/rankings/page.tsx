@@ -120,7 +120,7 @@ const TOP_CARDS: Array<{
     color: '#1677ff',
     bg: '#e6f4ff',
     getValue: (row) => numberValue(row.postCount),
-    suffix: '件',
+    suffix: '条',
   },
   {
     key: 'leads',
