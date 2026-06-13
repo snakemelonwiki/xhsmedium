@@ -40,6 +40,7 @@ import { getPostDetail, togglePostFavorite } from '@/shared/api/content';
 import { QuickRangePicker, RANGE_PRESETS_FULL } from '@/shared/components/date';
 import type { DateRangeValue } from '@/shared/components/date';
 import type { ContentPost } from '@/shared/types/content';
+import { formatStudyPlatform, getStudyPlatformColor } from './platformDisplay';
 
 type StudyPeriod = '7' | '14' | '30';
 type StudyTab = 'posts' | 'accounts' | 'picks';
@@ -461,7 +462,7 @@ export default function StudyRankingsPage() {
           <Space direction="vertical" size={4}>
             {record.title.length > 8 ? <Tooltip title={record.title}>{node}</Tooltip> : node}
             <Space wrap>
-              <Tag color={record.platform.includes('抖') ? 'blue' : 'red'}>{record.platform}</Tag>
+              <Tag color={getStudyPlatformColor(record.platform)}>{formatStudyPlatform(record.platform)}</Tag>
               <Tag>{record.postType || '未分类'}</Tag>
             </Space>
           </Space>
@@ -584,7 +585,7 @@ export default function StudyRankingsPage() {
       dataIndex: 'platform',
       width: 100,
       render: (platform: string) => (
-        <Tag color={platform.includes('抖') ? 'blue' : 'red'}>{platform}</Tag>
+        <Tag color={getStudyPlatformColor(platform)}>{formatStudyPlatform(platform)}</Tag>
       ),
     },
     {
@@ -654,7 +655,7 @@ export default function StudyRankingsPage() {
             {record.title.length > 8 ? <Tooltip title={record.title}>{node}</Tooltip> : node}
             <Space wrap>
               <Tag color="gold">主管推荐</Tag>
-              <Tag color={record.platform.includes('抖') ? 'blue' : 'red'}>{record.platform}</Tag>
+              <Tag color={getStudyPlatformColor(record.platform)}>{formatStudyPlatform(record.platform)}</Tag>
               <Tag>{record.postType || '未分类'}</Tag>
             </Space>
           </Space>
@@ -862,8 +863,8 @@ export default function StudyRankingsPage() {
             )}
             <Typography.Title level={4}>{selectedPost.title}</Typography.Title>
             <Space wrap>
-              <Tag color={selectedPost.platform.includes('抖') ? 'blue' : 'red'}>
-                {selectedPost.platform}
+              <Tag color={getStudyPlatformColor(selectedPost.platform)}>
+                {formatStudyPlatform(selectedPost.platform)}
               </Tag>
               <Tag>{selectedPost.postType || '未分类'}</Tag>
               {selectedPost.publishedAt && (
