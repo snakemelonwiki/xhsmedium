@@ -840,7 +840,7 @@ export class LeadsService {
   async updateDealStatus(
     id: string,
     actorUserId: string,
-    dto: { dealStatus: string; dealAmount?: number | string | null },
+    dto: { dealStatus: string; dealAmount?: number | string | null; invalidReason?: string | null },
   ): Promise<any | null> {
     const dealStatus = String(dto.dealStatus || '').trim();
     if (!DEAL_STATUS_CODES.has(dealStatus)) {
@@ -854,6 +854,9 @@ export class LeadsService {
     const patch: Partial<Lead> = { dealStatus };
     if (dto.dealAmount !== undefined) {
       patch.dealAmount = dto.dealAmount != null && dto.dealAmount !== '' ? String(dto.dealAmount) : null;
+    }
+    if (dto.invalidReason !== undefined) {
+      patch.invalidReason = dto.invalidReason || null;
     }
     // deal_done 同步 processStatus=deal_done + status=in_followup（与 closeDeal 保持一致口径）
     if (dealStatus === 'deal_done') {

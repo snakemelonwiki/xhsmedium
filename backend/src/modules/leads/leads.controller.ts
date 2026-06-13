@@ -254,6 +254,7 @@ export class LeadsController {
         addStatus: body.addStatus || 'not_added',
         intention: body.intention || null,
         isDispatched,
+        wechat: body.wechat || null,
       });
       return res.json({ ok: true });
     } catch (err: any) {

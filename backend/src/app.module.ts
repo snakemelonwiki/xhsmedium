@@ -31,6 +31,8 @@ import { OrderSubmission } from './entities/order-submission.entity';
 import { OrderStatusHistory } from './entities/order-status-history.entity';
 import { OrderReminder } from './entities/order-reminder.entity';
 import { OrderFinance } from './entities/order-finance.entity';
+// T8/T9: 作品广场配置表
+import { PlazaConfig } from './entities/plaza-config.entity';
 import { AuthModule } from './modules/auth/auth.module';
 import { EmployeesModule } from './modules/employees/employees.module';
 import { UsersModule } from './modules/users/users.module';
@@ -105,6 +107,7 @@ import { TokenRefreshInterceptor } from './common/token-refresh.interceptor';
           OrderStatusHistory,
           OrderReminder,
           OrderFinance,
+          PlazaConfig,
         ],
         synchronize: false,
         charset: 'utf8mb4',
