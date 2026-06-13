@@ -98,6 +98,7 @@ type FollowFormValues = {
   intentionLevel?: IntentionLevelCode;
   followAction?: string;
   content?: string;
+  wechat?: string;
   nextFollowTime?: Dayjs | string | null;
 };
 
