@@ -3,7 +3,6 @@
 import {
   DownloadOutlined,
   EyeOutlined,
-  LinkOutlined,
   PlusOutlined,
   ReloadOutlined,
   StopOutlined,
@@ -921,14 +920,24 @@ export default function AdminPostsPage() {
                 </Typography.Text>
                 <Typography.Text type="secondary">平台：{selectedPost.platform || '-'}</Typography.Text>
                 <Typography.Text type="secondary">类型：{selectedPost.postType || '-'}</Typography.Text>
-                {selectedPost.postUrl && (
-                  <a href={selectedPost.postUrl} target="_blank" rel="noreferrer">
-                    <Button size="small" icon={<LinkOutlined />}>
-                      打开原帖
-                    </Button>
-                  </a>
-                )}
               </Space>
+
+              {/* 作品链接 */}
+              {selectedPost.postUrl ? (
+                <div>
+                  <Typography.Text type="secondary">作品链接：</Typography.Text>
+                  <Typography.Link
+                    href={selectedPost.postUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    copyable
+                  >
+                    {selectedPost.postUrl}
+                  </Typography.Link>
+                </div>
+              ) : (
+                <Typography.Text type="secondary">作品链接：-</Typography.Text>
+              )}
 
               {/* 完整文案 */}
               <Card size="small">
