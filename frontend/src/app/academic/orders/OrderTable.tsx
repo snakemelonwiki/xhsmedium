@@ -290,21 +290,22 @@ export function OrderTable({
   const columns = useMemo<TableColumnsType<OrderItem>>(() => {
     const baseColumns: TableColumnsType<OrderItem> = [
       {
-        title: '订单',
-        dataIndex: 'id',
-        key: 'id',
-        width: 180,
-        render: (value: string, record) => {
+        title: '订单编号',
+        dataIndex: 'orderCode',
+        key: 'orderCode',
+        width: 200,
+        render: (value: string | null | undefined, record) => {
+          const displayCode = value || record.id;
           // 教务端的所有 actionMode（academic / abnormal）跳教务详情，
           // 销售端跳销售详情，admin 也跳销售详情（复用销售端只读视图）。
           const detailHref =
             actionMode === 'academic' || actionMode === 'abnormal'
-              ? `/academic/orders/${value}`
-              : `/sales/orders/${value}`;
+              ? `/academic/orders/${record.id}`
+              : `/sales/orders/${record.id}`;
           return (
             <Space direction="vertical" size={0}>
               <a href={detailHref}>
-                <Typography.Text strong>{value}</Typography.Text>
+                <Typography.Text strong>{displayCode}</Typography.Text>
               </a>
               <Typography.Text type="secondary">{record.serviceType || '未填写服务类型'}</Typography.Text>
             </Space>

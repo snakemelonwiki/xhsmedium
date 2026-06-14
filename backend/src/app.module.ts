@@ -27,6 +27,8 @@ import { AppSetting } from './entities/app-setting.entity';
 import { ScrapingAlert } from './modules/scraping/scraping-alert.entity';
 // v1.3 增量（教务端表 M25）
 import { Teacher } from './entities/teacher.entity';
+import { TeacherSpecialty } from './entities/teacher-specialty.entity';
+import { TeacherOrderType } from './entities/teacher-order-type.entity';
 import { OrderAuthor } from './entities/order-author.entity';
 import { OrderSubmission } from './entities/order-submission.entity';
 import { OrderStatusHistory } from './entities/order-status-history.entity';
@@ -61,6 +63,8 @@ import { UploadsModule } from './modules/uploads/uploads.module';
 import { SalesModule } from './modules/sales/sales.module';
 import { EnumsModule } from './modules/enums/enums.module';
 import { TeachersModule } from './modules/teachers/teachers.module';
+import { TeacherSpecialtiesModule } from './modules/teacher-specialties/teacher-specialties.module';
+import { TeacherOrderTypesModule } from './modules/teacher-order-types/teacher-order-types.module';
 import { StorageModule } from './shared/storage/storage.service';
 import { CacheModule } from './shared/cache.service';
 // T8/T9: 作品广场配置模块
@@ -106,6 +110,8 @@ import { TokenRefreshInterceptor } from './common/token-refresh.interceptor';
           AppSetting,
           ScrapingAlert,
           Teacher,
+          TeacherSpecialty,
+          TeacherOrderType,
           OrderAuthor,
           OrderSubmission,
           OrderStatusHistory,
@@ -170,6 +176,8 @@ import { TokenRefreshInterceptor } from './common/token-refresh.interceptor';
     SalesModule,
     EnumsModule,
     TeachersModule,
+    TeacherSpecialtiesModule,
+    TeacherOrderTypesModule,
     StorageModule,
     CacheModule,
     // T8/T9: 作品广场配置模块

@@ -1,17 +1,49 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Like, Repository } from 'typeorm';
-import { Teacher } from '../../entities/teacher.entity';
+import { Teacher, TEACHER_EDUCATION_OPTIONS, TEACHER_TUTORING_TYPES, TEACHER_QUALITY_LEVELS } from '../../entities/teacher.entity';
 import { makeId } from '../../shared/utils/id-generator';
 
-/** 质量评分只允许 A / B / C */
-const VALID_SCORES = ['A', 'B', 'C'];
+/** 质量评分：兼容旧格式 A/B/C 与新格式 优秀/一般/差 */
+const VALID_SCORES = ['A', 'B', 'C', '优秀', '一般', '差'];
 
 function parseScore(raw: string | null | undefined): string | null {
   if (raw === null || raw === undefined || raw === '') return null;
-  const v = String(raw).trim().toUpperCase();
-  if (!VALID_SCORES.includes(v)) {
-    throw new BadRequestException('质量评分只允许 A / B / C');
+  const v = String(raw).trim();
+  // 旧格式大写转换
+  const normalized = v.length === 1 ? v.toUpperCase() : v;
+  if (!VALID_SCORES.includes(normalized)) {
+    throw new BadRequestException('质量评分只允许 A/B/C 或 优秀/一般/差');
+  }
+  return normalized;
+}
+
+/** 校验学历枚举值 */
+function validateEducation(val: string | null | undefined): string | null {
+  if (!val) return null;
+  const v = String(val).trim();
+  if (!(TEACHER_EDUCATION_OPTIONS as readonly string[]).includes(v)) {
+    throw new BadRequestException(`学历值不合法: ${v}，允许值: ${TEACHER_EDUCATION_OPTIONS.join('/')}`);
+  }
+  return v;
+}
+
+/** 校验辅导类型枚举值 */
+function validateTutoringType(val: string | null | undefined): string | null {
+  if (!val) return null;
+  const v = String(val).trim();
+  if (!(TEACHER_TUTORING_TYPES as readonly string[]).includes(v)) {
+    throw new BadRequestException(`辅导类型值不合法: ${v}，允许值: ${TEACHER_TUTORING_TYPES.join('/')}`);
+  }
+  return v;
+}
+
+/** 校验质量等级枚举值（A-4 规范）：优秀 / 一般 / 差 */
+function validateQualityLevel(val: string | null | undefined): string | null {
+  if (!val) return null;
+  const v = String(val).trim();
+  if (!(TEACHER_QUALITY_LEVELS as readonly string[]).includes(v)) {
+    throw new BadRequestException(`质量等级值不合法: ${v}，允许值: ${TEACHER_QUALITY_LEVELS.join('/')}`);
   }
   return v;
 }
@@ -20,10 +52,16 @@ export interface CreateTeacherInput {
   name: string;
   phone?: string | null;
   wechat?: string | null;
+  school?: string | null;
+  education?: string | null;
+  researchArea?: string | null;
   specialty?: string | null;
   direction?: string | null;
+  tutoringType?: string | null;
+  imageUrl?: string | null;
   stability?: string;
   qualityScore?: string | null;
+  qualityLevel?: string | null;
   remark?: string | null;
 }
 
@@ -31,10 +69,16 @@ export interface UpdateTeacherInput {
   name?: string;
   phone?: string | null;
   wechat?: string | null;
+  school?: string | null;
+  education?: string | null;
+  researchArea?: string | null;
   specialty?: string | null;
   direction?: string | null;
+  tutoringType?: string | null;
+  imageUrl?: string | null;
   stability?: string;
   qualityScore?: string | null;
+  qualityLevel?: string | null;
   remark?: string | null;
   status?: string;
 }
@@ -47,7 +91,7 @@ export class TeachersService {
   ) {}
 
   /**
-   * 查询老师列表，支持关键字搜索（姓名/专业能力/接单方向）。
+   * 查询老师列表，支持关键字搜索（姓名/专业能力/接单方向/学校）。
    */
   async findAll(keyword = ''): Promise<Teacher[]> {
     const where = keyword
@@ -55,6 +99,8 @@ export class TeachersService {
           { name: Like(`%${keyword}%`) },
           { specialty: Like(`%${keyword}%`) },
           { direction: Like(`%${keyword}%`) },
+          { school: Like(`%${keyword}%`) },
+          { researchArea: Like(`%${keyword}%`) },
         ]
       : {};
     return this.repo.find({ where, order: { createdAt: 'DESC' } });
@@ -69,6 +115,8 @@ export class TeachersService {
           { name: Like(`%${keyword}%`) },
           { specialty: Like(`%${keyword}%`) },
           { direction: Like(`%${keyword}%`) },
+          { school: Like(`%${keyword}%`) },
+          { researchArea: Like(`%${keyword}%`) },
         ]
       : {};
     const [items, total] = await this.repo.findAndCount({
@@ -93,10 +141,16 @@ export class TeachersService {
       name: input.name.trim(),
       phone: input.phone || null,
       wechat: input.wechat || null,
+      school: input.school || null,
+      education: validateEducation(input.education),
+      researchArea: input.researchArea || null,
       specialty: input.specialty || null,
       direction: input.direction || null,
+      tutoringType: validateTutoringType(input.tutoringType),
+      imageUrl: input.imageUrl || null,
       stability: (input.stability as any) || 'new',
       qualityScore: parseScore(input.qualityScore),
+      qualityLevel: validateQualityLevel(input.qualityLevel),
       remark: input.remark || null,
     });
     return this.repo.save(t);
@@ -107,10 +161,16 @@ export class TeachersService {
     if (input.name !== undefined) t.name = input.name;
     if (input.phone !== undefined) t.phone = input.phone;
     if (input.wechat !== undefined) t.wechat = input.wechat;
+    if (input.school !== undefined) t.school = input.school;
+    if (input.education !== undefined) t.education = validateEducation(input.education);
+    if (input.researchArea !== undefined) t.researchArea = input.researchArea;
     if (input.specialty !== undefined) t.specialty = input.specialty;
     if (input.direction !== undefined) t.direction = input.direction;
+    if (input.tutoringType !== undefined) t.tutoringType = validateTutoringType(input.tutoringType);
+    if (input.imageUrl !== undefined) t.imageUrl = input.imageUrl;
     if (input.stability !== undefined) t.stability = input.stability as any;
     if (input.qualityScore !== undefined) t.qualityScore = parseScore(input.qualityScore);
+    if (input.qualityLevel !== undefined) t.qualityLevel = validateQualityLevel(input.qualityLevel);
     if (input.remark !== undefined) t.remark = input.remark;
     if (input.status !== undefined) t.status = input.status as any;
     return this.repo.save(t);

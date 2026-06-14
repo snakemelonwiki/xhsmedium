@@ -55,7 +55,7 @@ function ensureEmployeeAdmin(req: Request, res: Response): boolean {
 }
 
 /** 登录角色白名单：与 user.entity.ts enum 对齐 */
-const LOGIN_ROLE_VALUES = ['operation', 'sales', 'academic', 'admin', 'supervisor', 'staff', 'owner'] as const;
+const LOGIN_ROLE_VALUES = ['operation', 'sales', 'academic', 'academic_supervisor', 'admin', 'supervisor', 'staff', 'owner'] as const;
 
 @Controller('employees')
 // B/P0-05: 整个 employees 控制器在未带 Bearer token 时必须直接 401，

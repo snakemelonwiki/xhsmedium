@@ -14,10 +14,11 @@ import {
  *   - 两稿两投 → submission_no=1,2
  *   - 三稿三投 → submission_no=1,2,3
  * - 每组独立记录 paper_title / journal_name / journal_url / account / password / submit_time。
- * - 唯一约束 (order_id, submission_no) 保证同一位次只有一行。
+ * - 唯一约束 (order_id, submission_no, type) 保证同一位次只有一行（含备用）。
+ * - type = 'regular' 正常投稿；type = 'backup' 备用投稿（A-5）。
  */
 @Entity('order_submissions')
-@Index('uk_order_submissions_order_no', ['orderId', 'submissionNo'], { unique: true })
+@Index('uk_order_submissions_order_no_type', ['orderId', 'submissionNo', 'type'], { unique: true })
 @Index('idx_order_submissions_order', ['orderId'])
 @Index('idx_order_submissions_submit_time', ['submitTime'])
 export class OrderSubmission {
@@ -62,6 +63,14 @@ export class OrderSubmission {
    */
   @Column({ name: 'submit_time', type: 'datetime', nullable: true })
   submitTime: Date | null;
+
+  /**
+   * 投稿类型（A-5 新增）。
+   * - 'regular' 正常投稿（默认）
+   * - 'backup'  备用投稿
+   */
+  @Column({ length: 16, default: 'regular' })
+  type: string;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;

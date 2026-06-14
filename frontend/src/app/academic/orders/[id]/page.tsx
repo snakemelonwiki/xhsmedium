@@ -1,7 +1,7 @@
 'use client';
 
 import { DeleteOutlined, DownloadOutlined, ExclamationCircleOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons';
-import { Button, Card, Col, DatePicker, Descriptions, Empty, Form, Input, Modal, Row, Select, Space, Spin, Steps, Table, Tag, Timeline, Tooltip, Typography, Upload, message } from 'antd';
+import { Button, Card, Col, DatePicker, Descriptions, Divider, Empty, Form, Input, Modal, Row, Select, Space, Spin, Steps, Table, Tag, Timeline, Tooltip, Typography, Upload, message } from 'antd';
 import type { UploadProps } from 'antd';
 import dayjs, { type Dayjs } from 'dayjs';
 import { useParams, useRouter } from 'next/navigation';
@@ -308,12 +308,18 @@ function hydrateDeliveryForm(detail: OrderDeliveryDetail) {
   DELIVERY_DATE_FIELDS.forEach((field) => {
     order[field] = toDayjs(detail.order[field]);
   });
+  // 按操作方式初始化投稿数量
+  const method = order.operationMethod as string || '';
+  const submissionCount = method === '三稿三投' ? 3 : method === '两稿两投' ? 2 : 1;
   return {
     order,
     authors: detail.authors.length ? detail.authors : [{ authorOrder: 1 }],
     submissions: detail.submissions.length
       ? detail.submissions.map((item) => ({ ...item, submitTime: toDayjs(item.submitTime) }))
-      : [{ submissionNo: 1 }, { submissionNo: 2 }, { submissionNo: 3 }],
+      : Array.from({ length: submissionCount }, (_, i) => ({ submissionNo: i + 1 })),
+    backupSubmissions: (detail as any).backupSubmissions?.length
+      ? (detail as any).backupSubmissions.map((item: any) => ({ ...item, submitTime: toDayjs(item.submitTime) }))
+      : [],
     finance: detail.finance,
   };
 }
@@ -335,6 +341,9 @@ function serializeDeliveryForm(values: any) {
     authors: Array.isArray(values.authors) ? values.authors : [],
     submissions: Array.isArray(values.submissions)
       ? values.submissions.map((item: any) => ({ ...item, submitTime: serializeDate(item?.submitTime) }))
+      : [],
+    backupSubmissions: Array.isArray(values.backupSubmissions)
+      ? values.backupSubmissions.map((item: any) => ({ ...item, submitTime: serializeDate(item?.submitTime) }))
       : [],
     finance: values.finance || {},
   };
@@ -385,6 +394,7 @@ export default function AcademicOrderDetailPage() {
   const [form] = Form.useForm();
   const [deliveryForm] = Form.useForm();
   const statusStage = Form.useWatch(['order', 'statusStage'], deliveryForm);
+  const operationMethod = Form.useWatch(['order', 'operationMethod'], deliveryForm);
   const journalStatus = Form.useWatch(['order', 'journalStatus'], deliveryForm);
   const financeValues = Form.useWatch('finance', deliveryForm) || {};
   const customerPending = calculatePendingAmount(
@@ -459,8 +469,8 @@ export default function AcademicOrderDetailPage() {
     setSavingDelivery(true);
     try {
       const payload = serializeDeliveryForm(values);
-      // 教务端不提交财务信息（后端限制"付款信息只允许销售修改"）
-      if (isAcademic) {
+      // 教务端（含教务主管）不提交财务信息（后端限制"付款信息只允许销售修改"）
+      if (isAcademic || currentUser?.role === 'academic_supervisor') {
         delete (payload as Record<string, unknown>).finance;
       }
       await updateOrderDelivery(orderId, payload);
@@ -541,7 +551,7 @@ export default function AcademicOrderDetailPage() {
   function canCloseFeedback(feedback: OrderAbnormalFeedback): boolean {
     if (!currentUser) return false;
     if (isAdminLike) return feedback.status !== 'closed';
-    if (isAcademic && feedback.reporterUserId === currentUser.id) return feedback.status !== 'closed';
+    if ((isAcademic || currentUser.role === 'academic_supervisor') && feedback.reporterUserId === currentUser.id) return feedback.status !== 'closed';
     if (currentUser.role === 'sales' && order?.salesUserId === currentUser.id) return feedback.status !== 'closed';
     return false;
   }
@@ -609,7 +619,7 @@ export default function AcademicOrderDetailPage() {
               bordered
               column={{ xs: 1, md: 2 }}
               items={[
-                { key: 'id', label: '订单 ID', children: orderId },
+                { key: 'orderCode', label: '订单编号', children: order?.orderCode || orderId },
                 { key: 'leadId', label: '客资 ID', children: emptyText(order?.leadId) },
                 { key: 'serviceType', label: '服务类型', children: emptyText(order?.serviceType) },
                 // 教务端不显示金额，仅显示付款状态与付款比例
@@ -648,7 +658,7 @@ export default function AcademicOrderDetailPage() {
             }
           >
             <Form form={deliveryForm} layout="vertical" onFinish={submitDelivery}>
-              <Typography.Title level={5}>基础与投稿资料</Typography.Title>
+              <Typography.Title level={5}>客户基本信息</Typography.Title>
               <Row gutter={12}>
                 {BASIC_DELIVERY_FIELDS.map((field) => (
                   <Col xs={24} md={8} key={field.name}>
@@ -702,16 +712,9 @@ export default function AcademicOrderDetailPage() {
                     <Select options={PLAGIARISM_OPTIONS} placeholder="请选择查重要求" allowClear />
                   </Form.Item>
                 </Col>
-                <Col xs={24}>
-                  <Form.Item name={['order', 'fundInfo']} label="基金信息">
-                    <Input.TextArea
-                      rows={3}
-                      placeholder="基金名称、编号；没有可填无"
-                      allowClear
-                    />
-                  </Form.Item>
-                </Col>
               </Row>
+
+              <Divider style={{ margin: '20px 0' }} />
 
               <Typography.Title level={5}>作者信息</Typography.Title>
               <Form.List name="authors">
@@ -750,8 +753,8 @@ export default function AcademicOrderDetailPage() {
                           </Form.Item>
                         </Col>
                         <Col xs={20} md={2}>
-                          <Form.Item name={[field.name, 'nameEn']} label={index === 0 ? '英文信息' : ' '}>
-                            <Input allowClear />
+                          <Form.Item name={[field.name, 'nameEn']} label={index === 0 ? '密码' : ' '}>
+                            <Input.Password allowClear />
                           </Form.Item>
                         </Col>
                         <Col xs={4} md={1}>
@@ -762,13 +765,52 @@ export default function AcademicOrderDetailPage() {
                     <Button icon={<PlusOutlined />} onClick={() => add({ authorOrder: fields.length + 1 })}>
                       添加作者
                     </Button>
-                    <Button icon={<UploadOutlined />} onClick={() => message.info('作者等级表导入功能开发中，模板格式确认后开放')}>导入作者等级表</Button>
                   </Space>
                 )}
               </Form.List>
 
+              {/* A-5：基金信息放在作者信息下面 */}
+              <Typography.Title level={5} style={{ marginTop: 20 }}>基金与备注</Typography.Title>
+              <Row gutter={12}>
+                <Col xs={24}>
+                  <Form.Item name={['order', 'fundInfo']} label="基金信息">
+                    <Input.TextArea
+                      rows={3}
+                      placeholder="基金名称、编号；没有可填无"
+                      allowClear
+                    />
+                  </Form.Item>
+                </Col>
+                <Col xs={24}>
+                  <Form.Item name={['order', 'academicRemark']} label="教务备注">
+                    <Input.TextArea
+                      rows={2}
+                      placeholder="教务内部备注，不对外展示"
+                      allowClear
+                    />
+                  </Form.Item>
+                </Col>
+              </Row>
+
+              {/* A-5：按操作方向动态生成投稿信息数量 */}
               <Typography.Title level={5} style={{ marginTop: 20 }}>投稿信息</Typography.Title>
-              <Form.List name="submissions">
+              {(() => {
+                const method = operationMethod || '';
+                const isThesis = deliveryForm.getFieldValue(['order', 'productType']) === '毕业论文';
+                if (isThesis) {
+                  return (
+                    <Typography.Paragraph type="secondary" style={{ padding: '12px 0' }}>
+                      毕业论文类型仅需上传作者信息表，无需填写投稿信息。
+                    </Typography.Paragraph>
+                  );
+                }
+                const maxSubmissions = method === '三稿三投' ? 3 : method === '两稿两投' ? 2 : 1;
+                return (
+                  <>
+                    <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
+                      当前操作方式「{method || '未选择'}」，投稿信息数：{maxSubmissions} 组
+                    </Typography.Text>
+                    <Form.List name="submissions">
                 {(fields, { add, remove }) => (
                   <Space direction="vertical" size={8} style={{ width: '100%' }}>
                     {fields.map((field, index) => (
@@ -815,6 +857,66 @@ export default function AcademicOrderDetailPage() {
                     ))}
                     <Button icon={<PlusOutlined />} onClick={() => add({ submissionNo: fields.length + 1 })}>
                       添加投稿
+                    </Button>
+                  </Space>
+                )}
+              </Form.List>
+                  </>
+                );
+              })()}
+
+              {/* A-5：备用投稿信息表 */}
+              <Typography.Title level={5} style={{ marginTop: 24 }}>备用投稿信息</Typography.Title>
+              <Typography.Paragraph type="secondary">
+                备用投稿信息仅供上传查看，不默认展示在投稿流程中。如有需要可在此补充额外投稿记录。
+              </Typography.Paragraph>
+              <Form.List name="backupSubmissions">
+                {(bfields, { add: badd, remove: bremove }) => (
+                  <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                    {bfields.map((field, index) => (
+                      <Row gutter={8} key={field.key} align="middle">
+                        <Col xs={12} md={2}>
+                          <Form.Item name={[field.name, 'submissionNo']} label={index === 0 ? '序号' : ' '}>
+                            <Input placeholder="备用" disabled />
+                          </Form.Item>
+                        </Col>
+                        <Col xs={24} md={5}>
+                          <Form.Item name={[field.name, 'paperTitle']} label={index === 0 ? '论文名称' : ' '}>
+                            <Input allowClear />
+                          </Form.Item>
+                        </Col>
+                        <Col xs={24} md={4}>
+                          <Form.Item name={[field.name, 'journalName']} label={index === 0 ? '投稿期刊' : ' '}>
+                            <Input allowClear />
+                          </Form.Item>
+                        </Col>
+                        <Col xs={24} md={4}>
+                          <Form.Item name={[field.name, 'journalUrl']} label={index === 0 ? '投稿网址' : ' '}>
+                            <Input allowClear />
+                          </Form.Item>
+                        </Col>
+                        <Col xs={12} md={3}>
+                          <Form.Item name={[field.name, 'account']} label={index === 0 ? '投稿账号' : ' '}>
+                            <Input allowClear />
+                          </Form.Item>
+                        </Col>
+                        <Col xs={12} md={3}>
+                          <Form.Item name={[field.name, 'password']} label={index === 0 ? '投稿密码' : ' '}>
+                            <Input allowClear />
+                          </Form.Item>
+                        </Col>
+                        <Col xs={20} md={2}>
+                          <Form.Item name={[field.name, 'submitTime']} label={index === 0 ? '投稿时间' : ' '}>
+                            <DatePicker showTime style={{ width: '100%' }} />
+                          </Form.Item>
+                        </Col>
+                        <Col xs={4} md={1}>
+                          <Button aria-label="删除备用投稿" icon={<DeleteOutlined />} onClick={() => bremove(field.name)} />
+                        </Col>
+                      </Row>
+                    ))}
+                    <Button icon={<PlusOutlined />} onClick={() => badd({ submissionNo: bfields.length + 1 })}>
+                      添加备用投稿
                     </Button>
                   </Space>
                 )}
@@ -960,7 +1062,7 @@ export default function AcademicOrderDetailPage() {
             </Typography.Paragraph>
           </Card>
 
-          {isAcademic ? (
+          {isAcademic || currentUser?.role === 'academic_supervisor' ? (
             <Card
               title="订单异常反馈"
               extra={

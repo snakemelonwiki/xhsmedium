@@ -267,6 +267,10 @@ export class Order {
   @Column({ name: 'next_follow_at', type: 'datetime', nullable: true })
   nextFollowAt: Date | null;
 
+  /** 教务备注（A-5 新增）：教务内部备注，不对外展示。 */
+  @Column({ name: 'academic_remark', type: 'text', nullable: true })
+  academicRemark: string | null;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 

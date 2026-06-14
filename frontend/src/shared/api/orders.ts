@@ -32,6 +32,7 @@ function mapOrder(raw: RawRecord): OrderItem {
     paidStatus: text(raw.paidStatus ?? raw.paid_status) ?? 'unpaid',
     orderStatus: text(raw.orderStatus ?? raw.order_status) ?? 'to_receive',
     handoverStatus: text(raw.handoverStatus ?? raw.handover_status) ?? 'pending',
+    orderCode: text(raw.orderCode ?? raw.order_code) ?? null,
     remark: text(raw.remark) ?? null,
     deliveryRequirement: text(raw.deliveryRequirement ?? raw.delivery_requirement) ?? null,
     materialStatus: text(raw.materialStatus ?? raw.material_status) ?? null,

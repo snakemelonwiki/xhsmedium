@@ -23,11 +23,31 @@ export const TEACHER_STABILITY_CODES = ['stable', 'new', 'probation'] as const;
 export type TeacherStabilityCode = (typeof TEACHER_STABILITY_CODES)[number];
 
 /**
+ * 老师学历枚举。
+ */
+export const TEACHER_EDUCATION_OPTIONS = ['专科', '本科', '硕士', '博士', '其他'] as const;
+export type TeacherEducation = (typeof TEACHER_EDUCATION_OPTIONS)[number];
+
+/**
+ * 辅导类型枚举。
+ */
+export const TEACHER_TUTORING_TYPES = ['辅导', '全流程', '都可'] as const;
+export type TeacherTutoringType = (typeof TEACHER_TUTORING_TYPES)[number];
+
+/**
+ * 质量等级（A-4 规范）：优秀 / 一般 / 差
+ */
+export const TEACHER_QUALITY_LEVELS = ['优秀', '一般', '差'] as const;
+export type TeacherQualityLevel = (typeof TEACHER_QUALITY_LEVELS)[number];
+
+/**
  * 稳定老师库：教务端老师档案与派单关系。
  *
  * 业务来源：v1.3 任务清单 v1.3-四端口迭代任务清单.md 教务端部分。
  * 对应 SQL：migrations/M25__academic_end_tables.up.sql §3 + schema.sql §19。
  * 关系：与 orders.teacher_id（接单老师）和 orders.dispatched_teacher_id（派单老师）逻辑关联。
+ *
+ * v2026-06-14（中台优化 A-4）：增加学校、学历、研究领域、接单类型、辅导类型、图片字段。
  */
 @Entity('teachers')
 @Index('idx_teachers_status', ['status'])
@@ -41,6 +61,18 @@ export class Teacher {
   @Column({ length: 64 })
   name: string;
 
+  /** 学校/单位（中台优化 A-4 新增）。 */
+  @Column({ length: 128, nullable: true })
+  school: string | null;
+
+  /** 学历（中台优化 A-4 新增）：专科/本科/硕士/博士/其他。 */
+  @Column({ length: 16, nullable: true })
+  education: string | null;
+
+  /** 研究领域/研究方向（中台优化 A-4 新增），如：机器学习、自然语言处理。 */
+  @Column({ name: 'research_area', length: 255, nullable: true })
+  researchArea: string | null;
+
   /** 联系电话（与 wechat 二选一必填）。 */
   @Column({ length: 64, nullable: true })
   phone: string | null;
@@ -49,13 +81,21 @@ export class Teacher {
   @Column({ length: 64, nullable: true })
   wechat: string | null;
 
-  /** 专业能力（如：SCI 期刊、EI 会议、CSCD 期刊；多个用顿号分隔）。 */
+  /** 专业能力/专业方向（如：SCI 期刊、EI 会议、CSCD 期刊；多个用顿号分隔）。 */
   @Column({ length: 255, nullable: true })
   specialty: string | null;
 
-  /** 接单方向（如：计算机、医学、材料；与 specialty 区别：specialty 是"能力"，direction 是"愿意接的领域"）。 */
+  /** 接单方向/接单类型（如：计算机、医学、材料；与 specialty 区别：specialty 是"能力"，direction 是"愿意接的领域"）。 */
   @Column({ length: 255, nullable: true })
   direction: string | null;
+
+  /** 辅导类型（中台优化 A-4 新增）：辅导/全流程/都可。 */
+  @Column({ name: 'tutoring_type', length: 16, nullable: true })
+  tutoringType: string | null;
+
+  /** 老师头像/图片 URL（中台优化 A-4 新增）。 */
+  @Column({ name: 'image_url', length: 500, nullable: true })
+  imageUrl: string | null;
 
   /**
    * 老师稳定性。决定新订单派单时是否需要走"创新点审核"流程。
@@ -66,9 +106,13 @@ export class Teacher {
   @Column({ length: 16, default: 'new' })
   stability: TeacherStabilityCode;
 
-  /** 质量评分（A/B/C）。教务对接单交付质量的主观评级，作为后续派单参考。 */
+  /** 质量评分（A/B/C 旧格式，或 优秀/一般/差 新格式）。教务对接单交付质量的主观评级，作为后续派单参考。 */
   @Column({ name: 'quality_score', length: 16, nullable: true })
   qualityScore: string | null;
+
+  /** 质量等级（A-4 规范）：优秀 / 一般 / 差。如果同时设置 qualityScore 与 qualityLevel，qualityLevel 优先。 */
+  @Column({ name: 'quality_level', length: 8, nullable: true })
+  qualityLevel: string | null;
 
   /** 备注（自由文本：合作历史、注意事项、特殊偏好等）。 */
   @Column({ type: 'text', nullable: true })

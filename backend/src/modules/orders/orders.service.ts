@@ -107,7 +107,13 @@ interface OrderDeliveryDto {
   order?: Record<string, any>;
   authors?: Array<Record<string, any>>;
   submissions?: Array<Record<string, any>>;
+  backupSubmissions?: Array<Record<string, any>>;
   finance?: Record<string, any>;
+}
+
+interface OrderActor {
+  userId?: string;
+  role?: string;
 }
 
 @Injectable()
@@ -449,7 +455,7 @@ export class OrdersService {
         salesUserName: r.salesUserId ? namesById.get(r.salesUserId) || null : null,
         academicUserName: r.academicUserId ? namesById.get(r.academicUserId) || null : null,
       });
-      // 教务角色隐藏金额
+      // A-6：教务角色隐藏订单金额（教务主管 `academic_supervisor` 可见）
       if (options.sessionRole === 'academic') {
         mapped.amount = null;
       }
@@ -559,13 +565,13 @@ export class OrdersService {
    * - role=sales 等其他角色               → 仅自己经手的销售/教务订单
    */
   private applyOrdersScope(qb: any, options: ListOrdersOptions): void {
-    const isAdminLike = options.sessionRole === 'admin' || options.sessionRole === 'owner';
+    const isAdminLike = options.sessionRole === 'admin' || options.sessionRole === 'owner' || options.sessionRole === 'supervisor';
 
     if (isAdminLike && (options.scope === 'all' || !options.scope)) {
       return;
     }
 
-    if (options.role === 'academic' || options.sessionRole === 'academic') {
+    if (options.role === 'academic' || options.role === 'academic_supervisor' || options.sessionRole === 'academic' || options.sessionRole === 'academic_supervisor') {
       if (options.scope === 'pool') {
         qb.andWhere('o.academic_user_id IS NULL');
         return;
@@ -624,7 +630,7 @@ export class OrdersService {
         salesUserName: r.salesUserId ? namesById.get(r.salesUserId) || null : null,
         academicUserName: r.academicUserId ? namesById.get(r.academicUserId) || null : null,
       });
-      // 教务角色隐藏金额
+      // A-6：教务角色隐藏金额（教务主管可见完整金额）
       if (options.sessionRole === 'academic') {
         mapped.amount = null;
       }
@@ -728,7 +734,7 @@ export class OrdersService {
 
   async findOne(
     id: string,
-    actor?: { userId?: string; role?: string },
+    actor?: OrderActor,
   ): Promise<any> {
     const order = await this.orderRepository.findOne({ where: { id } });
     if (!order) {
@@ -737,11 +743,11 @@ export class OrdersService {
     if (actor) {
       const role = actor.role || '';
       const uid = actor.userId || '';
-      const isAdminLike = role === 'admin' || role === 'owner';
+      const isAdminLike = role === 'admin' || role === 'owner' || role === 'supervisor';
       if (!isAdminLike) {
         const canSee =
           (role === 'sales' && order.salesUserId === uid) ||
-          (role === 'academic' && (order.academicUserId === uid || order.academicUserId == null)) ||
+          (role === 'academic' || role === 'academic_supervisor') && (order.academicUserId === uid || order.academicUserId == null) ||
           (order.salesUserId === uid || order.academicUserId === uid);
         if (!canSee) {
           // 不暴露 "存在但无权限"；与不存在一致返回 404
@@ -758,7 +764,7 @@ export class OrdersService {
     ]);
     const names = await this.lookupUserNames([order.salesUserId, order.academicUserId]);
     const mappedOrder = this.mapOrder(order, names);
-    // 教务角色隐藏金额
+    // A-6：教务角色隐藏金额（教务主管可见完整金额）
     const role = actor?.role || '';
     if (role === 'academic') {
       mappedOrder.amount = null;
@@ -774,42 +780,63 @@ export class OrdersService {
    * 查询教务端交付详情。
    * 聚合 orders 主表、order_authors、order_submissions、order_finance，供订单跟进页编辑。
    */
-  async getOrderDelivery(orderId: string, actor?: { userId?: string; role?: string }): Promise<any> {
+  async getOrderDelivery(orderId: string, actor?: OrderActor): Promise<any> {
     const order = await this.orderRepository.findOne({ where: { id: orderId } });
     if (!order) {
       throw new NotFoundException('order not found');
     }
-    const [authors, submissions, finance] = await Promise.all([
+    const [authors, submissions, backupSubmissions, finance] = await Promise.all([
       this.orderAuthorRepository.find({
         where: { orderId },
         order: { authorOrder: 'ASC' },
       }),
       this.orderSubmissionRepository.find({
-        where: { orderId },
+        where: { orderId, type: 'regular' },
+        order: { submissionNo: 'ASC' },
+      }),
+      this.orderSubmissionRepository.find({
+        where: { orderId, type: 'backup' },
         order: { submissionNo: 'ASC' },
       }),
       this.orderFinanceRepository.findOne({ where: { orderId } }),
     ]);
     const mappedOrder = this.mapOrderDeliveryFields(order);
     const role = actor?.role || '';
+    const isAdminLike = role === 'admin' || role === 'owner' || role === 'supervisor';
+    const isAcademicSupervisor = role === 'academic_supervisor';
     const isAcademic = role === 'academic';
-    // 教务角色隐藏订单金额信息
+    const isSales = role === 'sales';
+    // A-6：教务角色隐藏订单金额信息（教务主管可见完整金额）
     if (isAcademic) {
       mappedOrder.amount = null;
     }
     const mappedFinance = this.mapOrderFinance(finance);
-    if (isAcademic) {
-      mappedFinance.orderAmount = null;
-      mappedFinance.customerPaid = null;
-      mappedFinance.customerPending = null;
-      mappedFinance.teacherPrice = null;
-      mappedFinance.teacherPaid = null;
-      mappedFinance.teacherPending = null;
+    if (!isAdminLike && !isAcademicSupervisor) {
+      if (isAcademic) {
+        // 普通教务：隐藏客户付款金额，保留老师付款信息
+        mappedFinance.orderAmount = null;
+        mappedFinance.customerPaid = null;
+        mappedFinance.customerPending = null;
+      } else if (isSales) {
+        // 销售：隐藏老师付款金额，保留客户付款信息
+        mappedFinance.teacherPrice = null;
+        mappedFinance.teacherPaid = null;
+        mappedFinance.teacherPending = null;
+      } else {
+        // 其他角色：隐藏全部财务信息
+        mappedFinance.orderAmount = null;
+        mappedFinance.customerPaid = null;
+        mappedFinance.customerPending = null;
+        mappedFinance.teacherPrice = null;
+        mappedFinance.teacherPaid = null;
+        mappedFinance.teacherPending = null;
+      }
     }
     return {
       order: mappedOrder,
       authors: authors.map((row) => this.mapOrderAuthor(row)),
       submissions: submissions.map((row) => this.mapOrderSubmission(row)),
+      backupSubmissions: backupSubmissions.map((row) => this.mapOrderSubmission(row)),
       finance: mappedFinance,
     };
   }
@@ -821,51 +848,78 @@ export class OrdersService {
    *
    * 角色校验：付款信息（finance）只允许销售修改，其余角色直接报错。
    */
-  async saveOrderDelivery(orderId: string, dto: OrderDeliveryDto, actorRole?: string): Promise<void> {
+  async saveOrderDelivery(orderId: string, dto: OrderDeliveryDto, actor: OrderActor): Promise<void> {
     const order = await this.orderRepository.findOne({ where: { id: orderId } });
     if (!order) {
       throw new NotFoundException('order not found');
     }
 
-    // 角色校验：付款信息只允许销售修改
-    const role = actorRole || '';
-    const isAdminLike = role === 'admin' || role === 'owner';
+    const role = actor.role || '';
+    const userId = actor.userId || '';
+    const hasFinancePayload = this.hasNonEmptyObjectFields(dto.finance);
+    const isAdminLike = role === 'admin' || role === 'owner' || role === 'supervisor';
     const isSales = role === 'sales';
-    if (dto.finance && Object.keys(dto.finance).length > 0 && !isSales && !isAdminLike) {
-      throw new ForbiddenException('付款信息只允许销售修改');
+    const isAcademic = role === 'academic' || role === 'academic_supervisor';
+
+    if (hasFinancePayload) {
+      if (isAcademic) {
+        throw new ForbiddenException('教务角色不允许修改订单财务信息');
+      }
+      if (isSales && order.salesUserId !== userId) {
+        throw new ForbiddenException('仅订单销售本人可以修改财务信息');
+      }
     }
 
     const orderPatch = this.buildOrderDeliveryPatch(dto.order || {});
-    if (Object.keys(orderPatch).length > 0) {
-      await this.orderRepository.update(orderId, orderPatch);
-    }
 
-    if (Array.isArray(dto.authors)) {
-      await this.orderAuthorRepository.delete({ orderId });
-      const authors = dto.authors
-        .map((item, index) => this.buildOrderAuthor(orderId, item, index))
-        .filter((item): item is OrderAuthor => item !== null);
-      if (authors.length > 0) {
-        await this.orderAuthorRepository.save(authors);
+    // 作者/投稿/财务 delete+reinsert 放在事务中，避免中途失败导致数据丢失
+    // orderPatch 也放入同一事务：否则事务回滚后 order 元数据与子表不一致
+    await this.dataSource.transaction(async (manager) => {
+      if (Object.keys(orderPatch).length > 0) {
+        await manager.getRepository(Order).update(orderId, orderPatch);
       }
-    }
 
-    if (Array.isArray(dto.submissions)) {
-      await this.orderSubmissionRepository.delete({ orderId });
-      const submissions = dto.submissions
-        .map((item, index) => this.buildOrderSubmission(orderId, item, index))
-        .filter((item): item is OrderSubmission => item !== null);
-      if (submissions.length > 0) {
-        await this.orderSubmissionRepository.save(submissions);
+      const authorRepo = manager.getRepository(OrderAuthor);
+      const submissionRepo = manager.getRepository(OrderSubmission);
+      const financeRepo = manager.getRepository(OrderFinance);
+
+      if (Array.isArray(dto.authors)) {
+        await authorRepo.delete({ orderId });
+        const authors = dto.authors
+          .map((item, index) => this.buildOrderAuthor(orderId, item, index))
+          .filter((item): item is OrderAuthor => item !== null);
+        if (authors.length > 0) {
+          await authorRepo.save(authors);
+        }
       }
-    }
 
-    if (dto.finance) {
-      const currentFinance = await this.orderFinanceRepository.findOne({ where: { orderId } });
-      await this.orderFinanceRepository.save(
-        this.buildOrderFinance(orderId, dto.finance, currentFinance),
-      );
-    }
+      if (Array.isArray(dto.submissions)) {
+        await submissionRepo.delete({ orderId, type: 'regular' });
+        const submissions = dto.submissions
+          .map((item, index) => this.buildOrderSubmission(orderId, item, index, 'regular'))
+          .filter((item): item is OrderSubmission => item !== null);
+        if (submissions.length > 0) {
+          await submissionRepo.save(submissions);
+        }
+      }
+
+      if (Array.isArray(dto.backupSubmissions)) {
+        await submissionRepo.delete({ orderId, type: 'backup' });
+        const backupItems = dto.backupSubmissions
+          .map((item: any, index: number) => this.buildOrderSubmission(orderId, item, index, 'backup'))
+          .filter((item: OrderSubmission | null): item is OrderSubmission => item !== null);
+        if (backupItems.length > 0) {
+          await submissionRepo.save(backupItems);
+        }
+      }
+
+      if (dto.finance) {
+        const currentFinance = await financeRepo.findOne({ where: { orderId } });
+        await financeRepo.save(
+          this.buildOrderFinance(orderId, dto.finance, currentFinance),
+        );
+      }
+    });
   }
 
   /**
@@ -888,11 +942,11 @@ export class OrdersService {
     if (!order) return false;
     const role = actor?.role || '';
     const uid = actor?.userId || '';
-    if (role === 'admin' || role === 'owner') return true;
+    if (role === 'admin' || role === 'owner' || role === 'supervisor') return true;
     if (role === 'sales') {
       return Boolean(uid && order.salesUserId === uid);
     }
-    if (role === 'academic') {
+    if (role === 'academic' || role === 'academic_supervisor') {
       return order.academicUserId === uid || order.academicUserId == null;
     }
     return Boolean(uid && (order.salesUserId === uid || order.academicUserId === uid));
@@ -1140,12 +1194,12 @@ export class OrdersService {
         employeeId = ctx.employeeId;
       }
       const uid = actor.userId || '';
-      const isAdminLike = role === 'admin' || role === 'owner';
+      const isAdminLike = role === 'admin' || role === 'owner' || role === 'supervisor';
       if (!isAdminLike) {
         const canSee =
           (role === 'sales' && order.salesUserId === uid) ||
-          (role === 'academic' &&
-            (order.academicUserId === employeeId || order.academicUserId == null)) ||
+          (role === 'academic' || role === 'academic_supervisor') &&
+            (order.academicUserId === employeeId || order.academicUserId == null) ||
           order.salesUserId === uid ||
           order.academicUserId === employeeId;
         if (!canSee) {
@@ -1214,7 +1268,7 @@ export class OrdersService {
     // BF-09b：避开 TypeORM 1.0 `this.subQuery is not a function`，改用 Repository.find。
     try {
       const receivers = await this.userRepository.find({
-        where: { role: In(['academic', 'admin', 'owner']) },
+        where: { role: In(['academic', 'academic_supervisor', 'admin', 'owner', 'supervisor']) },
         select: { id: true },
       });
       const ids = receivers.map((u) => u.id).filter((id) => id && id !== actorUserId);
@@ -1547,7 +1601,9 @@ export class OrdersService {
   private mapOrderDeliveryFields(row: Order): any {
     return {
       id: row.id,
+      productType: row.productType,
       orderNumber: row.orderCode || row.id,
+      orderId: row.id,
       customerName: row.customerName,
       degreeLevel: row.educationLevel,
       majorDirection: row.major,
@@ -1584,6 +1640,7 @@ export class OrdersService {
       needsSupervisor: row.needsSupervisor,
       emergencyStatus: row.emergencyStatus,
       supervisorNote: row.supervisorNote,
+      academicRemark: row.academicRemark,
       nextFollowUpAt: row.nextFollowAt,
       riskLevel: row.riskLevel,
       journalStatus: row.currentStage,
@@ -1660,6 +1717,7 @@ export class OrdersService {
     setString('needsSupervisor', input.needsSupervisor);
     setString('emergencyStatus', input.emergencyStatus);
     setString('supervisorNote', input.supervisorNote);
+    setString('academicRemark', input.academicRemark);
     setString('currentStage', input.journalStatus);
     setDate('submittedExpectedAt', input.submittedExpectedAt);
     setDate('withEditorExpectedAt', input.withEditorExpectedAt);
@@ -1710,6 +1768,7 @@ export class OrdersService {
     orderId: string,
     input: Record<string, any>,
     index: number,
+    type: 'regular' | 'backup' = 'regular',
   ): OrderSubmission | null {
     const paperTitle = String(input.paperTitle || '').trim();
     const journalName = String(input.journalName || '').trim();
@@ -1721,7 +1780,7 @@ export class OrdersService {
       input.password || input.submissionPassword,
       input.submitTime || input.submittedAt,
     ].some((value) => value !== undefined && value !== null && String(value).trim() !== '');
-    if (!hasAnyValue) return null;
+    if (!hasAnyValue && type === 'regular') return null;
     return {
       id: input.id || makeId(),
       orderId,
@@ -1732,6 +1791,7 @@ export class OrdersService {
       account: input.account || input.submissionAccount ? String(input.account || input.submissionAccount).trim() : null,
       password: input.password || input.submissionPassword ? String(input.password || input.submissionPassword).trim() : null,
       submitTime: input.submitTime || input.submittedAt ? new Date(input.submitTime || input.submittedAt) : null,
+      type,
     } as OrderSubmission;
   }
 
@@ -1794,6 +1854,16 @@ export class OrdersService {
       teacherPaid: row?.teacherPaid ?? null,
       teacherPending: row?.teacherPending ?? null,
     };
+  }
+
+  private hasNonEmptyObjectFields(value?: Record<string, any>): boolean {
+    if (!value || Object.keys(value).length === 0) return false;
+    return Object.values(value).some((item) => {
+      if (item === undefined || item === null) return false;
+      if (Array.isArray(item)) return item.length > 0;
+      if (typeof item === 'object') return Object.keys(item).length > 0;
+      return String(item).trim() !== '';
+    });
   }
 
   private normalizeMoney(value: any): string | null {

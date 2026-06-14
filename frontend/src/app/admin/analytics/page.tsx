@@ -35,6 +35,16 @@ const PLATFORM_OPTIONS = [
 const PLATFORM_COLORS: Record<string, string> = {
   小红书: '#fa8c16',
   抖音: '#1677ff',
+  xiaohongshu: '#fa8c16',
+  douyin: '#1677ff',
+};
+
+// 统一平台名称映射：后端返回 xiaohongshu/douyin，图表展示中文
+const PLATFORM_LABEL: Record<string, string> = {
+  xiaohongshu: '小红书',
+  douyin: '抖音',
+  小红书: '小红书',
+  抖音: '抖音',
 };
 
 // T6.2 时段预设：今日 / 本周 / 本月 + 自定义（与主管端 dashboard 的 OVERVIEW_PRESETS 对齐）
@@ -157,8 +167,8 @@ function PlatformTrendChart({ analysis, loading }: { analysis?: SupervisorAnalys
     const platforms = Array.from(new Set(rows.map((r) => r.platform))).sort();
     const dates = Array.from(new Set(rows.map((r) => r.date))).sort();
     const series = platforms.map((p) => ({
-      name: p,
-      color: PLATFORM_COLORS[p] ?? '#999',
+      name: PLATFORM_LABEL[p] ?? p,
+      color: PLATFORM_COLORS[p] ?? PLATFORM_COLORS[PLATFORM_LABEL[p]] ?? '#999',
       data: dates.map((d) => rows.find((r) => r.date === d && r.platform === p)?.postCount ?? 0),
     }));
     return buildLineOption('平台趋势（作品数）', dates, series);
@@ -192,8 +202,8 @@ function LeadTrendChart({ analysis, loading }: { analysis?: SupervisorAnalysis; 
     const platforms = Array.from(new Set(rows.map((r) => r.platform))).sort();
     const dates = Array.from(new Set(rows.map((r) => r.date))).sort();
     const series = platforms.map((p) => ({
-      name: p,
-      color: PLATFORM_COLORS[p] ?? '#999',
+      name: PLATFORM_LABEL[p] ?? p,
+      color: PLATFORM_COLORS[p] ?? PLATFORM_COLORS[PLATFORM_LABEL[p]] ?? '#999',
       data: dates.map((d) => rows.find((r) => r.date === d && r.platform === p)?.leadCount ?? 0),
     }));
     return buildLineOption('客资趋势（新增客资数）', dates, series);

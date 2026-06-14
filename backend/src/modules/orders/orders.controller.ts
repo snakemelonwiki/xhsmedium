@@ -308,7 +308,8 @@ export class OrdersController {
     const userId = getSessionUserId(req) || '';
     const role = session?.role || '';
     try {
-      const canAccess = await this.ordersService.canAccessOrder(id, { userId, role });
+      const actor = { userId, role };
+      const canAccess = await this.ordersService.canAccessOrder(id, actor);
       if (!canAccess) {
         return res.status(404).json({ ok: false, message: 'not found' });
       }
@@ -316,8 +317,9 @@ export class OrdersController {
         order: body?.order || {},
         authors: Array.isArray(body?.authors) ? body.authors : undefined,
         submissions: Array.isArray(body?.submissions) ? body.submissions : undefined,
+        backupSubmissions: Array.isArray(body?.backupSubmissions) ? body.backupSubmissions : undefined,
         finance: body?.finance || undefined,
-      }, role);
+      }, actor);
       await this.logSafe({
         userId,
         action: OPERATION_LOG_ACTIONS.UPDATE,
@@ -328,6 +330,9 @@ export class OrdersController {
       });
       return res.json({ ok: true });
     } catch (err: any) {
+      if (err?.status === 403) {
+        return res.status(403).json({ ok: false, message: err?.message || 'forbidden' });
+      }
       const code = err?.status || 422;
       return res.status(code).json({ ok: false, message: err?.message || 'invalid' });
     }

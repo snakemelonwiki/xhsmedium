@@ -3,7 +3,7 @@ export const STORAGE_KEYS = {
   user: 'xhsmedium.user',
 } as const;
 
-export const APP_ROLES = ['operation', 'sales', 'academic', 'admin', 'owner', 'supervisor'] as const;
+export const APP_ROLES = ['operation', 'sales', 'academic', 'academic_supervisor', 'admin', 'owner', 'supervisor'] as const;
 
 export type AppRole = (typeof APP_ROLES)[number];
 
@@ -19,6 +19,7 @@ const DEFAULT_HOME_BY_ROLE: Record<AppRole, string> = {
   operation: '/operation',
   sales: '/sales/leads',
   academic: '/academic',
+  academic_supervisor: '/academic',
   admin: '/admin',
   supervisor: '/admin',
   // owner 复用主管端的全套页面，但有独立的 /owner 落地路径承载"总后台"字样
@@ -36,6 +37,7 @@ const PORT_PREFIX_BY_ROLE: Record<AppRole, string> = {
   operation: '/operation',
   sales: '/sales',
   academic: '/academic',
+  academic_supervisor: '/academic',
   admin: '/admin',
   supervisor: '/admin',
   owner: '/owner',

@@ -1790,7 +1790,7 @@ export class DashboardService {
       const leadCount = Number(row.lead_count || 0);
       return {
         date: formatDateOnly(row.date),
-        platform: row.platform,
+        platform: this.normalizePlatform(row.platform) || row.platform,
         postCount,
         leadCount,
         efficiency: postCount > 0 ? Number((leadCount / postCount).toFixed(2)) : 0,
@@ -1802,7 +1802,7 @@ export class DashboardService {
       const leadCount = Number(row.lead_count || 0);
       return {
         date: formatDateOnly(row.date),
-        platform: row.platform,
+        platform: this.normalizePlatform(row.platform) || row.platform,
         leadPostCount,
         leadCount,
         efficiency: leadPostCount > 0 ? Number((leadCount / leadPostCount).toFixed(2)) : 0,
@@ -1826,7 +1826,7 @@ export class DashboardService {
       filters: { platform, employeeId: employeeId || '', accountId: accountId || '', from, to },
       platformTrend: (platformTrend as any[]).map((row) => ({
         date: formatDateOnly(row.date),
-        platform: row.platform,
+        platform: this.normalizePlatform(row.platform) || row.platform,
         postCount: Number(row.post_count || 0),
         likes: Number(row.likes || 0),
       })),
@@ -1836,13 +1836,13 @@ export class DashboardService {
       })),
       leadTrend: (leadTrend as any[]).map((row) => ({
         date: formatDateOnly(row.date),
-        platform: row.platform,
+        platform: this.normalizePlatform(row.platform) || row.platform,
         leadCount: Number(row.lead_count || 0),
       })),
       // T6.3
       trafficTrend: (trafficTrend as any[]).map((row) => ({
         date: formatDateOnly(row.date),
-        platform: row.platform,
+        platform: this.normalizePlatform(row.platform) || row.platform,
         traffic: Number(row.traffic || 0),
       })),
       efficiencyTrend,

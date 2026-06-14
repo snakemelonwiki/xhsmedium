@@ -4,6 +4,7 @@ export type AdminPostDetailSource = {
   copywriting?: string | null;
   coverImageUrl?: string | null;
   coverThumbUrl?: string | null;
+  postUrl?: string | null;
   traffic?: number | null;
   likes?: number | null;
   comments?: number | null;

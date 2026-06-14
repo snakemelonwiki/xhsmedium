@@ -12,6 +12,7 @@ import {
   ScheduleOutlined,
   ShareAltOutlined,
   ShopOutlined,
+  TagsOutlined,
   TeamOutlined,
   UsergroupAddOutlined,
 } from '@ant-design/icons';
@@ -343,6 +344,20 @@ export const APP_MENU_ITEMS: AppMenuItem[] = [
     label: '账号管理',
     path: '/admin/accounts',
     icon: <ShopOutlined />,
+    roles: ['admin', 'owner'],
+  },
+  {
+    key: 'admin-teacher-specialties',
+    label: '专业方向管理',
+    path: '/admin/teacher-specialties',
+    icon: <TagsOutlined />,
+    roles: ['admin', 'owner'],
+  },
+  {
+    key: 'admin-teacher-order-types',
+    label: '接单类型管理',
+    path: '/admin/teacher-order-types',
+    icon: <TagsOutlined />,
     roles: ['admin', 'owner'],
   },
   {

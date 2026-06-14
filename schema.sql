@@ -96,8 +96,8 @@ CREATE TABLE IF NOT EXISTS users (
   id           VARCHAR(64)  PRIMARY KEY                        COMMENT '用户唯一ID（UUID）',
   username     VARCHAR(64)  NOT NULL UNIQUE                    COMMENT '登录用户名（全局唯一）',
   password     VARCHAR(255) NOT NULL                           COMMENT '登录密码：bcrypt hash 或历史明文',
-  role         ENUM('admin','staff','owner','sales','academic','operation','supervisor') NOT NULL
-                                                                COMMENT '账号角色：admin/supervisor主管 | staff/operation运营员工 | owner总后台 | sales销售 | academic教务',
+  role         ENUM('admin','staff','owner','sales','academic','operation','supervisor','academic_supervisor') NOT NULL
+                                                                COMMENT '账号角色：admin/supervisor主管 | staff/operation运营员工 | owner总后台 | sales销售 | academic教务 | academic_supervisor教务主管',
   capacity_paused   TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否已达客资上限：0可接客资 | 1已达上限（运营端红色警示）',
   capacity_paused_at DATETIME NULL COMMENT '点击"已达上限"的时间，超过1小时自动恢复',
   failed_login_count INT NOT NULL DEFAULT 0 COMMENT '登录失败次数（>=5次触发账号锁定）',
@@ -433,6 +433,7 @@ CREATE TABLE IF NOT EXISTS orders (
   needs_supervisor         VARCHAR(16)  NULL COMMENT '主管关注：是/否',
   emergency_status         VARCHAR(32)  NULL COMMENT '应急状态',
   supervisor_note          TEXT         NULL COMMENT '主管备注/风险说明',
+  academic_remark          TEXT         NULL COMMENT '教务备注（A-5 新增）：教务内部备注，不对外展示',
   paper_progress           VARCHAR(32)  NULL COMMENT '论文进度（运营/教务维护的业务进度，与 order_status 区分）',
   -- 阶段/查稿/状态
   current_stage            VARCHAR(32)  NULL COMMENT '当前真实阶段：Submitted/WithEditor/UnderReview/Revision/Accepted/Proofing/Online/Indexed/Rejected',
@@ -788,8 +789,9 @@ CREATE TABLE IF NOT EXISTS revoked_tokens (
 
 -- ============================================================
 -- 19. teachers（教务端 v1.3 业务参考新增：稳定老师库）
--- 业务来源：完整项目源码包 v1 原型「稳定老师库」页面
--- 业务字段：老师姓名、电话/微信、专业能力、接单方向、稳定性、质量评分、备注
+-- 业务来源：完整项目源码包 v1 原型「稳定老师库」页面 + 中台优化 A-4 字段扩展
+-- 业务字段：老师姓名、学校/学历、研究领域、电话/微信、专业能力、接单类型、辅导类型、
+--          稳定性、质量评分、质量等级、头像图片、备注
 -- 自动统计：接单状态（空闲/接单中/满载）、当前接单数、累计接单数
 -- 关系：与 orders.teacher_id / orders.dispatched_teacher_id 关联
 -- 与 v1 原型兼容：v1 原型 localStorage 数据不导入，新版本独立建表
@@ -797,12 +799,18 @@ CREATE TABLE IF NOT EXISTS revoked_tokens (
 CREATE TABLE IF NOT EXISTS teachers (
   id              VARCHAR(64)  PRIMARY KEY,
   name            VARCHAR(64)  NOT NULL COMMENT '老师姓名',
+  school          VARCHAR(128) NULL COMMENT '学校/单位（A-4 新增）',
+  education       VARCHAR(16)  NULL COMMENT '学历（A-4 新增）：专科/本科/硕士/博士/其他',
+  research_area   VARCHAR(255) NULL COMMENT '研究领域/研究方向（A-4 新增）',
   phone           VARCHAR(64)  NULL COMMENT '电话',
   wechat          VARCHAR(64)  NULL COMMENT '微信',
-  specialty       VARCHAR(255) NULL COMMENT '专业能力',
-  direction       VARCHAR(255) NULL COMMENT '接单方向',
+  specialty       VARCHAR(255) NULL COMMENT '专业能力/专业方向',
+  direction       VARCHAR(255) NULL COMMENT '接单方向/接单类型',
+  tutoring_type   VARCHAR(16)  NULL COMMENT '辅导类型（A-4 新增）：辅导/全流程/都可',
+  image_url       VARCHAR(500) NULL COMMENT '老师头像/图片 URL（A-4 新增）',
   stability       VARCHAR(16)  NOT NULL DEFAULT 'new' COMMENT '稳定性：stable稳定/new新老师/probation试合作',
-  quality_score   VARCHAR(16)  NULL COMMENT '质量评分：A/B/C',
+  quality_score   VARCHAR(16)  NULL COMMENT '质量评分：A/B/C 或 优秀/一般/差',
+  quality_level   VARCHAR(8)   NULL COMMENT '质量等级（A-4 规范）：优秀/一般/差',
   remark          TEXT         NULL COMMENT '备注',
   status          VARCHAR(16)  NOT NULL DEFAULT 'idle' COMMENT '接单状态：idle空闲/working接单中/full满载',
   current_orders  INT          NOT NULL DEFAULT 0 COMMENT '当前接单数（实时统计缓存）',
@@ -814,6 +822,26 @@ CREATE TABLE IF NOT EXISTS teachers (
   INDEX idx_teachers_stability (stability),
   INDEX idx_teachers_name      (name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='稳定老师库：教务端老师档案与派单关系';
+
+-- ============================================================
+-- 19a. teacher_specialties（专业方向查找表，A-4 管控）
+-- 主管端维护可选值列表，老师编辑时多选引用
+-- ============================================================
+CREATE TABLE IF NOT EXISTS teacher_specialties (
+  id          INT          AUTO_INCREMENT PRIMARY KEY,
+  name        VARCHAR(100) NOT NULL UNIQUE COMMENT '专业方向名称',
+  created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='专业方向查找表（A-4 管控）';
+
+-- ============================================================
+-- 19b. teacher_order_types（接单类型查找表，A-4 管控）
+-- 主管端维护可选值列表，老师编辑时多选引用
+-- ============================================================
+CREATE TABLE IF NOT EXISTS teacher_order_types (
+  id          INT          AUTO_INCREMENT PRIMARY KEY,
+  name        VARCHAR(100) NOT NULL UNIQUE COMMENT '接单类型名称',
+  created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='接单类型查找表（A-4 管控）';
 
 -- ============================================================
 -- 20. order_authors（教务端：订单多作者信息）
@@ -842,12 +870,13 @@ CREATE TABLE IF NOT EXISTS order_authors (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='订单多作者信息表';
 
 -- ============================================================
--- 21. order_submissions（教务端：1-3 组投稿信息）
--- 业务来源：v1 原型订单录入「投稿信息」板块
+-- 21. order_submissions（教务端：1-3 组投稿信息 + 备用投稿）
+-- 业务来源：v1 原型订单录入「投稿信息」板块 + 中台优化 A-5 备用投稿
 -- 业务规则：操作方式决定投稿组数
 --   一稿一投 → submission_no=1
 --   两稿两投 → submission_no=1,2
 --   三稿三投 → submission_no=1,2,3
+--   type='regular' 正常投稿，type='backup' 备用投稿（A-5 新增）
 -- 字段对应 v1：论文名称/投稿期刊/投稿网址/投稿账号/投稿密码/投稿时间
 -- ============================================================
 CREATE TABLE IF NOT EXISTS order_submissions (
@@ -860,13 +889,14 @@ CREATE TABLE IF NOT EXISTS order_submissions (
   account       VARCHAR(128) NULL COMMENT '投稿账号',
   password      VARCHAR(128) NULL COMMENT '投稿密码',
   submit_time   DATETIME     NULL COMMENT '投稿时间',
+  type          VARCHAR(16)  NOT NULL DEFAULT 'regular' COMMENT '投稿类型（A-5 新增）：regular 正常投稿 / backup 备用投稿',
   created_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 
-  UNIQUE INDEX uk_order_submissions_order_no (order_id, submission_no),
-  INDEX idx_order_submissions_order         (order_id),
-  INDEX idx_order_submissions_submit_time   (submit_time)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='订单投稿信息表（一稿一投/两稿两投/三稿三投）';
+  UNIQUE INDEX uk_order_submissions_order_no_type (order_id, submission_no, type),
+  INDEX idx_order_submissions_order              (order_id),
+  INDEX idx_order_submissions_submit_time        (submit_time)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='订单投稿信息表（一稿一投/两稿两投/三稿三投；A-5 新增 type regular/backup 区分）';
 
 -- ============================================================
 -- 22. order_status_history（教务端：9 阶段状态机轨迹）

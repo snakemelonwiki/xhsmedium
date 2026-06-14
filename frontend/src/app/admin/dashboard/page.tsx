@@ -686,7 +686,7 @@ function PieBlock({
             .filter((it) => it.value > 0)
             .map((it) => ({
               ...it,
-              itemStyle: { color: PLATFORM_COLOR_MAP[it.name] },
+              itemStyle: { color: PLATFORM_COLOR_MAP[it.name] ?? '#999' },
             })),
           label: {
             show: true,

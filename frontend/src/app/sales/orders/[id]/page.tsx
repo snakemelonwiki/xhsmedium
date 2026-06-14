@@ -116,7 +116,7 @@ export default function SalesOrderDetailPage() {
               bordered
               column={{ xs: 1, md: 2 }}
               items={[
-                { key: 'id', label: '订单 ID', children: orderId },
+                { key: 'orderCode', label: '订单编号', children: order?.orderCode || orderId },
                 { key: 'leadId', label: '客资 ID', children: emptyText(order?.leadId) },
                 { key: 'serviceType', label: '服务类型', children: emptyText(order?.serviceType) },
                 { key: 'amount', label: '金额', children: emptyText(order?.amount) },

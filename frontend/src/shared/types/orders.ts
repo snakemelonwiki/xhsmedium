@@ -17,6 +17,7 @@ export type HandoverStatusCode = 'pending' | 'handed_over' | 'accepted' | 'rejec
 
 export interface OrderItem {
   id: string;
+  orderCode?: string | null;
   leadId?: string;
   salesUserId?: string;
   salesName?: string;
