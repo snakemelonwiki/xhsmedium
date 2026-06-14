@@ -1218,27 +1218,6 @@ export default function AcademicOrderDetailPage() {
                     </Form.Item>
                   </Col>
                 ) : null}
-                {visibleFinanceFieldKeys.has('teacherPrice') ? (
-                  <Col xs={24} md={4}>
-                    <Form.Item name={['finance', 'teacherPrice']} label="老师接单价格">
-                      <Input disabled />
-                    </Form.Item>
-                  </Col>
-                ) : null}
-                {visibleFinanceFieldKeys.has('teacherPaid') ? (
-                  <Col xs={24} md={4}>
-                    <Form.Item name={['finance', 'teacherPaid']} label="老师已付款">
-                      <Input disabled />
-                    </Form.Item>
-                  </Col>
-                ) : null}
-                {visibleFinanceFieldKeys.has('teacherPending') ? (
-                  <Col xs={24} md={4}>
-                    <Form.Item label="老师待付款">
-                      <Input value={teacherPending} disabled />
-                    </Form.Item>
-                  </Col>
-                ) : null}
                 <Col xs={24} md={4}>
                   <Form.Item name={['finance', 'teacherPrice']} label="老师接单价格">
                     <InputNumber min={0} precision={0} style={{ width: '100%' }} />

@@ -14,7 +14,7 @@ export const DELIVERY_PROGRESS_STAGES: readonly DeliveryProgressStage[] = [
     key: 'initial',
     label: '初始',
     statusValues: ['销售建单', '待补资料', '待教务审核', '待补客户资料'],
-    fields: ['responsibleTeacher', 'statusStage', 'paperProgress', 'salesContact', 'academicOwner'],
+    fields: ['statusStage'],
   },
   {
     key: 'assign',
@@ -32,12 +32,12 @@ export const DELIVERY_PROGRESS_STAGES: readonly DeliveryProgressStage[] = [
     key: 'prepare',
     label: '投稿准备',
     statusValues: ['待投稿'],
-    fields: ['paperProgress', 'salesContact', 'authorInfoChecked'],
+    fields: ['paperProgress', 'authorInfoChecked'],
   },
   {
     key: 'submitted',
     label: '投稿后',
     statusValues: ['已投稿', '审稿中', '返修中', '已录用', '待见刊', '已完成', '异常处理中'],
-    fields: ['paperProgress', 'salesContact', 'nextFollowUpAt', 'lastTeacherUpdateAt'],
+    fields: ['paperProgress', 'nextFollowUpAt', 'lastTeacherUpdateAt'],
   },
 ] as const;
