@@ -1,7 +1,7 @@
 'use client';
 
 import { ReloadOutlined } from '@ant-design/icons';
-import { Alert, Button, Card, Empty, Select, Space, Table, Tag, Typography, message } from 'antd';
+import { Alert, Button, Card, Empty, Space, Table, Tag, Typography, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
@@ -23,12 +23,7 @@ type ReminderRow = {
   orderStatus?: string | null;
 };
 
-const HORIZON_OPTIONS = [
-  { label: '已到期 + 未来 24 小时', value: 24 },
-  { label: '已到期 + 未来 7 天', value: 24 * 7 },
-  { label: '已到期 + 未来 14 天', value: 24 * 14 },
-  { label: '仅已到期', value: 0 },
-];
+const HORIZON = 24;
 
 /**
  * 教务端节点提醒页：列出当前用户名下/跟进过的订单中 next_remind_at
@@ -38,10 +33,9 @@ const HORIZON_OPTIONS = [
 export default function AcademicRemindersPage() {
   const [items, setItems] = useState<ReminderRow[]>([]);
   const [loading, setLoading] = useState(false);
-  const [horizon, setHorizon] = useState<number>(24);
   const [error, setError] = useState('');
 
-  async function load(nextHorizon = horizon) {
+  async function load(nextHorizon = HORIZON) {
     setLoading(true);
     setError('');
     try {
@@ -60,7 +54,7 @@ export default function AcademicRemindersPage() {
   }
 
   useEffect(() => {
-    void load(horizon);
+    void load(HORIZON);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -135,15 +129,6 @@ export default function AcademicRemindersPage() {
           </Typography.Paragraph>
         </div>
         <Space wrap>
-          <Select
-            value={horizon}
-            style={{ width: 220 }}
-            options={HORIZON_OPTIONS}
-            onChange={(v) => {
-              setHorizon(v);
-              void load(v);
-            }}
-          />
           <Button icon={<ReloadOutlined />} onClick={() => load()} loading={loading}>
             刷新
           </Button>
