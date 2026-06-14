@@ -293,6 +293,13 @@ export const APP_MENU_ITEMS: AppMenuItem[] = [
     roles: ['admin', 'owner'],
   },
   {
+    key: 'admin-rankings-study',
+    label: '学习榜单',
+    path: '/admin/rankings/study',
+    icon: <BookOutlined />,
+    roles: ['admin', 'owner', 'supervisor'],
+  },
+  {
     key: 'admin-personal',
     label: '个人看板',
     path: '/admin/personal',

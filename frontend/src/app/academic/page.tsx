@@ -21,9 +21,10 @@ import { useEffect, useState } from 'react';
 import { getAcademicHomeSummary, type AcademicHomeSummary } from '@/shared/api/orders';
 import { readAuthenticatedUser } from '@/shared/auth/auth';
 import { useNotifications } from '@/shared/contexts/NotificationContext';
+import { buildAcademicTodoHref } from './academicTodoRoutes';
 
 type MetricCard = {
-  key: keyof AcademicHomeSummary;
+  key: Exclude<keyof AcademicHomeSummary, 'targets'>;
   title: string;
   href: string;
   description: string;
@@ -165,8 +166,10 @@ export default function AcademicHomePage() {
         <div className="metric-grid">
           {METRIC_CARDS.map((card) => {
             const value = summary ? summary[card.key] : 0;
+            const targetOrderId = summary?.targets?.[card.key]?.orderId;
+            const href = buildAcademicTodoHref({ type: card.key, orderId: targetOrderId });
             return (
-              <Link key={card.key} href={card.href}>
+              <Link key={card.key} href={href || card.href}>
                 <Card hoverable styles={{ body: { padding: 20 } }}>
                   <Space direction="vertical" size={12} style={{ width: '100%' }}>
                     <Space size={8} align="center">
