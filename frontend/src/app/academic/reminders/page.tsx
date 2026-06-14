@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 
 import { apiClient } from '@/shared/api/apiClient';
+import { markOrderReminderHandled } from '@/shared/api/orders';
 import { orderStatusMeta } from '@/shared/api/enums';
 import { formatDateTime, formatRemindTimeTag } from '@/shared/utils/date-format';
 
@@ -33,6 +34,7 @@ const HORIZON = 24;
 export default function AcademicRemindersPage() {
   const [items, setItems] = useState<ReminderRow[]>([]);
   const [loading, setLoading] = useState(false);
+  const [handlingId, setHandlingId] = useState('');
   const [error, setError] = useState('');
 
   async function load(nextHorizon = HORIZON) {
@@ -58,6 +60,19 @@ export default function AcademicRemindersPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  async function handleReminder(id: string) {
+    setHandlingId(id);
+    try {
+      await markOrderReminderHandled(id);
+      setItems((prev) => prev.filter((item) => item.id !== id));
+      message.success('已提醒，当前列表已移除');
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '操作失败');
+    } finally {
+      setHandlingId('');
+    }
+  }
+
   const columns: ColumnsType<ReminderRow> = [
     {
       title: '订单',
@@ -65,7 +80,7 @@ export default function AcademicRemindersPage() {
       width: 200,
       render: (value: string, record) => (
         <Space direction="vertical" size={0}>
-          <Link href={`/academic/orders/${value}`}>
+          <Link href={`/academic/orders/${value}?target=progress#progress`}>
             <Typography.Text strong>{value}</Typography.Text>
           </Link>
           <Typography.Text type="secondary">{record.serviceType || '未填写服务类型'}</Typography.Text>
@@ -117,6 +132,20 @@ export default function AcademicRemindersPage() {
         return <Tag color={meta.color}>{meta.label}</Tag>;
       },
     },
+    {
+      title: '操作',
+      key: 'actions',
+      width: 120,
+      render: (_value, record) => (
+        <Button
+          size="small"
+          loading={handlingId === record.id}
+          onClick={() => handleReminder(record.id)}
+        >
+          已提醒
+        </Button>
+      ),
+    },
   ];
 
   return (
@@ -125,7 +154,7 @@ export default function AcademicRemindersPage() {
         <div>
           <Typography.Title level={2}>节点提醒</Typography.Title>
           <Typography.Paragraph type="secondary">
-            订单跟进节点到达提醒时间后会在此集中显示。系统每分钟自动扫描并向相关用户推送站内通知。
+            订单跟进节点会固定在 10:00、15:00、18:00 三个时段提醒；确认已提醒后会从当前列表移除。
           </Typography.Paragraph>
         </div>
         <Space wrap>

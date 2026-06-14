@@ -22,6 +22,7 @@ export type CreateCollaborationTaskBody = {
 
 export type CloseLeadDealPayload = {
   amount?: number | string | null;
+  clientPaid?: number | string | null;
   serviceType?: string | null;
   contractStatus?: 'unsigned' | 'signed' | 'pending' | string;
   paidStatus?: 'unpaid' | 'partial' | 'paid' | string;
@@ -94,6 +95,7 @@ function mapLead(raw: RawRecord): SalesLead {
     addMethod: text(raw.addMethod) ?? text(raw.add_method),
     ip: text(raw.ip),
     requirementNote: text(raw.requirementNote) ?? text(raw.requirement_note),
+    purpose: text(raw.purpose) ?? text(raw.intention) ?? null,
     supervisorNote: text(raw.supervisorNote) ?? text(raw.supervisor_note),
     // v1.3 / CROSS-1 客资分流
     isDispatched: Boolean(raw.isDispatched),
@@ -106,6 +108,7 @@ function mapLead(raw: RawRecord): SalesLead {
     followActionAt: text(raw.followActionAt) ?? text(raw.follow_action_at) ?? null,
     dealStatus: text(raw.dealStatus) ?? text(raw.deal_status) ?? null,
     dealAmount: text(raw.dealAmount) ?? text(raw.deal_amount) ?? null,
+    invalidReason: text(raw.invalidReason) ?? text(raw.invalid_reason) ?? null,
     intentionLevel: text(raw.intentionLevel) ?? text(raw.intention_level) ?? null,
     sourcePostQualityStatus: text(raw.sourcePostQualityStatus) ?? text(raw.source_post_quality_status),
     leadPriceMultiplier: Number(raw.leadPriceMultiplier ?? raw.lead_price_multiplier ?? 1),
@@ -192,7 +195,7 @@ export async function listTomorrowFollowups(query: PageQuery = {}): Promise<Page
 export async function getLeadDetail(id: string): Promise<SalesLead | undefined> {
   try {
     const payload = await apiClient.get<RawRecord>(`/leads/${id}`);
-    return mapLead(payload);
+    return mapLead((payload.lead as RawRecord | undefined) ?? payload);
   } catch {
     return undefined;
   }
@@ -223,6 +226,13 @@ export async function listCollaborationTasks(query: PageQuery = {}): Promise<Pag
 
 export async function createLeadFollowRecord(id: string, body: Record<string, unknown>) {
   return apiClient.post(`/leads/${id}/follow-records`, body);
+}
+
+export async function updateLeadContact(
+  id: string,
+  body: { contactInfo: string },
+) {
+  return apiClient.patch<{ ok: boolean; lead?: SalesLead }>(`/leads/${id}/contact`, body);
 }
 
 export async function updateLeadBoard(id: string, body: Record<string, unknown>) {
@@ -267,6 +277,7 @@ export async function confirmLeadSource({ leadId, matchedPostId, sourceOperatorI
 export async function closeLeadDeal(id: string, body: CloseLeadDealPayload) {
   const payload = {
     amount: body.amount ?? null,
+    clientPaid: body.clientPaid ?? null,
     serviceType: body.serviceType ?? null,
     contractStatus: body.contractStatus ?? null,
     paidStatus: body.paidStatus ?? null,
@@ -297,7 +308,7 @@ export async function updateLeadDealStatus(
  */
 export async function updateLeadIntentionLevel(
   id: string,
-  body: { intentionLevel: 'high' | 'mid' | 'low' | 'invalid' | 'pending' },
+  body: { intentionLevel: 'high' | 'mid' | 'low' | 'invalid' | 'pending'; invalidReason?: string | null },
 ) {
   return apiClient.patch<{ ok: boolean; lead?: SalesLead }>(`/leads/${id}/intention-level`, body);
 }
@@ -344,7 +355,7 @@ export async function listTodayFollowupsForSales(query: PageQuery = {}): Promise
 
 /**
  * v1.3 / SA-7: 销售"我的成交"列表。
- * 支持 status 为字符串或数组（后端 status IN 过滤，"我的成交"默认传 ['completed','closed']）。
+ * 支持 status 为字符串或数组（后端 status IN 过滤）。
  */
 export async function listMyDeals(query: {
   status?: string | string[];

@@ -48,6 +48,7 @@ import { formatDateTime } from '@/shared/utils/date-format';
 import { QuickRangePicker } from '@/shared/components/date';
 import type { DateRangeValue } from '@/shared/components/date';
 import { buildOperationReminderTarget } from './leadReminderTarget';
+import { buildTodayDateRange } from '@/shared/utils/default-date-range';
 import {
   LeadAddStatus,
   LeadProcessStatus,
@@ -104,12 +105,17 @@ const EMPTY_FILTERS: Filters = {
   search: '',
 };
 
+function buildDefaultFilters(): Filters {
+  return { ...EMPTY_FILTERS, dateRange: buildTodayDateRange() };
+}
+
 type FollowFormValues = {
   clientDegree?: string;
   clientMajorResearch?: string;
   clientTimeRequirement?: string;
   objectionPoint?: string;
   intentionLevel?: IntentionLevelCode;
+  invalidReason?: string;
   followAction?: string;
   content?: string;
   nextFollowTime?: Dayjs | null;
@@ -117,6 +123,7 @@ type FollowFormValues = {
 
 type IntentionFormValues = {
   intentionLevel: IntentionLevelCode;
+  invalidReason?: string;
 };
 
 function isTodayNotAdded(lead: SalesLead): boolean {
@@ -134,7 +141,7 @@ function isTodayNotAdded(lead: SalesLead): boolean {
 export default function SalesLeadsPage() {
   const router = useRouter();
   const [items, setItems] = useState<SalesLead[]>([]);
-  const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
+  const [filters, setFilters] = useState<Filters>(() => buildDefaultFilters());
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [total, setTotal] = useState(0);
@@ -247,6 +254,7 @@ export default function SalesLeadsPage() {
       clientTimeRequirement: lead.clientTimeRequirement || undefined,
       objectionPoint: lead.objectionPoint || undefined,
       intentionLevel: (lead.intentionLevel as IntentionLevelCode) || undefined,
+      invalidReason: lead.invalidReason || undefined,
       followAction: lead.followAction || undefined,
       content: undefined,
       nextFollowTime: lead.nextFollowAt ? dayjs(lead.nextFollowAt) : null,
@@ -270,6 +278,7 @@ export default function SalesLeadsPage() {
           followAction: values.followAction || null,
           followActionAt: new Date().toISOString(),
           intentionLevel: values.intentionLevel || followOpen.intentionLevel,
+          invalidReason: (values.intentionLevel || followOpen.intentionLevel) === 'invalid' ? (values.invalidReason || null) : null,
           nextFollowTime: values.nextFollowTime ? values.nextFollowTime.toISOString() : undefined,
         }),
       );
@@ -288,6 +297,7 @@ export default function SalesLeadsPage() {
     setIntentionOpen(lead);
     intentionForm.setFieldsValue({
       intentionLevel: (lead.intentionLevel as IntentionLevelCode) || 'pending',
+      invalidReason: lead.invalidReason || undefined,
     });
   }
 
@@ -297,9 +307,15 @@ export default function SalesLeadsPage() {
     if (!values) return;
     setSubmitting(true);
     try {
-      await updateLeadIntentionLevel(String(intentionOpen.id), {
+      const result = await updateLeadIntentionLevel(String(intentionOpen.id), {
         intentionLevel: values.intentionLevel,
+        invalidReason: values.intentionLevel === 'invalid' ? (values.invalidReason || null) : null,
       });
+      if (result.lead) {
+        setItems((prev) => prev.map((item) => (
+          String(item.id) === String(intentionOpen.id) ? { ...item, ...result.lead } : item
+        )));
+      }
       message.success('意向程度已更新');
       setIntentionOpen(null);
       intentionForm.resetFields();
@@ -676,7 +692,7 @@ export default function SalesLeadsPage() {
           />
           <QuickRangePicker
             value={filters.dateRange}
-            onChange={(range) => setFilters((prev) => ({ ...prev, dateRange: range }))}
+            onChange={(range) => setFilters((prev) => ({ ...prev, dateRange: range ?? buildTodayDateRange() }))}
           />
           <Button icon={<ReloadOutlined />} onClick={() => loadLeads()} loading={loading}>
             刷新
@@ -771,6 +787,26 @@ export default function SalesLeadsPage() {
                 ]}
               />
             </Form.Item>
+            <Form.Item noStyle shouldUpdate={(prev, next) => prev.intentionLevel !== next.intentionLevel}>
+              {({ getFieldValue }) => (
+                getFieldValue('intentionLevel') === 'invalid' ? (
+                  <Form.Item name="invalidReason" label="无效原因" rules={[{ required: true, message: '请选择无效原因' }]}>
+                    <Select
+                      allowClear
+                      placeholder="请选择无效原因"
+                      options={[
+                        { label: '客户不需要', value: '客户不需要' },
+                        { label: '客户预算不足', value: '客户预算不足' },
+                        { label: '客户已流失', value: '客户已流失' },
+                        { label: '联系方式错误', value: '联系方式错误' },
+                        { label: '重复客资', value: '重复客资' },
+                        { label: '其他', value: '其他' },
+                      ]}
+                    />
+                  </Form.Item>
+                ) : null
+              )}
+            </Form.Item>
             <Form.Item name="followAction" label="具体跟进措施">
               <Input placeholder="如：明天下午 3 点发修改方案" />
             </Form.Item>
@@ -804,6 +840,26 @@ export default function SalesLeadsPage() {
                 { label: '待判断', value: 'pending' },
               ]}
             />
+          </Form.Item>
+          <Form.Item noStyle shouldUpdate={(prev, next) => prev.intentionLevel !== next.intentionLevel}>
+            {({ getFieldValue }) => (
+              getFieldValue('intentionLevel') === 'invalid' ? (
+                <Form.Item name="invalidReason" label="无效原因" rules={[{ required: true, message: '请选择无效原因' }]}>
+                  <Select
+                    allowClear
+                    placeholder="请选择无效原因"
+                    options={[
+                      { label: '客户不需要', value: '客户不需要' },
+                      { label: '客户预算不足', value: '客户预算不足' },
+                      { label: '客户已流失', value: '客户已流失' },
+                      { label: '联系方式错误', value: '联系方式错误' },
+                      { label: '重复客资', value: '重复客资' },
+                      { label: '其他', value: '其他' },
+                    ]}
+                  />
+                </Form.Item>
+              ) : null
+            )}
           </Form.Item>
         </Form>
       </Modal>

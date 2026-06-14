@@ -167,7 +167,11 @@ function mapLearningPost(raw: Record<string, unknown>): LearningPost {
   };
 }
 
-export default function StudyRankingsPage() {
+type StudyRankingsPageProps = {
+  routeBase?: '/operation' | '/admin';
+};
+
+export default function StudyRankingsPage({ routeBase = '/operation' }: StudyRankingsPageProps) {
   const router = useRouter();
   const [range, setRange] = useState<DateRangeValue>(null);
   const period: StudyPeriod = deriveStudyPeriod(range);
@@ -399,14 +403,14 @@ export default function StudyRankingsPage() {
 
   /**
    * v1.3 OP-9: 跳转到指定账号的全部作品列表（复用作品广场按账号筛选）。
-   * 走 /operation/posts?accountId=... 路由，运营端可按账号过滤作品。
+   * 走当前端口的 posts?accountId=... 路由，按账号过滤作品。
    */
   function viewAccountPosts(post: LearningPost) {
     if (!post.accountId) {
       message.warning('该作品未关联账号');
       return;
     }
-    router.push(`/operation/posts?accountId=${encodeURIComponent(post.accountId)}`);
+    router.push(`${routeBase}/posts?accountId=${encodeURIComponent(post.accountId)}`);
   }
 
   /**
@@ -419,7 +423,7 @@ export default function StudyRankingsPage() {
       message.warning('该账号缺少 ID');
       return;
     }
-    router.push(`/operation/accounts?id=${encodeURIComponent(record.accountId)}`);
+    router.push(`${routeBase}/accounts?id=${encodeURIComponent(record.accountId)}`);
   }
 
   async function viewPostDetail(post: LearningPost) {

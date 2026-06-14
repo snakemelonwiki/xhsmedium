@@ -14,6 +14,7 @@ import { NOTIFICATION_TYPES } from '../../shared/notifications';
 const NODE_TIMEOUT_MS = 7 * 24 * 3600 * 1000;
 /** 扫描单轮上限 */
 const SCAN_BATCH = 200;
+const FIXED_REMIND_HOURS = [10, 15, 18] as const;
 
 /**
  * 节点提醒扫描器：每分钟扫描 order_follow_records.next_remind_at <= NOW
@@ -38,6 +39,33 @@ export class RemindersService {
     private readonly notifications: NotificationsService,
     private readonly operationLogs: OperationLogsService,
   ) {}
+
+  /**
+   * 将节点提醒归一到固定提醒时段：10:00、15:00、18:00。
+   * 入参日期保留用户选定的日期语义，具体小时落到当天最近的后续固定时段；
+   * 若已晚于 18:00，则顺延到次日 10:00。
+   */
+  static normalizeRemindAt(value?: Date | string | null): Date | null {
+    if (!value) return null;
+    const input = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(input.getTime())) return null;
+
+    const target = new Date(input);
+    const nextHour = FIXED_REMIND_HOURS.find((hour) => {
+      const slot = new Date(input);
+      slot.setHours(hour, 0, 0, 0);
+      return input.getTime() <= slot.getTime();
+    });
+
+    if (nextHour !== undefined) {
+      target.setHours(nextHour, 0, 0, 0);
+      return target;
+    }
+
+    target.setDate(target.getDate() + 1);
+    target.setHours(FIXED_REMIND_HOURS[0], 0, 0, 0);
+    return target;
+  }
 
   @Cron(CronExpression.EVERY_MINUTE, { name: 'orderNodeReminderScan' })
   async scanDue(): Promise<void> {
@@ -173,6 +201,26 @@ export class RemindersService {
       serviceType: r.serviceType || null,
       orderStatus: r.orderStatus || null,
     }));
+  }
+
+  /**
+   * 将当前节点提醒标记为已处理，使其从当前提醒列表移除。
+   */
+  async markHandled(id: string, userId: string): Promise<{ ok: true; changed: boolean }> {
+    if (!id || !userId) return { ok: true, changed: false };
+    const record = await this.followRepo.findOne({ where: { id } });
+    if (!record) return { ok: true, changed: false };
+    if (record.userId !== userId) {
+      const order = record.orderId
+        ? await this.orderRepo.findOne({ where: { id: record.orderId } })
+        : null;
+      if (order?.academicUserId !== userId) {
+        return { ok: true, changed: false };
+      }
+    }
+    if (!record.nextRemindAt) return { ok: true, changed: false };
+    await this.followRepo.update({ id }, { nextRemindAt: null });
+    return { ok: true, changed: true };
   }
 
   private buildContent(record: OrderFollowRecord): string {

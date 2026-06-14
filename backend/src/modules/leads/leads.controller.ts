@@ -472,6 +472,25 @@ export class LeadsController {
     }
   }
 
+  @Patch(':id/contact')
+  @UseGuards(DebounceGuard)
+  async updateContact(@Param('id') id: string, @Body() body: any, @Req() req: Request, @Res() res: Response) {
+    const session = (req as any).session;
+    const actorUserId = getSessionUserId(req) || body.actorUserId || '';
+    try {
+      const lead = await this.leadsService.updateContactInfo(id, body.contactInfo ?? body.contact, {
+        actorUserId,
+        actorEmployeeId: session?.employeeId || '',
+        actorRole: session?.role || '',
+      });
+      if (!lead) return res.status(404).json({ ok: false, message: 'not found' });
+      return res.json({ ok: true, lead });
+    } catch (err: any) {
+      const code = err?.status || 422;
+      return res.status(code).json({ ok: false, message: err.message || 'invalid' });
+    }
+  }
+
   @Get(':id/follow-records')
   async listFollowRecords(
     @Param('id') id: string,
@@ -536,7 +555,9 @@ export class LeadsController {
         nextFollowTime: body.nextFollowTime,
         processStatus: body.processStatus,
         intention: body.intention,
+        purpose: body.purpose,
         intentionLevel: body.intentionLevel,
+        invalidReason: body.invalidReason,
         // v1.3 / SA-1 + CROSS-2 扩展字段，回写 leads 自身
         clientDegree: body.clientDegree,
         clientMajorResearch: body.clientMajorResearch,
@@ -625,6 +646,7 @@ export class LeadsController {
     try {
       const lead = await this.leadsService.updateIntentionLevel(id, actorUserId, {
         intentionLevel: body.intentionLevel,
+        invalidReason: body.invalidReason,
       });
       if (!lead) return res.status(404).json({ ok: false, message: 'not found' });
       return res.json({ ok: true, lead });

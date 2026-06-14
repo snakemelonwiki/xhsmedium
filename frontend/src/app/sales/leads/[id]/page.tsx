@@ -32,6 +32,7 @@ import {
   getLeadDetail,
   listCollaborationTasks,
   listLeadFollowRecords,
+  updateLeadContact,
   updateLeadBoard,
   updateLeadDealStatus,
   updateLeadIntentionLevel,
@@ -82,6 +83,8 @@ const INTENTION_META: Record<IntentionLevelCode, { label: string; color: string 
 
 type CloseDealFormValues = {
   amount?: number | string;
+  clientPaid?: number | string;
+  paidStatus?: 'partial' | 'paid';
   serviceType?: string;
   productType?: string;
   guaranteeType?: string;
@@ -91,12 +94,13 @@ type CloseDealFormValues = {
 };
 
 type FollowFormValues = {
+  purpose?: string;
   clientDegree?: string;
   clientMajorResearch?: string;
   clientTimeRequirement?: string;
   objectionPoint?: string;
-  wechat?: string;
   intentionLevel?: IntentionLevelCode;
+  invalidReason?: string;
   followAction?: string;
   content?: string;
   nextFollowTime?: Dayjs | string | null;
@@ -110,6 +114,11 @@ type DealStatusFormValues = {
 
 type IntentionFormValues = {
   intentionLevel: IntentionLevelCode;
+  invalidReason?: string;
+};
+
+type ContactFormValues = {
+  contactInfo: string;
 };
 
 export default function SalesLeadDetailPage() {
@@ -122,9 +131,11 @@ export default function SalesLeadDetailPage() {
   const [form] = Form.useForm<FollowFormValues>();
   const [dealStatusForm] = Form.useForm<DealStatusFormValues>();
   const [intentionForm] = Form.useForm<IntentionFormValues>();
+  const [contactForm] = Form.useForm<ContactFormValues>();
   const [collaborationForm] = Form.useForm();
   const [closeDealForm] = Form.useForm<CloseDealFormValues>();
   const [collaborationOpen, setCollaborationOpen] = useState(false);
+  const [contactOpen, setContactOpen] = useState(false);
   const [closeDealOpen, setCloseDealOpen] = useState(false);
   const [dealStatusOpen, setDealStatusOpen] = useState(false);
   const [intentionOpen, setIntentionOpen] = useState(false);
@@ -154,6 +165,21 @@ export default function SalesLeadDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.id]);
 
+  useEffect(() => {
+    if (!lead) return;
+    form.setFieldsValue({
+      purpose: lead.purpose || undefined,
+      clientDegree: lead.clientDegree || undefined,
+      clientMajorResearch: lead.clientMajorResearch || undefined,
+      clientTimeRequirement: lead.clientTimeRequirement || undefined,
+      objectionPoint: lead.objectionPoint || undefined,
+      followAction: lead.followAction || undefined,
+      intentionLevel: (lead.intentionLevel as IntentionLevelCode) || undefined,
+      invalidReason: lead.invalidReason || undefined,
+      nextFollowTime: lead.nextFollowAt ? dayjs(lead.nextFollowAt) : null,
+    });
+  }, [form, lead]);
+
   // v1.3 / SA-12: 当客资已"已添加通过"时，自动滚动到订单跟进区；
   // 销售填写完"标记成交"后 lead 状态推进到 ADDED_SUCCESS，后端 / 订单列表页会同步刷新。
   useEffect(() => {
@@ -178,13 +204,14 @@ export default function SalesLeadDetailPage() {
         await createLeadFollowRecord(leadId, {
           content: values.content,
           clientDegree: values.clientDegree || null,
+          purpose: values.purpose || null,
           clientMajorResearch: values.clientMajorResearch || null,
           clientTimeRequirement: values.clientTimeRequirement || null,
           objectionPoint: values.objectionPoint || null,
-          wechat: values.wechat || null,
           followAction: values.followAction || null,
           followActionAt: new Date().toISOString(),
           intentionLevel: values.intentionLevel,
+          invalidReason: values.intentionLevel === 'invalid' ? (values.invalidReason || null) : null,
           nextFollowTime,
         });
         message.success('跟进记录已保存');
@@ -194,6 +221,35 @@ export default function SalesLeadDetailPage() {
         message.error(err instanceof Error ? err.message : '跟进记录保存失败');
       }
     });
+  }
+
+  async function submitContact() {
+    const values = await contactForm.validateFields().catch(() => null);
+    if (!values) return;
+    await run(async () => {
+      try {
+        await updateLeadContact(leadId, { contactInfo: values.contactInfo });
+        message.success('联系方式已更新');
+        setContactOpen(false);
+        await loadDetail();
+      } catch (err) {
+        message.error(err instanceof Error ? err.message : '联系方式更新失败');
+      }
+    });
+  }
+
+  function openContactEditor() {
+    contactForm.setFieldsValue({ contactInfo: lead?.contact || lead?.phone || lead?.wechat || '' });
+    setContactOpen(true);
+  }
+
+  function openCloseDeal() {
+    closeDealForm.setFieldsValue({
+      clientRequirementNote: lead?.requirementNote || undefined,
+      paidStatus: 'partial',
+      paymentStage: '已付定金',
+    });
+    setCloseDealOpen(true);
   }
 
   async function requestCollaboration(values: { type: string; reason: string; remark?: string; urgency?: string }) {
@@ -220,11 +276,13 @@ export default function SalesLeadDetailPage() {
       try {
         const result = await closeLeadDeal(leadId, {
           amount: values.amount ?? null,
+          clientPaid: values.clientPaid ?? null,
+          paidStatus: values.paidStatus ?? 'partial',
           serviceType: values.serviceType ?? null,
           productType: values.productType ?? null,
           guaranteeType: values.guaranteeType ?? null,
           paymentStage: values.paymentStage ?? null,
-          clientRequirementNote: values.clientRequirementNote ?? null,
+          clientRequirementNote: values.clientRequirementNote ?? lead?.requirementNote ?? null,
           remark: values.remark ?? null,
         });
         message.success(`已标记成交，订单编号 ${result.orderCode || result.orderId || ''}`);
@@ -259,7 +317,13 @@ export default function SalesLeadDetailPage() {
     const values = await intentionForm.validateFields().catch(() => null);
     if (!values) return;
     try {
-      await updateLeadIntentionLevel(leadId, { intentionLevel: values.intentionLevel });
+      const result = await updateLeadIntentionLevel(leadId, {
+        intentionLevel: values.intentionLevel,
+        invalidReason: values.intentionLevel === 'invalid' ? (values.invalidReason || null) : null,
+      });
+      if (result.lead) {
+        setLead(result.lead);
+      }
       message.success('意向程度已更新');
       setIntentionOpen(false);
       intentionForm.resetFields();
@@ -286,7 +350,18 @@ export default function SalesLeadDetailPage() {
         <Space wrap>
           <Button onClick={() => router.push('/sales/leads')}>返回列表</Button>
           <Button onClick={() => router.push(`/sales/collaboration?leadId=${leadId}`)}>打开协同页</Button>
-          <Button onClick={() => setIntentionOpen(true)}>更新意向程度</Button>
+          <Button onClick={openContactEditor}>编辑联系方式</Button>
+          <Button
+            onClick={() => {
+              intentionForm.setFieldsValue({
+                intentionLevel: (lead?.intentionLevel as IntentionLevelCode) || 'pending',
+                invalidReason: lead?.invalidReason || undefined,
+              });
+              setIntentionOpen(true);
+            }}
+          >
+            更新意向程度
+          </Button>
           <Button onClick={() => setDealStatusOpen(true)}>更新成交状态</Button>
           {reminderTarget.recipientId ? (
             <ReminderButton
@@ -307,7 +382,7 @@ export default function SalesLeadDetailPage() {
               type="primary"
               ghost
               disabled={!canCloseDeal}
-              onClick={() => setCloseDealOpen(true)}
+              onClick={openCloseDeal}
             >
               标记成交
             </Button>
@@ -339,11 +414,21 @@ export default function SalesLeadDetailPage() {
           items={[
             { key: 'id', label: '客资 ID', children: leadId },
             { key: 'name', label: '客户', children: lead?.customerName ?? '详情接口待补齐' },
-            { key: 'contact', label: '联系方式', children: lead?.contact ?? '-' },
+            {
+              key: 'contact',
+              label: '联系方式',
+              children: (
+                <Space size={8}>
+                  <Typography.Text>{lead?.contact ?? '-'}</Typography.Text>
+                  <Button size="small" type="link" onClick={openContactEditor}>编辑</Button>
+                </Space>
+              ),
+            },
             { key: 'ipRegion', label: 'IP / 地区', children: lead?.ip ?? '-' },
             // v1.3 / CROSS-2 销售写跟进回写的客户画像字段
             { key: 'clientDegree', label: '客户学历', children: lead?.clientDegree || '-' },
             { key: 'clientMajorResearch', label: '专业 / 研究方向', children: lead?.clientMajorResearch || '-' },
+            { key: 'purpose', label: '用途', children: lead?.purpose ?? '-' },
             { key: 'requirementNote', label: '客户需求', children: lead?.requirementNote ?? '-' },
             { key: 'clientTimeRequirement', label: '时间要求', children: lead?.clientTimeRequirement || '-' },
             { key: 'objectionPoint', label: '异议点', children: lead?.objectionPoint || '-' },
@@ -353,6 +438,7 @@ export default function SalesLeadDetailPage() {
                 {INTENTION_META[lead.intentionLevel as IntentionLevelCode]?.label || lead.intentionLevel}
               </Tag>
             ) : '-' },
+            { key: 'invalidReason', label: '无效原因', children: lead?.invalidReason || '-' },
             { key: 'dealStatus', label: '成交状态', children: lead?.dealStatus ? (
               <Tag color={DEAL_STATUS_META[lead.dealStatus as DealStatusCode]?.color || 'default'}>
                 {DEAL_STATUS_META[lead.dealStatus as DealStatusCode]?.label || lead.dealStatus}
@@ -418,8 +504,10 @@ export default function SalesLeadDetailPage() {
                     clientMajorResearch: lead?.clientMajorResearch,
                     clientTimeRequirement: lead?.clientTimeRequirement,
                     objectionPoint: lead?.objectionPoint,
+                    purpose: lead?.purpose || undefined,
                     followAction: lead?.followAction,
                     intentionLevel: (lead?.intentionLevel as IntentionLevelCode) || undefined,
+                    invalidReason: lead?.invalidReason || undefined,
                     nextFollowTime: lead?.nextFollowAt ? dayjs(lead.nextFollowAt) : null,
                   }}
                 >
@@ -446,9 +534,8 @@ export default function SalesLeadDetailPage() {
                     <Form.Item name="objectionPoint" label="异议点">
                       <Input placeholder="如：价格太贵 / 导师不同意" />
                     </Form.Item>
-                    {/* T12: 客资微信号（销售推老师微信后填写） */}
-                    <Form.Item name="wechat" label="客资微信号">
-                      <Input placeholder="客户微信号，推老师微信后填写" />
+                    <Form.Item name="purpose" label="用途">
+                      <Input placeholder="如：评职称 / 毕业 / 保研 / 课题结项" />
                     </Form.Item>
                     <Form.Item name="intentionLevel" label="意向程度">
                       <Select
@@ -461,6 +548,26 @@ export default function SalesLeadDetailPage() {
                           { label: '待判断', value: 'pending' },
                         ]}
                       />
+                    </Form.Item>
+                    <Form.Item noStyle shouldUpdate={(prev, next) => prev.intentionLevel !== next.intentionLevel}>
+                      {({ getFieldValue }) => (
+                        getFieldValue('intentionLevel') === 'invalid' ? (
+                          <Form.Item name="invalidReason" label="无效原因" rules={[{ required: true, message: '请选择无效原因' }]}>
+                            <Select
+                              allowClear
+                              placeholder="请选择无效原因"
+                              options={[
+                                { label: '客户不需要', value: '客户不需要' },
+                                { label: '客户预算不足', value: '客户预算不足' },
+                                { label: '客户已流失', value: '客户已流失' },
+                                { label: '联系方式错误', value: '联系方式错误' },
+                                { label: '重复客资', value: '重复客资' },
+                                { label: '其他', value: '其他' },
+                              ]}
+                            />
+                          </Form.Item>
+                        ) : null
+                      )}
                     </Form.Item>
                     <Form.Item name="followAction" label="具体跟进措施">
                       <Input placeholder="如：明天下午 3 点发修改方案" />
@@ -548,6 +655,21 @@ export default function SalesLeadDetailPage() {
       </Modal>
 
       <Modal
+        title="编辑联系方式"
+        open={contactOpen}
+        onCancel={() => setContactOpen(false)}
+        onOk={submitContact}
+        confirmLoading={submitting}
+        destroyOnClose
+      >
+        <Form<ContactFormValues> form={contactForm} layout="vertical" preserve={false}>
+          <Form.Item name="contactInfo" label="联系方式" rules={[{ required: true, message: '请输入联系方式' }]}>
+            <Input placeholder="手机号 / 微信号 / 其他可联系信息" />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
         title="标记成交"
         open={closeDealOpen}
         onCancel={() => setCloseDealOpen(false)}
@@ -557,7 +679,7 @@ export default function SalesLeadDetailPage() {
       >
         <Form<CloseDealFormValues> form={closeDealForm} layout="vertical" onFinish={submitCloseDeal} preserve>
           <div className="form-grid">
-            <Form.Item name="clientRequirementNote" label="客户要求备注" className="full-row">
+            <Form.Item name="clientRequirementNote" label="客户要求备注" initialValue={lead?.requirementNote || undefined} className="full-row">
               <Input.TextArea rows={2} placeholder="客户原始诉求、特殊情况等" />
             </Form.Item>
             <Form.Item name="productType" label="产品类型" rules={[{ required: true, message: '请选择产品类型' }]}>
@@ -631,8 +753,26 @@ export default function SalesLeadDetailPage() {
                 description="提交后，系统会把订单金额和财务订单额写为当前填写金额的 50%。"
               />
             ) : null}
-            <Form.Item name="paymentStage" label="付款阶段" className="full-row">
-              <Input placeholder="如：定金 / 中期 / 尾款" />
+            <Form.Item name="paidStatus" label="付款状态" initialValue="partial" rules={[{ required: true, message: '请选择付款状态' }]}>
+              <Select
+                options={[
+                  { label: '部分付款', value: 'partial' },
+                  { label: '已付款', value: 'paid' },
+                ]}
+              />
+            </Form.Item>
+            <Form.Item name="clientPaid" label="付款金额（元）" rules={[{ required: true, message: '请输入付款金额' }]}>
+              <InputNumber min={0.01} precision={2} style={{ width: '100%' }} placeholder="0.00" />
+            </Form.Item>
+            <Form.Item name="paymentStage" label="付款阶段" initialValue="已付定金" className="full-row" rules={[{ required: true, message: '请选择付款阶段' }]}>
+              <Select
+                options={[
+                  { label: '已付定金', value: '已付定金' },
+                  { label: '已付中期', value: '已付中期' },
+                  { label: '已付尾款', value: '已付尾款' },
+                  { label: '已付全款', value: '已付全款' },
+                ]}
+              />
             </Form.Item>
             <Form.Item name="remark" label="成交备注" className="full-row">
               <Input.TextArea rows={2} placeholder="可补充成交背景、客户特殊要求等" />
@@ -703,7 +843,7 @@ export default function SalesLeadDetailPage() {
         confirmLoading={submitting}
         destroyOnClose
       >
-        <Form<IntentionFormValues> form={intentionForm} layout="vertical" preserve={false} initialValues={{ intentionLevel: (lead?.intentionLevel as IntentionLevelCode) || 'pending' }}>
+        <Form<IntentionFormValues> form={intentionForm} layout="vertical" preserve={false} initialValues={{ intentionLevel: (lead?.intentionLevel as IntentionLevelCode) || 'pending', invalidReason: lead?.invalidReason || undefined }}>
           <Form.Item name="intentionLevel" label="意向程度" rules={[{ required: true, message: '请选择意向程度' }]}>
             <Select
               options={[
@@ -714,6 +854,26 @@ export default function SalesLeadDetailPage() {
                 { label: '待判断', value: 'pending' },
               ]}
             />
+          </Form.Item>
+          <Form.Item noStyle shouldUpdate={(prev, next) => prev.intentionLevel !== next.intentionLevel}>
+            {({ getFieldValue }) => (
+              getFieldValue('intentionLevel') === 'invalid' ? (
+                <Form.Item name="invalidReason" label="无效原因" rules={[{ required: true, message: '请选择无效原因' }]}>
+                  <Select
+                    allowClear
+                    placeholder="请选择无效原因"
+                    options={[
+                      { label: '客户不需要', value: '客户不需要' },
+                      { label: '客户预算不足', value: '客户预算不足' },
+                      { label: '客户已流失', value: '客户已流失' },
+                      { label: '联系方式错误', value: '联系方式错误' },
+                      { label: '重复客资', value: '重复客资' },
+                      { label: '其他', value: '其他' },
+                    ]}
+                  />
+                </Form.Item>
+              ) : null
+            )}
           </Form.Item>
         </Form>
       </Modal>

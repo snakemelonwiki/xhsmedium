@@ -1,9 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { getOrderDetail, listOrderFollowRecords, listOrders, updateOrder } from './orders';
+import {
+  getOrderDelivery,
+  getOrderDetail,
+  listOrderFollowRecords,
+  listOrders,
+  markOrderReminderHandled,
+  remindSalesPayment,
+  updateOrderDelivery,
+  updateOrder,
+} from './orders';
 
 const apiClientMock = vi.hoisted(() => ({
   get: vi.fn(),
+  post: vi.fn(),
   patch: vi.fn(),
 }));
 
@@ -18,6 +28,7 @@ vi.mock('@/shared/api/apiClient', async () => {
 describe('orders api', () => {
   beforeEach(() => {
     apiClientMock.get.mockReset();
+    apiClientMock.post.mockReset();
     apiClientMock.patch.mockReset();
   });
 
@@ -116,6 +127,7 @@ describe('orders api', () => {
         nodeType: '待客户资料',
         content: '已提醒客户补资料',
         nextRemindAt: '2026-05-03T00:00:00.000Z',
+        remindStage: null,
         createdAt: '2026-05-02T00:00:00.000Z',
       },
     ]);
@@ -127,5 +139,119 @@ describe('orders api', () => {
     await updateOrder('order-1', { academic_user_id: 'academic-1' });
 
     expect(apiClientMock.patch).toHaveBeenCalledWith('/orders/order-1', { academic_user_id: 'academic-1' });
+  });
+
+  it('posts a sales payment reminder for an order', async () => {
+    apiClientMock.post.mockResolvedValueOnce({ ok: true, receiverId: 'sales-1' });
+
+    const result = await remindSalesPayment('order-1');
+
+    expect(apiClientMock.post).toHaveBeenCalledWith('/orders/order-1/remind-sales-payment', {});
+    expect(result.receiverId).toBe('sales-1');
+  });
+
+  it('marks an order reminder handled', async () => {
+    apiClientMock.patch.mockResolvedValueOnce({ ok: true, changed: true });
+
+    const result = await markOrderReminderHandled('reminder-1');
+
+    expect(apiClientMock.patch).toHaveBeenCalledWith('/orders/reminders/reminder-1/handled', {});
+    expect(result.changed).toBe(true);
+  });
+
+  it('maps academic delivery teacher assignment and institution fields', async () => {
+    apiClientMock.get.mockResolvedValueOnce({
+      order: {
+        id: 'order-1',
+        institution_accepted: 1,
+        status_stage: 'awaiting_teacher',
+        order_status: 'awaiting_teacher',
+        assigned_teacher: 'teacher-1',
+        assigned_teacher_name: '王老师',
+        teacher_phone: '13800000000',
+        teacher_wechat: 'wx-teacher',
+        teacher_stability: 'stable',
+        fund_remark: '作者二备注',
+        backup_submission_url: 'https://cdn.example.com/backup.docx',
+        backup_submission_name: '备用投稿信息表.docx',
+        backup_teachers: [
+          {
+            teacher_id: 'teacher-2',
+            teacher_name: '李老师',
+            teacher_phone: '13900000000',
+            teacher_stability: 'probation',
+          },
+        ],
+      },
+      authors: [],
+      submissions: [],
+      finance: {},
+    });
+
+    const result = await getOrderDelivery('order-1');
+
+    expect(result.order).toMatchObject({
+      institutionAccepted: true,
+      statusStage: '待分配老师',
+      orderStatus: 'awaiting_teacher',
+      assignedTeacher: 'teacher-1',
+      assignedTeacherName: '王老师',
+      teacherPhone: '13800000000',
+      teacherWechat: 'wx-teacher',
+      teacherStability: '稳定老师',
+      fundRemark: '作者二备注',
+      backupSubmissionUrl: 'https://cdn.example.com/backup.docx',
+      backupSubmissionName: '备用投稿信息表.docx',
+      backupTeachers: [
+        {
+          teacherId: 'teacher-2',
+          teacherName: '李老师',
+          teacherPhone: '13900000000',
+          teacherStability: '试合作',
+        },
+      ],
+    });
+  });
+
+  it('patches delivery assignment fields without flattening backup teacher rows', async () => {
+    apiClientMock.patch.mockResolvedValueOnce({ ok: true });
+
+    await updateOrderDelivery('order-1', {
+      order: {
+        institutionAccepted: true,
+        statusStage: '待补客户资料',
+        orderStatus: 'awaiting_client_info',
+        assignedTeacher: 'teacher-1',
+        assignedTeacherName: '王老师',
+        teacherWechat: 'wx-teacher',
+        backupTeachers: [
+          {
+            teacherId: 'teacher-2',
+            teacherName: '李老师',
+            teacherPhone: '13900000000',
+            teacherStability: '一般',
+          },
+        ],
+      },
+    });
+
+    expect(apiClientMock.patch).toHaveBeenCalledWith('/orders/order-1/delivery', {
+      order: {
+        institutionAccepted: true,
+        statusStage: '待补客户资料',
+        orderStatus: 'awaiting_client_info',
+        assignedTeacher: 'teacher-1',
+        assignedTeacherName: '王老师',
+        teacherWechat: 'wx-teacher',
+        backupTeachers: [
+          {
+            teacherId: 'teacher-2',
+            teacherName: '李老师',
+            teacherPhone: '13900000000',
+            teacherStability: '一般',
+          },
+        ],
+      },
+    });
   });
 });

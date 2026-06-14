@@ -25,6 +25,12 @@ export interface OrderItem {
   academicName?: string;
   serviceType?: string | null;
   amount?: string | null;
+  productType?: string | null;
+  guaranteeType?: string | null;
+  paymentStage?: string | null;
+  customerName?: string | null;
+  articlePurpose?: string | null;
+  salesContact?: string | null;
   paidStatus: PaidStatusCode | string;
   orderStatus: OrderStatusCode | string;
   handoverStatus?: HandoverStatusCode | string;
@@ -70,6 +76,8 @@ export interface OrderListQuery extends PageQuery {
 export interface OrderDeliveryOrderFields {
   id?: string;
   orderNumber?: string | null;
+  institutionAccepted?: boolean;
+  orderStatus?: string | null;
   customerName?: string | null;
   degreeLevel?: string | null;
   majorDirection?: string | null;
@@ -78,18 +86,25 @@ export interface OrderDeliveryOrderFields {
   registrationFormStatus?: string | null;
   infoSentToTeacherAt?: string | null;
   fundInfo?: string | null;
+  fundRemark?: string | null;
+  academicRemark?: string | null;
   submissionEmail?: string | null;
   submissionEmailPassword?: string | null;
   authorRegistrationUrl?: string | null;
   authorRegistrationName?: string | null;
+  backupSubmissionUrl?: string | null;
+  backupSubmissionName?: string | null;
   operationMethod?: string | null;
   plagiarismRequirement?: string | null;
   responsibleTeacher?: string | null;
   statusStage?: string | null;
   paperProgress?: string | null;
   assignedTeacher?: string | null;
+  assignedTeacherName?: string | null;
   backupTeacher?: string | null;
+  backupTeachers?: OrderBackupTeacher[];
   teacherPhone?: string | null;
+  teacherWechat?: string | null;
   teacherStability?: string | null;
   innovationReviewStatus?: string | null;
   innovationReviewAt?: string | null;
@@ -131,6 +146,13 @@ export interface OrderDeliveryOrderFields {
   reviewReportStatus?: string | null;
 }
 
+export interface OrderBackupTeacher {
+  teacherId?: string | null;
+  teacherName?: string | null;
+  teacherPhone?: string | null;
+  teacherStability?: string | null;
+}
+
 export interface OrderDeliveryAuthor {
   id?: string;
   orderId?: string;
@@ -168,6 +190,7 @@ export interface OrderDeliveryDetail {
   order: OrderDeliveryOrderFields;
   authors: OrderDeliveryAuthor[];
   submissions: OrderDeliverySubmission[];
+  backupSubmissions?: OrderDeliverySubmission[];
   finance: OrderDeliveryFinance;
 }
 

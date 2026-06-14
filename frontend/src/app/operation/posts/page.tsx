@@ -18,6 +18,7 @@ import {
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { ReloadOutlined } from '@ant-design/icons';
+import dayjs from 'dayjs';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
@@ -28,6 +29,7 @@ import { listPosts, refreshPostMetrics, getPostDetail } from '@/shared/api/conte
 import { QuickRangePicker, RANGE_PRESETS_FULL } from '@/shared/components/date';
 import type { DateRangeValue } from '@/shared/components/date';
 import type { ContentPost } from '@/shared/types/content';
+import { buildTodayDateRange } from '@/shared/utils/default-date-range';
 import { normalizePostMetric } from '@/shared/utils/post-metrics';
 
 type PostFilters = {
@@ -63,10 +65,13 @@ export default function OperationPostsPage() {
   const fromParam = searchParams.get('from') || undefined;
   const toParam = searchParams.get('to') || undefined;
   const accountParam = searchParams.get('accountId') || undefined;
+  const urlDateRange = fromParam && toParam ? { start: dayjs(fromParam), end: dayjs(toParam) } : undefined;
 
   const [items, setItems] = useState<ContentPost[]>([]);
   const [accounts, setAccounts] = useState<CatalogOption[]>([]);
-  const [filters, setFilters] = useState<PostFilters>({});
+  const [filters, setFilters] = useState<PostFilters>(() => ({
+    dateRange: urlDateRange ?? buildTodayDateRange(),
+  }));
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(15);
@@ -215,7 +220,10 @@ export default function OperationPostsPage() {
     if (accountParam) {
       setFilters((prev) => ({ ...prev, accountId: accountParam }));
     }
-  }, [accountParam]);
+    if (urlDateRange) {
+      setFilters((prev) => ({ ...prev, dateRange: urlDateRange }));
+    }
+  }, [accountParam, fromParam, toParam]);
 
   useEffect(() => {
     listSourceAccounts()
@@ -230,7 +238,7 @@ export default function OperationPostsPage() {
   }
 
   function handleDateRangeChange(dateRange: DateRangeValue) {
-    const next = { ...filters, dateRange };
+    const next = { ...filters, dateRange: dateRange ?? buildTodayDateRange() };
     setFilters(next);
     load(1, next);
   }

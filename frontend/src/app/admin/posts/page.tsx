@@ -63,7 +63,7 @@ type Filters = {
 };
 
 const EMPTY_FILTERS: Filters = {
-  period: 'all',
+  period: 'today',
   customRange: null,
   platform: '',
   employeeId: '',
@@ -143,6 +143,11 @@ function getPeriodLabel(period: PeriodKey): string {
   if (period === 'month') return '本月';
   if (period === 'custom') return '自定义';
   return '累计';
+}
+
+function buildPeriodDateRangeValue(filters: Filters) {
+  const { from, to } = resolvePeriodRange(filters.period, filters.customRange);
+  return from && to ? { start: dayjs(from), end: dayjs(to) } : null;
 }
 
 function isLongPostTitle(title?: string): boolean {
@@ -842,12 +847,10 @@ export default function AdminPostsPage() {
             />
           </Space>
           <QuickRangePicker
-            value={filters.period === 'custom' && filters.customRange
-              ? { start: dayjs(filters.customRange[0]), end: dayjs(filters.customRange[1]) }
-              : null}
+            value={buildPeriodDateRangeValue(filters)}
             onChange={(range) => {
               if (!range) {
-                setFilters((prev) => ({ ...prev, period: 'all', customRange: null }));
+                setFilters((prev) => ({ ...prev, period: 'today', customRange: null }));
                 return;
               }
               setFilters((prev) => ({

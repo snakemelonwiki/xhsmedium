@@ -19,4 +19,28 @@ describe('OrdersController', () => {
     );
     expect(controller).toBeDefined();
   });
+
+  it('blocks sales from changing academic assignment', async () => {
+    const ordersService = {
+      canAccessOrder: jest.fn().mockResolvedValue(true),
+      update: jest.fn(),
+    } as any;
+    const controller = new OrdersController(
+      ordersService,
+      {} as any,
+      {} as any,
+      { create: jest.fn() } as any,
+    );
+    const res = response();
+
+    await controller.update(
+      'order-1',
+      { academic_user_id: 'academic-1' },
+      { session: { userId: 'sales-1', role: 'sales' } } as any,
+      res,
+    );
+
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(ordersService.update).not.toHaveBeenCalled();
+  });
 });

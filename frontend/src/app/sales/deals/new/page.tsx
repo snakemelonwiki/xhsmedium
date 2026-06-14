@@ -12,6 +12,8 @@ type NewDealFormValues = {
   serviceType: string;
   guaranteeType?: string;
   paymentStage?: string;
+  paidStatus?: 'partial' | 'paid';
+  clientPaid?: number | string;
   amount: number | string;
   clientRequirementNote?: string;
   leadId: string;
@@ -32,6 +34,8 @@ export default function SalesDealsNewPage() {
         serviceType: values.serviceType,
         guaranteeType: values.guaranteeType,
         paymentStage: values.paymentStage,
+        paidStatus: values.paidStatus,
+        clientPaid: values.clientPaid,
         amount: values.amount,
         clientRequirementNote: values.clientRequirementNote,
       });
@@ -116,8 +120,26 @@ export default function SalesDealsNewPage() {
             <Form.Item name="amount" label="成交金额（元）" rules={[{ required: true, message: '请输入成交金额' }]}>
               <InputNumber min={0} precision={2} style={{ width: '100%' }} placeholder="0.00" />
             </Form.Item>
-            <Form.Item name="paymentStage" label="付款阶段" className="full-row">
-              <Input placeholder="如：定金 / 中期 / 尾款，或单期" />
+            <Form.Item name="paidStatus" label="付款状态" initialValue="partial" rules={[{ required: true, message: '请选择付款状态' }]}>
+              <Select
+                options={[
+                  { label: '部分付款', value: 'partial' },
+                  { label: '已付款', value: 'paid' },
+                ]}
+              />
+            </Form.Item>
+            <Form.Item name="clientPaid" label="付款金额（元）" rules={[{ required: true, message: '请输入付款金额' }]}>
+              <InputNumber min={0.01} precision={2} style={{ width: '100%' }} placeholder="0.00" />
+            </Form.Item>
+            <Form.Item name="paymentStage" label="付款阶段" initialValue="已付定金" className="full-row" rules={[{ required: true, message: '请选择付款阶段' }]}>
+              <Select
+                options={[
+                  { label: '已付定金', value: '已付定金' },
+                  { label: '已付中期', value: '已付中期' },
+                  { label: '已付尾款', value: '已付尾款' },
+                  { label: '已付全款', value: '已付全款' },
+                ]}
+              />
             </Form.Item>
             <Form.Item name="clientRequirementNote" label="客户要求备注" className="full-row">
               <Input.TextArea rows={3} placeholder="客户原始诉求、特殊情况等" />

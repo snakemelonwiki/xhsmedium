@@ -101,6 +101,22 @@ describe('content image URL mapping', () => {
       ],
     });
   });
+
+  it('loads gallery posts from the plaza API with type tab filters', async () => {
+    getMock.mockResolvedValue({ items: [], total: 0 });
+
+    await listGalleryPosts({ page: 2, pageSize: 15, postType: '营销贴', platform: '小红书' });
+
+    expect(getMock).toHaveBeenCalledWith('/posts/plaza', {
+      query: {
+        view: 'all',
+        page: 2,
+        pageSize: 15,
+        postType: '营销贴',
+        platform: '小红书',
+      },
+    });
+  });
 });
 
 describe('content list query helpers', () => {

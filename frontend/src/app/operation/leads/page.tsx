@@ -35,6 +35,14 @@ type LeadFilters = {
   collaborationStatus?: string;
 };
 
+const INTENTION_LEVEL_LABELS: Record<string, string> = {
+  high: '高',
+  mid: '中',
+  low: '低',
+  invalid: '无效',
+  pending: '待判断',
+};
+
 /** 手机号中间4位脱敏 */
 function maskPhone(phone?: string): string {
   if (!phone) return '-';
@@ -497,6 +505,10 @@ export default function OperationLeadsPage() {
                   <Typography.Text>微信号：{maskWechat(detailLead.wechat)}</Typography.Text>
                   <Typography.Text>IP/地区：{detailLead.ip || '-'}</Typography.Text>
                   <Typography.Text>需求备注：{detailLead.requirementNote || '-'}</Typography.Text>
+                  <Typography.Text>
+                    意向程度：{detailLead.intentionLevel ? (INTENTION_LEVEL_LABELS[detailLead.intentionLevel] || detailLead.intentionLevel) : '-'}
+                  </Typography.Text>
+                  <Typography.Text>无效原因：{detailLead.invalidReason || '-'}</Typography.Text>
                   <Typography.Text>来源平台：{detailLead.source?.platform || '-'}</Typography.Text>
                   <Typography.Text>
                     来源账号：{detailLead.source?.accountName || detailLead.source?.accountId || '-'}
