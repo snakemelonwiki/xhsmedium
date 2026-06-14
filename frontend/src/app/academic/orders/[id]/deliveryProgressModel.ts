@@ -32,7 +32,7 @@ export const DELIVERY_PROGRESS_STAGES: readonly DeliveryProgressStage[] = [
     key: 'prepare',
     label: '投稿准备',
     statusValues: ['待投稿'],
-    fields: ['paperProgress', 'authorInfoChecked'],
+    fields: ['authorInfoChecked'],
   },
   {
     key: 'submitted',
