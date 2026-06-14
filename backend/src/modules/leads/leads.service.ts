@@ -32,7 +32,9 @@ interface FollowRecordDto {
   nextFollowTime?: string | Date | null;
   processStatus?: string;
   intention?: string | null;
+  purpose?: string | null;
   intentionLevel?: string;
+  invalidReason?: string | null;
   // v1.3 / SA-1 + CROSS-2：销售"写跟进"扩展字段，回写到 leads 自身
   clientDegree?: string | null;
   clientRequirement?: string | null;
@@ -638,6 +640,30 @@ export class LeadsService {
     await this.leadRepository.update(id, dto);
   }
 
+  /**
+   * 销售端快捷维护客资联系方式。
+   * 仅销售本人可改自己被分配的客资，admin/owner 作为后台兜底可改。
+   */
+  async updateContactInfo(
+    id: string,
+    contactInfo: string,
+    actor?: { actorUserId?: string; actorEmployeeId?: string; actorRole?: string },
+  ): Promise<any | null> {
+    const nextContact = String(contactInfo || '').trim();
+    if (!nextContact) {
+      throw new BadRequestException('contactInfo required');
+    }
+    const canAccess = await this.canAccessLead(id, actor);
+    if (!canAccess) {
+      throw new NotFoundException('not found');
+    }
+    await this.leadRepository.update(id, { contactInfo: nextContact });
+    const updated = await this.leadRepository.findOne({ where: { id } });
+    if (!updated) return null;
+    const latestCollaboration = await this.latestCollaborationByLeadIds([updated.id]);
+    return this.mapLead(updated, undefined, latestCollaboration.get(updated.id));
+  }
+
   async findOne(id: string, actor?: { actorUserId?: string; actorEmployeeId?: string; actorRole?: string }): Promise<any | null> {
     const row = await this.leadRepository.findOne({ where: { id } });
     if (!row) return null;
@@ -773,7 +799,16 @@ export class LeadsService {
     }
     if (normalized.processStatus !== undefined) patch.processStatus = normalized.processStatus || 'not_contacted';
     if (dto.intention !== undefined) patch.intention = dto.intention || null;
-    if (dto.intentionLevel !== undefined) patch.intentionLevel = dto.intentionLevel || 'pending';
+    if (dto.purpose !== undefined) patch.intention = dto.purpose || null;
+    if (dto.intentionLevel !== undefined) {
+      const intentionLevel = dto.intentionLevel || 'pending';
+      const invalidReason = dto.invalidReason != null ? String(dto.invalidReason).trim() : '';
+      if (intentionLevel === 'invalid' && !invalidReason) {
+        throw new BadRequestException('无效意向必须填写无效原因');
+      }
+      patch.intentionLevel = intentionLevel;
+      patch.invalidReason = intentionLevel === 'invalid' ? invalidReason : null;
+    }
     // v1.3 / SA-1 + CROSS-2: 销售"写跟进"把客户学历/需求/专业/时间要求/异议点/跟进措施回写到 leads。
     // 客户需求走 requirement_note（已存在字段，CR/兼容）；其他字段是新加的列。
     if (dto.clientDegree !== undefined) patch.clientDegree = dto.clientDegree || null;
@@ -852,7 +887,7 @@ export class LeadsService {
   async updateIntentionLevel(
     id: string,
     actorUserId: string,
-    dto: { intentionLevel: string },
+    dto: { intentionLevel: string; invalidReason?: string | null },
   ): Promise<any | null> {
     const intentionLevel = String(dto.intentionLevel || '').trim();
     if (!INTENTION_LEVEL_CODES.has(intentionLevel)) {
@@ -860,9 +895,16 @@ export class LeadsService {
         `invalid intentionLevel: ${intentionLevel}（必须是 ${Array.from(INTENTION_LEVEL_CODES).join(' / ')}）`,
       );
     }
+    const invalidReason = dto.invalidReason != null ? String(dto.invalidReason).trim() : '';
+    if (intentionLevel === 'invalid' && !invalidReason) {
+      throw new BadRequestException('无效意向必须填写无效原因');
+    }
     const current = await this.leadRepository.findOne({ where: { id } });
     if (!current) return null;
-    await this.leadRepository.update(id, { intentionLevel });
+    await this.leadRepository.update(id, {
+      intentionLevel,
+      invalidReason: intentionLevel === 'invalid' ? invalidReason : null,
+    });
     try {
       await this.operationLogsService.log({
         userId: actorUserId || '',
@@ -870,8 +912,8 @@ export class LeadsService {
         targetType: 'lead',
         targetId: id,
         detail: JSON.stringify({
-          from: { intentionLevel: current.intentionLevel },
-          to: { intentionLevel },
+          from: { intentionLevel: current.intentionLevel, invalidReason: current.invalidReason },
+          to: { intentionLevel, invalidReason: intentionLevel === 'invalid' ? invalidReason : null },
           field: 'intentionLevel',
         }),
       });

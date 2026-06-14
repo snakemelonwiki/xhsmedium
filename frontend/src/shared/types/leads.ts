@@ -55,6 +55,8 @@ export interface SalesLead {
   ip?: string;
   /** 需求备注（运营端填写） */
   requirementNote?: string;
+  /** 用途（销售跟进/成交交接字段，后端存储在 intention） */
+  purpose?: string | null;
   /** 主管备注（运营端填写） */
   supervisorNote?: string;
   // v1.3 / CROSS-1 客资分流
