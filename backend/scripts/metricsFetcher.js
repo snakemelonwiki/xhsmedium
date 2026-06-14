@@ -336,8 +336,17 @@ function extractDouyinFromDetail(detail) {
     let publishDate = "";
     const ts = detail.create_time ?? detail.createTime;
     if (ts) {
-      const d = new Date(Number(ts) * 1000);
-      publishDate = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+      const timestamp = Number(ts);
+      const d = new Date(timestamp * 1000);
+      const dateSource = detail.create_time != null ? "create_time" : "createTime";
+      if (Number.isFinite(timestamp) && Number.isFinite(d.getTime())) {
+        publishDate = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+        console.log(`[metricsFetcher] 抖音发布日期元素抓取: source=${dateSource}, raw=${String(ts)}, parsed=${publishDate}`);
+      } else {
+        console.warn(`[metricsFetcher] 抖音发布日期元素已抓取但未识别: source=${dateSource}, raw=${String(ts)}`);
+      }
+    } else {
+      console.warn("[metricsFetcher] 抖音发布日期元素未找到: source=detail.create_time/detail.createTime");
     }
 
     return {
@@ -649,6 +658,34 @@ async function readXiaohongshuInitialState(page, preferredNoteId) {
       };
     };
 
+    const formatDateFromTimestamp = (value) => {
+      if (value === null || value === undefined || value === "") return null;
+      const n = Number(value);
+      if (!Number.isFinite(n) || n <= 0) return null;
+      const ms = n > 100000000000 ? n : n > 10000000000 ? n * 1000 : null;
+      if (ms === null) return null;
+      const d = new Date(ms);
+      if (!Number.isFinite(d.getTime())) return null;
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    };
+
+    const extractPublishedAt = (note) => {
+      const fields = [
+        ["time", note?.time],
+        ["time_ms", note?.time_ms],
+        ["timestamp", note?.timestamp],
+        ["publish_time", note?.publish_time],
+        ["publishedAt", note?.publishedAt],
+        ["createdAt", note?.createdAt],
+        ["createTime", note?.createTime],
+      ];
+      for (const [field, value] of fields) {
+        const date = formatDateFromTimestamp(value);
+        if (date) return { publishedAt: date, publishedAtSource: `note.${field}` };
+      }
+      return { publishedAt: null, publishedAtSource: null };
+    };
+
     for (const note of notes) {
       if (!note || typeof note !== "object") continue;
       const interact = note.interact_info || note.interactInfo || {};
@@ -658,8 +695,9 @@ async function readXiaohongshuInitialState(page, preferredNoteId) {
       const shares = pickCount(interact.share_count ?? interact.shareCount ?? interact.shared_count ?? interact.sharedCount ?? note.share_count ?? note.shareCount);
       const title = String(note.title || note.display_title || note.note_title || note.desc || "").trim();
       const author = extractUser(note);
-      if (likes !== null || comments !== null || favorites !== null || shares !== null || title) {
-        return { likes, comments, favorites, shares, title, ...(author || {}) };
+      const published = extractPublishedAt(note);
+      if (likes !== null || comments !== null || favorites !== null || shares !== null || title || published.publishedAt) {
+        return { likes, comments, favorites, shares, title, publishedAt: published.publishedAt, publishedAtSource: published.publishedAtSource, ...(author || {}) };
       }
     }
 
@@ -667,8 +705,9 @@ async function readXiaohongshuInitialState(page, preferredNoteId) {
     for (const note of notes) {
       const title = String(note.title || note.display_title || note.note_title || note.desc || "").trim();
       const author = extractUser(note);
-      if (title || author) {
-        return { likes: null, comments: null, favorites: null, shares: null, title, ...(author || {}) };
+      const published = extractPublishedAt(note);
+      if (title || author || published.publishedAt) {
+        return { likes: null, comments: null, favorites: null, shares: null, title, publishedAt: published.publishedAt, publishedAtSource: published.publishedAtSource, ...(author || {}) };
       }
     }
 
@@ -795,25 +834,50 @@ function pad2(n) {
   return String(n).padStart(2, "0");
 }
 
+function makeXiaohongshuDate(year, month, day) {
+  const y = Number(year);
+  const m = Number(month);
+  const d = Number(day);
+  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return null;
+  if (y < 2000 || y > 2099 || m < 1 || m > 12 || d < 1 || d > 31) return null;
+  return `${y}-${pad2(m)}-${pad2(d)}`;
+}
+
 function parseXiaohongshuDateText(text) {
   if (!text) return null;
   const raw = String(text).trim();
   const now = new Date();
   const currentYear = now.getFullYear();
 
-  // 2024-06-12 / 2024/06/12
-  let m = raw.match(/(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})/);
-  if (m) return `${m[1]}-${pad2(m[2])}-${pad2(m[3])}`;
+  // 2024-06-12 / 2024/06/12 / 2024.06.12
+  let m = raw.match(/(\d{4})[\/.-](\d{1,2})[\/.-](\d{1,2})/);
+  if (m) {
+    const parsed = makeXiaohongshuDate(m[1], m[2], m[3]);
+    if (parsed) return parsed;
+  }
 
   // 2024年06月12日
   m = raw.match(/(\d{4})年(\d{1,2})月(\d{1,2})日/);
-  if (m) return `${m[1]}-${pad2(m[2])}-${pad2(m[3])}`;
+  if (m) {
+    const parsed = makeXiaohongshuDate(m[1], m[2], m[3]);
+    if (parsed) return parsed;
+  }
+
+  // 20240612
+  m = raw.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if (m) {
+    const parsed = makeXiaohongshuDate(m[1], m[2], m[3]);
+    if (parsed) return parsed;
+  }
 
   // 06-12 / 06/12（默认当年）
   m = raw.match(/(\d{1,2})[\/-](\d{1,2})/);
-  if (m) return `${currentYear}-${pad2(m[1])}-${pad2(m[2])}`;
+  if (m) {
+    const parsed = makeXiaohongshuDate(currentYear, m[1], m[2]);
+    if (parsed) return parsed;
+  }
 
-  // 昨天 / 今天
+  // 昨天 / 今天 / 2天前
   if (/昨天/.test(raw)) {
     const d = new Date(now.getTime() - 86400000);
     return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
@@ -821,36 +885,471 @@ function parseXiaohongshuDateText(text) {
   if (/今天/.test(raw)) {
     return `${currentYear}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
   }
+  m = raw.match(/(\d{1,3})\s*天前/);
+  if (m) {
+    const days = Number(m[1]);
+    const d = new Date(now.getTime() - days * 86400000);
+    return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+  }
 
   return null;
 }
 
-async function readXiaohongshuPublishDate(page) {
-  try {
-    const dateText = await page.evaluate(() => {
+function parseXiaohongshuDateValue(value, { allowTimestamp = true } = {}) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    const ms = value > 100000000000 ? value : value > 10000000000 ? value * 1000 : null;
+    if (ms !== null) {
+      const d = new Date(ms);
+      if (Number.isFinite(d.getTime())) return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+    }
+  }
+  const raw = String(value).trim();
+  if (!raw) return null;
+  const compact = raw.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if (compact) {
+    const parsed = makeXiaohongshuDate(compact[1], compact[2], compact[3]);
+    if (parsed) return parsed;
+  }
+  const timestamp = raw.match(/^(\d{10,13})$/);
+  if (timestamp && allowTimestamp) {
+    const ms = timestamp[1].length === 13 ? Number(timestamp[1]) : Number(timestamp[1]) * 1000;
+    const d = new Date(ms);
+    if (Number.isFinite(d.getTime())) return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+  }
+  return parseXiaohongshuDateText(raw);
+}
+
+function selectXiaohongshuDateCandidate(candidates) {
+  if (!Array.isArray(candidates)) return null;
+  const parsed = [];
+  for (const item of candidates) {
+    const raw = String(item?.value ?? '').trim();
+    const path = String(item?.path || '').toLowerCase();
+    const text = String(item?.value ?? '');
+    // 登录页/全局时间不是作品发布日期，不能兜底使用。
+    if (/(servertime|mountedtime|login)/.test(path)) continue;
+    const allowTimestamp = /note|publish|published|time|create|display|last_update/.test(path) || /发布于|发布时间|发表于|发布日期/.test(text);
+    const date = parseXiaohongshuDateValue(raw, { allowTimestamp });
+    if (!date) continue;
+    let score = 1;
+    if (/note|publish|published|time|create|display|last_update/.test(path)) score += 20;
+    if (/发布于|发布时间|发表于|发布日期/.test(text)) score += 10;
+    if (String(item?.source || '').includes('text')) score += 2;
+    if (/xsec|token|apptime|share|url|source/.test(path)) score -= 100;
+    if (/^\d{10,13}$/.test(raw) && !allowTimestamp) score -= 100;
+    if (score <= 0) continue;
+    parsed.push({ ...item, date, score });
+  }
+  if (!parsed.length) return null;
+  parsed.sort((a, b) => b.score - a.score || a.path.length - b.path.length);
+  return parsed[0];
+}
+
+function shortElementSelector(el) {
+  if (!el || el.nodeType !== 1) return '';
+  const tag = String(el.tagName || '').toLowerCase();
+  const id = el.id ? `#${el.id}` : '';
+  const cls = Array.from(el.classList || []).slice(0, 3).map((c) => `.${c}`).join('');
+  return `${tag}${id}${cls}`.slice(0, 120);
+}
+
+async function findXiaohongshuDateNearTitle(page) {
+  return page.evaluate(() => {
+    const DATE_RE = /((?:20\d{2}|19\d{2})[-/.年](?:0?[1-9]|1[0-2])[-/.月](?:0?[1-9]|[12]\d|3[01])|(?:19|20)\d{2}年(?:0?[1-9]|1[0-2])月(?:0?[1-9]|[12]\d|3[01])日|(?:19|20)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])|(?:0?[1-9]|1[0-2])月(?:0?[1-9]|[12]\d|3[01])日|\b(?:0?[1-9]|1[0-2])[-/](?:0?[1-9]|[12]\d|3[01])\b|今天|昨天|(?:0?[1-9]|[1-9]\d{1,2})天前)/;
+    const candidates = [];
+    const seen = new Set();
+    let scanned = 0;
+
+    const normalizeText = (value) => String(value || '').replace(/\s+/g, ' ').trim();
+    const shortSelector = (el) => {
+      if (!el || el.nodeType !== 1) return '';
+      const tag = String(el.tagName || '').toLowerCase();
+      const id = el.id ? `#${el.id}` : '';
+      const cls = Array.from(el.classList || []).slice(0, 3).map((c) => `.${c}`).join('');
+      return `${tag}${id}${cls}`.slice(0, 120);
+    };
+    const titleScore = (el) => {
+      let score = 0;
+      if (el.id === 'detail-title') score += 100;
+      if (/detail-title/i.test(el.id || '')) score += 80;
+      if (/title/i.test(shortSelector(el))) score += 35;
+      const text = normalizeText(el.textContent);
+      if (text.length >= 4 && text.length <= 300) score += 10;
+      return score;
+    };
+
+    const titleCandidates = [];
+    const addTitleCandidate = (el, index) => {
+      if (!el || el.nodeType !== 1) return;
+      const selector = shortSelector(el);
+      const key = selector || `${el.tagName}:${index}`;
+      if (titleCandidates.some((item) => item.selector === key)) return;
+      titleCandidates.push({ el, selector: key, score: titleScore(el), index });
+    };
+    const collectSelector = (selector) => {
       try {
-        // 用户提供的 CSS Path
-        const el = document.querySelector(
-          "#noteContainer > div.interaction-container > div.note-scroller > div.note-content > div.bottom-container > span.date",
-        );
-        if (el) return (el.textContent || "").trim();
-        // 兜底：任意 #noteContainer 下的 .date
-        const fallback = document.querySelector("#noteContainer span.date");
-        return fallback ? (fallback.textContent || "").trim() : "";
-      } catch {
-        return "";
+        Array.from(document.querySelectorAll(selector)).slice(0, 20).forEach(addTitleCandidate);
+      } catch {}
+    };
+
+    collectSelector('#detail-title');
+    collectSelector('#detailTitle');
+    collectSelector('[id*="title" i]');
+    collectSelector('[class*="title" i]');
+    collectSelector('[class*="Title" i]');
+    collectSelector('[data-testid*="title" i]');
+
+    const xpathResult = document.evaluate(
+      '//*[translate(@id,"ABCDEFGHIJKLMNOPQRSTUVWXYZ","abcdefghijklmnopqrstuvwxyz")="detail-title" or contains(translate(@id,"ABCDEFGHIJKLMNOPQRSTUVWXYZ","abcdefghijklmnopqrstuvwxyz"),"title") or contains(translate(@class,"ABCDEFGHIJKLMNOPQRSTUVWXYZ","abcdefghijklmnopqrstuvwxyz"),"title") or contains(translate(@data-testid,"ABCDEFGHIJKLMNOPQRSTUVWXYZ","abcdefghijklmnopqrstuvwxyz"),"title")]',
+      document,
+      null,
+      XPathResult.ORDERED_NODE_SNAPSHOT_TYPE,
+      null,
+    );
+    for (let i = 0; i < xpathResult.snapshotLength && titleCandidates.length < 30; i += 1) {
+      addTitleCandidate(xpathResult.snapshotItem(i), titleCandidates.length);
+    }
+
+    titleCandidates.sort((a, b) => b.score - a.score || a.index - b.index);
+    const titleEls = titleCandidates.slice(0, 3).map((item) => item.el);
+
+    if (!titleEls.length) {
+      return { source: null, reason: 'title-not-found', titleSelector: '', scanned, candidates: [] };
+    }
+
+    const addCandidate = (el, distance, source, relation, text, value) => {
+      if (!el || el.nodeType !== 1) return;
+      const selector = shortSelector(el);
+      const key = `${source}:${distance}:${selector}:${value}:${relation}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      candidates.push({
+        source,
+        distance,
+        selector,
+        relation,
+        value,
+        context: text.slice(0, 180),
+      });
+    };
+
+    const push = (el, distance, source, relation = '') => {
+      if (!el || el.nodeType !== 1) return;
+      scanned += 1;
+      const selector = shortSelector(el);
+      const text = normalizeText(el.textContent);
+      if (!text) return;
+
+      const directMatch = text.match(DATE_RE);
+      if (directMatch) {
+        addCandidate(el, distance, source, relation || selector, text, directMatch[1]);
+        return;
       }
+
+      // 父容器文本太长时，继续向下扫子节点，避免日期被长标题/正文淹没。
+      if (text.length > 260) {
+        const children = [el, ...Array.from(el.querySelectorAll('*')).slice(0, 80)];
+        for (const child of children) {
+          const childText = normalizeText(child.textContent);
+          if (!childText || childText.length > 260) continue;
+          const match = childText.match(DATE_RE);
+          if (!match) continue;
+          addCandidate(child, distance, `${source}-desc`, `${relation || selector}->${shortSelector(child)}`, childText, match[1]);
+          if (candidates.length >= 30) break;
+        }
+      }
+    };
+
+    const addSiblings = (start, direction, source, maxDistance = 8) => {
+      let el = direction > 0 ? start.nextElementSibling : start.previousElementSibling;
+      let distance = 1;
+      while (el && distance <= maxDistance && candidates.length < 30) {
+        push(el, distance * direction, source, `${shortSelector(start)}->${shortSelector(el)}`);
+        el = direction > 0 ? el.nextElementSibling : el.previousElementSibling;
+        distance += 1;
+      }
+    };
+
+    const scanDescendants = (start, distance, source, relation) => {
+      if (!start || start.nodeType !== 1 || candidates.length >= 30) return;
+      const text = normalizeText(start.textContent);
+      const directMatch = text.match(DATE_RE);
+      if (directMatch) {
+        addCandidate(start, distance, source, relation || shortSelector(start), text, directMatch[1]);
+        return;
+      }
+      if (text.length > 260) {
+        const children = Array.from(start.querySelectorAll('*')).slice(0, 120);
+        for (const child of children) {
+          const childText = normalizeText(child.textContent);
+          if (!childText || childText.length > 260) continue;
+          const match = childText.match(DATE_RE);
+          if (!match) continue;
+          addCandidate(child, distance, `${source}-desc`, `${relation || shortSelector(start)}->${shortSelector(child)}`, childText, match[1]);
+          if (candidates.length >= 30) break;
+        }
+      }
+    };
+
+    const addAncestorsAndSiblings = (start, source) => {
+      let current = start;
+      for (let depth = 0; depth <= 5 && current?.parentElement && candidates.length < 30; depth += 1) {
+        const parent = current.parentElement;
+        addSiblings(parent, -1, `${source}-ancestor-${depth}`, 10);
+        addSiblings(parent, 1, `${source}-ancestor-${depth}`, 10);
+        current = parent;
+      }
+    };
+
+    for (const titleEl of titleEls) {
+      // 日期元素可能在标题元素左右兄弟节点中。
+      addSiblings(titleEl, -1, 'near-title-sibling', 8);
+      addSiblings(titleEl, 1, 'near-title-sibling', 8);
+
+      // 也兼容“日期所在父元素”和标题元素同级的结构：扫描标题父节点、祖父节点等兄弟节点及其子节点。
+      addAncestorsAndSiblings(titleEl, 'near-title-parent-sibling');
+    }
+
+    // 如果标题本身就是 note-content 里的子节点，日期可能在同一个 note-content 容器内，但不是 DOM 兄弟。
+    for (const titleEl of titleEls) {
+      const root = titleEl.closest?.('.note-content') || titleEl.parentElement?.closest?.('.note-content') || null;
+      if (!root) continue;
+      scanDescendants(root, 0, 'near-title-note-content', '.note-content');
+    }
+
+    if (!candidates.length) {
+      return {
+        source: null,
+        reason: 'near-title-date-not-found',
+        titleSelector: titleEls.map(shortSelector).join('|'),
+        scanned,
+        candidates: [],
+      };
+    }
+
+    const sourceRank = {
+      'near-title-sibling': 1,
+      'near-title-note-content': 2,
+      'near-title-parent-sibling': 3,
+      'near-title-parent-sibling-ancestor': 4,
+    };
+    candidates.sort((a, b) => {
+      const distanceDiff = Math.abs(a.distance) - Math.abs(b.distance);
+      if (distanceDiff) return distanceDiff;
+      const rankDiff = (sourceRank[a.source] || 99) - (sourceRank[b.source] || 99);
+      if (rankDiff) return rankDiff;
+      return a.source.localeCompare(b.source) || a.selector.localeCompare(b.selector);
     });
+
+    const best = candidates[0];
+    return {
+      ...best,
+      reason: null,
+      titleSelector: titleEls.map(shortSelector).join('|'),
+      scanned,
+      candidates: candidates.slice(0, 5),
+    };
+  }).catch((err) => ({
+    source: null,
+    reason: `evaluate-error: ${err?.message || String(err)}`,
+    titleSelector: '',
+    scanned: 0,
+    candidates: [],
+  }));
+}
+
+async function scanXiaohongshuDateCandidates(page) {
+  return page.evaluate(() => {
+    const DATE_RE = /(20\d{2})[-/.年](\d{1,2})[-/.月](\d{1,2})|\b(\d{1,2})[-/](\d{1,2})\b|今天|昨天|\d{1,3}天前/;
+    const candidates = [];
+    const seen = new Set();
+    const push = (source, path, value) => {
+      const text = String(value ?? '').trim();
+      if (!text) return;
+      if (!DATE_RE.test(text) && !/^\d{8}$/.test(text) && !/^\d{10,13}$/.test(text)) return;
+      const key = `${source}:${path}:${text}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      candidates.push({ source, path, value: text });
+    };
+    const walk = (obj, path, depth) => {
+      if (!obj || typeof obj !== 'object' || depth > 8 || candidates.length > 80) return;
+      if (Array.isArray(obj)) {
+        obj.slice(0, 20).forEach((item, idx) => walk(item, `${path}[${idx}]`, depth + 1));
+        return;
+      }
+      for (const [key, value] of Object.entries(obj)) {
+        if (candidates.length > 80) return;
+        if (typeof value === 'string' || typeof value === 'number') {
+          push('state', `${path}.${key}`, value);
+        } else {
+          walk(value, `${path}.${key}`, depth + 1);
+        }
+      }
+    };
+    [
+      window.__INITIAL_STATE__,
+      window.__initialState__,
+      window.__RENDER_DATA__,
+      window.RENDER_DATA,
+    ].forEach((root, idx) => {
+      if (root && typeof root === 'object') walk(root, `state[${idx}]`, 0);
+    });
+
+    const snapshot = document.evaluate(
+      '//text()[normalize-space() != ""]',
+      document,
+      null,
+      XPathResult.ORDERED_NODE_SNAPSHOT_TYPE,
+      null,
+    );
+    for (let i = 0; i < snapshot.length && candidates.length <= 80; i += 1) {
+      const text = snapshot.item(i)?.textContent || '';
+      if (DATE_RE.test(text)) push('text-node', `text[${i}]`, text);
+    }
+    return candidates.slice(0, 80);
+  }).catch(() => []);
+}
+
+async function readXiaohongshuPublishDate(page) {
+  const selectors = {
+    exact: "#noteContainer > div.interaction-container > div.note-scroller > div.note-content > div.bottom-container > span.date",
+    fallback: "#noteContainer span.date",
+    fullXpath: "/html/body/div[2]/div[1]/div[2]/div[2]/div/div[1]/div[4]/div[2]/div[1]/div[4]/span[1]",
+  };
+  const pageUrl = page.url();
+  try {
+    const dateInfo = await page.evaluate((dateSelectors) => {
+      try {
+        const read = (selector) => {
+          const el = document.querySelector(selector);
+          return {
+            selector,
+            found: Boolean(el),
+            hasText: Boolean(el?.textContent?.trim()),
+            text: (el?.textContent || "").trim(),
+            outerHTML: el ? el.outerHTML.slice(0, 500) : "",
+            parentHTML: el?.parentElement ? el.parentElement.outerHTML.slice(0, 800) : "",
+          };
+        };
+        const readXPath = (xpath) => {
+          const result = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+          const el = result.singleNodeValue;
+          return {
+            selector: xpath,
+            found: Boolean(el),
+            hasText: Boolean(el?.textContent?.trim()),
+            text: (el?.textContent || "").trim(),
+            outerHTML: el ? el.outerHTML.slice(0, 500) : "",
+            parentHTML: el?.parentElement ? el.parentElement.outerHTML.slice(0, 800) : "",
+          };
+        };
+
+        // 诊断：收集 #noteContainer 下所有疑似日期元素
+        const allDateEls = Array.from(document.querySelectorAll("#noteContainer span.date, #noteContainer .date, #noteContainer .bottom-container span")).map((el) => ({
+          tag: el.tagName,
+          class: el.className,
+          text: (el.textContent || "").trim(),
+          outerHTML: el.outerHTML.slice(0, 400),
+        }));
+
+        // 诊断：收集 bottom-container 结构
+        const bottomContainer = document.querySelector("#noteContainer .bottom-container");
+        const bottomContainerHTML = bottomContainer ? bottomContainer.outerHTML.slice(0, 1200) : "";
+
+        const exact = read(dateSelectors.exact);
+        if (exact.found) {
+          return { ...exact, source: "exact", allDateEls, bottomContainerHTML };
+        }
+
+        const fallback = read(dateSelectors.fallback);
+        if (fallback.found) {
+          return { ...fallback, source: "fallback", allDateEls, bottomContainerHTML };
+        }
+
+        const fullXpath = readXPath(dateSelectors.fullXpath);
+        return { ...fullXpath, source: fullXpath.found ? "fullXpath" : "not-found", allDateEls, bottomContainerHTML };
+      } catch (err) {
+        return {
+          source: "error",
+          selector: dateSelectors.exact,
+          found: false,
+          hasText: false,
+          text: "",
+          outerHTML: "",
+          parentHTML: "",
+          allDateEls: [],
+          bottomContainerHTML: "",
+          error: err?.message || String(err),
+        };
+      }
+    }, selectors);
+    const dateText = dateInfo.text || "";
+    console.log(`[metricsFetcher] 小红书发布日期元素抓取: url=${pageUrl}, source=${dateInfo.source}, selector=${dateInfo.selector || ""}, found=${dateInfo.found}, hasText=${dateInfo.hasText}, raw=${dateText || ""}`);
+
+    // 详细诊断日志：无论命中与否都打印候选元素，方便排查页面结构变化
+    if (dateInfo.allDateEls?.length) {
+      console.log(`[metricsFetcher] 小红书发布日期候选元素 (${dateInfo.allDateEls.length}个): ${JSON.stringify(dateInfo.allDateEls)}`);
+    } else {
+      console.warn(`[metricsFetcher] 小红书发布日期候选元素为空: url=${pageUrl}`);
+    }
+
+    if (dateInfo.source === "exact" && dateInfo.outerHTML) {
+      console.log(`[metricsFetcher] 小红书发布日期精确元素 HTML: ${dateInfo.outerHTML}`);
+    } else if (dateInfo.bottomContainerHTML) {
+      console.log(`[metricsFetcher] 小红书 bottom-container HTML: ${dateInfo.bottomContainerHTML}`);
+    } else {
+      // 兜底：打印 noteContainer 内 note-content 片段，帮助定位结构变化
+      try {
+        const noteContentHTML = await page.evaluate(() => {
+          const el = document.querySelector("#noteContainer .note-content");
+          return el ? el.outerHTML.slice(0, 2000) : "";
+        });
+        if (noteContentHTML) {
+          console.log(`[metricsFetcher] 小红书 note-content HTML: ${noteContentHTML}`);
+        }
+      } catch (dumpErr) {
+        console.warn(`[metricsFetcher] 小红书 note-content HTML 打印失败: ${dumpErr?.message || dumpErr}`);
+      }
+    }
+
     const parsed = parseXiaohongshuDateText(dateText);
     if (parsed) {
-      console.log(`[metricsFetcher] 小红书发布日期命中: ${parsed} (raw=${dateText})`);
+      console.log(`[metricsFetcher] 小红书发布日期解析命中: ${parsed} (raw=${dateText})`);
       return parsed;
     }
-    if (dateText) {
-      console.warn(`[metricsFetcher] 小红书发布日期未识别: ${dateText}`);
+
+    const nearTitle = await findXiaohongshuDateNearTitle(page);
+    if (nearTitle) {
+      console.log(`[metricsFetcher] 小红书发布日期标题同级扫描: titleSelector=${nearTitle.titleSelector || ''}, scanned=${nearTitle.scanned || 0}, reason=${nearTitle.reason || ''}, candidates=${JSON.stringify(nearTitle.candidates || [])}`);
+      if (nearTitle.value) {
+        const nearTitleDate = parseXiaohongshuDateValue(nearTitle.value, { allowTimestamp: false });
+        if (nearTitleDate) {
+          console.log(`[metricsFetcher] 小红书发布日期标题同级兜底命中: ${nearTitleDate} (source=${nearTitle.source}, distance=${nearTitle.distance}, selector=${nearTitle.selector}, context=${nearTitle.context})`);
+          return nearTitleDate;
+        }
+        console.log(`[metricsFetcher] 小红书发布日期标题同级候选未解析: source=${nearTitle.source}, distance=${nearTitle.distance}, selector=${nearTitle.selector}, raw=${nearTitle.value || ""}, context=${nearTitle.context || ""}`);
+      }
+    }
+
+    const candidates = await scanXiaohongshuDateCandidates(page);
+    const selected = selectXiaohongshuDateCandidate(candidates);
+    if (selected) {
+      console.log(`[metricsFetcher] 小红书发布日期兜底命中: ${selected.date} (source=${selected.source}, path=${selected.path}, raw=${selected.value})`);
+      return selected.date;
+    }
+    if (candidates.length) {
+      console.log(`[metricsFetcher] 小红书发布日期兜底候选: ${JSON.stringify(candidates.slice(0, 10))}`);
+    }
+
+    if (dateInfo.found) {
+      console.warn(`[metricsFetcher] 小红书发布日期元素已抓取但未识别: raw=${dateText || ""}, url=${pageUrl}`);
+    } else {
+      console.warn(`[metricsFetcher] 小红书发布日期元素未找到: selector=${dateInfo.selector || "unknown"}, url=${pageUrl}`);
     }
   } catch (err) {
-    console.warn(`[metricsFetcher] 小红书发布日期读取失败: ${err?.message || err}`);
+    console.warn(`[metricsFetcher] 小红书发布日期读取失败: url=${pageUrl}, error=${err?.message || err}`);
   }
   return null;
 }
@@ -982,7 +1481,6 @@ async function scrapeXiaohongshu(page, targetNoteId, getFeedData) {
   const htmlFallback = await inferXiaohongshuCountsFromHtml(page);
   const metaTags = await readXiaohongshuMetaTags(page);
   const xpathTitle = await readXiaohongshuTitleByXPath(page);
-  const publishDate = await readXiaohongshuPublishDate(page);
   const domAuthorName = await readXiaohongshuAuthorNameFromDom(page);
   const domAuthorUrl = await readXiaohongshuAuthorUrlFromDom(page);
   const domAuthorId = extractXiaohongshuUserIdFromProfileUrl(domAuthorUrl);
@@ -1017,6 +1515,13 @@ async function scrapeXiaohongshu(page, targetNoteId, getFeedData) {
   const title = feedCard?.title || initialState?.title || xpathTitle || metaTags?.title || metaTags?.description || "";
   const titleSource = feedCard?.title ? "feed-api" : initialState?.title ? "initialState" : xpathTitle ? "xpath" : metaTags?.title ? "meta-title" : metaTags?.description ? "meta-description" : "empty";
   console.log(`[metricsFetcher] 小红书标题来源: ${titleSource}, title=${title.slice(0, 80)}`);
+  // 发布日期：feed API > INITIAL_STATE.note.time > DOM 日期兜底
+  const publishDate = feedCard?.publishedAt || initialState?.publishedAt || await readXiaohongshuPublishDate(page);
+  if (feedCard?.publishedAt) {
+    console.log(`[metricsFetcher] 小红书发布日期来源: feed-api, publishedAt=${feedCard.publishedAt}`);
+  } else if (initialState?.publishedAt) {
+    console.log(`[metricsFetcher] 小红书发布日期来源: ${initialState.publishedAtSource || "initialState"}, publishedAt=${initialState.publishedAt}`);
+  }
 
   // 作者优先级：feed API > DOM > SSR > meta
   const authorName = feedCard?.authorName || domAuthorName || initialState?.authorName || metaTags?.authorName || "";
@@ -1130,6 +1635,38 @@ async function readDouyinRenderData(page) {
     console.warn(`[metricsFetcher] 抖音 RENDER_DATA 提取失败: ${err?.message || err}`);
     return null;
   }
+}
+
+/**
+ * 抖音页面文案（描述/正文）XPath 提取。
+ * 用户反馈：抖音视频页/图文页的文案位于 #douyin-right-container 下的固定 XPath。
+ * 优先用该 XPath；若取不到，再兜底取 meta description 或 RSC 的 desc。
+ */
+async function readDouyinCopywritingByXPath(page) {
+  try {
+    const text = await page.evaluate(() => {
+      try {
+        const result = document.evaluate(
+          '//*[@id="douyin-right-container"]/div[2]/main/div[2]/div[2]/div/div[1]/div[1]/div/span',
+          document,
+          null,
+          XPathResult.FIRST_ORDERED_NODE_TYPE,
+          null,
+        );
+        const node = result.singleNodeValue;
+        return node ? (node.textContent || "").trim() : "";
+      } catch {
+        return "";
+      }
+    });
+    if (text) {
+      console.log(`[metricsFetcher] 抖音 XPath 文案命中: ${text.slice(0, 80)}`);
+      return text;
+    }
+  } catch (err) {
+    console.warn(`[metricsFetcher] 抖音 XPath 文案读取失败: ${err?.message || err}`);
+  }
+  return "";
 }
 
 async function scrapeDouyin(page, getDouyinDetail) {
@@ -1279,6 +1816,7 @@ async function scrapeDouyin(page, getDouyinDetail) {
   }).catch(() => null);
 
   const fallback = await inferCountsFromBody(page);
+  const copywriting = await readDouyinCopywritingByXPath(page);
 
   // 优先级：API 拦截 > RSC > RENDER_DATA > HTML 正则 > XPath > DOM 扫描 > body text
   const sources = { likes: "", comments: "", favorites: "", shares: "" };
@@ -1296,6 +1834,7 @@ async function scrapeDouyin(page, getDouyinDetail) {
   const result = {
     bodyText: fallback.text,
     title: apiMetrics?.title || rscMetrics?.title || renderData?.title || "",
+    copywriting: copywriting || rscMetrics?.title || apiMetrics?.title || "",
     authorName: apiMetrics?.authorName || rscMetrics?.authorName || "",
     authorId: apiMetrics?.authorId || rscMetrics?.authorId || "",
     publishDate: apiMetrics?.publishDate || rscMetrics?.publishDate || "",
@@ -1619,6 +2158,7 @@ async function fetchMetricsFromUrl(url) {
     const result = {
       platform,
       title: normalizedTitle,
+      copywriting: payload?.copywriting || "",
       authorName: payload?.authorName || "",
       authorId: payload?.authorId || "",
       likes: Number(payload.likes || 0),

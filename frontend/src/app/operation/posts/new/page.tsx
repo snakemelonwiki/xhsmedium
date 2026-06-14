@@ -96,6 +96,8 @@ export default function OperationPostNewPage() {
             platform?: string;
             postUrl?: string;
             title?: string;
+            /** 作品文案/描述（抖音从页面 XPath 提取） */
+            copywriting?: string;
             authorName?: string;
             authorId?: string;
             likes?: number;
@@ -105,6 +107,8 @@ export default function OperationPostNewPage() {
             /** 抓取截图：原图 / 缩略图（同源低分辨率图）。无封面时为空串。 */
             coverImageUrl?: string;
             coverThumbUrl?: string;
+            /** 发布日期（小红书页面解析，YYYY-MM-DD） */
+            publishedAt?: string;
             parsed?: boolean;
             warning?: string;
           };
@@ -124,7 +128,7 @@ export default function OperationPostNewPage() {
       if (mySeq !== parseSeqRef.current) {
         return;
       }
-      const nextValues: Record<string, string | number> = {};
+      const nextValues: Record<string, unknown> = {};
 
       // 平台：后端可能返回 '小红书'/'抖音'（中文）/ 'xiaohongshu'/'douyin'（英文），
       //   都要映射到表单值 xiaohongshu/douyin。同时用 URL 兜底识别。
@@ -136,12 +140,8 @@ export default function OperationPostNewPage() {
         nextValues.title = data.title;
       }
 
-      // 抖音解析成功后，将标题写入文案字段（如果文案为空）
-      if (data?.parsed && data?.title && !form.getFieldValue('copywriting') && data?.platform === '抖音') {
-        nextValues.copywriting = data.title;
-      }
-
       // 作者信息回填：优先按账号 UID 精确匹配，其次按名称模糊匹配
+      let matchedAccount: AccountOption | undefined;
       if (data?.authorId || data?.authorName) {
         const matchedByUid = data?.authorId
           ? accountOptions.find((a) => a.accountUid && a.accountUid === data.authorId)
@@ -154,46 +154,42 @@ export default function OperationPostNewPage() {
               return n1 === n2 || n1.includes(n2) || n2.includes(n1);
             })
           : undefined;
-        const matched = matchedByUid || matchedByName;
-        if (matched) {
-          nextValues.accountId = matched.id;
+        matchedAccount = matchedByUid || matchedByName;
+      }
+
+      // 解析链接成功后，粘贴新 URL 即代表要录入新作品：
+      // - 后端可解析字段直接覆盖表单已有值；
+      // - 后端无法解析但表单已有旧值的字段统一清回默认/空值，避免 URL A 的旧数据残留覆盖 URL B。
+      if (data?.parsed === true) {
+        nextValues.postUrl = rawUrl;
+        nextValues.postType = '获客贴';
+        nextValues.title = data.title || inferTitleFromUrl(rawUrl);
+        nextValues.publishedAt = data.publishedAt ? dayjs(data.publishedAt) : undefined;
+        nextValues.copywriting = data.copywriting || data.title || '';
+        nextValues.likes = data.likes ?? 0;
+        nextValues.comments = data.comments ?? 0;
+        nextValues.favorites = data.favorites ?? 0;
+        nextValues.shares = data.shares ?? 0;
+        nextValues.accountId = matchedAccount?.id;
+        nextValues.note = '';
+        nextValues.coverImageUrl = data.coverImageUrl || undefined;
+        latestThumbRef.current = data.coverThumbUrl || data.coverImageUrl || '';
+      } else {
+        // 兜底标题
+        if (!nextValues.title && !form.getFieldValue('title')) {
+          nextValues.title = inferTitleFromUrl(rawUrl);
+        }
+        // 兜底封面：只要后端返回了 coverImageUrl，就回填到表单。
+        //   coverThumbUrl 通过 latestThumbRef 一并带上（与手工上传走同一条提交路径）。
+        if (data.coverImageUrl) {
+          nextValues.coverImageUrl = data.coverImageUrl;
+          latestThumbRef.current = data.coverThumbUrl || data.coverImageUrl;
+        }
+        if (matchedAccount) {
+          nextValues.accountId = matchedAccount.id;
         }
       }
-      // 修复 (2026-06-05)：抓取成功时直接覆盖指标，不要"仅在未填写时回填"。
-      //   旧逻辑的问题：用户先粘贴 URL A → 指标 A 写进表单（初始 0，!0=true 命中）；
-      //   再粘贴 URL B → !指标A=true 时跳过回填，旧指标一直留着，看起来"没覆盖"。
-      //   粘贴新 URL 即代表要录入新帖子，指标也应该是新帖子的；用户如果想保留旧值，
-      //   不应该再粘贴新 URL（或者用手动录入入口）。
-      //
-      // 修复 (2026-06-06)：原本"指标+封面"都包在 if (data?.parsed) 里，
-      //   但后端某些路径可能没设 parsed 字段（如登录墙/旧版 controller），导致封面/指标
-      //   全部不写。现在改为：parsed===true 才覆盖指标；封面单独看 coverImageUrl 是否存在，
-      //   只要有图就回填（哪怕 parsed=false，至少封面能用）。
-      if (data?.parsed === true) {
-        if (data.likes !== undefined) nextValues.likes = data.likes;
-        if (data.comments !== undefined) nextValues.comments = data.comments;
-        if (data.favorites !== undefined) nextValues.favorites = data.favorites;
-        if (data.shares !== undefined) nextValues.shares = data.shares;
-      }
-      // 封面截图：只要后端返回了 coverImageUrl，就回填到表单。
-      //   coverThumbUrl 通过 latestThumbRef 一并带上（与手工上传走同一条提交路径）。
-      //   之前用户要自己截图再上传；现在 Playwright 在后端抓完指标顺手截一张并 sharp 压成
-      //   ≤720px jpeg，前端无需任何额外操作。
-      if (data.coverImageUrl) {
-        nextValues.coverImageUrl = data.coverImageUrl;
-        latestThumbRef.current = data.coverThumbUrl || data.coverImageUrl;
-      }
-
-      // 兜底标题
-      if (!nextValues.title && !form.getFieldValue('title')) {
-        nextValues.title = inferTitleFromUrl(rawUrl);
-      }
       form.setFieldsValue(nextValues);
-
-      // 发布日期：小红书解析成功后回填
-      if (data?.publishedAt) {
-        form.setFieldValue('publishedAt', dayjs(data.publishedAt));
-      }
 
       if (data?.parsed) {
         const hasCover = !!(data.coverImageUrl);

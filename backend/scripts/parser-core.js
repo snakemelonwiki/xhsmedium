@@ -82,11 +82,13 @@ async function fetchWithRetry(url, { retry = 3, timeout = 20000, log = () => {} 
     try {
       log(`第 ${attempt + 1} 次抓取 ${platform}: ${url}`);
       const data = await fetchMetricsFromUrl(url);
+      log(`抓取结果 ${platform}: title=${(data.title || '').slice(0, 60)}, publishedAt=${data.publishedAt || ''}`);
       return {
         ok: true,
         data: {
           platform: data.platform || platform,
           title: data.title || "",
+          copywriting: data.copywriting || "",
           authorName: data.authorName || "",
           authorId: data.authorId || "",
           likes: Number(data.likes || 0),

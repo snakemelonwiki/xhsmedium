@@ -7,6 +7,8 @@ const CACHE_TTL_MS = 5 * 60 * 1000; // 5 分钟缓存
 export interface ScrapedMetrics {
   platform: string;
   title: string;
+  /** 作品文案/描述（抖音从页面 XPath 提取） */
+  copywriting?: string;
   authorName?: string;
   authorId?: string;
   likes: number;
@@ -81,6 +83,7 @@ export class PostsMetricsService {
     const scraped: ScrapedMetrics = {
       platform: d.platform,
       title: d.title,
+      copywriting: d.copywriting || undefined,
       authorName: d.authorName || undefined,
       authorId: d.authorId || undefined,
       likes: Number(d.likes || 0),

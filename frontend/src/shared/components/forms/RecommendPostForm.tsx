@@ -100,13 +100,28 @@ export function RecommendPostForm({
       }
       if (mySeq !== parseSeqRef.current) return;
 
-      const nextValues: Record<string, string | number> = {};
+      const nextValues: Record<string, string | number | dayjs.Dayjs> = {};
       const platformKey = mapPlatformToKey(data?.platform) || inferPlatformFromUrl(rawUrl);
       if (platformKey) nextValues.platform = platformKey;
       if (data?.title) nextValues.title = data.title;
-      if (data?.parsed && data?.title && !form.getFieldValue('copywriting') && data?.platform === '抖音') {
-        nextValues.copywriting = data.title;
+
+      // 解析成功后，标题/文案回填：
+      // - 小红书：后端 title 即笔记文案，直接覆盖文案
+      // - 抖音：优先用后端从页面 XPath 提取的 copywriting 直接覆盖；
+      //        若 copywriting 为空则兜底用 title
+      if (data?.parsed) {
+        if (platformKey === 'xiaohongshu') {
+          nextValues.copywriting = data.copywriting || data.title || '';
+        } else if (platformKey === 'douyin') {
+          nextValues.copywriting = data.copywriting || data.title || '';
+        }
       }
+
+      // 发布日期：小红书解析成功后回填/覆盖已有表单值
+      if (data?.publishedAt) {
+        nextValues.publishedAt = dayjs(data.publishedAt);
+      }
+
       // 作者信息回填：优先按账号 UID 精确匹配，其次按名称模糊匹配
       if (data?.authorId || data?.authorName) {
         const matchedByUid = data?.authorId
@@ -137,11 +152,6 @@ export function RecommendPostForm({
         nextValues.title = inferTitleFromUrl(rawUrl);
       }
       form.setFieldsValue(nextValues);
-
-      // 发布日期：小红书解析成功后回填
-      if (data?.publishedAt) {
-        form.setFieldValue('publishedAt', dayjs(data.publishedAt));
-      }
 
       if (data?.parsed) {
         hideLoading();

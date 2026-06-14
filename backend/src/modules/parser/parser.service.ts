@@ -22,6 +22,8 @@ export interface ParserSuccess {
   data: {
     platform: string;
     title: string;
+    /** 作品文案/描述（抖音从页面 XPath 提取，小红书目前同 title） */
+    copywriting?: string;
     /** 作者昵称（抖音/小红书页面解析） */
     authorName?: string;
     /** 作者平台 ID（抖音/小红书页面解析） */

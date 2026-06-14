@@ -295,6 +295,8 @@ export class PostsService {
     platform: string;
     postUrl: string;
     title: string;
+    /** 作品文案/描述（抖音从页面 XPath 提取） */
+    copywriting?: string;
     authorName?: string;
     authorId?: string;
     likes: number;
@@ -351,6 +353,7 @@ export class PostsService {
         platform: scraped.platform || platform,
         postUrl: normalizedUrl,
         title: String(scraped.title || fallback.title),
+        copywriting: String(scraped.copywriting || scraped.title || ''),
         authorName: scraped.authorName || undefined,
         authorId: scraped.authorId || undefined,
         likes: Number(scraped.likes || 0),

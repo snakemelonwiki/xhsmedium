@@ -11,6 +11,7 @@ import { LeadsService } from './leads.service';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { CollaborationTasksModule } from '../collaboration-tasks/collaboration-tasks.module';
 import { OperationLogsModule } from '../operation-logs/operation-logs.module';
+import { UsersModule } from '../users/users.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { OperationLogsModule } from '../operation-logs/operation-logs.module';
     NotificationsModule,
     CollaborationTasksModule,
     OperationLogsModule,
+    UsersModule,
   ],
   controllers: [LeadsController],
   providers: [LeadsService],

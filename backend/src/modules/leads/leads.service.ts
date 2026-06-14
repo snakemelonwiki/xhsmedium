@@ -11,6 +11,7 @@ import { makeId } from '../../shared/utils/id-generator';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NOTIFICATION_TYPES } from '../../shared/notifications';
 import { OperationLogsService } from '../operation-logs/operation-logs.service';
+import { UsersService } from '../users/users.service';
 
 interface BoardPatchDto {
   status?: string;
@@ -136,74 +137,30 @@ export class LeadsService {
     private readonly collaborationRepository: Repository<CollaborationTask>,
     private readonly notificationsService: NotificationsService,
     private readonly operationLogsService: OperationLogsService,
+    private readonly usersService: UsersService,
   ) {}
 
   /**
    * T5: 自动轮转销售分配（按运营账号维度）。
    * 内存级 round-robin，每次分配后 index + 1。
+   *
+   * 候选列表复用 usersService.findAssignableSalesUsersPaged，确保与前端下拉框
+   * 的过滤/去重/测试账号排除规则一致。
    */
   private lastAssignedSalesIndex = new Map<string, number>();
 
   async autoAssignSales(employeeId: string): Promise<{ userId: string; userName: string } | null> {
-    const disabledStatuses = ['离职', '停用', 'inactive', 'disabled', 'leave', 'resign', 'stopped'];
-    const statusPlaceholders = disabledStatuses.map(() => '?').join(',');
-    const rows: Array<{
-      id: string;
-      username: string;
-      employeeName: string;
-      capacityPaused: number;
-      capacityPausedAt: Date | null;
-    }> = await this.userRepository.manager.query(
-      `
-      SELECT
-        u.id,
-        u.username,
-        e.name AS employeeName,
-        u.capacity_paused AS capacityPaused,
-        u.capacity_paused_at AS capacityPausedAt
-      FROM users u
-      INNER JOIN employees e ON u.employee_id = e.id COLLATE utf8mb4_unicode_ci
-      WHERE u.role = ?
-        AND u.status = 'active'
-        AND e.status NOT IN (${statusPlaceholders})
-        AND u.id = (
-          SELECT u2.id
-          FROM users u2
-          WHERE u2.employee_id = u.employee_id
-            AND u2.role = 'sales'
-            AND u2.status = 'active'
-          ORDER BY u2.created_at DESC, u2.id DESC
-          LIMIT 1
-        )
-      ORDER BY u.created_at ASC
-      `,
-      ['sales', ...disabledStatuses],
-    );
-    const now = new Date();
-    const ONE_HOUR_MS = 60 * 60 * 1000;
-    const available = rows.filter((u) => {
-      if (!u.capacityPaused) return true;
-      if (!u.capacityPausedAt) return true;
-      const elapsed = now.getTime() - new Date(u.capacityPausedAt).getTime();
-      return elapsed > ONE_HOUR_MS;
-    });
+    const { items } = await this.usersService.findAssignableSalesUsersPaged({ limit: 10000, offset: 0 });
+    // capacityPaused 为 true 表示处于 1 小时上限冻结期，跳过
+    const available = items.filter((u) => !u.capacityPaused);
     if (available.length === 0) return null;
+
     const key = employeeId || '_global';
     const currentIndex = this.lastAssignedSalesIndex.get(key) || 0;
     const nextIndex = currentIndex % available.length;
     this.lastAssignedSalesIndex.set(key, currentIndex + 1);
     const chosen = available[nextIndex];
-    // 惰性恢复 capacityPaused
-    if (chosen.capacityPaused && chosen.capacityPausedAt) {
-      const elapsed = now.getTime() - new Date(chosen.capacityPausedAt).getTime();
-      if (elapsed > ONE_HOUR_MS) {
-        await this.userRepository.update(chosen.id, {
-          capacityPaused: 0 as any,
-          capacityPausedAt: null as any,
-        });
-      }
-    }
-    return { userId: chosen.id, userName: chosen.employeeName || chosen.username };
+    return { userId: String(chosen.id), userName: chosen.employeeName || chosen.username };
   }
 
   /**
@@ -1668,12 +1625,14 @@ export class LeadsService {
       platform: row.platform,
       contactInfo: row.contactInfo,
       nickname: row.nickname,
+      wechat: row.wechat || null,
       budget: row.budget,
       majorContent: row.majorContent,
       ip: row.ip,
       status: row.status,
       dealAmount: row.dealAmount,
       dealStatus: row.dealStatus,
+      invalidReason: row.invalidReason || null,
       note: row.note,
       requirementNote: row.requirementNote,
       supervisorNote: row.supervisorNote,

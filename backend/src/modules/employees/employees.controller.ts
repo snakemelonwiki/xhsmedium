@@ -1,5 +1,6 @@
 import { Controller, Get, Post, Put, Patch, Delete, Body, Param, Req, Res, Query, UseGuards } from '@nestjs/common';
 import { EmployeesService } from './employees.service';
+import { validatePasswordStrength } from '../../shared/utils/password';
 import { Request, Response } from 'express';
 import { OperationLogsService } from '../operation-logs/operation-logs.service';
 import { AuthGuard } from '../../common/auth.guard';
@@ -206,8 +207,13 @@ export class EmployeesController {
         if (!body.loginUsername || !String(body.loginUsername).trim()) {
           return res.status(400).json({ ok: false, message: '创建登录账号时，loginUsername 为必填字段' });
         }
-        if (!body.loginPassword || !String(body.loginPassword).trim()) {
+        const loginPassword = String(body.loginPassword || '').trim();
+        if (!loginPassword) {
           return res.status(400).json({ ok: false, message: '创建登录账号时，loginPassword 为必填字段' });
+        }
+        const strength = validatePasswordStrength(loginPassword);
+        if (!strength.valid) {
+          return res.status(400).json({ ok: false, message: strength.message });
         }
       }
 
