@@ -3,7 +3,7 @@
 import { DownloadOutlined, ReloadOutlined } from '@ant-design/icons';
 import { Alert, Button, Card, Input, Modal, Pagination, Select, Space, Table, Tag, Typography, message } from 'antd';
 import type { TableColumnsType } from 'antd';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 
 import { createOrderFollowRecord, listOrders, remindSalesPayment, updateOrder } from '@/shared/api/orders';
@@ -108,7 +108,8 @@ export function OrderTable({
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [total, setTotal] = useState(0);
-  const [statusFilter, setStatusFilter] = useState(status ?? '');
+  const searchParams = useSearchParams();
+  const [statusFilter, setStatusFilter] = useState(searchParams?.get('status') || status || '');
   const [handoverFilter, setHandoverFilter] = useState<HandoverStatusCode | ''>('');
   const [abnormalOnly, setAbnormalOnly] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -290,15 +291,6 @@ export function OrderTable({
     loadOrders(1, pageSize, statusFilter, handoverFilter, abnormalOnly);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scope, statusFilter, handoverFilter, abnormalOnly]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined' || status) return;
-    const nextStatus = new URLSearchParams(window.location.search).get('status') || '';
-    if (nextStatus && nextStatus !== statusFilter) {
-      setStatusFilter(nextStatus);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status]);
 
   const columns = useMemo<TableColumnsType<OrderItem>>(() => {
     const baseColumns: TableColumnsType<OrderItem> = [
