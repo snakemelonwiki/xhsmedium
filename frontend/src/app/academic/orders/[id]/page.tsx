@@ -1292,15 +1292,6 @@ export default function AcademicOrderDetailPage() {
             </Form>
           </Card>
 
-          <Card title="销售跟进摘要">
-            <Typography.Paragraph type="secondary" style={{ marginBottom: 8 }}>
-              仅展示销售向教务/主管公开同步的进展摘要；销售与客户的私密沟通不在此展示。
-            </Typography.Paragraph>
-            <Typography.Paragraph style={{ whiteSpace: 'pre-wrap' }}>
-              {emptyText(order?.salesSummary)}
-            </Typography.Paragraph>
-          </Card>
-
           {isAcademic || currentUser?.role === 'academic_supervisor' ? (
             <Card
               title="订单异常反馈"
