@@ -11,6 +11,7 @@ import { User } from '../../entities/user.entity';
 import { makeId } from '../../shared/utils/id-generator';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NOTIFICATION_TYPES } from '../../shared/notifications';
+import { RemindersService as OrderRemindersService } from './reminders.service';
 
 type PaidStatus = 'unpaid' | 'partial' | 'paid' | 'refunded';
 type OrderStatus =
@@ -24,6 +25,13 @@ type OrderStatus =
   | 'abnormal'
   | 'closed';
 
+type BackupTeacherRow = {
+  teacherId?: string | null;
+  teacherName?: string | null;
+  teacherPhone?: string | null;
+  teacherStability?: string | null;
+};
+
 const ALLOWED_PAID: PaidStatus[] = ['unpaid', 'partial', 'paid', 'refunded'];
 const ALLOWED_ORDER_STATUS: OrderStatus[] = [
   'pending_accept',
@@ -36,7 +44,15 @@ const ALLOWED_ORDER_STATUS: OrderStatus[] = [
   'abnormal',
   'closed',
 ];
+const ACADEMIC_DELIVERY_ROLES = ['admin', 'owner', 'supervisor', 'academic', 'academic_supervisor'];
 const ALLOWED_HANDOVER_STATUS: HandoverStatusCode[] = [...HANDOVER_STATUS_CODES];
+const ACADEMIC_STAGE_TO_STATUS: Record<string, OrderStatus> = {
+  待补客户资料: 'awaiting_client_info',
+  待补资料: 'awaiting_client_info',
+  awaiting_client_info: 'awaiting_client_info',
+  待分配老师: 'awaiting_teacher',
+  awaiting_teacher: 'awaiting_teacher',
+};
 
 // N-P1-02: ORDER_UPDATED 通知去重窗口。
 // 同一 (orderId, 变化字段组合) 在窗口内只发一次，避免客户端 PATCH 重试
@@ -49,12 +65,15 @@ const ORDER_UPDATED_FIELD_LABELS: Record<string, string> = {
   academicUserId: '教务归属',
   serviceType: '服务类型',
   amount: '订单金额',
+  paymentStage: '付款阶段',
+  clientPaid: '付款金额',
   remark: '备注',
 };
 
 interface CloseDealDto {
   serviceType?: string | null;
   amount?: number | string | null;
+  clientPaid?: number | string | null;
   remark?: string | null;
   // v1.3 / SA-8 销售成交录入扩展字段
   productType?: string | null;
@@ -91,6 +110,8 @@ interface OrderPatchDto {
   academic_user_id?: string | null;
   service_type?: string | null;
   amount?: number | string | null;
+  payment_stage?: string | null;
+  client_paid?: number | string | null;
   remark?: string | null;
 }
 
@@ -170,6 +191,12 @@ export class OrdersService {
     if (amountNum === null) {
       throw new BadRequestException('订单金额必填且必须大于0');
     }
+    const paidStatus = this.normalizeRequiredPaidStatus(dto.paidStatus);
+    const paymentStage = this.normalizeRequiredPaymentStage(dto.paymentStage);
+    const clientPaid = this.normalizePositiveMoney(dto.clientPaid);
+    if (clientPaid === null) {
+      throw new BadRequestException('付款金额必填且必须大于0');
+    }
     const orderId = makeId();
     const orderFinanceId = makeId();
     let leadContact = '';
@@ -203,6 +230,12 @@ export class OrdersService {
       const remark = this.composeRemark(dto, pricing);
       // 上面已经校验 amountNum > 0；统一以 string 形式落库。
       const amountStr = pricing.finalAmount;
+      const clientPending = this.computePending(amountStr, clientPaid) || '0.00';
+      const customerName = lead.nickname || lead.contactInfo || null;
+      const educationLevel = lead.clientDegree || null;
+      const major = lead.clientMajorResearch || lead.majorContent || null;
+      const area = lead.ip || null;
+      const articlePurpose = lead.intention || null;
       await manager.query(
         `UPDATE leads
          SET process_status = ?, deal_status = ?, status = ?, updated_at = CURRENT_TIMESTAMP
@@ -212,8 +245,11 @@ export class OrdersService {
       await manager.query(
         `INSERT INTO orders
          (id, lead_id, sales_user_id, academic_user_id, service_type, amount,
-          paid_status, order_status, handover_status, remark, order_code, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+          paid_status, order_status, handover_status, remark, order_code,
+          product_type, guarantee_type, payment_stage, customer_name,
+          education_level, major, area, article_purpose, sales_contact,
+          created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
         [
           orderId,
           leadId,
@@ -221,11 +257,20 @@ export class OrdersService {
           null,
           mergedServiceType,
           amountStr,
-          dto.paidStatus || 'unpaid',
+          paidStatus,
           'to_receive',
           'handed_over',
           remark,
           orderCode,
+          dto.productType || null,
+          dto.guaranteeType || null,
+          paymentStage,
+          customerName,
+          educationLevel,
+          major,
+          area,
+          articlePurpose,
+          lead.contactInfo || null,
         ],
       );
 
@@ -239,8 +284,8 @@ export class OrdersService {
           orderFinanceId,
           orderId,
           amountStr,
-          '0.00',
-          amountStr,
+          clientPaid,
+          clientPending,
           null,
           null,
           null,
@@ -339,7 +384,8 @@ export class OrdersService {
       ? `原金额 ¥${pricing.originalAmount} | 不合格作品半价入单金额 ¥${pricing.finalAmount}`
       : dto.amount != null && dto.amount !== '' ? `金额 ¥${dto.amount}` : '';
     const stageLine = dto.paymentStage ? `付款阶段 ${dto.paymentStage}` : '';
-    const lines = [codeLine, amountLine, stageLine].filter(Boolean);
+    const paidLine = dto.clientPaid != null && dto.clientPaid !== '' ? `已付 ¥${dto.clientPaid}` : '';
+    const lines = [codeLine, amountLine, stageLine, paidLine].filter(Boolean);
     return lines.join(' | ') || '销售成交';
   }
 
@@ -574,6 +620,7 @@ export class OrdersService {
     if (options.role === 'academic' || options.role === 'academic_supervisor' || options.sessionRole === 'academic' || options.sessionRole === 'academic_supervisor') {
       if (options.scope === 'pool') {
         qb.andWhere('o.academic_user_id IS NULL');
+        this.applyAcademicClaimableFilter(qb);
         return;
       }
       if (options.scope === 'assigned' || options.scope === 'mine') {
@@ -584,6 +631,7 @@ export class OrdersService {
       // 默认教务视角（scope=academic 或未传）：池单 + 自己已认领
       if (!options.currentUserId) {
         qb.andWhere('o.academic_user_id IS NULL');
+        this.applyAcademicClaimableFilter(qb);
         return;
       }
       qb.andWhere(
@@ -670,6 +718,7 @@ export class OrdersService {
     waitingTeacher: number;
     nearDue: number;
     abnormal: number;
+    targets: Record<string, { orderId: string; todoType: string; targetModule: string } | null>;
   }> {
     // academic_supervisor 与 admin/owner 走全量统计，否则仅池单+自己已认领
     const effectiveRole = (sessionRole === 'academic_supervisor' || sessionRole === 'admin' || sessionRole === 'owner' || sessionRole === 'supervisor')
@@ -689,16 +738,31 @@ export class OrdersService {
       return Number.isFinite(n) ? n : 0;
     }
 
+    async function firstOrderId(qb: any): Promise<string | null> {
+      if ((qb as any)._earlyReturnEmpty) return null;
+      const row = await qb
+        .select('o.id', 'orderId')
+        .orderBy('o.updated_at', 'ASC')
+        .getRawOne();
+      return (row as { orderId?: string } | undefined)?.orderId ?? null;
+    }
+
     const buildBase = () => {
       const qb = this.orderRepository.createQueryBuilder('o');
       this.applyOrdersScope(qb, scope);
       return qb;
     };
+    const buildClaimableReceive = () => {
+      const qb = this.orderRepository
+        .createQueryBuilder('o')
+        .andWhere('o.academic_user_id IS NULL')
+        .andWhere('o.order_status = :s', { s: 'to_receive' });
+      this.applyAcademicClaimableFilter(qb);
+      return qb;
+    };
 
-    // 待接收：池单（academic_user_id IS NULL） + 状态 to_receive。
-    const pendingReceive = await count(
-      buildBase().andWhere('o.order_status = :s', { s: 'to_receive' }),
-    );
+    // 待接收：首页数量与领取池口径一致，只展示已付定金且有客户付款金额的池单。
+    const pendingReceive = await count(buildClaimableReceive());
 
     const inProgress = await count(
       buildBase().andWhere('o.order_status = :s', { s: 'in_progress' }),
@@ -727,6 +791,27 @@ export class OrdersService {
       buildBase().andWhere('o.order_status = :s', { s: 'abnormal' }),
     );
 
+    const [pendingReceiveTarget, waitingMaterialTarget, waitingTeacherTarget, nearDueTarget] =
+      await Promise.all([
+        firstOrderId(buildClaimableReceive()),
+        firstOrderId(buildBase().andWhere('o.order_status = :s', { s: 'awaiting_client_info' })),
+        firstOrderId(buildBase().andWhere('o.order_status = :s', { s: 'awaiting_teacher' })),
+        firstOrderId(
+          buildBase()
+            .andWhere(
+              "o.order_status IN (:...nearStatuses)",
+              { nearStatuses: ['in_progress', 'awaiting_client_info', 'awaiting_teacher', 'to_deliver'] },
+            )
+            .andWhere('o.updated_at < (NOW() - INTERVAL 5 DAY)'),
+        ),
+      ]);
+
+    const makeTarget = (
+      orderId: string | null,
+      todoType: string,
+      targetModule: string,
+    ) => (orderId ? { orderId, todoType, targetModule } : null);
+
     return {
       pendingReceive,
       inProgress,
@@ -734,7 +819,53 @@ export class OrdersService {
       waitingTeacher,
       nearDue,
       abnormal,
+      targets: {
+        pendingReceive: makeTarget(pendingReceiveTarget, 'pendingReceive', 'overview'),
+        inProgress: null,
+        waitingMaterial: makeTarget(waitingMaterialTarget, 'waitingMaterial', 'client-info'),
+        waitingTeacher: makeTarget(waitingTeacherTarget, 'waitingTeacher', 'teacher'),
+        nearDue: makeTarget(nearDueTarget, 'nearDue', 'progress'),
+        abnormal: null,
+      },
     };
+  }
+
+  /**
+   * 教务领取池只展示已付定金且有付款金额的订单。
+   */
+  private applyAcademicClaimableFilter(qb: any): void {
+    qb.andWhere(`(
+      o.payment_stage IS NOT NULL
+      AND o.payment_stage NOT LIKE :unpaidStage
+      AND o.payment_stage NOT LIKE :unpaidPaymentStage
+    )`, {
+      unpaidStage: '%未付%',
+      unpaidPaymentStage: '%未付款%',
+    });
+    qb.andWhere(`(
+      o.payment_stage LIKE :paidDepositStage
+      OR o.payment_stage LIKE :paidMiddleStage
+      OR o.payment_stage LIKE :paidFinalStage
+      OR o.payment_stage LIKE :depositStage
+      OR o.payment_stage LIKE :middleStage
+      OR o.payment_stage LIKE :finalStage
+      OR o.payment_stage LIKE :fullPaidStage
+      OR o.payment_stage LIKE :singleStage
+    )`, {
+      paidDepositStage: '%已付定金%',
+      paidMiddleStage: '%已付中期%',
+      paidFinalStage: '%已付尾款%',
+      depositStage: '%定金%',
+      middleStage: '%中期%',
+      finalStage: '%尾款%',
+      fullPaidStage: '%全款%',
+      singleStage: '%单期%',
+    });
+    qb.andWhere(`o.id IN (
+      SELECT CONVERT(f.order_id USING utf8mb4) COLLATE utf8mb4_unicode_ci
+      FROM order_finance f
+      WHERE f.client_paid IS NOT NULL AND f.client_paid > 0
+    )`);
   }
 
   async findOne(
@@ -851,7 +982,7 @@ export class OrdersService {
    * 主表字段更新 orders；作者与投稿信息采用按订单整体替换，避免旧位次残留；
    * 财务表为 1:1 upsert，并自动计算客户/老师待付金额。
    *
-   * 角色校验：付款信息（finance）只允许销售修改，其余角色直接报错。
+   * 角色校验：交付详情只允许教务/admin/owner 修改，销售付款走订单付款更新接口。
    */
   async saveOrderDelivery(orderId: string, dto: OrderDeliveryDto, actor: OrderActor): Promise<void> {
     const order = await this.orderRepository.findOne({ where: { id: orderId } });
@@ -860,19 +991,8 @@ export class OrdersService {
     }
 
     const role = actor.role || '';
-    const userId = actor.userId || '';
-    const hasFinancePayload = this.hasNonEmptyObjectFields(dto.finance);
-    const isAdminLike = role === 'admin' || role === 'owner' || role === 'supervisor';
-    const isSales = role === 'sales';
-    const isAcademic = role === 'academic' || role === 'academic_supervisor';
-
-    if (hasFinancePayload) {
-      if (isAcademic) {
-        throw new ForbiddenException('教务角色不允许修改订单财务信息');
-      }
-      if (isSales && order.salesUserId !== userId) {
-        throw new ForbiddenException('仅订单销售本人可以修改财务信息');
-      }
+    if (!ACADEMIC_DELIVERY_ROLES.includes(role)) {
+      throw new ForbiddenException('当前角色不允许修改教务交付详情');
     }
 
     const orderPatch = this.buildOrderDeliveryPatch(dto.order || {});
@@ -957,6 +1077,47 @@ export class OrdersService {
     return Boolean(uid && (order.salesUserId === uid || order.academicUserId === uid));
   }
 
+  /**
+   * 教务提醒订单对应销售催收客户付款。
+   */
+  async remindSalesPayment(
+    orderId: string,
+    actor: { userId?: string; role?: string },
+  ): Promise<{ ok: true; receiverId: string }> {
+    const order = await this.orderRepository.findOne({ where: { id: orderId } });
+    if (!order) {
+      throw new NotFoundException('order not found');
+    }
+    const role = actor?.role || '';
+    if (role !== 'academic' && role !== 'admin' && role !== 'owner') {
+      throw new ForbiddenException('当前角色不允许提醒销售催款');
+    }
+    const canAccess = await this.canAccessOrder(orderId, actor);
+    if (!canAccess) {
+      throw new NotFoundException('order not found');
+    }
+    if (!order.salesUserId) {
+      throw new BadRequestException('订单未关联销售，无法发送催款提醒');
+    }
+
+    const contentParts = [
+      `订单 ${order.id}`,
+      order.customerName ? `客户 ${order.customerName}` : '客户未填写',
+      order.paymentStage ? `付款阶段 ${order.paymentStage}` : '付款阶段未填写',
+    ];
+    await this.notificationsService.create({
+      receiverIds: [order.salesUserId],
+      senderId: actor.userId || null,
+      portType: 'sales',
+      typeCode: NOTIFICATION_TYPES.REMINDER,
+      title: '催款提醒',
+      content: `${contentParts.join('，')}，请尽快跟进客户付款。`,
+      relatedId: order.id,
+      relatedType: 'order',
+    });
+    return { ok: true, receiverId: order.salesUserId };
+  }
+
   async update(id: string, actorUserId: string, dto: OrderPatchDto): Promise<void> {
     const current = await this.orderRepository.findOne({ where: { id } });
     if (!current) {
@@ -982,6 +1143,13 @@ export class OrdersService {
         next.paidStatus = dto.paid_status;
       }
     }
+    if (dto.payment_stage !== undefined) {
+      const nextPaymentStage = dto.payment_stage ? String(dto.payment_stage).trim() : null;
+      if (nextPaymentStage !== current.paymentStage) {
+        changedFields.push('paymentStage');
+        next.paymentStage = nextPaymentStage;
+      }
+    }
     if (dto.academic_user_id !== undefined) {
       const nextAcademic = dto.academic_user_id || null;
       if (nextAcademic !== current.academicUserId) {
@@ -1003,6 +1171,10 @@ export class OrdersService {
         next.amount = nextAmount;
       }
     }
+    if (dto.client_paid !== undefined) {
+      await this.updateClientPaidFinance(id, current.amount, dto.client_paid);
+      changedFields.push('clientPaid');
+    }
     if (dto.remark !== undefined) {
       const nextRemark = dto.remark || null;
       if (nextRemark !== current.remark) {
@@ -1011,7 +1183,13 @@ export class OrdersService {
       }
     }
     if (changedFields.length === 0) return;
-    await this.orderRepository.update(id, next);
+    if (Object.keys(next).length > 0) {
+      await this.orderRepository.update(id, next);
+    }
+    const updatedForClaim = { ...current, ...next } as Order;
+    if (changedFields.includes('clientPaid') || changedFields.includes('paymentStage') || changedFields.includes('paidStatus')) {
+      await this.notifyAcademicIfClaimable(updatedForClaim, actorUserId);
+    }
 
     // N-P1-02: 订单状态/进度更新通知。
     // 接收方：订单的销售（始终）+ 主管/admin 兜底；portType='sales'。
@@ -1105,7 +1283,7 @@ export class OrdersService {
       userId: actorUserId,
       nodeType,
       content: dto.content ? String(dto.content).trim() : null,
-      nextRemindAt: dto.nextRemindAt ? new Date(dto.nextRemindAt) : null,
+      nextRemindAt: OrderRemindersService.normalizeRemindAt(dto.nextRemindAt ?? null),
       remindStage: dto.remindStage ? String(dto.remindStage).trim() : null,
       attachmentUrl: dto.attachmentUrl || null,
       attachmentName: dto.attachmentName || null,
@@ -1283,7 +1461,7 @@ export class OrdersService {
           portType: 'academic',
           typeCode: NOTIFICATION_TYPES.DEAL_CLOSED,
           title: '订单待接收',
-          content: `订单 ${orderId} 已交接，请尽快接单`,
+      content: `订单 ${orderId} 已交接，请尽快接单`,
           relatedId: orderId,
           relatedType: 'order',
         });
@@ -1291,6 +1469,38 @@ export class OrdersService {
     } catch (err: any) {
       // eslint-disable-next-line no-console
       console.error('[orders] notify hand_over failed', err?.message || err);
+    }
+  }
+
+  /**
+   * 付款信息补齐到可领取条件时，提醒教务领取订单。
+   */
+  private async notifyAcademicIfClaimable(order: Order, actorUserId: string): Promise<void> {
+    try {
+      await this.assertAcademicClaimable(order);
+      if (order.handoverStatus !== 'handed_over' || order.academicUserId) {
+        return;
+      }
+      const receivers = await this.userRepository.find({
+        where: { role: In(['academic', 'admin', 'owner']) },
+        select: { id: true },
+      });
+      const ids = receivers.map((u) => u.id).filter((id) => id && id !== actorUserId);
+      if (ids.length === 0) return;
+      await this.notificationsService.create({
+        receiverIds: ids,
+        senderId: actorUserId || null,
+        portType: 'academic',
+        typeCode: NOTIFICATION_TYPES.DEAL_CLOSED,
+        title: '订单可领取',
+        content: `订单 ${order.orderCode || order.id} 已确认定金与付款金额，请尽快领取`,
+        relatedId: order.id,
+        relatedType: 'order',
+      });
+    } catch (err: any) {
+      if (err instanceof BadRequestException) return;
+      // eslint-disable-next-line no-console
+      console.error('[orders] notify academic claimable failed', err?.message || err);
     }
   }
 
@@ -1347,6 +1557,7 @@ export class OrdersService {
         `cannot accept from current status: ${order.handoverStatus}, must be handed_over`,
       );
     }
+    await this.assertAcademicClaimable(order);
 
     const nextOrderStatus: OrderStatus =
       order.orderStatus === 'to_receive' || order.orderStatus === 'pending_accept'
@@ -1597,6 +1808,12 @@ export class OrdersService {
       handoverStatus: row.handoverStatus,
       remark: row.remark,
       orderCode: row.orderCode,
+      productType: row.productType,
+      guaranteeType: row.guaranteeType,
+      paymentStage: row.paymentStage,
+      customerName: row.customerName,
+      articlePurpose: row.articlePurpose,
+      salesContact: row.salesContact,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };
@@ -1608,6 +1825,8 @@ export class OrdersService {
       productType: row.productType,
       orderNumber: row.orderCode || row.id,
       orderId: row.id,
+      institutionAccepted: Boolean(row.institutionAccepted),
+      orderStatus: row.orderStatus,
       customerName: row.customerName,
       degreeLevel: row.educationLevel,
       majorDirection: row.major,
@@ -1616,18 +1835,24 @@ export class OrdersService {
       registrationFormStatus: row.registrationStatus,
       infoSentToTeacherAt: row.handoverToTeacherAt,
       fundInfo: row.fundInfo,
+      fundRemark: row.fundRemark,
       submissionEmail: row.submitEmail,
       submissionEmailPassword: row.submitEmailPassword,
       authorRegistrationUrl: row.authorRegistrationUrl,
       authorRegistrationName: row.authorRegistrationName,
+      backupSubmissionUrl: row.backupSubmissionUrl,
+      backupSubmissionName: row.backupSubmissionName,
       operationMethod: row.operationMethod,
       plagiarismRequirement: row.checkedDuplicate ? '已查重' : '未确认',
       responsibleTeacher: row.dispatchedTeacherId,
       statusStage: row.orderStage,
       paperProgress: row.paperProgress,
       assignedTeacher: row.teacherId,
+      assignedTeacherName: row.teacherName,
       backupTeacher: row.backupTeacher,
+      backupTeachers: this.parseBackupTeachers(row.backupTeachers, row.backupTeacher),
       teacherPhone: row.teacherPhone,
+      teacherWechat: row.teacherWechat,
       teacherStability: row.teacherStability,
       innovationReviewStatus: row.innovationReviewStatus,
       innovationReviewAt: row.innovationReviewAt,
@@ -1683,6 +1908,11 @@ export class OrdersService {
         (patch as any)[key] = value ? new Date(value) : null;
       }
     };
+    const setBoolean = (key: keyof Order, value: any) => {
+      if (value !== undefined) {
+        (patch as any)[key] = value === true || value === 'true' || value === 1 || value === '1';
+      }
+    };
     setString('educationLevel', input.degreeLevel);
     setString('customerName', input.customerName);
     setString('major', input.majorDirection);
@@ -1691,20 +1921,38 @@ export class OrdersService {
     setString('registrationStatus', input.registrationFormStatus);
     setDate('handoverToTeacherAt', input.infoSentToTeacherAt);
     setString('fundInfo', input.fundInfo);
+    setString('fundRemark', input.fundRemark);
     setString('submitEmail', input.submissionEmail);
     setString('submitEmailPassword', input.submissionEmailPassword);
     setString('authorRegistrationUrl', input.authorRegistrationUrl);
     setString('authorRegistrationName', input.authorRegistrationName);
+    setString('backupSubmissionUrl', input.backupSubmissionUrl);
+    setString('backupSubmissionName', input.backupSubmissionName);
     setString('operationMethod', input.operationMethod);
     if (input.plagiarismRequirement !== undefined) {
       patch.checkedDuplicate = ['已查重', '需要查重'].includes(String(input.plagiarismRequirement));
     }
     setString('dispatchedTeacherId', input.responsibleTeacher);
-    setString('orderStage', input.statusStage);
+    setBoolean('institutionAccepted', input.institutionAccepted);
+    const academicStatus = this.normalizeAcademicStage(input.statusStage);
+    setString('orderStage', academicStatus ?? input.statusStage);
+    if (academicStatus || input.orderStatus !== undefined) {
+      const nextOrderStatus = academicStatus ?? String(input.orderStatus || '');
+      if (ALLOWED_ORDER_STATUS.includes(nextOrderStatus as OrderStatus)) {
+        patch.orderStatus = nextOrderStatus as OrderStatus;
+      }
+    }
     setString('paperProgress', input.paperProgress);
     setString('teacherId', input.assignedTeacher);
+    setString('teacherName', input.assignedTeacherName);
     setString('backupTeacher', input.backupTeacher);
+    if (input.backupTeachers !== undefined) {
+      const backupTeachers = this.normalizeBackupTeachers(input.backupTeachers);
+      patch.backupTeachers = backupTeachers.length > 0 ? JSON.stringify(backupTeachers) : null;
+      patch.backupTeacher = backupTeachers[0]?.teacherName || backupTeachers[0]?.teacherId || null;
+    }
     setString('teacherPhone', input.teacherPhone);
+    setString('teacherWechat', input.teacherWechat);
     setString('teacherStability', input.teacherStability);
     setString('innovationReviewStatus', input.innovationReviewStatus);
     setDate('innovationReviewAt', input.innovationReviewAt);
@@ -1746,6 +1994,48 @@ export class OrdersService {
     setString('riskLevel', input.riskLevel);
     setDate('nextFollowAt', input.nextFollowUpAt);
     return patch;
+  }
+
+  /**
+   * 将教务端第 0 块的两个阶段收敛到订单核心状态。
+   */
+  private normalizeAcademicStage(value: any): OrderStatus | null {
+    if (value === undefined || value === null || value === '') return null;
+    return ACADEMIC_STAGE_TO_STATUS[String(value)] ?? null;
+  }
+
+  /**
+   * 解析备用老师 JSON，兼容历史单个 backup_teacher 字段。
+   */
+  private parseBackupTeachers(raw: string | null, legacyBackupTeacher?: string | null): BackupTeacherRow[] {
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          return this.normalizeBackupTeachers(parsed);
+        }
+      } catch {
+        return legacyBackupTeacher ? [{ teacherName: legacyBackupTeacher }] : [];
+      }
+    }
+    return legacyBackupTeacher ? [{ teacherName: legacyBackupTeacher }] : [];
+  }
+
+  /**
+   * 规范化备用老师行，避免空行和多余字段写入订单。
+   */
+  private normalizeBackupTeachers(value: any): BackupTeacherRow[] {
+    if (!Array.isArray(value)) return [];
+    return value
+      .map((item) => ({
+        teacherId: item?.teacherId || item?.teacher_id ? String(item.teacherId || item.teacher_id) : null,
+        teacherName: item?.teacherName || item?.teacher_name ? String(item.teacherName || item.teacher_name) : null,
+        teacherPhone: item?.teacherPhone || item?.teacher_phone ? String(item.teacherPhone || item.teacher_phone) : null,
+        teacherStability: item?.teacherStability || item?.teacher_stability
+          ? String(item.teacherStability || item.teacher_stability)
+          : null,
+      }))
+      .filter((item) => item.teacherId || item.teacherName || item.teacherPhone || item.teacherStability);
   }
 
   private buildOrderAuthor(
@@ -1882,6 +2172,95 @@ export class OrdersService {
     const totalNum = Number(total || 0);
     const paidNum = Number(paid || 0);
     return (totalNum - paidNum).toFixed(2);
+  }
+
+  /**
+   * 成交时付款状态必填，且必须表示已经发生付款。
+   */
+  private normalizeRequiredPaidStatus(value: any): PaidStatus {
+    const paidStatus = String(value || '').trim() as PaidStatus;
+    if (!ALLOWED_PAID.includes(paidStatus) || paidStatus === 'unpaid' || paidStatus === 'refunded') {
+      throw new BadRequestException('付款状态必填，且必须为部分付款或已付款');
+    }
+    return paidStatus;
+  }
+
+  /**
+   * 成交/领取要求付款阶段明确进入已付节点。
+   */
+  private normalizeRequiredPaymentStage(value: any): string {
+    const paymentStage = String(value || '').trim();
+    if (!this.isPaidDepositStage(paymentStage)) {
+      throw new BadRequestException('付款阶段必填，且必须至少为已付定金');
+    }
+    return paymentStage;
+  }
+
+  /**
+   * 将销售侧付款金额写入订单财务表。
+   */
+  private async updateClientPaidFinance(
+    orderId: string,
+    orderAmountInput: string | null,
+    clientPaidInput: any,
+  ): Promise<void> {
+    const currentFinance = await this.orderFinanceRepository.findOne({ where: { orderId } });
+    const orderAmount = this.normalizeMoney(currentFinance?.orderAmount ?? orderAmountInput);
+    const clientPaid = this.normalizePositiveMoney(clientPaidInput);
+    if (clientPaid === null) {
+      throw new BadRequestException('付款金额必填且必须大于0');
+    }
+    await this.orderFinanceRepository.save({
+      ...(currentFinance || {}),
+      id: currentFinance?.id || makeId(),
+      orderId,
+      orderAmount,
+      clientPaid,
+      clientPending: this.computePending(orderAmount, clientPaid),
+      teacherPrice: currentFinance?.teacherPrice ?? null,
+      teacherPaid: currentFinance?.teacherPaid ?? null,
+      teacherPending: currentFinance?.teacherPending ?? null,
+    } as OrderFinance);
+  }
+
+  /**
+   * 教务领取硬条件：已付定金或后续付款阶段，且客户已付金额大于 0。
+   */
+  private async assertAcademicClaimable(order: Order): Promise<void> {
+    if (!this.isPaidDepositStage(order.paymentStage)) {
+      throw new BadRequestException('订单未确认已付定金，暂不能领取');
+    }
+    const finance = await this.orderFinanceRepository.findOne({ where: { orderId: order.id } });
+    const clientPaid = Number(finance?.clientPaid ?? 0);
+    if (!Number.isFinite(clientPaid) || clientPaid <= 0) {
+      throw new BadRequestException('订单未填写付款金额，暂不能领取');
+    }
+  }
+
+  /**
+   * 判断付款阶段是否满足教务领取的"已付定金及以上"。
+   */
+  private isPaidDepositStage(value?: string | null): boolean {
+    const stage = String(value || '').trim();
+    if (!stage) return false;
+    if (stage.includes('未付') || stage.includes('未付款')) return false;
+    return stage.includes('已付定金') ||
+      stage.includes('定金') ||
+      stage.includes('已付中期') ||
+      stage.includes('中期') ||
+      stage.includes('已付尾款') ||
+      stage.includes('尾款') ||
+      stage.includes('全款') ||
+      stage.includes('单期');
+  }
+
+  /**
+   * 金额字段标准化为大于 0 的两位小数字符串。
+   */
+  private normalizePositiveMoney(value: any): string | null {
+    const money = this.normalizeMoney(value);
+    if (money === null) return null;
+    return Number(money) > 0 ? money : null;
   }
 
   /**

@@ -29,6 +29,12 @@ function mapOrder(raw: RawRecord): OrderItem {
     academicName: text(raw.academicName ?? raw.academic_name ?? raw.academicUserName ?? raw.academic_user_name),
     serviceType: text(raw.serviceType ?? raw.service_type) ?? null,
     amount: text(raw.amount) ?? null,
+    productType: text(raw.productType ?? raw.product_type) ?? null,
+    guaranteeType: text(raw.guaranteeType ?? raw.guarantee_type) ?? null,
+    paymentStage: text(raw.paymentStage ?? raw.payment_stage) ?? null,
+    customerName: text(raw.customerName ?? raw.customer_name) ?? null,
+    articlePurpose: text(raw.articlePurpose ?? raw.article_purpose) ?? null,
+    salesContact: text(raw.salesContact ?? raw.sales_contact) ?? null,
     paidStatus: text(raw.paidStatus ?? raw.paid_status) ?? 'unpaid',
     orderStatus: text(raw.orderStatus ?? raw.order_status) ?? 'to_receive',
     handoverStatus: text(raw.handoverStatus ?? raw.handover_status) ?? 'pending',
@@ -60,6 +66,10 @@ function numberValue(value: unknown): number | undefined {
   if (value === undefined || value === null || value === '') return undefined;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function booleanValue(value: unknown): boolean {
+  return value === true || value === 'true' || value === 1 || value === '1';
 }
 
 function normalizeRegistrationFormStatus(value: unknown): string | null {
@@ -105,6 +115,10 @@ const DELIVERY_VALUE_MAPS = {
   teacherStability: {
     new: '新老师',
     stable: '稳定老师',
+    probation: '试合作',
+    excellent: '优秀',
+    average: '一般',
+    poor: '差',
   },
   innovationReviewStatus: {
     none: '未提交',
@@ -175,6 +189,8 @@ const DELIVERY_VALUE_MAPS = {
     pending: '待提醒客户缴纳',
     reminded: '已提醒客户',
     paid: '客户已缴纳',
+    required: '未缴纳',
+    unpaid: '未缴纳',
   },
   proofingStatus: {
     none: '未到校稿',
@@ -201,9 +217,16 @@ const DELIVERY_VALUE_MAPS = {
 } as const;
 
 function mapDeliveryOrder(raw: RawRecord = {}): OrderDeliveryOrderFields {
+  const backupTeacherRows = Array.isArray(raw.backupTeachers)
+    ? (raw.backupTeachers as RawRecord[])
+    : Array.isArray(raw.backup_teachers)
+      ? (raw.backup_teachers as RawRecord[])
+      : [];
   return {
     id: text(raw.id),
     orderNumber: text(raw.orderNumber ?? raw.order_number) ?? null,
+    institutionAccepted: booleanValue(raw.institutionAccepted ?? raw.institution_accepted),
+    orderStatus: text(raw.orderStatus ?? raw.order_status) ?? null,
     customerName: text(raw.customerName ?? raw.customer_name) ?? null,
     degreeLevel: text(raw.degreeLevel ?? raw.degree_level) ?? null,
     majorDirection: text(raw.majorDirection ?? raw.major_direction) ?? null,
@@ -212,18 +235,30 @@ function mapDeliveryOrder(raw: RawRecord = {}): OrderDeliveryOrderFields {
     registrationFormStatus: normalizeRegistrationFormStatus(raw.registrationFormStatus ?? raw.registration_form_status),
     infoSentToTeacherAt: text(raw.infoSentToTeacherAt ?? raw.info_sent_to_teacher_at) ?? null,
     fundInfo: text(raw.fundInfo ?? raw.fund_info) ?? null,
+    fundRemark: text(raw.fundRemark ?? raw.fund_remark) ?? null,
+    academicRemark: text(raw.academicRemark ?? raw.academic_remark) ?? null,
     submissionEmail: text(raw.submissionEmail ?? raw.submission_email) ?? null,
     submissionEmailPassword: text(raw.submissionEmailPassword ?? raw.submission_email_password) ?? null,
     authorRegistrationUrl: text(raw.authorRegistrationUrl ?? raw.author_registration_url) ?? null,
     authorRegistrationName: text(raw.authorRegistrationName ?? raw.author_registration_name) ?? null,
+    backupSubmissionUrl: text(raw.backupSubmissionUrl ?? raw.backup_submission_url) ?? null,
+    backupSubmissionName: text(raw.backupSubmissionName ?? raw.backup_submission_name) ?? null,
     operationMethod: text(raw.operationMethod ?? raw.operation_method) ?? null,
     plagiarismRequirement: text(raw.plagiarismRequirement ?? raw.plagiarism_requirement) ?? null,
     responsibleTeacher: text(raw.responsibleTeacher ?? raw.responsible_teacher) ?? null,
     statusStage: normalizeByMap(raw.statusStage ?? raw.status_stage, DELIVERY_VALUE_MAPS.statusStage),
     paperProgress: normalizeByMap(raw.paperProgress ?? raw.paper_progress, DELIVERY_VALUE_MAPS.paperProgress),
     assignedTeacher: text(raw.assignedTeacher ?? raw.assigned_teacher) ?? null,
+    assignedTeacherName: text(raw.assignedTeacherName ?? raw.assigned_teacher_name) ?? null,
     backupTeacher: text(raw.backupTeacher ?? raw.backup_teacher) ?? null,
+    backupTeachers: backupTeacherRows.map((item) => ({
+      teacherId: text(item.teacherId ?? item.teacher_id) ?? null,
+      teacherName: text(item.teacherName ?? item.teacher_name) ?? null,
+      teacherPhone: text(item.teacherPhone ?? item.teacher_phone) ?? null,
+      teacherStability: normalizeByMap(item.teacherStability ?? item.teacher_stability, DELIVERY_VALUE_MAPS.teacherStability),
+    })),
     teacherPhone: text(raw.teacherPhone ?? raw.teacher_phone) ?? null,
+    teacherWechat: text(raw.teacherWechat ?? raw.teacher_wechat) ?? null,
     teacherStability: normalizeByMap(raw.teacherStability ?? raw.teacher_stability, DELIVERY_VALUE_MAPS.teacherStability),
     innovationReviewStatus: normalizeByMap(raw.innovationReviewStatus ?? raw.innovation_review_status, DELIVERY_VALUE_MAPS.innovationReviewStatus),
     innovationReviewAt: text(raw.innovationReviewAt ?? raw.innovation_review_at) ?? null,
@@ -347,10 +382,16 @@ export async function getOrderDelivery(id: string): Promise<OrderDeliveryDetail>
   const payload = await apiClient.get<RawRecord>(`/orders/${id}/delivery`);
   const authors = Array.isArray(payload.authors) ? (payload.authors as RawRecord[]) : [];
   const submissions = Array.isArray(payload.submissions) ? (payload.submissions as RawRecord[]) : [];
+  const backupSubmissions = Array.isArray(payload.backupSubmissions)
+    ? (payload.backupSubmissions as RawRecord[])
+    : Array.isArray(payload.backup_submissions)
+      ? (payload.backup_submissions as RawRecord[])
+      : [];
   return {
     order: mapDeliveryOrder((payload.order ?? {}) as RawRecord),
     authors: authors.map(mapDeliveryAuthor),
     submissions: submissions.map(mapDeliverySubmission),
+    backupSubmissions: backupSubmissions.map(mapDeliverySubmission),
     finance: mapDeliveryFinance((payload.finance ?? {}) as RawRecord),
   };
 }
@@ -374,6 +415,14 @@ export async function createOrderFollowRecord(
   },
 ) {
   return apiClient.post(`/orders/${id}/follow-records`, body);
+}
+
+export async function remindSalesPayment(id: string): Promise<{ ok: true; receiverId: string }> {
+  return apiClient.post<{ ok: true; receiverId: string }>(`/orders/${id}/remind-sales-payment`, {});
+}
+
+export async function markOrderReminderHandled(id: string): Promise<{ ok: boolean; changed: boolean }> {
+  return apiClient.patch<{ ok: boolean; changed: boolean }>(`/orders/reminders/${id}/handled`, {});
 }
 
 // ─── 订单异常反馈 ──────────────────────────────────────────────────────────
@@ -506,6 +555,10 @@ export type AcademicHomeSummary = {
   waitingTeacher: number;
   nearDue: number;
   abnormal: number;
+  targets?: Partial<Record<
+    'pendingReceive' | 'inProgress' | 'waitingMaterial' | 'waitingTeacher' | 'nearDue' | 'abnormal',
+    { orderId?: string | null; targetModule?: string | null; todoType?: string | null }
+  >>;
 };
 
 const EMPTY_ACADEMIC_HOME_SUMMARY: AcademicHomeSummary = {
@@ -515,6 +568,7 @@ const EMPTY_ACADEMIC_HOME_SUMMARY: AcademicHomeSummary = {
   waitingTeacher: 0,
   nearDue: 0,
   abnormal: 0,
+  targets: {},
 };
 
 function academicNumberOrZero(value: unknown): number {
@@ -540,5 +594,6 @@ export async function getAcademicHomeSummary(): Promise<AcademicHomeSummary> {
     waitingTeacher: academicNumberOrZero((payload as AcademicHomeSummary).waitingTeacher),
     nearDue: academicNumberOrZero((payload as AcademicHomeSummary).nearDue),
     abnormal: academicNumberOrZero((payload as AcademicHomeSummary).abnormal),
+    targets: (payload as AcademicHomeSummary).targets ?? {},
   };
 }

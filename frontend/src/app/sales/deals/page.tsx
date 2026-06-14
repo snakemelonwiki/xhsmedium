@@ -6,6 +6,9 @@ import {
   Button,
   Card,
   Empty,
+  Form,
+  InputNumber,
+  Modal,
   Pagination,
   Select,
   Space,
@@ -20,9 +23,17 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
 import { listMyDeals } from '@/shared/api/leads';
+import { getOrderDelivery, updateOrder } from '@/shared/api/orders';
 import { formatDateTime } from '@/shared/utils/date-format';
 import { QuickRangePicker } from '@/shared/components/date';
 import type { DateRangeValue } from '@/shared/components/date';
+import { buildTodayDateRange } from '@/shared/utils/default-date-range';
+import {
+  buildSalesDealStatusFilter,
+  formatSalesDealDateParam,
+  normalizePaymentStatus,
+  pickClientPaidValue,
+} from './dealsFilters';
 
 const PRODUCT_TYPE_OPTIONS = [
   { label: '全部产品', value: '' },
@@ -44,6 +55,7 @@ const ORDER_STATUS_OPTIONS = [
   { label: '待老师', value: 'awaiting_teacher' },
   { label: '待交付', value: 'to_deliver' },
   { label: '已完成', value: 'completed' },
+  { label: '已关闭', value: 'closed' },
   { label: '异常', value: 'abnormal' },
 ];
 
@@ -54,6 +66,7 @@ const orderStatusMeta: Record<string, { label: string; color: string }> = {
   awaiting_teacher: { label: '待老师', color: 'purple' },
   to_deliver: { label: '待交付', color: 'cyan' },
   completed: { label: '已完成', color: 'green' },
+  closed: { label: '已关闭', color: 'default' },
   abnormal: { label: '异常', color: 'red' },
 };
 
@@ -63,33 +76,46 @@ type Filters = {
   dateRange: DateRangeValue;
 };
 
+type PaymentFormValues = {
+  paidStatus: 'partial' | 'paid';
+  paymentStage: string;
+  clientPaid: number | string;
+};
+
 const EMPTY_FILTERS: Filters = {
   status: '',
   productType: '',
   dateRange: null,
 };
 
+function buildDefaultFilters(): Filters {
+  return { ...EMPTY_FILTERS, dateRange: buildTodayDateRange() };
+}
+
 export default function SalesDealsPage() {
   const router = useRouter();
   const [items, setItems] = useState<Array<Record<string, unknown>>>([]);
-  const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
+  const [filters, setFilters] = useState<Filters>(() => buildDefaultFilters());
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [paymentOpen, setPaymentOpen] = useState<Record<string, unknown> | null>(null);
+  const [paymentForm] = Form.useForm<PaymentFormValues>();
+  const [updatingPayment, setUpdatingPayment] = useState(false);
 
   async function load() {
     setLoading(true);
     setError('');
     try {
-      // "我的成交"口径：默认不传 status 查全部，选具体状态时传单值过滤。
-      const statusParam = filters.status ? [filters.status] : undefined;
+      // "我的成交"需覆盖销售仍要跟进收款/交付的订单状态，避免刚成交订单消失。
+      // 数组传参会展开成多个 status 查询参数（apiClient 已支持）。
       const result = await listMyDeals({
-        status: statusParam,
+        status: buildSalesDealStatusFilter(filters.status),
         productType: filters.productType || undefined,
-        startDate: filters.dateRange?.start.startOf('day').toISOString() || undefined,
-        endDate: filters.dateRange?.end.endOf('day').toISOString() || undefined,
+        startDate: filters.dateRange ? formatSalesDealDateParam(filters.dateRange.start, 'start') : undefined,
+        endDate: filters.dateRange ? formatSalesDealDateParam(filters.dateRange.end, 'end') : undefined,
         page,
         pageSize,
       });
@@ -110,7 +136,54 @@ export default function SalesDealsPage() {
     setPage(1);
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters.status, filters.productType, filters.dateRange?.start.valueOf(), filters.dateRange?.end.valueOf()]);
+  }, [
+    filters.status,
+    filters.productType,
+    filters.dateRange?.start.valueOf(),
+    filters.dateRange?.end.valueOf(),
+    page,
+    pageSize,
+  ]);
+
+  async function openPayment(record: Record<string, unknown>) {
+    setPaymentOpen(record);
+    const fallbackClientPaid = record.clientPaid as number | string | null | undefined;
+    paymentForm.setFieldsValue({
+      paidStatus: normalizePaymentStatus(record.paidStatus),
+      paymentStage: String(record.paymentStage || parsePaymentStage(record.remark) || '已付定金'),
+      clientPaid: pickClientPaidValue(undefined, fallbackClientPaid),
+    });
+    try {
+      const delivery = await getOrderDelivery(String(record.id));
+      paymentForm.setFieldsValue({
+        clientPaid: pickClientPaidValue(delivery.finance.customerPaid, fallbackClientPaid),
+      });
+    } catch {
+      message.warning('付款详情加载失败，已保留列表中的付款金额');
+    }
+  }
+
+  async function submitPayment() {
+    if (!paymentOpen) return;
+    const values = await paymentForm.validateFields().catch(() => null);
+    if (!values) return;
+    setUpdatingPayment(true);
+    try {
+      await updateOrder(String(paymentOpen.id), {
+        paid_status: values.paidStatus,
+        payment_stage: values.paymentStage,
+        client_paid: values.clientPaid,
+      });
+      message.success('付款信息已更新');
+      setPaymentOpen(null);
+      paymentForm.resetFields();
+      await load();
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '付款信息更新失败');
+    } finally {
+      setUpdatingPayment(false);
+    }
+  }
 
   const columns: TableColumnsType<Record<string, unknown>> = [
     {
@@ -163,10 +236,9 @@ export default function SalesDealsPage() {
       dataIndex: 'remark',
       key: 'paymentStage',
       width: 140,
-      render: (value: unknown) => {
-        if (!value) return '-';
-        const match = String(value).match(/付款: ([^|]+)/);
-        return match ? <Tag color="orange">{match[1].trim()}</Tag> : '-';
+      render: (value: unknown, record) => {
+        const stage = String(record.paymentStage || parsePaymentStage(value) || '');
+        return stage ? <Tag color="orange">{stage}</Tag> : '-';
       },
     },
     {
@@ -208,6 +280,17 @@ export default function SalesDealsPage() {
       },
     },
     {
+      title: '操作',
+      key: 'actions',
+      fixed: 'right',
+      width: 110,
+      render: (_value: unknown, record) => (
+        <Button size="small" onClick={() => openPayment(record)}>
+          更新付款
+        </Button>
+      ),
+    },
+    {
       title: '成交时间',
       dataIndex: 'createdAt',
       key: 'createdAt',
@@ -242,7 +325,7 @@ export default function SalesDealsPage() {
           />
           <QuickRangePicker
             value={filters.dateRange}
-            onChange={(range) => setFilters((prev) => ({ ...prev, dateRange: range }))}
+            onChange={(range) => setFilters((prev) => ({ ...prev, dateRange: range ?? buildTodayDateRange() }))}
           />
           <Button icon={<ReloadOutlined />} onClick={load} loading={loading}>刷新</Button>
         </Space>
@@ -271,12 +354,49 @@ export default function SalesDealsPage() {
             onChange={(nextPage, nextPageSize) => {
               setPage(nextPage);
               setPageSize(nextPageSize);
-              load();
             }}
             style={{ marginTop: 16, textAlign: 'right' }}
           />
         </Card>
       </Spin>
+      <Modal
+        title="更新付款信息"
+        open={Boolean(paymentOpen)}
+        onCancel={() => setPaymentOpen(null)}
+        onOk={submitPayment}
+        confirmLoading={updatingPayment}
+        destroyOnClose
+      >
+        <Form<PaymentFormValues> form={paymentForm} layout="vertical" preserve={false}>
+          <Form.Item name="paidStatus" label="付款状态" rules={[{ required: true, message: '请选择付款状态' }]}>
+            <Select
+              options={[
+                { label: '部分付款', value: 'partial' },
+                { label: '已付款', value: 'paid' },
+              ]}
+            />
+          </Form.Item>
+          <Form.Item name="paymentStage" label="付款阶段" rules={[{ required: true, message: '请选择付款阶段' }]}>
+            <Select
+              options={[
+                { label: '已付定金', value: '已付定金' },
+                { label: '已付中期', value: '已付中期' },
+                { label: '已付尾款', value: '已付尾款' },
+                { label: '已付全款', value: '已付全款' },
+              ]}
+            />
+          </Form.Item>
+          <Form.Item name="clientPaid" label="付款金额（元）" rules={[{ required: true, message: '请输入付款金额' }]}>
+            <InputNumber min={0.01} precision={2} style={{ width: '100%' }} placeholder="0.00" />
+          </Form.Item>
+        </Form>
+      </Modal>
     </Space>
   );
+}
+
+function parsePaymentStage(value: unknown): string {
+  if (!value) return '';
+  const match = String(value).match(/付款: ([^|]+)/);
+  return match ? match[1].trim() : '';
 }

@@ -1,7 +1,7 @@
 'use client';
 
 import { DeleteOutlined, DownloadOutlined, ExclamationCircleOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons';
-import { Button, Card, Col, DatePicker, Descriptions, Divider, Empty, Form, Input, Modal, Row, Select, Space, Spin, Steps, Table, Tag, Timeline, Tooltip, Typography, Upload, message } from 'antd';
+import { Button, Card, Checkbox, Col, DatePicker, Descriptions, Empty, Form, Input, Modal, Row, Select, Space, Spin, Steps, Table, Tag, Timeline, Tooltip, Typography, Upload, message } from 'antd';
 import type { UploadProps } from 'antd';
 import dayjs, { type Dayjs } from 'dayjs';
 import { useParams, useRouter } from 'next/navigation';
@@ -15,14 +15,19 @@ import {
   getOrderDetail,
   listAbnormalFeedbacks,
   listOrderFollowRecords,
+  remindSalesPayment,
   updateOrderDelivery,
 } from '@/shared/api/orders';
 import { createExport, downloadExportUrl, getExport } from '@/shared/api/exports';
+import { getTeacher, listTeachers, type TeacherOption } from '@/shared/api/teachers';
 import { uploadFile } from '@/shared/api/uploads';
 import { readStoredUser } from '@/shared/auth/auth';
 import { handoverStatusMeta, orderStatusMeta, paidStatusMeta } from '@/shared/api/enums';
 import type { AbnormalTypeCode, ExpectedHelperCode, OrderAbnormalFeedback, OrderDeliveryDetail, OrderFollowRecord, OrderItem } from '@/shared/types/orders';
 import { formatDateTime } from '@/shared/utils/date-format';
+import { getSubmissionCountByOperationMethod, getVisibleFinanceFieldKeys, isGraduationProductType, normalizeSubmissionRows } from './deliveryDetailRules';
+import { DeliveryHeaderExtra } from './deliveryHeaderExtra';
+import { DELIVERY_PROGRESS_STAGES } from './deliveryProgressModel';
 
 function emptyText(value?: string | null) {
   return value || '-';
@@ -89,6 +94,18 @@ const DELIVERY_DATE_FIELDS = [
   'indexingAt',
 ] as const;
 
+const TEACHER_STABILITY_LABEL: Record<string, string> = {
+  stable: '稳定老师',
+  new: '新老师',
+  probation: '试合作',
+  excellent: '优秀',
+  average: '一般',
+  poor: '差',
+  优秀: '优秀',
+  一般: '一般',
+  差: '差',
+};
+
 type DeliveryFieldConfig = {
   name: string;
   label: string;
@@ -134,9 +151,9 @@ const PLAGIARISM_OPTIONS = [
 
 const DELIVERY_SELECT_OPTIONS: Record<string, { label: string; value: string }[]> = {
   degreeLevel: options(['专科', '本科', '硕士', '博士', '职称']),
-  statusStage: options(['销售建单', '待补资料', '待教务审核', '待分配老师', '老师已接单', '写作中', '待投稿', '已投稿', '审稿中', '返修中', '已录用', '待见刊', '已完成', '异常处理中']),
+  statusStage: options(['待补客户资料', '待分配老师']),
   paperProgress: options(['待分配', '进行中', '待投稿', '已投稿', '返修中', '已录用']),
-  teacherStability: options(['新老师', '稳定老师']),
+  teacherStability: options(['优秀', '一般', '差', '稳定老师', '新老师', '试合作']),
   innovationReviewStatus: options(['未提交', '待审核', '已通过', '需修改', '稳定老师跳过']),
   firstDraftReviewStatus: options(['未提交', '待审核', '已通过', '需修改']),
   editorReviewStatus: options(['未提交', '待审查', '已通过', '需修改']),
@@ -148,7 +165,7 @@ const DELIVERY_SELECT_OPTIONS: Record<string, { label: string; value: string }[]
   journalStatus: options(['未投稿', 'Submitted', 'With Editor', 'Under Review', 'Revision', 'Accepted', 'Proofing', 'Online', 'Indexed', 'Rejected']),
   reminderLetterStatus: options(['不需要', '需提醒老师发送', '老师已发送']),
   revisionStatus: options(['无返修', '待提醒老师', '老师返修中', '已提交返修']),
-  pageFeeStatus: options(['未录用', '待提醒客户缴纳', '已提醒客户', '客户已缴纳']),
+  pageFeeStatus: options(['未缴纳', '缴纳']),
   proofingStatus: options(['未到校稿', '待客户确认', '客户有修改需求', '老师校稿中', '已提交校稿']),
   onlineStatus: options(['未online', '已online待提醒作者', '已提醒作者']),
   indexingStatus: options(['未检索', '已检索待开报告', '已提醒开检索报告']),
@@ -173,16 +190,12 @@ const PROGRESS_DELIVERY_FIELDS: readonly DeliveryFieldConfig[] = [
   { name: 'responsibleTeacher', label: '派单老师' },
   { name: 'statusStage', label: '订单阶段' },
   { name: 'paperProgress', label: '论文进度' },
-  { name: 'assignedTeacher', label: '接单老师' },
-  { name: 'backupTeacher', label: '备用老师' },
-  { name: 'teacherPhone', label: '老师电话' },
-  { name: 'teacherStability', label: '老师稳定性' },
   { name: 'innovationReviewStatus', label: '创新点审核' },
   { name: 'innovationReviewAt', label: '创新点审核时间', type: 'date' },
   { name: 'firstDraftReviewStatus', label: '初稿审核' },
   { name: 'firstDraftReviewAt', label: '初稿审核时间', type: 'date' },
-  { name: 'editorReviewStatus', label: '编辑老师审查' },
-  { name: 'editorReviewAt', label: '编辑审查时间', type: 'date' },
+  { name: 'editorReviewStatus', label: '终稿审查' },
+  { name: 'editorReviewAt', label: '审查时间', type: 'date' },
   { name: 'authorInfoChecked', label: '投稿前作者信息核对' },
   { name: 'authorInfoCheckedAt', label: '作者核对时间', type: 'date' },
   { name: 'salesContact', label: '对接销售' },
@@ -217,53 +230,6 @@ const STATUS_DELIVERY_FIELDS: readonly DeliveryFieldConfig[] = [
   { name: 'indexingStatus', label: '检索状态' },
   { name: 'indexingAt', label: '检索时间', type: 'date' },
   { name: 'reviewReportStatus', label: '检索审查报告' },
-] as const;
-
-const PROGRESS_STAGES = [
-  {
-    key: 'init',
-    label: '初始',
-    statusValues: ['销售建单', '待补资料', '待教务审核'],
-    fields: ['responsibleTeacher', 'statusStage', 'paperProgress', 'academicOwner', 'salesContact'],
-  },
-  {
-    key: 'assign',
-    label: '分配老师',
-    statusValues: ['待分配老师', '老师已接单'],
-    fields: ['assignedTeacher', 'backupTeacher', 'teacherPhone', 'teacherStability'],
-  },
-  {
-    key: 'writing',
-    label: '写作审核',
-    statusValues: ['写作中'],
-    fields: [
-      'innovationReviewStatus',
-      'innovationReviewAt',
-      'firstDraftReviewStatus',
-      'firstDraftReviewAt',
-      'editorReviewStatus',
-      'editorReviewAt',
-    ],
-  },
-  {
-    key: 'preSubmit',
-    label: '投稿准备',
-    statusValues: ['待投稿'],
-    fields: ['authorInfoChecked', 'authorInfoCheckedAt'],
-  },
-  {
-    key: 'postSubmit',
-    label: '投稿后',
-    statusValues: ['已投稿', '审稿中', '返修中', '已录用', '待见刊', '已完成', '异常处理中'],
-    fields: [
-      'riskLevel',
-      'nextFollowUpAt',
-      'lastTeacherUpdateAt',
-      'customerComplaint',
-      'needsSupervisor',
-      'emergencyStatus',
-    ],
-  },
 ] as const;
 
 const JOURNAL_STEPS = [
@@ -308,18 +274,12 @@ function hydrateDeliveryForm(detail: OrderDeliveryDetail) {
   DELIVERY_DATE_FIELDS.forEach((field) => {
     order[field] = toDayjs(detail.order[field]);
   });
-  // 按操作方式初始化投稿数量
-  const method = order.operationMethod as string || '';
-  const submissionCount = method === '三稿三投' ? 3 : method === '两稿两投' ? 2 : 1;
   return {
     order,
     authors: detail.authors.length ? detail.authors : [{ authorOrder: 1 }],
     submissions: detail.submissions.length
       ? detail.submissions.map((item) => ({ ...item, submitTime: toDayjs(item.submitTime) }))
-      : Array.from({ length: submissionCount }, (_, i) => ({ submissionNo: i + 1 })),
-    backupSubmissions: (detail as any).backupSubmissions?.length
-      ? (detail as any).backupSubmissions.map((item: any) => ({ ...item, submitTime: toDayjs(item.submitTime) }))
-      : [],
+      : [{ submissionNo: 1 }, { submissionNo: 2 }, { submissionNo: 3 }],
     finance: detail.finance,
   };
 }
@@ -341,9 +301,6 @@ function serializeDeliveryForm(values: any) {
     authors: Array.isArray(values.authors) ? values.authors : [],
     submissions: Array.isArray(values.submissions)
       ? values.submissions.map((item: any) => ({ ...item, submitTime: serializeDate(item?.submitTime) }))
-      : [],
-    backupSubmissions: Array.isArray(values.backupSubmissions)
-      ? values.backupSubmissions.map((item: any) => ({ ...item, submitTime: serializeDate(item?.submitTime) }))
       : [],
     finance: values.finance || {},
   };
@@ -373,9 +330,8 @@ export default function AcademicOrderDetailPage() {
   const orderId = String(params.id);
   const currentUser = readStoredUser();
   const isAcademic = currentUser?.role === 'academic';
-  const isAcademicSupervisor = currentUser?.role === 'academic_supervisor';
   const isAdminLike = currentUser?.role === 'admin' || currentUser?.role === 'owner';
-  const canSeeCustomerFinance = isAdminLike || isAcademicSupervisor;
+  const currentRole = currentUser?.role;
 
   const [order, setOrder] = useState<OrderItem>();
   const [delivery, setDelivery] = useState<OrderDeliveryDetail>(DEFAULT_DELIVERY);
@@ -388,17 +344,26 @@ export default function AcademicOrderDetailPage() {
   const [closingId, setClosingId] = useState('');
   const [exporting, setExporting] = useState(false);
   const [savingDelivery, setSavingDelivery] = useState(false);
+  const [remindingPayment, setRemindingPayment] = useState(false);
   const [attachmentUrl, setAttachmentUrl] = useState('');
   const [attachmentName, setAttachmentName] = useState('');
+  const [backupSubmissionUploading, setBackupSubmissionUploading] = useState(false);
   const [activeProgressStep, setActiveProgressStep] = useState(0);
   const [activeJournalStep, setActiveJournalStep] = useState(0);
+  const [teacherOptions, setTeacherOptions] = useState<TeacherOption[]>([]);
+  const [teacherLoading, setTeacherLoading] = useState(false);
+  const [teacherDetail, setTeacherDetail] = useState<TeacherOption | null>(null);
+  const [teacherDetailOpen, setTeacherDetailOpen] = useState(false);
   const [abnormalForm] = Form.useForm();
   const [form] = Form.useForm();
   const [deliveryForm] = Form.useForm();
-  const statusStage = Form.useWatch(['order', 'statusStage'], deliveryForm);
-  const operationMethod = Form.useWatch(['order', 'operationMethod'], deliveryForm);
+  const institutionAccepted = Form.useWatch(['order', 'institutionAccepted'], deliveryForm);
   const journalStatus = Form.useWatch(['order', 'journalStatus'], deliveryForm);
+  const operationMethod = Form.useWatch(['order', 'operationMethod'], deliveryForm);
   const financeValues = Form.useWatch('finance', deliveryForm) || {};
+  const visibleFinanceFieldKeys = new Set(getVisibleFinanceFieldKeys(currentRole));
+  const productType = order?.productType ?? order?.serviceType ?? '';
+  const isGraduationOrder = isGraduationProductType(productType);
   const customerPending = calculatePendingAmount(
     financeValues.orderAmount,
     financeValues.customerPaid,
@@ -423,7 +388,23 @@ export default function AcademicOrderDetailPage() {
       setRecords(followRecords);
       setAbnormalFeedbacks(feedbacks);
       setDelivery(deliveryDetail);
-      deliveryForm.setFieldsValue(hydrateDeliveryForm(deliveryDetail));
+      deliveryForm.setFieldsValue(hydrateDeliveryForm({
+        ...deliveryDetail,
+        submissions: normalizeSubmissionRows(deliveryDetail.submissions, {
+          productType: detail.productType ?? detail.serviceType,
+          operationMethod: deliveryDetail.order.operationMethod,
+        }),
+      }));
+      const nextProgressStep = DELIVERY_PROGRESS_STAGES.findIndex((stage) =>
+        (stage.statusValues as readonly string[]).includes(String(deliveryDetail.order.statusStage || '')),
+      );
+      setActiveProgressStep(nextProgressStep >= 0 ? nextProgressStep : 0);
+      const journalKeys = JOURNAL_STEPS.map((item) => item.key) as string[];
+      const nextJournalStep = Math.max(
+        0,
+        journalKeys.indexOf(String(deliveryDetail.order.journalStatus || '')),
+      );
+      setActiveJournalStep(nextJournalStep >= 0 ? nextJournalStep : 0);
     } catch (err) {
       message.error(err instanceof Error ? err.message : '订单详情加载失败');
       setOrder(undefined);
@@ -439,6 +420,36 @@ export default function AcademicOrderDetailPage() {
     loadDetail();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.id]);
+
+  useEffect(() => {
+    if (loading) return;
+    const query = new URLSearchParams(window.location.search);
+    const target = query.get('target') || window.location.hash.replace('#', '');
+    if (!target) return;
+    const node = document.getElementById(target);
+    if (!node) {
+      message.warning('目标处理区域暂不可访问，请在订单详情中手动查看');
+      return;
+    }
+    window.requestAnimationFrame(() => {
+      node.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  }, [loading]);
+
+  useEffect(() => {
+    void loadTeachers();
+  }, []);
+
+  async function loadTeachers(keyword = '') {
+    setTeacherLoading(true);
+    try {
+      setTeacherOptions(await listTeachers({ keyword, limit: 100, offset: 0 }));
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '老师库加载失败');
+    } finally {
+      setTeacherLoading(false);
+    }
+  }
 
   async function submit(values: { nodeType: string; content?: string; remindStage?: string; nextRemindAt?: any }) {
     if (!values.nodeType?.trim()) {
@@ -471,15 +482,21 @@ export default function AcademicOrderDetailPage() {
     setSavingDelivery(true);
     try {
       const payload = serializeDeliveryForm(values);
-      // 教务端（含教务主管）不提交财务信息（后端限制"付款信息只允许销售修改"）
-      if (isAcademic || currentUser?.role === 'academic_supervisor') {
+      // 教务端不提交财务信息（后端限制"付款信息只允许销售修改"）
+      if (isAcademic) {
         delete (payload as Record<string, unknown>).finance;
       }
       await updateOrderDelivery(orderId, payload);
       message.success('交付信息已保存');
       const next = await getOrderDelivery(orderId);
       setDelivery(next);
-      deliveryForm.setFieldsValue(hydrateDeliveryForm(next));
+      deliveryForm.setFieldsValue(hydrateDeliveryForm({
+        ...next,
+        submissions: normalizeSubmissionRows(next.submissions, {
+          productType: order?.productType ?? order?.serviceType,
+          operationMethod: next.order.operationMethod,
+        }),
+      }));
     } catch (err) {
       message.error(err instanceof Error ? err.message : '交付信息保存失败');
     } finally {
@@ -500,6 +517,25 @@ export default function AcademicOrderDetailPage() {
       message.success('作者登记表上传成功，请保存交付信息');
     } catch (err) {
       message.error(err instanceof Error ? err.message : '作者登记表上传失败');
+    }
+  }
+
+  async function uploadBackupSubmission(file: File) {
+    setBackupSubmissionUploading(true);
+    try {
+      const result = await uploadFile(file, 'order-backup-submissions');
+      deliveryForm.setFieldsValue({
+        order: {
+          ...(deliveryForm.getFieldValue('order') || {}),
+          backupSubmissionUrl: result.url,
+          backupSubmissionName: result.originalName || file.name,
+        },
+      });
+      message.success('备用投稿信息表上传成功，请保存交付信息');
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '备用投稿信息表上传失败');
+    } finally {
+      setBackupSubmissionUploading(false);
     }
   }
 
@@ -553,10 +589,99 @@ export default function AcademicOrderDetailPage() {
   function canCloseFeedback(feedback: OrderAbnormalFeedback): boolean {
     if (!currentUser) return false;
     if (isAdminLike) return feedback.status !== 'closed';
-    if ((isAcademic || currentUser.role === 'academic_supervisor') && feedback.reporterUserId === currentUser.id) return feedback.status !== 'closed';
+    if (isAcademic && feedback.reporterUserId === currentUser.id) return feedback.status !== 'closed';
     if (currentUser.role === 'sales' && order?.salesUserId === currentUser.id) return feedback.status !== 'closed';
     return false;
   }
+
+  async function remindPayment() {
+    setRemindingPayment(true);
+    try {
+      await remindSalesPayment(orderId);
+      message.success('已提醒销售催款');
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '提醒发送失败');
+    } finally {
+      setRemindingPayment(false);
+    }
+  }
+
+  function normalizeTeacherStability(value?: string | null) {
+    if (!value) return null;
+    return TEACHER_STABILITY_LABEL[value] ?? value;
+  }
+
+  function teacherSelectOptions() {
+    return teacherOptions.map((teacher) => ({
+      label: `${teacher.name}${teacher.direction ? ` · ${teacher.direction}` : ''}`,
+      value: teacher.id,
+    }));
+  }
+
+  function applyMainTeacher(teacherId?: string) {
+    const teacher = teacherOptions.find((item) => item.id === teacherId);
+    const orderValues = deliveryForm.getFieldValue('order') || {};
+    deliveryForm.setFieldsValue({
+      order: {
+        ...orderValues,
+        assignedTeacher: teacher?.id ?? null,
+        assignedTeacherName: teacher?.name ?? null,
+        teacherPhone: teacher?.phone ?? null,
+        teacherWechat: teacher?.wechat ?? null,
+        teacherStability: normalizeTeacherStability(teacher?.stability),
+      },
+    });
+  }
+
+  function applyBackupTeacher(rowIndex: number, teacherId?: string) {
+    const teacher = teacherOptions.find((item) => item.id === teacherId);
+    const backupTeachers = [...(deliveryForm.getFieldValue(['order', 'backupTeachers']) || [])];
+    backupTeachers[rowIndex] = {
+      ...(backupTeachers[rowIndex] || {}),
+      teacherId: teacher?.id ?? null,
+      teacherName: teacher?.name ?? null,
+      teacherPhone: teacher?.phone ?? null,
+      teacherStability: normalizeTeacherStability(teacher?.stability),
+    };
+    deliveryForm.setFieldsValue({ order: { ...(deliveryForm.getFieldValue('order') || {}), backupTeachers } });
+  }
+
+  async function openTeacherDetail(teacherId?: string | null) {
+    if (!teacherId) {
+      message.warning('请先选择老师');
+      return;
+    }
+    try {
+      setTeacherDetail(await getTeacher(teacherId));
+      setTeacherDetailOpen(true);
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '老师详情加载失败');
+    }
+  }
+
+  function openUploadedFile(url?: string | null) {
+    if (!url) {
+      message.warning('暂无可查看的附件');
+      return;
+    }
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }
+
+  function syncSubmissionRows(nextOperationMethod?: string | null) {
+    const currentSubmissions = deliveryForm.getFieldValue('submissions') || [];
+    deliveryForm.setFieldsValue({
+      submissions: normalizeSubmissionRows(currentSubmissions, {
+        productType,
+        operationMethod: nextOperationMethod ?? operationMethod,
+      }),
+    });
+  }
+
+  useEffect(() => {
+    if (loading) return;
+    syncSubmissionRows(operationMethod);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, operationMethod, productType]);
 
   return (
     <Space direction="vertical" size={16} className="page-stack">
@@ -616,12 +741,12 @@ export default function AcademicOrderDetailPage() {
 
       <Spin spinning={loading}>
         <Space direction="vertical" size={16} style={{ width: '100%' }}>
-          <Card>
+          <Card id="overview">
             <Descriptions
               bordered
               column={{ xs: 1, md: 2 }}
               items={[
-                { key: 'orderCode', label: '订单编号', children: order?.orderCode || orderId },
+                { key: 'id', label: '订单 ID', children: orderId },
                 { key: 'leadId', label: '客资 ID', children: emptyText(order?.leadId) },
                 { key: 'serviceType', label: '服务类型', children: emptyText(order?.serviceType) },
                 // 教务端不显示金额，仅显示付款状态与付款比例
@@ -654,13 +779,161 @@ export default function AcademicOrderDetailPage() {
           <Card
             title="交付信息"
             extra={
-              <Typography.Text type="secondary">
-                保存后同步到订单交付资料。
-              </Typography.Text>
+              <DeliveryHeaderExtra
+                checked={Boolean(institutionAccepted)}
+                onChange={(checked) => {
+                  deliveryForm.setFieldsValue({
+                    order: {
+                      ...(deliveryForm.getFieldValue('order') || {}),
+                      institutionAccepted: checked,
+                    },
+                  });
+                }}
+              />
             }
           >
             <Form form={deliveryForm} layout="vertical" onFinish={submitDelivery}>
-              <Typography.Title level={5}>客户基本信息</Typography.Title>
+              <Form.Item name={['order', 'institutionAccepted']} valuePropName="checked" hidden>
+                <Checkbox />
+              </Form.Item>
+              {!institutionAccepted ? (
+                <Card id="teacher" title="履约进度" size="small" style={{ marginBottom: 16 }}>
+                  <Steps
+                    size="small"
+                    current={activeProgressStep}
+                    onChange={(step) => {
+                      setActiveProgressStep(step);
+                    }}
+                    items={DELIVERY_PROGRESS_STAGES.map((s) => ({ title: s.label }))}
+                  />
+                  <Row gutter={12} style={{ marginTop: 16 }}>
+                    {PROGRESS_DELIVERY_FIELDS.filter((field) => {
+                      const visibleFields = new Set<string>(DELIVERY_PROGRESS_STAGES[activeProgressStep]?.fields ?? []);
+                      return visibleFields.has(field.name);
+                    }).map((field) => (
+                      <Col xs={24} md={6} key={field.name}>
+                        <Form.Item name={['order', field.name]} label={field.label}>
+                          {renderDeliveryControl(field)}
+                        </Form.Item>
+                      </Col>
+                    ))}
+                  </Row>
+                  {activeProgressStep === 1 ? (
+                    <>
+                      <Row gutter={12}>
+                        <Col xs={24} md={6}>
+                          <Form.Item name={['order', 'assignedTeacher']} label="接单老师">
+                            <Select
+                              showSearch
+                              allowClear
+                              loading={teacherLoading}
+                              filterOption={false}
+                              options={teacherSelectOptions()}
+                              placeholder="从稳定老师库选择"
+                              onSearch={(value) => void loadTeachers(value)}
+                              onChange={(value) => applyMainTeacher(value)}
+                            />
+                          </Form.Item>
+                          <Form.Item name={['order', 'assignedTeacherName']} hidden>
+                            <Input />
+                          </Form.Item>
+                        </Col>
+                        <Col xs={24} md={5}>
+                          <Form.Item name={['order', 'teacherWechat']} label="老师微信号">
+                            <Input allowClear />
+                          </Form.Item>
+                        </Col>
+                        <Col xs={24} md={5}>
+                          <Form.Item name={['order', 'teacherPhone']} label="老师电话">
+                            <Input allowClear />
+                          </Form.Item>
+                        </Col>
+                        <Col xs={24} md={5}>
+                          <Form.Item name={['order', 'teacherStability']} label="老师稳定性">
+                            <Select options={DELIVERY_SELECT_OPTIONS.teacherStability} allowClear />
+                          </Form.Item>
+                        </Col>
+                        <Col xs={24} md={3}>
+                          <Form.Item label=" ">
+                            <Button
+                              block
+                              onClick={() => openTeacherDetail(deliveryForm.getFieldValue(['order', 'assignedTeacher']))}
+                            >
+                              老师详情
+                            </Button>
+                          </Form.Item>
+                        </Col>
+                      </Row>
+
+                      <Form.List name={['order', 'backupTeachers']}>
+                        {(fields, { add, remove }) => (
+                          <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                            {fields.map((field, index) => (
+                              <Row gutter={8} key={field.key} align="middle">
+                                <Col xs={24} md={6}>
+                                  <Form.Item name={[field.name, 'teacherId']} label={index === 0 ? '备用老师' : ' '}>
+                                    <Select
+                                      showSearch
+                                      allowClear
+                                      loading={teacherLoading}
+                                      filterOption={false}
+                                      options={teacherSelectOptions()}
+                                      placeholder="选择备用老师"
+                                      onSearch={(value) => void loadTeachers(value)}
+                                      onChange={(value) => applyBackupTeacher(index, value)}
+                                    />
+                                  </Form.Item>
+                                  <Form.Item name={[field.name, 'teacherName']} hidden>
+                                    <Input />
+                                  </Form.Item>
+                                </Col>
+                                <Col xs={20} md={6}>
+                                  <Form.Item name={[field.name, 'teacherPhone']} label={index === 0 ? '老师电话' : ' '}>
+                                    <Input allowClear />
+                                  </Form.Item>
+                                </Col>
+                                <Col xs={20} md={6}>
+                                  <Form.Item name={[field.name, 'teacherStability']} label={index === 0 ? '老师稳定性' : ' '}>
+                                    <Select options={DELIVERY_SELECT_OPTIONS.teacherStability} allowClear />
+                                  </Form.Item>
+                                </Col>
+                                <Col xs={4} md={2}>
+                                  <Button aria-label="删除备用老师" icon={<DeleteOutlined />} onClick={() => remove(field.name)} />
+                                </Col>
+                              </Row>
+                            ))}
+                            <Button icon={<PlusOutlined />} onClick={() => add({})}>
+                              新增备用老师
+                            </Button>
+                          </Space>
+                        )}
+                      </Form.List>
+                    </>
+                  ) : null}
+                </Card>
+              ) : null}
+              <Card title="主管进度" size="small" style={{ marginBottom: 16 }}>
+                <Row gutter={12}>
+                  {['needsSupervisor', 'riskLevel', 'customerComplaint', 'emergencyStatus', 'nextFollowUpAt'].map((name) => {
+                    const field = PROGRESS_DELIVERY_FIELDS.find((item) => item.name === name);
+                    if (!field) return null;
+                    return (
+                      <Col xs={24} md={6} key={field.name}>
+                        <Form.Item name={['order', field.name]} label={field.label}>
+                          {renderDeliveryControl(field)}
+                        </Form.Item>
+                      </Col>
+                    );
+                  })}
+                  <Col xs={24}>
+                    <Form.Item name={['order', 'supervisorNote']} label="主管备注 / 风险说明">
+                      <Input.TextArea rows={3} placeholder="记录异常原因、应急安排、客户投诉等" allowClear />
+                    </Form.Item>
+                  </Col>
+                </Row>
+              </Card>
+
+              <Typography.Title id="client-info" level={5}>基础与投稿资料</Typography.Title>
               <Row gutter={12}>
                 {BASIC_DELIVERY_FIELDS.map((field) => (
                   <Col xs={24} md={8} key={field.name}>
@@ -691,6 +964,11 @@ export default function AcademicOrderDetailPage() {
                       <Form.Item name={['order', 'authorRegistrationName']} noStyle>
                         <Input readOnly placeholder="未选择任何文件" />
                       </Form.Item>
+                      <Space>
+                        <Button type="link" onClick={() => openUploadedFile(deliveryForm.getFieldValue(['order', 'authorRegistrationUrl']))}>
+                          查看作者信息表
+                        </Button>
+                      </Space>
                     </Space>
                   </Form.Item>
                 </Col>
@@ -714,9 +992,30 @@ export default function AcademicOrderDetailPage() {
                     <Select options={PLAGIARISM_OPTIONS} placeholder="请选择查重要求" allowClear />
                   </Form.Item>
                 </Col>
+                <Col xs={24}>
+                  <Form.Item name={['order', 'fundInfo']} label="基金信息">
+                    <Input.TextArea
+                      rows={3}
+                      placeholder="基金名称、编号；没有可填无"
+                      allowClear
+                    />
+                  </Form.Item>
+                </Col>
+                <Col xs={24}>
+                  <Form.Item name={['order', 'fundRemark']} label="基金备注">
+                    <Input.TextArea rows={2} placeholder="补充基金说明、作者备注等" allowClear />
+                  </Form.Item>
+                </Col>
+                <Col xs={24}>
+                  <Form.Item name={['order', 'academicRemark']} label="教务备注">
+                    <Input.TextArea
+                      rows={2}
+                      placeholder="教务内部备注，不对外展示"
+                      allowClear
+                    />
+                  </Form.Item>
+                </Col>
               </Row>
-
-              <Divider style={{ margin: '20px 0' }} />
 
               <Typography.Title level={5}>作者信息</Typography.Title>
               <Form.List name="authors">
@@ -771,208 +1070,91 @@ export default function AcademicOrderDetailPage() {
                 )}
               </Form.List>
 
-              {/* A-5：基金信息放在作者信息下面 */}
-              <Typography.Title level={5} style={{ marginTop: 20 }}>基金与备注</Typography.Title>
-              <Row gutter={12}>
-                <Col xs={24}>
-                  <Form.Item name={['order', 'fundInfo']} label="基金信息">
-                    <Input.TextArea
-                      rows={3}
-                      placeholder="基金名称、编号；没有可填无"
-                      allowClear
-                    />
-                  </Form.Item>
-                </Col>
-                <Col xs={24}>
-                  <Form.Item name={['order', 'academicRemark']} label="教务备注">
-                    <Input.TextArea
-                      rows={2}
-                      placeholder="教务内部备注，不对外展示"
-                      allowClear
-                    />
-                  </Form.Item>
-                </Col>
-              </Row>
-
-              {/* A-5：按操作方向动态生成投稿信息数量 */}
-              <Typography.Title level={5} style={{ marginTop: 20 }}>投稿信息</Typography.Title>
-              {(() => {
-                const method = operationMethod || '';
-                const isThesis = deliveryForm.getFieldValue(['order', 'productType']) === '毕业论文';
-                if (isThesis) {
-                  return (
-                    <Typography.Paragraph type="secondary" style={{ padding: '12px 0' }}>
-                      毕业论文类型仅需上传作者信息表，无需填写投稿信息。
-                    </Typography.Paragraph>
-                  );
-                }
-                const maxSubmissions = method === '三稿三投' ? 3 : method === '两稿两投' ? 2 : 1;
-                return (
-                  <>
-                    <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
-                      当前操作方式「{method || '未选择'}」，投稿信息数：{maxSubmissions} 组
-                    </Typography.Text>
-                    <Form.List name="submissions">
-                {(fields, { add, remove }) => (
-                  <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                    {fields.map((field, index) => (
-                      <Row gutter={8} key={field.key} align="middle">
-                        <Col xs={12} md={2}>
-                          <Form.Item name={[field.name, 'submissionNo']} label={index === 0 ? '序号' : ' '}>
-                            <Input placeholder="1" />
-                          </Form.Item>
-                        </Col>
-                        <Col xs={24} md={5}>
-                          <Form.Item name={[field.name, 'paperTitle']} label={index === 0 ? '论文名称' : ' '}>
-                            <Input allowClear />
-                          </Form.Item>
-                        </Col>
-                        <Col xs={24} md={4}>
-                          <Form.Item name={[field.name, 'journalName']} label={index === 0 ? '投稿期刊' : ' '}>
-                            <Input allowClear />
-                          </Form.Item>
-                        </Col>
-                        <Col xs={24} md={4}>
-                          <Form.Item name={[field.name, 'journalUrl']} label={index === 0 ? '投稿网址' : ' '}>
-                            <Input allowClear />
-                          </Form.Item>
-                        </Col>
-                        <Col xs={12} md={3}>
-                          <Form.Item name={[field.name, 'account']} label={index === 0 ? '投稿账号' : ' '}>
-                            <Input allowClear />
-                          </Form.Item>
-                        </Col>
-                        <Col xs={12} md={3}>
-                          <Form.Item name={[field.name, 'password']} label={index === 0 ? '投稿密码' : ' '}>
-                            <Input allowClear />
-                          </Form.Item>
-                        </Col>
-                        <Col xs={20} md={2}>
-                          <Form.Item name={[field.name, 'submitTime']} label={index === 0 ? '投稿时间' : ' '}>
-                            <DatePicker showTime style={{ width: '100%' }} />
-                          </Form.Item>
-                        </Col>
-                        <Col xs={4} md={1}>
-                          <Button aria-label="删除投稿" icon={<DeleteOutlined />} onClick={() => remove(field.name)} />
-                        </Col>
-                      </Row>
-                    ))}
-                    <Button icon={<PlusOutlined />} onClick={() => add({ submissionNo: fields.length + 1 })}>
-                      添加投稿
-                    </Button>
-                  </Space>
-                )}
-              </Form.List>
-                  </>
-                );
-              })()}
-
-              {/* A-5：备用投稿信息表 */}
-              <Typography.Title level={5} style={{ marginTop: 24 }}>备用投稿信息</Typography.Title>
-              <Typography.Paragraph type="secondary">
-                备用投稿信息仅供上传查看，不默认展示在投稿流程中。如有需要可在此补充额外投稿记录。
-              </Typography.Paragraph>
-              <Form.List name="backupSubmissions">
-                {(bfields, { add: badd, remove: bremove }) => (
-                  <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                    {bfields.map((field, index) => (
-                      <Row gutter={8} key={field.key} align="middle">
-                        <Col xs={12} md={2}>
-                          <Form.Item name={[field.name, 'submissionNo']} label={index === 0 ? '序号' : ' '}>
-                            <Input placeholder="备用" disabled />
-                          </Form.Item>
-                        </Col>
-                        <Col xs={24} md={5}>
-                          <Form.Item name={[field.name, 'paperTitle']} label={index === 0 ? '论文名称' : ' '}>
-                            <Input allowClear />
-                          </Form.Item>
-                        </Col>
-                        <Col xs={24} md={4}>
-                          <Form.Item name={[field.name, 'journalName']} label={index === 0 ? '投稿期刊' : ' '}>
-                            <Input allowClear />
-                          </Form.Item>
-                        </Col>
-                        <Col xs={24} md={4}>
-                          <Form.Item name={[field.name, 'journalUrl']} label={index === 0 ? '投稿网址' : ' '}>
-                            <Input allowClear />
-                          </Form.Item>
-                        </Col>
-                        <Col xs={12} md={3}>
-                          <Form.Item name={[field.name, 'account']} label={index === 0 ? '投稿账号' : ' '}>
-                            <Input allowClear />
-                          </Form.Item>
-                        </Col>
-                        <Col xs={12} md={3}>
-                          <Form.Item name={[field.name, 'password']} label={index === 0 ? '投稿密码' : ' '}>
-                            <Input allowClear />
-                          </Form.Item>
-                        </Col>
-                        <Col xs={20} md={2}>
-                          <Form.Item name={[field.name, 'submitTime']} label={index === 0 ? '投稿时间' : ' '}>
-                            <DatePicker showTime style={{ width: '100%' }} />
-                          </Form.Item>
-                        </Col>
-                        <Col xs={4} md={1}>
-                          <Button aria-label="删除备用投稿" icon={<DeleteOutlined />} onClick={() => bremove(field.name)} />
-                        </Col>
-                      </Row>
-                    ))}
-                    <Button icon={<PlusOutlined />} onClick={() => badd({ submissionNo: bfields.length + 1 })}>
-                      添加备用投稿
-                    </Button>
-                  </Space>
-                )}
-              </Form.List>
-
-              <Card title="履约进度" size="small" style={{ marginTop: 20 }}>
-                {(() => {
-                  const computedIndex = Math.max(
-                    0,
-                    PROGRESS_STAGES.findIndex((s) =>
-                      (s.statusValues as readonly string[]).includes(statusStage as string),
-                    ) ?? 0,
-                  );
-                  return (
-                    <>
-                      <Steps
-                        size="small"
-                        current={activeProgressStep}
-                        onChange={(step) => setActiveProgressStep(step)}
-                        items={PROGRESS_STAGES.map((s) => ({ title: s.label }))}
-                      />
-                      <Typography.Text
-                        type="secondary"
-                        style={{ display: 'block', marginTop: 12, marginBottom: 12 }}
+              {!isGraduationOrder ? (
+                <>
+                  <Typography.Title level={5} style={{ marginTop: 20 }}>投稿信息</Typography.Title>
+                  <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
+                    当前操作方式：{operationMethod || '一稿一投'}，将展示 {getSubmissionCountByOperationMethod(operationMethod)} 份投稿信息。
+                  </Typography.Paragraph>
+                  <Form.List name="submissions">
+                    {(fields, { remove }) => (
+                      <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                        {fields.map((field, index) => (
+                          <Row gutter={8} key={field.key} align="middle">
+                            <Col xs={12} md={2}>
+                              <Form.Item name={[field.name, 'submissionNo']} label={index === 0 ? '序号' : ' '}>
+                                <Input placeholder="1" />
+                              </Form.Item>
+                            </Col>
+                            <Col xs={24} md={5}>
+                              <Form.Item name={[field.name, 'paperTitle']} label={index === 0 ? '论文名称' : ' '}>
+                                <Input allowClear />
+                              </Form.Item>
+                            </Col>
+                            <Col xs={24} md={4}>
+                              <Form.Item name={[field.name, 'journalName']} label={index === 0 ? '投稿期刊' : ' '}>
+                                <Input allowClear />
+                              </Form.Item>
+                            </Col>
+                            <Col xs={24} md={4}>
+                              <Form.Item name={[field.name, 'journalUrl']} label={index === 0 ? '投稿网址' : ' '}>
+                                <Input allowClear />
+                              </Form.Item>
+                            </Col>
+                            <Col xs={12} md={3}>
+                              <Form.Item name={[field.name, 'account']} label={index === 0 ? '投稿账号' : ' '}>
+                                <Input allowClear />
+                              </Form.Item>
+                            </Col>
+                            <Col xs={12} md={3}>
+                              <Form.Item name={[field.name, 'password']} label={index === 0 ? '投稿密码' : ' '}>
+                                <Input allowClear />
+                              </Form.Item>
+                            </Col>
+                            <Col xs={20} md={2}>
+                              <Form.Item name={[field.name, 'submitTime']} label={index === 0 ? '投稿时间' : ' '}>
+                                <DatePicker showTime style={{ width: '100%' }} />
+                              </Form.Item>
+                            </Col>
+                            <Col xs={4} md={1}>
+                              <Button aria-label="删除投稿" icon={<DeleteOutlined />} onClick={() => remove(field.name)} />
+                            </Col>
+                          </Row>
+                        ))}
+                      </Space>
+                    )}
+                  </Form.List>
+                  <Card size="small" title="备用投稿信息表" style={{ marginTop: 16 }}>
+                    <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                      <Upload
+                        accept=".pdf,.doc,.docx,.xls,.xlsx"
+                        showUploadList={false}
+                        beforeUpload={(file) => {
+                          void uploadBackupSubmission(file);
+                          return false;
+                        }}
                       >
-                        当前阶段：{PROGRESS_STAGES[activeProgressStep]?.label || '—'}，下方展示该阶段需要填写的字段。
-                      </Typography.Text>
-                    </>
-                  );
-                })()}
-                <Row gutter={12}>
-                  {PROGRESS_DELIVERY_FIELDS.filter((field) => {
-                    const visibleFields = new Set<string>(PROGRESS_STAGES[activeProgressStep]?.fields ?? []);
-                    return visibleFields.has(field.name);
-                  }).map((field) => (
-                    <Col xs={24} md={6} key={field.name}>
-                      <Form.Item name={['order', field.name]} label={field.label}>
-                        {renderDeliveryControl(field)}
+                        <Button icon={<UploadOutlined />} loading={backupSubmissionUploading}>上传备用投稿信息表</Button>
+                      </Upload>
+                      <Form.Item name={['order', 'backupSubmissionUrl']} hidden>
+                        <Input />
                       </Form.Item>
-                    </Col>
-                  ))}
-                  <Col xs={24}>
-                    <Form.Item name={['order', 'supervisorNote']} label="主管备注 / 风险说明">
-                      <Input.TextArea
-                        rows={3}
-                        placeholder="记录异常原因、应急安排、客户投诉等"
-                        allowClear
-                      />
-                    </Form.Item>
-                  </Col>
-                </Row>
-              </Card>
+                      <Form.Item name={['order', 'backupSubmissionName']} noStyle>
+                        <Input readOnly placeholder="未选择任何文件" />
+                      </Form.Item>
+                      <Button type="link" onClick={() => openUploadedFile(deliveryForm.getFieldValue(['order', 'backupSubmissionUrl']))}>
+                        查看备用投稿信息表
+                      </Button>
+                    </Space>
+                  </Card>
+                </>
+              ) : (
+                <Typography.Paragraph type="secondary" style={{ marginTop: 20 }}>
+                  当前产品类型为毕业论文，仅需维护作者登记表与作者信息。
+                </Typography.Paragraph>
+              )}
 
-              <Card title="期刊与交付状态" size="small" style={{ marginTop: 16 }}>
+              <Card id="progress" title="期刊与交付状态" size="small" style={{ marginTop: 16 }}>
                 {(() => {
                   const allJournalKeys = JOURNAL_STEPS.map((s) => s.key);
                   const computedIndex = Math.max(
@@ -1010,46 +1192,59 @@ export default function AcademicOrderDetailPage() {
                 </Row>
               </Card>
 
-              <Typography.Title level={5}>财务信息</Typography.Title>
-              <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
-                {isAcademic ? '教务角色：仅展示老师相关财务信息' : ''}
-              </Typography.Paragraph>
+              <Typography.Title id="finance" level={5}>财务信息</Typography.Title>
               <Row gutter={12}>
-                {canSeeCustomerFinance ? (
-                  <>
-                    <Col xs={24} md={4}>
-                      <Form.Item name={['finance', 'orderAmount']} label="订单额">
-                        <Input disabled />
-                      </Form.Item>
-                    </Col>
-                    <Col xs={24} md={4}>
-                      <Form.Item name={['finance', 'customerPaid']} label="订单已付款">
-                        <Input disabled />
-                      </Form.Item>
-                    </Col>
-                    <Col xs={24} md={4}>
-                      <Form.Item label="订单待支付">
-                        <Input value={customerPending} disabled />
-                      </Form.Item>
-                    </Col>
-                  </>
+                {visibleFinanceFieldKeys.has('orderAmount') ? (
+                  <Col xs={24} md={4}>
+                    <Form.Item name={['finance', 'orderAmount']} label="订单额">
+                      <Input disabled />
+                    </Form.Item>
+                  </Col>
                 ) : null}
-                <Col xs={24} md={4}>
-                  <Form.Item name={['finance', 'teacherPrice']} label="老师接单价格">
-                    <Input disabled />
-                  </Form.Item>
-                </Col>
-                <Col xs={24} md={4}>
-                  <Form.Item name={['finance', 'teacherPaid']} label="老师已付款">
-                    <Input disabled />
-                  </Form.Item>
-                </Col>
-                <Col xs={24} md={4}>
-                  <Form.Item label="老师待付款">
-                    <Input value={teacherPending} disabled />
-                  </Form.Item>
-                </Col>
+                {visibleFinanceFieldKeys.has('customerPaid') ? (
+                  <Col xs={24} md={4}>
+                    <Form.Item name={['finance', 'customerPaid']} label="订单已付款">
+                      <Input disabled />
+                    </Form.Item>
+                  </Col>
+                ) : null}
+                {visibleFinanceFieldKeys.has('customerPending') ? (
+                  <Col xs={24} md={4}>
+                    <Form.Item label="订单待支付">
+                      <Input value={customerPending} disabled />
+                    </Form.Item>
+                  </Col>
+                ) : null}
+                {visibleFinanceFieldKeys.has('teacherPrice') ? (
+                  <Col xs={24} md={4}>
+                    <Form.Item name={['finance', 'teacherPrice']} label="老师接单价格">
+                      <Input disabled />
+                    </Form.Item>
+                  </Col>
+                ) : null}
+                {visibleFinanceFieldKeys.has('teacherPaid') ? (
+                  <Col xs={24} md={4}>
+                    <Form.Item name={['finance', 'teacherPaid']} label="老师已付款">
+                      <Input disabled />
+                    </Form.Item>
+                  </Col>
+                ) : null}
+                {visibleFinanceFieldKeys.has('teacherPending') ? (
+                  <Col xs={24} md={4}>
+                    <Form.Item label="老师待付款">
+                      <Input value={teacherPending} disabled />
+                    </Form.Item>
+                  </Col>
+                ) : null}
               </Row>
+              <Space style={{ marginBottom: 16 }}>
+                <Button loading={remindingPayment} onClick={remindPayment}>
+                  提醒销售催款
+                </Button>
+                <Typography.Text type="secondary">
+                  发送给订单对应销售，内容包含订单、客户与付款阶段。
+                </Typography.Text>
+              </Space>
 
               <Space>
                 <Button type="primary" htmlType="submit" loading={savingDelivery}>
@@ -1183,7 +1378,7 @@ export default function AcademicOrderDetailPage() {
                 />
               </Form.Item>
               <Form.Item name="nextRemindAt">
-                <DatePicker showTime placeholder="下次提醒（选填）" format="YYYY年MM月DD日 HH:mm:ss" />
+                <DatePicker placeholder="提醒日期（选填）" format="YYYY年MM月DD日" />
               </Form.Item>
               <Form.Item>
                 <Upload
@@ -1217,7 +1412,9 @@ export default function AcademicOrderDetailPage() {
                 <Button type="primary" htmlType="submit" loading={submitting}>添加</Button>
               </Form.Item>
             </Form>
-            <Typography.Text type="secondary">提示：节点类型含"异常"时仍会自动通知销售（兼容旧逻辑）。</Typography.Text>
+            <Typography.Text type="secondary">
+              提示：节点类型含"异常"时仍会自动通知销售；节点提醒固定在 10:00、15:00、18:00 生成。
+            </Typography.Text>
           </Card>
 
           <Card title="跟进时间线">
@@ -1283,6 +1480,32 @@ export default function AcademicOrderDetailPage() {
             </Space>
           </Form.Item>
         </Form>
+      </Modal>
+
+      <Modal
+        title="老师详情"
+        open={teacherDetailOpen}
+        onCancel={() => setTeacherDetailOpen(false)}
+        footer={null}
+        destroyOnClose
+      >
+        {teacherDetail ? (
+          <Descriptions column={1} bordered size="small">
+            <Descriptions.Item label="老师姓名">{teacherDetail.name || '-'}</Descriptions.Item>
+            <Descriptions.Item label="联系电话">{teacherDetail.phone || '-'}</Descriptions.Item>
+            <Descriptions.Item label="微信号">{teacherDetail.wechat || '-'}</Descriptions.Item>
+            <Descriptions.Item label="专业能力">{teacherDetail.specialty || '-'}</Descriptions.Item>
+            <Descriptions.Item label="接单方向">{teacherDetail.direction || '-'}</Descriptions.Item>
+            <Descriptions.Item label="稳定性">{normalizeTeacherStability(teacherDetail.stability) || '-'}</Descriptions.Item>
+            <Descriptions.Item label="质量评分">{teacherDetail.qualityScore || '-'}</Descriptions.Item>
+            <Descriptions.Item label="当前/累计">
+              {teacherDetail.currentOrders ?? 0} / {teacherDetail.totalOrders ?? 0}
+            </Descriptions.Item>
+            <Descriptions.Item label="备注">{teacherDetail.remark || '-'}</Descriptions.Item>
+          </Descriptions>
+        ) : (
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无老师详情" />
+        )}
       </Modal>
     </Space>
   );

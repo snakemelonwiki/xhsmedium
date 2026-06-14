@@ -114,6 +114,9 @@ export class Order {
   @Column({ name: 'fund_info', type: 'text', nullable: true })
   fundInfo: string | null;
 
+  @Column({ name: 'fund_remark', type: 'text', nullable: true })
+  fundRemark: string | null;
+
   @Column({ name: 'registration_status', length: 32, nullable: true })
   registrationStatus: string | null;
 
@@ -122,6 +125,12 @@ export class Order {
 
   @Column({ name: 'author_registration_name', length: 255, nullable: true })
   authorRegistrationName: string | null;
+
+  @Column({ name: 'backup_submission_url', length: 500, nullable: true })
+  backupSubmissionUrl: string | null;
+
+  @Column({ name: 'backup_submission_name', length: 255, nullable: true })
+  backupSubmissionName: string | null;
 
   @Column({ name: 'operation_method', length: 32, nullable: true })
   operationMethod: string | null;
@@ -138,11 +147,20 @@ export class Order {
   @Column({ name: 'teacher_id', length: 64, nullable: true })
   teacherId: string | null;
 
+  @Column({ name: 'teacher_name', length: 128, nullable: true })
+  teacherName: string | null;
+
   @Column({ name: 'backup_teacher', length: 128, nullable: true })
   backupTeacher: string | null;
 
+  @Column({ name: 'backup_teachers', type: 'text', nullable: true })
+  backupTeachers: string | null;
+
   @Column({ name: 'teacher_phone', length: 64, nullable: true })
   teacherPhone: string | null;
+
+  @Column({ name: 'teacher_wechat', length: 64, nullable: true })
+  teacherWechat: string | null;
 
   @Column({ name: 'teacher_stability', length: 16, nullable: true })
   teacherStability: string | null;
@@ -263,6 +281,9 @@ export class Order {
 
   @Column({ name: 'order_stage', length: 64, nullable: true })
   orderStage: string | null;
+
+  @Column({ name: 'institution_accepted', type: 'tinyint', default: 0 })
+  institutionAccepted: boolean;
 
   @Column({ name: 'next_follow_at', type: 'datetime', nullable: true })
   nextFollowAt: Date | null;

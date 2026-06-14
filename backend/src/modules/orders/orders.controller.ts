@@ -15,6 +15,8 @@ import {
   stringifyDetail,
 } from '../../shared/operation-logs.constants';
 
+const ACADEMIC_DELIVERY_ROLES = ['admin', 'owner', 'supervisor', 'academic', 'academic_supervisor'];
+
 @Controller()
 @UseGuards(AuthGuard)
 export class OrdersController {
@@ -76,6 +78,7 @@ export class OrdersController {
       const result = await this.ordersService.closeDeal(leadId, salesUserId, {
         serviceType: body?.serviceType ?? null,
         amount: body?.amount ?? null,
+        clientPaid: body?.clientPaid ?? body?.customerPaid ?? null,
         remark: body?.remark ?? null,
         productType: body?.productType ?? null,
         guaranteeType: body?.guaranteeType ?? null,
@@ -243,6 +246,23 @@ export class OrdersController {
   }
 
   /**
+   * 教务将当前节点提醒标记为已提醒/已处理；历史记录保留，当前列表隐藏。
+   */
+  @Patch('orders/reminders/:id/handled')
+  async markReminderHandled(
+    @Param('id') id: string,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    const userId = getSessionUserId(req) || '';
+    if (!userId) {
+      return res.status(401).json({ ok: false, message: 'unauthenticated' });
+    }
+    const result = await this.remindersService.markHandled(id, userId);
+    return res.json(result);
+  }
+
+  /**
    * 手动触发一次订单节点超时扫描（仅 admin/owner 可用）。
    * 必须放在 `@Get('orders/:id')` 之前，避免 'scan-node-timeouts' 被路由参数 :id 抢占。
    */
@@ -273,6 +293,40 @@ export class OrdersController {
     } catch (err: any) {
       const code = err?.status || 404;
       return res.status(code).json({ ok: false, message: err?.message || 'not found' });
+    }
+  }
+
+  /**
+   * 教务提醒订单对应销售催客户付款。
+   */
+  @Post('orders/:id/remind-sales-payment')
+  async remindSalesPayment(
+    @Param('id') id: string,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    const session = (req as any).session;
+    const actor = {
+      userId: getSessionUserId(req) || '',
+      role: session?.role || '',
+    };
+    if (!actor.userId) {
+      return res.status(401).json({ ok: false, message: 'unauthenticated' });
+    }
+    try {
+      const result = await this.ordersService.remindSalesPayment(id, actor);
+      await this.logSafe({
+        userId: actor.userId,
+        action: OPERATION_LOG_ACTIONS.UPDATE,
+        targetType: OPERATION_LOG_TARGET_TYPES.ORDER,
+        targetId: id,
+        detail: { action: 'remind-sales-payment', receiverId: result.receiverId },
+        req,
+      });
+      return res.json(result);
+    } catch (err: any) {
+      const code = err?.status || 422;
+      return res.status(code).json({ ok: false, message: err?.message || 'invalid' });
     }
   }
 
@@ -313,6 +367,9 @@ export class OrdersController {
       const canAccess = await this.ordersService.canAccessOrder(id, actor);
       if (!canAccess) {
         return res.status(404).json({ ok: false, message: 'not found' });
+      }
+      if (!ACADEMIC_DELIVERY_ROLES.includes(role)) {
+        return res.status(403).json({ ok: false, message: '当前角色不允许修改教务交付详情' });
       }
       await this.ordersService.saveOrderDelivery(id, {
         order: body?.order || {},
@@ -356,10 +413,12 @@ export class OrdersController {
       if (!canAccess) {
         return res.status(404).json({ ok: false, message: 'not found' });
       }
-      // 订单状态只允许教务/教务主管/主管/admin/owner 修改，其余角色不允许
-      const CAN_MODIFY_ORDER_STATUS = ['admin', 'owner', 'supervisor', 'academic', 'academic_supervisor'];
-      if (body?.order_status !== undefined && !CAN_MODIFY_ORDER_STATUS.includes(role)) {
+      // 订单状态与教务归属只允许教务/主管/admin/owner 修改，其余角色不允许
+      if (body?.order_status !== undefined && !ACADEMIC_DELIVERY_ROLES.includes(role)) {
         return res.status(403).json({ ok: false, message: '当前角色不允许修改订单状态' });
+      }
+      if (body?.academic_user_id !== undefined && !ACADEMIC_DELIVERY_ROLES.includes(role)) {
+        return res.status(403).json({ ok: false, message: '当前角色不允许修改教务归属' });
       }
       await this.ordersService.update(id, userId, {
         order_status: body?.order_status,
@@ -367,6 +426,8 @@ export class OrdersController {
         academic_user_id: body?.academic_user_id,
         service_type: body?.service_type,
         amount: body?.amount,
+        payment_stage: body?.payment_stage ?? body?.paymentStage,
+        client_paid: body?.client_paid ?? body?.clientPaid ?? body?.customerPaid,
         remark: body?.remark,
       });
       // 写操作日志：含 order_status 视为 status_change，否则按 UPDATE
@@ -384,6 +445,8 @@ export class OrdersController {
           academic_user_id: body?.academic_user_id,
           service_type: body?.service_type,
           amount: body?.amount,
+          payment_stage: body?.payment_stage ?? body?.paymentStage,
+          client_paid: body?.client_paid ?? body?.clientPaid ?? body?.customerPaid,
         },
         req,
       });
