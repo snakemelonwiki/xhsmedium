@@ -52,4 +52,21 @@ describe('notification route hints', () => {
 
     expect(result.items[0].routeHint).toBe('/operation/leads?leadId=lead-1');
   });
+
+  it('routes sales order payment reminders to the sales order detail', async () => {
+    getMock.mockResolvedValue({
+      items: [{
+        id: 'n3',
+        typeCode: 'reminder',
+        portType: 'sales',
+        relatedType: 'order',
+        relatedId: 'order-1',
+        title: '催款提醒',
+      }],
+    });
+
+    const result = await listNotifications();
+
+    expect(result.items[0].routeHint).toBe('/sales/orders/order-1');
+  });
 });
