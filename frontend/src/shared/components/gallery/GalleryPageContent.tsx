@@ -32,15 +32,16 @@ const platformOptions = [
   { label: '抖音', value: '抖音' },
 ];
 
-const typeOptions = [
+export const GALLERY_TYPE_OPTIONS = [
   { label: '全部类型', value: '' },
-  { label: '图文', value: '图文' },
-  { label: '视频', value: '视频' },
   { label: '素人贴', value: '素人贴' },
   { label: '话题贴', value: '话题贴' },
   { label: '获客贴', value: '获客贴' },
-  { label: '营销贴', value: '营销贴' },
 ];
+
+export function getGalleryTypeSelectValue(postType?: string) {
+  return GALLERY_TYPE_OPTIONS.some((option) => option.value === postType) ? postType : undefined;
+}
 
 const primaryTypeTabs = [
   { label: '营销帖', value: '营销贴' },
@@ -265,8 +266,8 @@ export function GalleryPageContent({
             aria-label="筛选类型"
             placeholder="全部类型"
             style={{ width: 130 }}
-            value={filters.postType || undefined}
-            options={typeOptions}
+            value={getGalleryTypeSelectValue(filters.postType)}
+            options={GALLERY_TYPE_OPTIONS}
             onChange={(value) => applyFilter('postType', value || undefined)}
           />
           <Select
