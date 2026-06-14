@@ -25,6 +25,7 @@ import { listSourceAccounts, type CatalogOption } from '@/shared/api/catalog';
 import { listGalleryPosts, togglePostFavorite } from '@/shared/api/content';
 import { getPlazaConfig, updatePlazaConfig, type PlazaConfig } from '@/shared/api/plaza-config';
 import type { ContentPost } from '@/shared/types/content';
+import { todayDateString } from '@/shared/utils/default-date-range';
 
 const platformOptions = [
   { label: '全部平台', value: '' },
@@ -38,6 +39,11 @@ export const GALLERY_TYPE_OPTIONS = [
   { label: '话题贴', value: '话题贴' },
   { label: '获客贴', value: '获客贴' },
 ];
+
+function buildDefaultGalleryFilters(): GalleryFilters {
+  const today = todayDateString();
+  return { postType: '营销贴', from: today, to: today };
+}
 
 export function getGalleryTypeSelectValue(postType?: string) {
   return GALLERY_TYPE_OPTIONS.some((option) => option.value === postType) ? postType : undefined;
@@ -73,7 +79,7 @@ export function GalleryPageContent({
   const [items, setItems] = useState<ContentPost[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
-  const [filters, setFilters] = useState<GalleryFilters>({ postType: '营销贴' });
+  const [filters, setFilters] = useState<GalleryFilters>(() => buildDefaultGalleryFilters());
   const [accounts, setAccounts] = useState<CatalogOption[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
@@ -141,10 +147,11 @@ export function GalleryPageContent({
   }
 
   function handleDateRangeChange(dates: any) {
+    const today = todayDateString();
     const next = {
       ...filters,
-      from: dates && dates[0] ? dayjs(dates[0]).format('YYYY-MM-DD') : undefined,
-      to: dates && dates[1] ? dayjs(dates[1]).format('YYYY-MM-DD') : undefined,
+      from: dates && dates[0] ? dayjs(dates[0]).format('YYYY-MM-DD') : today,
+      to: dates && dates[1] ? dayjs(dates[1]).format('YYYY-MM-DD') : today,
     };
     setFilters(next);
     load(1, next);
@@ -286,6 +293,7 @@ export function GalleryPageContent({
           />
           <DatePicker.RangePicker
             allowClear
+            value={filters.from && filters.to ? [dayjs(filters.from), dayjs(filters.to)] : null}
             style={{ width: 260 }}
             onChange={handleDateRangeChange}
           />

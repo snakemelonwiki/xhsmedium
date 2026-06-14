@@ -272,6 +272,8 @@ export class PostsController {
     @Query('platform') platform?: string,
     @Query('postType') postType?: string,
     @Query('employeeId') employeeId?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
   ) {
@@ -290,6 +292,8 @@ export class PostsController {
         platform: platform || undefined,
         postType: postType || undefined,
         employeeId: employeeId || undefined,
+        from: from || undefined,
+        to: to || undefined,
         userId,
       },
       Number(page) || 1,

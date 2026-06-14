@@ -85,6 +85,46 @@ describe('PostsController pagination', () => {
   });
 });
 
+describe('PostsController plaza filters', () => {
+  const response = () => ({
+    status: jest.fn().mockReturnThis(),
+    json: jest.fn().mockReturnThis(),
+  }) as any;
+
+  it('作品广场透传日期范围给 service', async () => {
+    const postsService = {
+      findPlaza: jest.fn().mockResolvedValue({ total: 0, items: [] }),
+    } as any;
+    const controller = new PostsController(postsService, {} as any, { log: jest.fn() } as any);
+    const res = response();
+    const req = { session: { role: 'admin', userId: 'user-1', employeeId: 'emp-1' } } as any;
+
+    await controller.findPlaza(
+      req,
+      res,
+      'all',
+      undefined,
+      '营销贴',
+      undefined,
+      '2026-06-14',
+      '2026-06-14',
+      '1',
+      '15',
+    );
+
+    expect(postsService.findPlaza).toHaveBeenCalledWith(
+      expect.objectContaining({
+        from: '2026-06-14',
+        to: '2026-06-14',
+        postType: '营销贴',
+      }),
+      1,
+      15,
+      expect.any(Object),
+    );
+  });
+});
+
 describe('PostsController A端契约补齐', () => {
   const response = () => ({
     status: jest.fn().mockReturnThis(),
@@ -293,5 +333,34 @@ describe('PostsController v1.3 OP-8 学习榜单维度切换', () => {
       },
       { employeeId: 'emp-2', role: 'staff' },
     );
+  });
+
+  it('读取学习榜单门槛配置', async () => {
+    const postsService = {
+      getLearningBoardThresholds: jest.fn().mockResolvedValue({ minLeads: 10, minTraffic: 10000 }),
+    } as any;
+    const controller = new PostsController(postsService, {} as any, { log: jest.fn() } as any);
+    const res = response();
+
+    await controller.getLearningBoardThresholds(res);
+
+    expect(res.json).toHaveBeenCalledWith({ ok: true, minLeads: 10, minTraffic: 10000 });
+  });
+
+  it('仅主管角色可以保存学习榜单门槛配置', async () => {
+    const postsService = {
+      saveLearningBoardThresholds: jest.fn(),
+    } as any;
+    const controller = new PostsController(postsService, {} as any, { log: jest.fn() } as any);
+    const res = response();
+
+    await controller.updateLearningBoardThresholds(
+      { session: { role: 'staff', userId: 'staff-1' } } as any,
+      res,
+      { minLeads: 5, minTraffic: 8000 },
+    );
+
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(postsService.saveLearningBoardThresholds).not.toHaveBeenCalled();
   });
 });

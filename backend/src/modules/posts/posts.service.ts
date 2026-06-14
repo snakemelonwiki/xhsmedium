@@ -71,6 +71,8 @@ interface PlazaFilters {
   platform?: string;
   postType?: string;
   employeeId?: string;
+  from?: string;
+  to?: string;
   userId?: string;
 }
 
@@ -400,7 +402,7 @@ export class PostsService {
     pageSize: number = 20,
     viewer?: PostViewer,
   ): Promise<{ items: any[]; total: number }> {
-    const params: any[] = [filters.userId || ''];
+    const params: any[] = [];
     const whereParts = ['1=1'];
 
     if (filters.platform) {
@@ -415,8 +417,17 @@ export class PostsService {
       whereParts.push('p.employee_id = ?');
       params.push(filters.employeeId);
     }
+    if (filters.from) {
+      whereParts.push('p.published_at >= ?');
+      params.push(filters.from);
+    }
+    if (filters.to) {
+      whereParts.push('p.published_at <= ?');
+      params.push(filters.to);
+    }
 
     let favoriteJoin = '';
+    const favoriteJoinParams: any[] = [];
     if (filters.view === 'favorites') {
       favoriteJoin = `
         INNER JOIN favorites fav_join
@@ -424,7 +435,7 @@ export class PostsService {
          AND fav_join.target_id = p.id COLLATE utf8mb4_unicode_ci
          AND fav_join.user_id = ?
       `;
-      params.push(filters.userId || '');
+      favoriteJoinParams.push(filters.userId || '');
     }
 
     // T8/T9: 应用作品广场门槛配置（按作品类型差异化过滤）
@@ -480,7 +491,7 @@ export class PostsService {
       ${thresholdClause}
       ${havingClause}
     `;
-    const countParams = [...params, ...thresholdParams];
+    const countParams = [...favoriteJoinParams, ...params, ...thresholdParams];
     const countResult = await this.postRepository.query(countSql, countParams);
     const total = Number((countResult[0] as any)?.total || 0);
 
@@ -530,9 +541,7 @@ export class PostsService {
       LIMIT ? OFFSET ?
     `;
 
-    // dataParams: params 已经包含 userId（首元素）和过滤条件；末尾追加 pageSize 和 offset
-    // 注意：不要再追加 filters.userId，否则会重复（之前导致 LIMIT 收到 userId 字符串而非数字）
-    const dataParams = [...params, ...thresholdParams, safePageSize, offset];
+    const dataParams = [filters.userId || '', ...favoriteJoinParams, ...params, ...thresholdParams, safePageSize, offset];
     const rows = await this.postRepository.query(sql, dataParams);
     return { items: (rows as any[]).map((row) => this.mapPostRow(row, viewer)), total };
   }
