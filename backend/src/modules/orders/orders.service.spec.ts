@@ -24,7 +24,12 @@ function createService(overrides: Record<string, any> = {}) {
   const orderSubmissionRepository = overrides.orderSubmissionRepository ?? createRepositoryMock();
   const userRepository = overrides.userRepository ?? createRepositoryMock();
   const leadRepository = overrides.leadRepository ?? createRepositoryMock();
-  const dataSource = overrides.dataSource ?? { transaction: jest.fn(), query: jest.fn() };
+  const dataSource = overrides.dataSource ?? {
+    transaction: jest.fn(async (cb) => cb({
+      getRepository: jest.fn(() => createRepositoryMock()),
+    })),
+    query: jest.fn(),
+  };
   const notificationsService = overrides.notificationsService ?? { create: jest.fn() };
 
   return {
@@ -114,7 +119,14 @@ describe('OrdersService', () => {
   });
 
   it('saves institution acceptance, backup teacher rows, and academic-controlled order status', async () => {
-    const { service, orderRepository } = createService();
+    const orderRepoInTransaction = createRepositoryMock();
+    const dataSource = {
+      query: jest.fn(),
+      transaction: jest.fn(async (cb) => cb({
+        getRepository: jest.fn(() => orderRepoInTransaction),
+      })),
+    };
+    const { service, orderRepository } = createService({ dataSource });
     orderRepository.findOne.mockResolvedValue({ id: 'order-1' });
 
     await service.saveOrderDelivery(
@@ -142,10 +154,10 @@ describe('OrdersService', () => {
           ],
         },
       },
-      'academic',
+      { role: 'academic', userId: 'academic-1' },
     );
 
-    expect(orderRepository.update).toHaveBeenCalledWith(
+    expect(orderRepoInTransaction.update).toHaveBeenCalledWith(
       'order-1',
       expect.objectContaining({
         institutionAccepted: true,
@@ -214,7 +226,7 @@ describe('OrdersService', () => {
             customerPaid: 300,
           },
         },
-        'sales',
+        { role: 'sales', userId: 'sales-1' },
       ),
     ).rejects.toThrow(ForbiddenException);
 
