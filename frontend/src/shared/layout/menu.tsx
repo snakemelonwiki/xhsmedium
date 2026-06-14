@@ -30,6 +30,8 @@ export type AppMenuItem = {
   roles: AppRole[];
 };
 
+const ACADEMIC_ROLE_SCOPE: AppRole[] = ['academic', 'academic_supervisor'];
+
 export const APP_MENU_ITEMS: AppMenuItem[] = [
   {
     key: 'operation-today-tasks',
@@ -211,63 +213,63 @@ export const APP_MENU_ITEMS: AppMenuItem[] = [
     label: '教务首页',
     path: '/academic',
     icon: <BookOutlined />,
-    roles: ['academic'],
+    roles: ACADEMIC_ROLE_SCOPE,
   },
   {
     key: 'academic-teachers',
     label: '稳定老师库',
     path: '/academic/teachers',
     icon: <TeamOutlined />,
-    roles: ['academic'],
+    roles: ACADEMIC_ROLE_SCOPE,
   },
   {
     key: 'academic-orders',
     label: '订单池',
     path: '/academic/orders',
     icon: <OrderedListOutlined />,
-    roles: ['academic'],
+    roles: ACADEMIC_ROLE_SCOPE,
   },
   {
     key: 'academic-followup',
     label: '订单跟进',
     path: '/academic/followup',
     icon: <ScheduleOutlined />,
-    roles: ['academic'],
+    roles: ACADEMIC_ROLE_SCOPE,
   },
   {
     key: 'academic-abnormal',
     label: '异常订单',
     path: '/academic/abnormal',
     icon: <ProjectOutlined />,
-    roles: ['academic'],
+    roles: ACADEMIC_ROLE_SCOPE,
   },
   {
     key: 'academic-reminders',
     label: '节点提醒',
     path: '/academic/reminders',
     icon: <ProjectOutlined />,
-    roles: ['academic'],
+    roles: ACADEMIC_ROLE_SCOPE,
   },
   {
     key: 'academic-exports',
     label: '导出中心',
     path: '/academic/exports',
     icon: <ExportOutlined />,
-    roles: ['academic'],
+    roles: ACADEMIC_ROLE_SCOPE,
   },
   {
     key: 'academic-messages',
     label: '消息',
     path: '/academic/messages',
     icon: <MessageOutlined />,
-    roles: ['academic'],
+    roles: ACADEMIC_ROLE_SCOPE,
   },
   {
     key: 'academic-recommend',
     label: '推荐作品录入',
     path: '/academic/recommend',
     icon: <ShareAltOutlined />,
-    roles: ['academic'],
+    roles: ACADEMIC_ROLE_SCOPE,
   },
   {
     key: 'owner-home',

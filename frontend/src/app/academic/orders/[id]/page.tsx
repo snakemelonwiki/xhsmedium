@@ -373,7 +373,9 @@ export default function AcademicOrderDetailPage() {
   const orderId = String(params.id);
   const currentUser = readStoredUser();
   const isAcademic = currentUser?.role === 'academic';
+  const isAcademicSupervisor = currentUser?.role === 'academic_supervisor';
   const isAdminLike = currentUser?.role === 'admin' || currentUser?.role === 'owner';
+  const canSeeCustomerFinance = isAdminLike || isAcademicSupervisor;
 
   const [order, setOrder] = useState<OrderItem>();
   const [delivery, setDelivery] = useState<OrderDeliveryDetail>(DEFAULT_DELIVERY);
@@ -1009,22 +1011,29 @@ export default function AcademicOrderDetailPage() {
               </Card>
 
               <Typography.Title level={5}>财务信息</Typography.Title>
+              <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
+                {isAcademic ? '教务角色：仅展示老师相关财务信息' : ''}
+              </Typography.Paragraph>
               <Row gutter={12}>
-                <Col xs={24} md={4}>
-                  <Form.Item name={['finance', 'orderAmount']} label="订单额">
-                    <Input disabled />
-                  </Form.Item>
-                </Col>
-                <Col xs={24} md={4}>
-                  <Form.Item name={['finance', 'customerPaid']} label="订单已付款">
-                    <Input disabled />
-                  </Form.Item>
-                </Col>
-                <Col xs={24} md={4}>
-                  <Form.Item label="订单待支付">
-                    <Input value={customerPending} disabled />
-                  </Form.Item>
-                </Col>
+                {canSeeCustomerFinance ? (
+                  <>
+                    <Col xs={24} md={4}>
+                      <Form.Item name={['finance', 'orderAmount']} label="订单额">
+                        <Input disabled />
+                      </Form.Item>
+                    </Col>
+                    <Col xs={24} md={4}>
+                      <Form.Item name={['finance', 'customerPaid']} label="订单已付款">
+                        <Input disabled />
+                      </Form.Item>
+                    </Col>
+                    <Col xs={24} md={4}>
+                      <Form.Item label="订单待支付">
+                        <Input value={customerPending} disabled />
+                      </Form.Item>
+                    </Col>
+                  </>
+                ) : null}
                 <Col xs={24} md={4}>
                   <Form.Item name={['finance', 'teacherPrice']} label="老师接单价格">
                     <Input disabled />
