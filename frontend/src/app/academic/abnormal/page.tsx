@@ -7,6 +7,7 @@ import { useState } from 'react';
 
 import { OrderTable } from '@/app/academic/orders/OrderTable';
 import { closeAbnormalFeedback, listAbnormalFeedbacks } from '@/shared/api/orders';
+import { readStoredUser } from '@/shared/auth/auth';
 import type { OrderItem } from '@/shared/types/orders';
 
 /**
@@ -18,6 +19,8 @@ import type { OrderItem } from '@/shared/types/orders';
 export default function AcademicAbnormalOrdersPage() {
   const router = useRouter();
   const [closingIds, setClosingIds] = useState<Record<string, boolean>>({});
+  const currentUser = readStoredUser();
+  const isAcademicSupervisor = currentUser?.role === 'academic_supervisor';
 
   async function closeOrderAbnormal(order: OrderItem) {
     if (closingIds[order.id]) return;
@@ -47,8 +50,12 @@ export default function AcademicAbnormalOrdersPage() {
   return (
     <OrderTable
       title="异常订单"
-      description="筛选异常或指定状态订单，并保留处理动作入口。"
-      scope="academic"
+      description={
+        isAcademicSupervisor
+          ? '教务主管：查看所有教务异常订单。'
+          : '筛选异常或指定状态订单，并保留处理动作入口。'
+      }
+      scope={isAcademicSupervisor ? 'all' : 'academic'}
       status="abnormal"
       showStatusFilter
       actionMode="abnormal"

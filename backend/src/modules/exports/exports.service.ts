@@ -566,7 +566,7 @@ export class ExportsService implements OnModuleInit, OnModuleDestroy {
     const role = String(filter.role || '');
     const uid = String(filter.currentUserId || '');
     const scope = String(filter.scope || '');
-    const isAdminLike = role === 'admin' || role === 'owner';
+    const isAdminLike = role === 'admin' || role === 'owner' || role === 'academic_supervisor';
     if (!(isAdminLike && (scope === 'all' || !scope))) {
       if (role === 'academic') {
         if (scope === 'pool') {
@@ -638,7 +638,7 @@ export class ExportsService implements OnModuleInit, OnModuleDestroy {
     const role = String(filter.role || '');
     const uid = String(filter.currentUserId || '');
     const scope = String(filter.scope || '');
-    const isAdminLike = role === 'admin' || role === 'owner';
+    const isAdminLike = role === 'admin' || role === 'owner' || role === 'academic_supervisor';
 
     const qb = this.orderFollowRepo
       .createQueryBuilder('f')

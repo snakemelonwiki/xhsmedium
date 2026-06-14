@@ -83,14 +83,10 @@ export default function SalesDealsPage() {
     setLoading(true);
     setError('');
     try {
-      // "我的成交"口径：order_status IN (completed, closed)，
-      // 排除还在销售跟进中（to_receive / in_progress / …）的中间态订单。
-      // 数组传参会展开成 ?status=completed&status=closed（apiClient 已支持）。
-      const defaultStatuses: string[] = filters.status
-        ? [filters.status]
-        : ['completed', 'closed'];
+      // "我的成交"口径：默认不传 status 查全部，选具体状态时传单值过滤。
+      const statusParam = filters.status ? [filters.status] : undefined;
       const result = await listMyDeals({
-        status: defaultStatuses,
+        status: statusParam,
         productType: filters.productType || undefined,
         startDate: filters.dateRange?.start.startOf('day').toISOString() || undefined,
         endDate: filters.dateRange?.end.endOf('day').toISOString() || undefined,
@@ -111,6 +107,7 @@ export default function SalesDealsPage() {
   }
 
   useEffect(() => {
+    setPage(1);
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters.status, filters.productType, filters.dateRange?.start.valueOf(), filters.dateRange?.end.valueOf()]);

@@ -134,7 +134,7 @@ export function OrderTable({
     setLoading(true);
     setError('');
     try {
-      const queryScope = isClaimPool ? 'pool' : isFollowup ? 'assigned' : scope;
+      const queryScope = isClaimPool ? 'pool' : (isFollowup && scope !== 'all') ? 'assigned' : scope;
       const queryStatus = isClaimPool ? 'to_receive' : nextStatus || undefined;
       const queryHandover = isClaimPool ? 'handed_over' : nextHandover || undefined;
       const result = await listOrders({

@@ -259,7 +259,7 @@ export class OrderAbnormalFeedbackService {
   private canRead(actor: Actor, order: Order): boolean {
     const role = actor.role || '';
     const uid = actor.userId || '';
-    if (role === 'admin' || role === 'owner') return true;
+    if (role === 'admin' || role === 'owner' || role === 'academic_supervisor') return true;
     if (role === 'sales') return order.salesUserId === uid;
     if (role === 'academic') return order.academicUserId === uid || order.academicUserId == null;
     return order.salesUserId === uid || order.academicUserId === uid;
@@ -268,8 +268,8 @@ export class OrderAbnormalFeedbackService {
   private canWrite(actor: Actor, order: Order): boolean {
     const role = actor.role || '';
     const uid = actor.userId || '';
-    if (role === 'admin' || role === 'owner' || role === 'academic') {
-      // 教务：限自己已认领 + 池单（与 orders list 保持一致）
+    if (role === 'admin' || role === 'owner' || role === 'academic' || role === 'academic_supervisor') {
+      // 教务/教务主管：限自己已认领 + 池单（与 orders list 保持一致）
       if (role === 'academic') {
         return order.academicUserId === uid || order.academicUserId == null;
       }
@@ -282,7 +282,7 @@ export class OrderAbnormalFeedbackService {
   private canClose(actor: Actor, order: Order, feedback: OrderAbnormalFeedback): boolean {
     const role = actor.role || '';
     const uid = actor.userId || '';
-    if (role === 'admin' || role === 'owner') return true;
+    if (role === 'admin' || role === 'owner' || role === 'academic_supervisor') return true;
     if (role === 'academic' && (order.academicUserId === uid || order.academicUserId == null)) {
       // 教务：必须是该反馈的提交人
       return feedback.reporterUserId === uid;

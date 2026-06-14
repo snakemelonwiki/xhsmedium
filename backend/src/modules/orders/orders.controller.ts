@@ -120,7 +120,8 @@ export class OrdersController {
       return res.status(401).json({ ok: false, message: 'unauthenticated' });
     }
     try {
-      const data = await this.ordersService.getAcademicHomeSummary(userId);
+      const session = (req as any).session;
+      const data = await this.ordersService.getAcademicHomeSummary(userId, session?.role);
       return res.json(data);
     } catch (err: any) {
       return res
@@ -355,8 +356,8 @@ export class OrdersController {
       if (!canAccess) {
         return res.status(404).json({ ok: false, message: 'not found' });
       }
-      // 订单状态只允许教务/主管/admin/owner 修改，其余角色不允许
-      const CAN_MODIFY_ORDER_STATUS = ['admin', 'owner', 'academic'];
+      // 订单状态只允许教务/教务主管/主管/admin/owner 修改，其余角色不允许
+      const CAN_MODIFY_ORDER_STATUS = ['admin', 'owner', 'supervisor', 'academic', 'academic_supervisor'];
       if (body?.order_status !== undefined && !CAN_MODIFY_ORDER_STATUS.includes(role)) {
         return res.status(403).json({ ok: false, message: '当前角色不允许修改订单状态' });
       }

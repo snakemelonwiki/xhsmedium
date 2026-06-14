@@ -565,7 +565,7 @@ export class OrdersService {
    * - role=sales 等其他角色               → 仅自己经手的销售/教务订单
    */
   private applyOrdersScope(qb: any, options: ListOrdersOptions): void {
-    const isAdminLike = options.sessionRole === 'admin' || options.sessionRole === 'owner' || options.sessionRole === 'supervisor';
+    const isAdminLike = options.sessionRole === 'admin' || options.sessionRole === 'owner' || options.sessionRole === 'supervisor' || options.sessionRole === 'academic_supervisor';
 
     if (isAdminLike && (options.scope === 'all' || !options.scope)) {
       return;
@@ -660,7 +660,10 @@ export class OrdersService {
    *
    * 返回 6 个数字：待接收 / 进行中 / 待客户资料 / 待老师安排 / 即将到期 / 异常。
    */
-  async getAcademicHomeSummary(currentUserId: string): Promise<{
+  async getAcademicHomeSummary(
+    currentUserId: string,
+    sessionRole?: string,
+  ): Promise<{
     pendingReceive: number;
     inProgress: number;
     waitingMaterial: number;
@@ -668,12 +671,14 @@ export class OrdersService {
     nearDue: number;
     abnormal: number;
   }> {
-    // 走 root qb 复用 applyOrdersScope 的可见性逻辑（academic 默认 = 池单 + 自己已认领）。
-    // admin/owner 调用本接口时也回落到"自己经手"（applyOrdersScope 已含）。
+    // academic_supervisor 与 admin/owner 走全量统计，否则仅池单+自己已认领
+    const effectiveRole = (sessionRole === 'academic_supervisor' || sessionRole === 'admin' || sessionRole === 'owner' || sessionRole === 'supervisor')
+      ? sessionRole
+      : 'academic';
     const scope: ListOrdersOptions = {
-      role: 'academic',
-      sessionRole: 'academic',
-      currentUserId: currentUserId || undefined,
+      role: effectiveRole,
+      sessionRole: effectiveRole,
+      currentUserId: effectiveRole === 'academic' ? (currentUserId || undefined) : undefined,
     };
 
     async function count(qb: any): Promise<number> {
@@ -743,11 +748,11 @@ export class OrdersService {
     if (actor) {
       const role = actor.role || '';
       const uid = actor.userId || '';
-      const isAdminLike = role === 'admin' || role === 'owner' || role === 'supervisor';
+      const isAdminLike = role === 'admin' || role === 'owner' || role === 'supervisor' || role === 'academic_supervisor';
       if (!isAdminLike) {
         const canSee =
           (role === 'sales' && order.salesUserId === uid) ||
-          (role === 'academic' || role === 'academic_supervisor') && (order.academicUserId === uid || order.academicUserId == null) ||
+          (role === 'academic' && (order.academicUserId === uid || order.academicUserId == null)) ||
           (order.salesUserId === uid || order.academicUserId === uid);
         if (!canSee) {
           // 不暴露 "存在但无权限"；与不存在一致返回 404
@@ -942,11 +947,11 @@ export class OrdersService {
     if (!order) return false;
     const role = actor?.role || '';
     const uid = actor?.userId || '';
-    if (role === 'admin' || role === 'owner' || role === 'supervisor') return true;
+    if (role === 'admin' || role === 'owner' || role === 'supervisor' || role === 'academic_supervisor') return true;
     if (role === 'sales') {
       return Boolean(uid && order.salesUserId === uid);
     }
-    if (role === 'academic' || role === 'academic_supervisor') {
+    if (role === 'academic') {
       return order.academicUserId === uid || order.academicUserId == null;
     }
     return Boolean(uid && (order.salesUserId === uid || order.academicUserId === uid));
@@ -1194,12 +1199,11 @@ export class OrdersService {
         employeeId = ctx.employeeId;
       }
       const uid = actor.userId || '';
-      const isAdminLike = role === 'admin' || role === 'owner' || role === 'supervisor';
+      const isAdminLike = role === 'admin' || role === 'owner' || role === 'supervisor' || role === 'academic_supervisor';
       if (!isAdminLike) {
         const canSee =
           (role === 'sales' && order.salesUserId === uid) ||
-          (role === 'academic' || role === 'academic_supervisor') &&
-            (order.academicUserId === employeeId || order.academicUserId == null) ||
+          (role === 'academic' && (order.academicUserId === employeeId || order.academicUserId == null)) ||
           order.salesUserId === uid ||
           order.academicUserId === employeeId;
         if (!canSee) {
