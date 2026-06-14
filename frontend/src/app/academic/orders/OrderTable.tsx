@@ -6,7 +6,7 @@ import type { TableColumnsType } from 'antd';
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 
-import { createOrderFollowRecord, listOrders, updateOrder } from '@/shared/api/orders';
+import { createOrderFollowRecord, listOrders, remindSalesPayment, updateOrder } from '@/shared/api/orders';
 import { updateLeadDealStatus } from '@/shared/api/leads';
 import { createExport, downloadExportUrl, getExport, type ExportFilter } from '@/shared/api/exports';
 import { readStoredUser } from '@/shared/auth/auth';
@@ -114,6 +114,7 @@ export function OrderTable({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [updatingId, setUpdatingId] = useState('');
+  const [remindingId, setRemindingId] = useState('');
   const [assigningOrder, setAssigningOrder] = useState<OrderItem>();
   const [assignAcademicUserId, setAssignAcademicUserId] = useState('');
   const [exportModalOpen, setExportModalOpen] = useState(false);
@@ -205,6 +206,18 @@ export function OrderTable({
       message.error(err instanceof Error ? err.message : '订单领取失败');
     } finally {
       setUpdatingId('');
+    }
+  }
+
+  async function remindPayment(orderId: string) {
+    setRemindingId(orderId);
+    try {
+      await remindSalesPayment(orderId);
+      message.success('已提醒销售催款');
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '提醒失败');
+    } finally {
+      setRemindingId('');
     }
   }
 
@@ -396,9 +409,14 @@ export function OrderTable({
         }
         if (isFollowup) {
           return (
-            <Button loading={updatingId === record.id} onClick={() => router.push(`/academic/orders/${record.id}`)}>
-              跟进
-            </Button>
+            <Space>
+              <Button loading={updatingId === record.id} onClick={() => router.push(`/academic/orders/${record.id}`)}>
+                跟进
+              </Button>
+              <Button loading={remindingId === record.id} onClick={() => remindPayment(record.id)}>
+                提醒销售催款
+              </Button>
+            </Space>
           );
         }
         return (
