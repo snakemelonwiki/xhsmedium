@@ -26,13 +26,13 @@ export const DELIVERY_PROGRESS_STAGES: readonly DeliveryProgressStage[] = [
     key: 'writing',
     label: '写作审核',
     statusValues: ['写作中'],
-    fields: ['innovationReviewStatus', 'innovationReviewAt', 'firstDraftReviewStatus', 'firstDraftReviewAt'],
+    fields: ['innovationReviewStatus', 'innovationReviewAt', 'editorReviewStatus', 'editorReviewAt'],
   },
   {
     key: 'prepare',
     label: '投稿准备',
     statusValues: ['待投稿'],
-    fields: ['paperProgress', 'salesContact', 'authorInfoChecked', 'authorInfoCheckedAt'],
+    fields: ['paperProgress', 'salesContact', 'authorInfoChecked'],
   },
   {
     key: 'submitted',
