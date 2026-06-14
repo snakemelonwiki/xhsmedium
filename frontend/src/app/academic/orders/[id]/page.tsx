@@ -174,7 +174,9 @@ const DELIVERY_SELECT_OPTIONS: Record<string, { label: string; value: string }[]
 function renderDeliveryControl(field: DeliveryFieldConfig) {
   const selectOptions = field.options ?? DELIVERY_SELECT_OPTIONS[field.name];
   if (field.type === 'date') {
-    return <DatePicker showTime style={{ width: '100%' }} />;
+    // 查稿时间只选日期，不带时分秒
+    const isCheckDate = field.name === 'nextJournalCheckAt' || field.name === 'firstWeekCheckAt';
+    return <DatePicker showTime={!isCheckDate} style={{ width: '100%' }} />;
   }
   if (selectOptions) {
     return <Select options={selectOptions} placeholder={`请选择${field.label}`} allowClear />;
@@ -490,6 +492,25 @@ export default function AcademicOrderDetailPage() {
         }
       }
       await updateOrderDelivery(orderId, payload);
+
+      // 下次查稿时间变更时：自动创建当天 10:00 / 15:00 / 18:00 的查稿提醒
+      const newCheckDate = deliveryForm.getFieldValue(['order', 'nextJournalCheckAt']);
+      const oldCheckDate = delivery.order?.nextJournalCheckAt;
+      const newDateStr = dayjs.isDayjs(newCheckDate) ? (newCheckDate as dayjs.Dayjs).format('YYYY-MM-DD') : '';
+      const oldDateStr = oldCheckDate ? dayjs(oldCheckDate).format('YYYY-MM-DD') : '';
+      if (newDateStr && newDateStr !== oldDateStr) {
+        const remindTimes = ['10:00', '15:00', '18:00'];
+        await Promise.all(
+          remindTimes.map((time) =>
+            createOrderFollowRecord(orderId, {
+              nodeType: '查稿提醒',
+              content: `系统自动创建：${newDateStr} ${time} 查稿提醒`,
+              nextRemindAt: `${newDateStr}T${time}:00+08:00`,
+            }),
+          ),
+        );
+      }
+
       message.success('交付信息已保存');
       const next = await getOrderDelivery(orderId);
       setDelivery(next);
