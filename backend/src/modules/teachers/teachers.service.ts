@@ -1,7 +1,9 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Like, Repository } from 'typeorm';
+import { In, Like, Repository } from 'typeorm';
 import { Teacher, TEACHER_EDUCATION_OPTIONS, TEACHER_TUTORING_TYPES, TEACHER_QUALITY_LEVELS } from '../../entities/teacher.entity';
+import { TeacherSpecialty } from '../../entities/teacher-specialty.entity';
+import { TeacherOrderType } from '../../entities/teacher-order-type.entity';
 import { makeId } from '../../shared/utils/id-generator';
 
 /** 质量评分：兼容旧格式 A/B/C 与新格式 优秀/一般/差 */
@@ -88,7 +90,60 @@ export class TeachersService {
   constructor(
     @InjectRepository(Teacher)
     private readonly repo: Repository<Teacher>,
+    @InjectRepository(TeacherSpecialty)
+    private readonly specialtyRepo: Repository<TeacherSpecialty>,
+    @InjectRepository(TeacherOrderType)
+    private readonly orderTypeRepo: Repository<TeacherOrderType>,
   ) {}
+
+  /**
+   * 将老师列表中的 specialty / direction ID 字段解析为可读的名称字段。
+   * 结果通过 Object.assign 附加到原对象上，不破坏原始 ID 字段（编辑场景仍需 ID）。
+   */
+  private async resolveTeacherNames(items: Teacher[]): Promise<Teacher[]> {
+    if (items.length === 0) return items;
+
+    const specialtyIds = new Set<string>();
+    const orderTypeIds = new Set<string>();
+    for (const item of items) {
+      if (item.specialty) {
+        item.specialty.split(/[、,]/).map((s) => s.trim()).filter(Boolean).forEach((id) => specialtyIds.add(id));
+      }
+      if (item.direction) {
+        item.direction.split(/[、,]/).map((s) => s.trim()).filter(Boolean).forEach((id) => orderTypeIds.add(id));
+      }
+    }
+
+    const [specialties, orderTypes] = await Promise.all([
+      specialtyIds.size > 0
+        ? this.specialtyRepo.findBy({ id: In(Array.from(specialtyIds).map((id) => Number(id))) })
+        : Promise.resolve<TeacherSpecialty[]>([]),
+      orderTypeIds.size > 0
+        ? this.orderTypeRepo.findBy({ id: In(Array.from(orderTypeIds).map((id) => Number(id))) })
+        : Promise.resolve<TeacherOrderType[]>([]),
+    ]);
+
+    const specialtyMap = new Map(specialties.map((s) => [String(s.id), s.name]));
+    const orderTypeMap = new Map(orderTypes.map((t) => [String(t.id), t.name]));
+
+    for (const item of items) {
+      const specialtyNames = item.specialty
+        ? item.specialty.split(/[、,]/).map((s) => s.trim()).filter(Boolean)
+            .map((id) => specialtyMap.get(id) || id)
+            .filter(Boolean)
+            .join('、')
+        : null;
+      const directionNames = item.direction
+        ? item.direction.split(/[、,]/).map((s) => s.trim()).filter(Boolean)
+            .map((id) => orderTypeMap.get(id) || id)
+            .filter(Boolean)
+            .join('、')
+        : null;
+      Object.assign(item, { specialtyNames, directionNames });
+    }
+
+    return items;
+  }
 
   /**
    * 查询老师列表，支持关键字搜索（姓名/专业能力/接单方向/学校）。
@@ -103,7 +158,8 @@ export class TeachersService {
           { researchArea: Like(`%${keyword}%`) },
         ]
       : {};
-    return this.repo.find({ where, order: { createdAt: 'DESC' } });
+    const items = await this.repo.find({ where, order: { createdAt: 'DESC' } });
+    return this.resolveTeacherNames(items);
   }
 
   /**
@@ -125,6 +181,7 @@ export class TeachersService {
       take: limit,
       skip: offset,
     });
+    await this.resolveTeacherNames(items);
     return { items, total, limit, offset };
   }
 

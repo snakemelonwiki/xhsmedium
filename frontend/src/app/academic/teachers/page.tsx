@@ -9,6 +9,7 @@ import { useEffect, useState } from 'react';
 
 import { apiClient } from '@/shared/api/apiClient';
 import { uploadFile } from '@/shared/api/uploads';
+import { formatTeacherCatalogNames } from './teacherDisplay';
 
 /* ------------------------------------------------------------------ */
 /*  类型                                                               */
@@ -24,6 +25,10 @@ type Teacher = {
   researchArea?: string | null;
   specialty?: string | null;
   direction?: string | null;
+  /** 后端解析后的专业方向名称（只读展示） */
+  specialtyNames?: string | null;
+  /** 后端解析后的接单类型名称（只读展示） */
+  directionNames?: string | null;
   tutoringType?: string | null;
   imageUrl?: string | null;
   stability: string;
@@ -132,9 +137,6 @@ export default function AcademicTeachersPage() {
   const [uploading, setUploading] = useState(false);
   const [specialtyOptions, setSpecialtyOptions] = useState<{ label: string; value: string }[]>([]);
   const [orderTypeOptions, setOrderTypeOptions] = useState<{ label: string; value: string }[]>([]);
-  // ID → 名称 映射表，用于表格/详情弹窗显示
-  const [specialtyMap, setSpecialtyMap] = useState<Record<string, string>>({});
-  const [orderTypeMap, setOrderTypeMap] = useState<Record<string, string>>({});
   const [form] = Form.useForm<TeacherFormValues>();
 
   /* ---------- 加载列表 ---------- */
@@ -155,17 +157,15 @@ export default function AcademicTeachersPage() {
 
   useEffect(() => { void load('', 1); }, []);
 
-  // 加载专业方向和接单类型选项（value=ID，供多选 Select + 名称回显使用）
+  // 加载专业方向和接单类型选项（value=ID，供编辑表单多选 Select 使用）
   useEffect(() => {
     apiClient.get<any>('/teacher-specialties').then((data) => {
       const list = Array.isArray(data) ? data : data?.items ?? [];
       setSpecialtyOptions(list.map((s: any) => ({ label: s.name, value: String(s.id) })));
-      setSpecialtyMap(list.reduce((acc: Record<string, string>, s: any) => { acc[String(s.id)] = s.name; return acc; }, {}));
     }).catch(() => {});
     apiClient.get<any>('/teacher-order-types').then((data) => {
       const list = Array.isArray(data) ? data : data?.items ?? [];
       setOrderTypeOptions(list.map((t: any) => ({ label: t.name, value: String(t.id) })));
-      setOrderTypeMap(list.reduce((acc: Record<string, string>, t: any) => { acc[String(t.id)] = t.name; return acc; }, {}));
     }).catch(() => {});
   }, []);
 
@@ -278,23 +278,13 @@ export default function AcademicTeachersPage() {
     {
       title: '专业方向',
       width: 160,
-      render: (_: unknown, r: Teacher) => {
-        if (!r.specialty) return '-';
-        const ids = r.specialty.split(/[、,]/).filter(Boolean);
-        const names = ids.map((id) => specialtyMap[id] || id).filter(Boolean);
-        return names.join('、') || '-';
-      },
+      render: (_: unknown, r: Teacher) => formatTeacherCatalogNames(r.specialty, specialtyOptions, r.specialtyNames),
       ellipsis: true,
     },
     {
       title: '接单类型',
       width: 120,
-      render: (_: unknown, r: Teacher) => {
-        if (!r.direction) return '-';
-        const ids = r.direction.split(/[、,]/).filter(Boolean);
-        const names = ids.map((id) => orderTypeMap[id] || id).filter(Boolean);
-        return names.join('、') || '-';
-      },
+      render: (_: unknown, r: Teacher) => formatTeacherCatalogNames(r.direction, orderTypeOptions, r.directionNames),
       ellipsis: true,
     },
     {
@@ -567,19 +557,11 @@ export default function AcademicTeachersPage() {
             <Descriptions.Item label="联系电话">{detailTeacher.phone || '-'}</Descriptions.Item>
             <Descriptions.Item label="微信号">{detailTeacher.wechat || '-'}</Descriptions.Item>
             <Descriptions.Item label="专业方向" span={2}>
-              {(() => {
-                if (!detailTeacher.specialty) return '-';
-                return detailTeacher.specialty.split(/[、,]/).filter(Boolean)
-                  .map((id) => specialtyMap[id] || id).join('、');
-              })()}
+              {formatTeacherCatalogNames(detailTeacher.specialty, specialtyOptions, detailTeacher.specialtyNames)}
             </Descriptions.Item>
             <Descriptions.Item label="接单类型" span={2}>
               <div style={{ wordBreak: 'break-word', whiteSpace: 'normal', lineHeight: 1.8 }}>
-                {(() => {
-                  if (!detailTeacher.direction) return '-';
-                  return detailTeacher.direction.split(/[、,]/).filter(Boolean)
-                    .map((id) => orderTypeMap[id] || id).join('、');
-                })()}
+                {formatTeacherCatalogNames(detailTeacher.direction, orderTypeOptions, detailTeacher.directionNames)}
               </div>
             </Descriptions.Item>
             <Descriptions.Item label="辅导类型">{detailTeacher.tutoringType || '-'}</Descriptions.Item>
