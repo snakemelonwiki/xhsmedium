@@ -1,8 +1,7 @@
 'use client';
 
 import { DeleteOutlined, DownloadOutlined, ExclamationCircleOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons';
-import { Button, Card, Col, DatePicker, Descriptions, Divider, Empty, Form, Input, InputNumber, Modal, Row, Select, Space, Spin, Steps, Table, Tag, Timeline, Tooltip, Typography, Upload, message } from 'antd';
-import { Button, Card, Checkbox, Col, DatePicker, Descriptions, Empty, Form, Input, Modal, Row, Select, Space, Spin, Steps, Table, Tag, Timeline, Tooltip, Typography, Upload, message } from 'antd';
+import { Button, Card, Checkbox, Col, DatePicker, Descriptions, Divider, Empty, Form, Input, InputNumber, Modal, Row, Select, Space, Spin, Steps, Table, Tag, Timeline, Tooltip, Typography, Upload, message } from 'antd';
 import type { UploadProps } from 'antd';
 import dayjs, { type Dayjs } from 'dayjs';
 import { useParams, useRouter } from 'next/navigation';
@@ -329,7 +328,9 @@ export default function AcademicOrderDetailPage() {
   const orderId = String(params.id);
   const currentUser = readStoredUser();
   const isAcademic = currentUser?.role === 'academic';
+  const isAcademicSupervisor = currentUser?.role === 'academic_supervisor';
   const isAdminLike = currentUser?.role === 'admin' || currentUser?.role === 'owner';
+  const canSeeCustomerFinance = isAdminLike || isAcademicSupervisor;
   const currentRole = currentUser?.role;
 
   const [order, setOrder] = useState<OrderItem>();
