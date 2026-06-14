@@ -38,6 +38,7 @@ import { getStatusMeta } from '@/shared/constants/status';
 import type { AdminEmployee } from '@/shared/types/admin';
 import type { AdminLeadsStats } from '@/shared/api/admin';
 import type { LeadTimelineItem } from '@/shared/types/leads';
+import { todayDateString } from '@/shared/utils/default-date-range';
 
 import { buildLeadReassignPayload } from './leadActions';
 
@@ -80,6 +81,11 @@ const EMPTY_FILTERS: Filters = {
   startDate: '',
   endDate: '',
 };
+
+function buildDefaultFilters(): Filters {
+  const today = todayDateString();
+  return { ...EMPTY_FILTERS, startDate: today, endDate: today };
+}
 
 const platformOptions = [
   { label: '全部平台', value: '' },
@@ -166,7 +172,7 @@ type Lead = {
 export default function AdminLeadsPage() {
   const [items, setItems] = useState<Lead[]>([]);
   const [stats, setStats] = useState<AdminLeadsStats | null>(null);
-  const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
+  const [filters, setFilters] = useState<Filters>(() => buildDefaultFilters());
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [total, setTotal] = useState(0);
@@ -379,6 +385,7 @@ export default function AdminLeadsPage() {
       dealStatus?: string;
       dateRange?: (Dayjs | null)[] | null;
     };
+    const today = todayDateString();
     setFilters((prev) => ({
       ...prev,
       platform: values.platform ?? '',
@@ -389,15 +396,15 @@ export default function AdminLeadsPage() {
       processStatus: values.processStatus ?? '',
       addStatus: values.addStatus ?? '',
       dealStatus: values.dealStatus ?? '',
-      startDate: values.dateRange?.[0] ? formatDayjs(values.dateRange[0]) : '',
-      endDate: values.dateRange?.[1] ? formatDayjs(values.dateRange[1]) : '',
+      startDate: values.dateRange?.[0] ? formatDayjs(values.dateRange[0]) : today,
+      endDate: values.dateRange?.[1] ? formatDayjs(values.dateRange[1]) : today,
     }));
     setAdvancedOpen(false);
   }
 
   function resetAdvanced() {
     advancedForm.resetFields();
-    setFilters(EMPTY_FILTERS);
+    setFilters(buildDefaultFilters());
     setAdvancedOpen(false);
   }
 
@@ -493,6 +500,8 @@ export default function AdminLeadsPage() {
     [posts],
   );
 
+  const today = todayDateString();
+  const isDefaultDateRange = filters.startDate === today && filters.endDate === today;
   const advancedActiveCount = [
     filters.platform,
     filters.operatorId,
@@ -502,9 +511,7 @@ export default function AdminLeadsPage() {
     filters.processStatus,
     filters.addStatus,
     filters.dealStatus,
-    filters.startDate,
-    filters.endDate,
-  ].filter(Boolean).length;
+  ].filter(Boolean).length + (isDefaultDateRange ? 0 : 1);
 
   // 8 统计卡数据
   const statsData = useMemo(() => {
@@ -800,8 +807,8 @@ export default function AdminLeadsPage() {
             value={buildDateRangeValue(filters.startDate, filters.endDate)}
             onChange={(range) => setFilters((prev) => ({
               ...prev,
-              startDate: range?.start.format('YYYY-MM-DD') ?? '',
-              endDate: range?.end.format('YYYY-MM-DD') ?? '',
+              startDate: range?.start.format('YYYY-MM-DD') ?? todayDateString(),
+              endDate: range?.end.format('YYYY-MM-DD') ?? todayDateString(),
             }))}
             presets={RANGE_PRESETS_FULL}
             variant="select"
