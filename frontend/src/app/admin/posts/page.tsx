@@ -181,6 +181,11 @@ type Post = {
 type Employee = { id: string; name: string };
 type Account = { id: string; name?: string; accountName?: string; employeeId?: string; platform?: string };
 
+function getAccountName(account: Account): string {
+  const name = String(account.accountName ?? account.name ?? '').trim();
+  return name || '未命名账号';
+}
+
 type SortField =
   | 'publishedAt'
   | 'traffic'
@@ -553,25 +558,16 @@ export default function AdminPostsPage() {
   const accountOptions = useMemo(() => {
     const counts = new Map<string, number>();
     for (const a of accounts) {
-      const key = String(a.name || a.id).trim();
+      const key = getAccountName(a);
       counts.set(key, (counts.get(key) || 0) + 1);
     }
     return [
       { label: '全部账号', value: '' },
       ...accounts.map((a) => {
-        const name = String(a.name || a.id).trim();
+        const name = getAccountName(a);
         const isDuplicate = (counts.get(name) || 0) > 1;
-        // 重复名时附加 platform 区分；正常情况下保持纯名称显示，避免下拉太长
-        const label = isDuplicate && a.platform
-          ? `${name}（${a.platform}）`
-          : name;
-        return {
-          label,
-          value: a.id,
-          // 冗余字段：搜索 prop 设为 'label' 时需要让 label 含 id（已含），
-          // 但 antd Select 不支持跨字段搜索；保留一个 data-search-key 让用户能搜 id 片段
-          // （antd v5 不直接支持，但下面 optionFilterProp='label' 配合 searchable 行为够用）
-        };
+        const label = isDuplicate && a.platform ? `${name}（${a.platform}）` : name;
+        return { label, value: a.id };
       }),
     ];
   }, [accounts]);
@@ -584,7 +580,7 @@ export default function AdminPostsPage() {
 
   const accountMap = useMemo(() => {
     const m = new Map<string, string>();
-    for (const a of accounts) m.set(a.id, a.name || a.id);
+    for (const a of accounts) m.set(a.id, getAccountName(a));
     return m;
   }, [accounts]);
 

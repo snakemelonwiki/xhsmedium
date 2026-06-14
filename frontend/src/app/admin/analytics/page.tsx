@@ -493,7 +493,7 @@ export default function AdminAnalyticsPage() {
   const accountOptions = useMemo(() => {
     const items = [{ label: '全部账号', value: 'all' }];
     for (const a of accounts) {
-      const name = a.accountName || a.id;
+      const name = a.accountName.trim() || '未命名账号';
       const emp = a.employeeName ? `（${a.employeeName}）` : '';
       const platformTag = a.platform ? ` [${a.platform}]` : '';
       items.push({ label: `${name}${platformTag}${emp}`, value: a.id });
