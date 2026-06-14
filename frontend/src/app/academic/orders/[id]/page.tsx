@@ -1,7 +1,7 @@
 'use client';
 
 import { DeleteOutlined, DownloadOutlined, ExclamationCircleOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons';
-import { Button, Card, Col, DatePicker, Descriptions, Divider, Empty, Form, Input, Modal, Row, Select, Space, Spin, Steps, Table, Tag, Timeline, Tooltip, Typography, Upload, message } from 'antd';
+import { Button, Card, Col, DatePicker, Descriptions, Divider, Empty, Form, Input, InputNumber, Modal, Row, Select, Space, Spin, Steps, Table, Tag, Timeline, Tooltip, Typography, Upload, message } from 'antd';
 import type { UploadProps } from 'antd';
 import dayjs, { type Dayjs } from 'dayjs';
 import { useParams, useRouter } from 'next/navigation';
@@ -358,7 +358,7 @@ function calculatePendingAmount(total: unknown, paid: unknown, fallback?: string
   const paidNumber = paidText ? Number(paidText) : 0;
   if (!Number.isFinite(totalNumber) || !Number.isFinite(paidNumber)) return '';
 
-  return (totalNumber - paidNumber).toFixed(2);
+  return String(Math.round(totalNumber - paidNumber));
 }
 
 /**
@@ -471,9 +471,12 @@ export default function AcademicOrderDetailPage() {
     setSavingDelivery(true);
     try {
       const payload = serializeDeliveryForm(values);
-      // 教务端（含教务主管）不提交财务信息（后端限制"付款信息只允许销售修改"）
-      if (isAcademic || currentUser?.role === 'academic_supervisor') {
-        delete (payload as Record<string, unknown>).finance;
+      // 教务端（含教务主管）只提交老师侧财务字段，客户侧不提交
+      if (isAcademic || isAcademicSupervisor) {
+        if (payload.finance) {
+          const { orderAmount, customerPaid, customerPending, ...teacherFinance } = payload.finance as Record<string, unknown>;
+          payload.finance = teacherFinance;
+        }
       }
       await updateOrderDelivery(orderId, payload);
       message.success('交付信息已保存');
@@ -1036,12 +1039,29 @@ export default function AcademicOrderDetailPage() {
                 ) : null}
                 <Col xs={24} md={4}>
                   <Form.Item name={['finance', 'teacherPrice']} label="老师接单价格">
-                    <Input disabled />
+                    <InputNumber min={0} precision={0} style={{ width: '100%' }} />
                   </Form.Item>
                 </Col>
                 <Col xs={24} md={4}>
-                  <Form.Item name={['finance', 'teacherPaid']} label="老师已付款">
-                    <Input disabled />
+                  <Form.Item
+                    name={['finance', 'teacherPaid']}
+                    label="老师已付款"
+                    dependencies={[['finance', 'teacherPrice']]}
+                    rules={[
+                      {
+                        validator: (_rule, value) => {
+                          if (value === undefined || value === null || value === '') return Promise.resolve();
+                          const teacherPrice = deliveryForm.getFieldValue(['finance', 'teacherPrice']);
+                          if (!teacherPrice || Number(teacherPrice) <= 0) return Promise.resolve();
+                          if (Number(value) > Number(teacherPrice)) {
+                            return Promise.reject(new Error('老师已付款不能大于老师接单价格'));
+                          }
+                          return Promise.resolve();
+                        },
+                      },
+                    ]}
+                  >
+                    <InputNumber min={0} precision={0} style={{ width: '100%' }} />
                   </Form.Item>
                 </Col>
                 <Col xs={24} md={4}>

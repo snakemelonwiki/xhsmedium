@@ -19,6 +19,21 @@ npm start              # Starts server on PORT (3000) + OWNER_PORT (3001) + ALL_
 
 > **开发规范**: 后续所有前端代码变更只涉及新前端 (`frontend/src/`)，不修改旧前端 (`public/`) 代码。
 
+## 开发工作流
+
+每次完成一个任务后，对涉及变更的项目执行静态编译检查：
+
+```bash
+# 后端变更后
+cd backend && npx tsc --noEmit 2>&1 | grep -v '\.spec\.ts'
+
+# 前端变更后（Next.js 构建检查）
+cd frontend && npx next build --turbopack 2>&1 | tail -20
+```
+
+- 确保编译无 error（.spec.ts 测试文件的预期错误可忽略）
+- 前端构建的 TypeScript 类型错误必须修复，lint 警告可酌情处理
+
 ## Architecture Overview
 
 **Monolithic Node.js/Express application** with no build step, no tests, and no linting configured. Frontend is vanilla JavaScript served as static files.

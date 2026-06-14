@@ -867,8 +867,18 @@ export class OrdersService {
     const isAcademic = role === 'academic' || role === 'academic_supervisor';
 
     if (hasFinancePayload) {
-      if (isAcademic) {
-        throw new ForbiddenException('教务角色不允许修改订单财务信息');
+      // 按角色分字段校验：教务可编辑老师侧，销售可编辑客户侧
+      const financeKeys = Object.keys(dto.finance || {}).filter((k) => dto.finance?.[k] !== undefined && dto.finance?.[k] !== null && dto.finance?.[k] !== '');
+      const CUSTOMER_FIELDS = ['orderAmount', 'customerPaid', 'customerPending'];
+      const TEACHER_FIELDS = ['teacherPrice', 'teacherPaid', 'teacherPending'];
+      const hasCustomerFields = financeKeys.some((k) => CUSTOMER_FIELDS.includes(k));
+      const hasTeacherFields = financeKeys.some((k) => TEACHER_FIELDS.includes(k));
+
+      if (isAcademic && hasCustomerFields) {
+        throw new ForbiddenException('教务角色不允许修改客户侧财务信息');
+      }
+      if (isSales && hasTeacherFields) {
+        throw new ForbiddenException('销售角色不允许修改老师侧财务信息');
       }
       if (isSales && order.salesUserId !== userId) {
         throw new ForbiddenException('仅订单销售本人可以修改财务信息');
@@ -1804,21 +1814,41 @@ export class OrdersService {
     input: Record<string, any>,
     current: OrderFinance | null,
   ): OrderFinance {
-    const orderAmount = this.normalizeMoney(input.orderAmount);
-    const clientPaid = this.normalizeMoney(input.customerPaid ?? input.clientPaid);
-    const teacherPrice = this.normalizeMoney(input.teacherPrice);
-    const teacherPaid = this.normalizeMoney(input.teacherPaid);
-    return {
-      ...(current || {}),
-      id: current?.id || makeId(),
-      orderId,
-      orderAmount,
-      clientPaid,
-      clientPending: this.computePending(orderAmount, clientPaid),
-      teacherPrice,
-      teacherPaid,
-      teacherPending: this.computePending(teacherPrice, teacherPaid),
-    } as OrderFinance;
+    const base = current ? { ...current } : { id: makeId(), orderId };
+    // 只覆盖入参中实际存在的字段，不覆盖的保留数据库原值
+    if (input.orderAmount !== undefined && input.orderAmount !== null && input.orderAmount !== '') {
+      const orderAmount = this.normalizeMoney(input.orderAmount);
+      (base as any).orderAmount = orderAmount;
+      (base as any).clientPending = this.computePending(
+        orderAmount,
+        (base as any).clientPaid ?? this.normalizeMoney(input.customerPaid ?? input.clientPaid),
+      );
+    }
+    if (input.customerPaid !== undefined && input.customerPaid !== null && input.customerPaid !== '') {
+      const clientPaid = this.normalizeMoney(input.customerPaid ?? input.clientPaid);
+      (base as any).clientPaid = clientPaid;
+      (base as any).clientPending = this.computePending(
+        (base as any).orderAmount ?? this.normalizeMoney(input.orderAmount),
+        clientPaid,
+      );
+    }
+    if (input.teacherPrice !== undefined && input.teacherPrice !== null && input.teacherPrice !== '') {
+      const teacherPrice = this.normalizeMoney(input.teacherPrice);
+      (base as any).teacherPrice = teacherPrice;
+      (base as any).teacherPending = this.computePending(
+        teacherPrice,
+        (base as any).teacherPaid ?? this.normalizeMoney(input.teacherPaid),
+      );
+    }
+    if (input.teacherPaid !== undefined && input.teacherPaid !== null && input.teacherPaid !== '') {
+      const teacherPaid = this.normalizeMoney(input.teacherPaid);
+      (base as any).teacherPaid = teacherPaid;
+      (base as any).teacherPending = this.computePending(
+        (base as any).teacherPrice ?? this.normalizeMoney(input.teacherPrice),
+        teacherPaid,
+      );
+    }
+    return base as OrderFinance;
   }
 
   private mapOrderAuthor(row: OrderAuthor): any {
