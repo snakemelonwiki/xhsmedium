@@ -476,7 +476,10 @@ export default function AdminLeadsPage() {
   const employeeOptions = useMemo(
     () => [
       { label: '全部运营', value: '' },
-      ...employees.map((emp) => ({ label: emp.name, value: emp.id })),
+      // 主管客资看板：仅显示运营角色员工（与后端 filterByRole 等价：operation/staff 视为等价）
+      ...employees
+        .filter((emp) => emp.role === 'operation' || emp.role === 'staff')
+        .map((emp) => ({ label: emp.name, value: emp.id })),
     ],
     [employees],
   );
