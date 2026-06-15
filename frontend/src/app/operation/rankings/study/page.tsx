@@ -34,7 +34,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createExport, downloadExportUrl, getExport } from '@/shared/api/exports';
 import { apiClient } from '@/shared/api/apiClient';
 import { getPostDetail, togglePostFavorite } from '@/shared/api/content';
-import type { LearningBoardThresholds } from '@/shared/api/learning-board';
 import { QuickRangePicker, RANGE_PRESETS_FULL } from '@/shared/components/date';
 import type { DateRangeValue } from '@/shared/components/date';
 import type { ContentPost } from '@/shared/types/content';
@@ -183,7 +182,6 @@ export default function StudyRankingsPage({ routeBase = '/operation' }: StudyRan
   const [posts, setPosts] = useState<LearningPost[]>([]);
   const [accounts, setAccounts] = useState<AccountStat[]>([]);
   const [picks, setPicks] = useState<LearningPost[]>([]);
-  const [thresholds, setThresholds] = useState<LearningBoardThresholds>({ minLeads: 10, minTraffic: 10000 });
   const [picksLoading, setPicksLoading] = useState(false);
   const [picksError, setPicksError] = useState<string>();
   const [selectedPost, setSelectedPost] = useState<ContentPost | null>(null);
@@ -200,12 +198,9 @@ export default function StudyRankingsPage({ routeBase = '/operation' }: StudyRan
     setLoading(true);
     setError(undefined);
     try {
-      const payload = await apiClient.get<{ items?: LearningPost[]; dimension?: string; thresholds?: LearningBoardThresholds }>('/posts/learning-board', {
+      const payload = await apiClient.get<{ items?: LearningPost[]; dimension?: string }>('/posts/learning-board', {
         query: { dimension: dim, days, limit: 30 },
       });
-      if (payload?.thresholds) {
-        setThresholds(payload.thresholds);
-      }
       const rawRows: unknown[] = Array.isArray(payload?.items) ? (payload.items as unknown[]) : [];
       const rows = rawRows.map((item) => mapLearningPost(item as Record<string, unknown>));
       setPosts(rows);
@@ -759,9 +754,6 @@ export default function StudyRankingsPage({ routeBase = '/operation' }: StudyRan
           <Typography.Paragraph type="secondary">
             浏览优秀作品、账号与主管推荐，学习获客技巧和内容策略。
           </Typography.Paragraph>
-          <Typography.Text type="secondary">
-            当前展示门槛：客资不少于 {thresholds.minLeads} 条，或流量不少于 {thresholds.minTraffic} 次。
-          </Typography.Text>
         </div>
         <Space wrap>
           {/** v1.3 OP-8: 维度切换器（流量优先 / 客资优先 / 综合） */}

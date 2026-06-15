@@ -112,6 +112,11 @@ export interface PostsListViewer {
   viewerEmployeeId?: string;
 }
 
+function isPlazaThresholdScopedViewer(viewer?: PostViewer): boolean {
+  const role = String(viewer?.role || '').toLowerCase();
+  return !['supervisor', 'admin', 'owner'].includes(role);
+}
+
 @Injectable()
 export class PostsService {
   constructor(
@@ -441,7 +446,7 @@ export class PostsService {
     // T8/T9: 应用作品广场门槛配置（按作品类型差异化过滤）
     const thresholdParts: string[] = [];
     const thresholdParams: any[] = [];
-    if (this.plazaConfigService) {
+    if (this.plazaConfigService && isPlazaThresholdScopedViewer(viewer)) {
       try {
         const config = await this.plazaConfigService.getConfig();
         // 营销帖（获客贴/营销贴）门槛
@@ -468,9 +473,12 @@ export class PostsService {
       }
     }
 
-    const havingClause = filters.view === 'excellent' ? 'HAVING lc.cnt >= 5' : '';
-    const thresholdClause = thresholdParts.length > 0
-      ? `AND (${thresholdParts.join(' AND ')})`
+    const effectiveFilterParts = [...thresholdParts];
+    if (filters.view === 'excellent') {
+      effectiveFilterParts.push('COALESCE(lc.cnt, 0) >= 5');
+    }
+    const thresholdClause = effectiveFilterParts.length > 0
+      ? `AND (${effectiveFilterParts.join(' AND ')})`
       : '';
 
     // Count query for total
@@ -489,7 +497,6 @@ export class PostsService {
       ${favoriteJoin}
       WHERE ${whereParts.join(' AND ')}
       ${thresholdClause}
-      ${havingClause}
     `;
     const countParams = [...favoriteJoinParams, ...params, ...thresholdParams];
     const countResult = await this.postRepository.query(countSql, countParams);
@@ -536,7 +543,6 @@ export class PostsService {
       ${favoriteJoin}
       WHERE ${whereParts.join(' AND ')}
       ${thresholdClause}
-      ${havingClause}
       ORDER BY COALESCE(lc.cnt, 0) DESC, p.likes DESC, p.published_at DESC, p.created_at DESC
       LIMIT ? OFFSET ?
     `;

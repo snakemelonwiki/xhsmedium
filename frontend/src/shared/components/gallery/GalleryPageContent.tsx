@@ -10,7 +10,6 @@ import {
   InputNumber,
   Modal,
   Pagination,
-  Radio,
   Select,
   Space,
   Tag,
@@ -35,6 +34,7 @@ const platformOptions = [
 
 export const GALLERY_TYPE_OPTIONS = [
   { label: '全部类型', value: '' },
+  { label: '营销贴', value: '营销贴' },
   { label: '素人贴', value: '素人贴' },
   { label: '话题贴', value: '话题贴' },
   { label: '获客贴', value: '获客贴' },
@@ -42,17 +42,13 @@ export const GALLERY_TYPE_OPTIONS = [
 
 function buildDefaultGalleryFilters(): GalleryFilters {
   const today = todayDateString();
-  return { postType: '营销贴', from: today, to: today };
+  return { from: today, to: today };
 }
 
 export function getGalleryTypeSelectValue(postType?: string) {
   return GALLERY_TYPE_OPTIONS.some((option) => option.value === postType) ? postType : undefined;
 }
 
-const primaryTypeTabs = [
-  { label: '营销帖', value: '营销贴' },
-  { label: '人设帖', value: '素人贴' },
-];
 
 type GalleryFilters = {
   platform?: string;
@@ -70,11 +66,13 @@ type GalleryFilters = {
 type GalleryPageContentProps = {
   description?: string;
   showConfigPanel?: boolean;
+  allowFavoriteActions?: boolean;
 };
 
 export function GalleryPageContent({
   description = '浏览全公司作品，收藏学习。客户联系方式、跟进记录、成交信息等敏感字段对运营端不展示。',
   showConfigPanel = false,
+  allowFavoriteActions = true,
 }: GalleryPageContentProps) {
   const [items, setItems] = useState<ContentPost[]>([]);
   const [total, setTotal] = useState(0);
@@ -250,14 +248,6 @@ export function GalleryPageContent({
       ) : null}
 
       <Card loading={loading}>
-        <Radio.Group
-          value={filters.postType}
-          optionType="button"
-          buttonStyle="solid"
-          options={primaryTypeTabs}
-          onChange={(event) => applyFilter('postType', event.target.value)}
-          style={{ marginBottom: 12 }}
-        />
         <Space size={8} wrap style={{ marginBottom: 16 }}>
           <Select
             allowClear
@@ -409,14 +399,16 @@ export function GalleryPageContent({
                         原帖
                       </Button>
                     )}
-                    <Button
-                      size="small"
-                      type={post.isFavorited ? 'primary' : 'default'}
-                      icon={post.isFavorited ? <StarFilled /> : <HeartOutlined />}
-                      onClick={(e) => toggleFavorite(post, e)}
-                    >
-                      {post.isFavorited ? '已收藏' : '收藏'}
-                    </Button>
+                    {allowFavoriteActions ? (
+                      <Button
+                        size="small"
+                        type={post.isFavorited ? 'primary' : 'default'}
+                        icon={post.isFavorited ? <StarFilled /> : <HeartOutlined />}
+                        onClick={(e) => toggleFavorite(post, e)}
+                      >
+                        {post.isFavorited ? '已收藏' : '收藏'}
+                      </Button>
+                    ) : null}
                   </Space>
                 </Space>
               </Card>

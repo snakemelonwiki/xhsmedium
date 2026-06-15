@@ -278,13 +278,13 @@ export class PostsController {
     @Query('pageSize') pageSize?: string,
   ) {
     const session = (req as any).session;
-    const role = session?.role || '';
+    const role = String(session?.role || '').toLowerCase();
     const userId = getSessionUserId(req);
     const allowedViews = new Set(['all', 'excellent', 'favorites']);
     const requestedView = allowedViews.has(String(view || '').toLowerCase())
       ? String(view || '').toLowerCase()
       : 'all';
-    const effectiveView = role === 'staff' ? 'excellent' : requestedView;
+    const effectiveView = ['staff', 'operation'].includes(role) ? 'excellent' : requestedView;
 
     const result = await this.postsService.findPlaza(
       {
@@ -299,7 +299,7 @@ export class PostsController {
       Number(page) || 1,
       Number(pageSize) || 20,
       // v1.3 OP-14: 透传 viewer 用于按权限收敛 leadsCount
-      { employeeId: session?.employeeId, role: String(role || '').toLowerCase() },
+      { employeeId: session?.employeeId, role },
     );
     return res.json({ ok: true, view: effectiveView, ...result });
   }
