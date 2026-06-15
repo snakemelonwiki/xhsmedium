@@ -4,11 +4,11 @@ import { LinkOutlined } from '@ant-design/icons';
 import { Button, Card, DatePicker, Form, Input, InputNumber, Select, Space, Typography, message } from 'antd';
 import dayjs from 'dayjs';
 import { useRouter } from 'next/navigation';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { apiClient } from '@/shared/api/apiClient';
 import { useSubmitLock } from '@/shared/hooks/useSubmitLock';
-import { mapPlatformToKey, inferPlatformFromUrl } from '@/shared/utils/platform-key';
+import { mapPlatformToKey, inferPlatformFromUrl, type PlatformFormKey } from '@/shared/utils/platform-key';
 
 import { ImageUploadField } from './ImageUploadField';
 
@@ -61,7 +61,13 @@ export function RecommendPostForm({
         if (cancelled) return;
         const list: any[] = Array.isArray(res) ? res : res?.items || [];
         setAccountOptions(
-          list.map((a: any) => ({ id: a.id, name: a.name || a.accountName, platform: a.platform })),
+          list.map((a: any) => ({
+            id: a.id,
+            name: a.name || a.accountName,
+            platform: a.platform,
+            accountUid: a.accountUid,
+            profileUrl: a.profileUrl,
+          })),
         );
       })
       .catch(() => {
@@ -71,6 +77,37 @@ export function RecommendPostForm({
       cancelled = true;
     };
   }, []);
+
+  // 监听平台字段:切换平台时只显示该平台的账号,避免小红书/抖音同名账号混在一起难选;
+  // 平台字段被后端回填 / OCR 识别 / 手动选择等场景修改时,这里都会同步刷新。
+  // 类型收窄到 PlatformFormKey,后续 mapPlatformToKey 比较时不需要再判空字符串。
+  const platformValue = Form.useWatch('platform', form) as PlatformFormKey | undefined;
+  // 平台过滤:用 mapPlatformToKey 兜底中英文("小红书"/"xiaohongshu" 都映射到同一 key);
+  // 平台为空时不过滤,展示全部账号(兜底场景:账号列表是后续异步加载完成的,首次进入页面前 platform 已有值的情况)。
+  const filteredAccountOptions = useMemo(() => {
+    const currentKey = mapPlatformToKey(platformValue);
+    if (!currentKey) return accountOptions;
+    return accountOptions.filter((a) => mapPlatformToKey(a.platform) === currentKey);
+  }, [accountOptions, platformValue]);
+
+  // 平台切换时,如果之前选中的账号不属于新平台,要把 accountId 清空,
+  // 否则 Select 下拉里没有这个 option,会显示成一个"空 label 的 id"看着像 bug。
+  // 重要:仅当 accountOptions 已经加载完成(非空)时才执行清理——避免解析回填的瞬间
+  //   accountOptions 还没就绪,误把"刚刚按新平台匹配好的 accountId"清掉。
+  // 兜底兜底:accountOptions 加载完成后再跑一次(在它依赖里),所以最终结果是一致的。
+  useEffect(() => {
+    const currentKey = mapPlatformToKey(platformValue);
+    if (!currentKey) return;
+    if (accountOptions.length === 0) return;
+    const selectedId = form.getFieldValue('accountId');
+    if (!selectedId) return;
+    const stillValid = accountOptions.some(
+      (a) => a.id === selectedId && mapPlatformToKey(a.platform) === currentKey,
+    );
+    if (!stillValid) {
+      form.setFieldsValue({ accountId: undefined });
+    }
+  }, [platformValue, accountOptions, form]);
 
   async function parsePostUrl() {
     if (parsing) return;
@@ -100,8 +137,12 @@ export function RecommendPostForm({
       }
       if (mySeq !== parseSeqRef.current) return;
 
-      const nextValues: Record<string, string | number | dayjs.Dayjs> = {};
+      const nextValues: Record<string, string | number | dayjs.Dayjs | undefined> = {};
       const platformKey = mapPlatformToKey(data?.platform) || inferPlatformFromUrl(rawUrl);
+      // 平台如果真要切(从老平台切到新平台),下面的"accountId 是否要清"会受它影响;
+      //   显式记录"是否在切平台",用于稍后决定要不要提示用户"原账号已清空"。
+      const currentPlatformKey = mapPlatformToKey(form.getFieldValue('platform'));
+      const isPlatformSwitching = !!platformKey && !!currentPlatformKey && platformKey !== currentPlatformKey;
       if (platformKey) nextValues.platform = platformKey;
       if (data?.title) nextValues.title = data.title;
 
@@ -117,26 +158,46 @@ export function RecommendPostForm({
         }
       }
 
-      // 发布日期：小红书解析成功后回填/覆盖已有表单值
+      // 发布日期:后端能解析就用,解析不到(空串/无效)则兜底当天,避免运营被卡在"必填项"
+      //   (例:抖音移动端短链/已删除作品/登录墙等场景,后端通常拿不到 publishedAt)
+      //   用户已经手动选过日期时不覆盖,只看本次解析结果。
       if (data?.publishedAt) {
         nextValues.publishedAt = dayjs(data.publishedAt);
+      } else if (!form.getFieldValue('publishedAt')) {
+        nextValues.publishedAt = dayjs();
       }
 
       // 作者信息回填：优先按账号 UID 精确匹配，其次按名称模糊匹配
-      if (data?.authorId || data?.authorName) {
+      // 关键：匹配到的账号必须属于解析出来的平台,否则会出现"平台=抖音 / 账号=小红书"的脏数据
+      //   (后端 authorId/name 可能在跨平台撞名,前端必须按平台再校验一次)。
+      let matchedAccount: AccountOption | undefined;
+      if ((data?.authorId || data?.authorName) && platformKey) {
         const matchedByUid = data?.authorId
-          ? accountOptions.find((a) => a.accountUid && a.accountUid === data.authorId)
+          ? accountOptions.find(
+              (a) =>
+                a.accountUid &&
+                a.accountUid === data.authorId &&
+                mapPlatformToKey(a.platform) === platformKey,
+            )
           : undefined;
         const matchedByName = data?.authorName
           ? accountOptions.find((a) => {
               if (!a.name || !data.authorName) return false;
+              if (mapPlatformToKey(a.platform) !== platformKey) return false;
               const n1 = a.name.trim().toLowerCase();
               const n2 = String(data.authorName).trim().toLowerCase();
               return n1 === n2 || n1.includes(n2) || n2.includes(n1);
             })
           : undefined;
-        const matched = matchedByUid || matchedByName;
-        if (matched) nextValues.accountId = matched.id;
+        matchedAccount = matchedByUid || matchedByName;
+      }
+      // 提前快照旧 accountId,后面用来判断"是否真有旧账号被清掉",再决定要不要提示用户
+      const oldAccountIdBefore = form.getFieldValue('accountId');
+      if (matchedAccount) {
+        nextValues.accountId = matchedAccount.id;
+      } else if (isPlatformSwitching) {
+        // 切平台时没匹配到新平台账号,显式清掉旧账号(避免后面 useEffect 隐式清空一脸懵)
+        nextValues.accountId = undefined;
       }
       if (data?.parsed === true) {
         if (data.likes !== undefined) nextValues.likes = data.likes;
@@ -153,6 +214,18 @@ export function RecommendPostForm({
       }
       form.setFieldsValue(nextValues);
 
+      // 切平台时把"旧账号已清"显式告知用户,避免被解析链路隐式操作一脸懵
+      //   - 必须用 setFieldsValue 前的快照判断,否则读到的是新值(undefined)
+      //   - 仅当"真有旧值被清"时提示,无旧账号不打扰
+      if (
+        isPlatformSwitching &&
+        oldAccountIdBefore &&
+        nextValues.accountId === undefined
+      ) {
+        const newPlatformDisplay = platformKey === 'douyin' ? '抖音' : '小红书';
+        message.info(`已自动切换到 ${newPlatformDisplay},原账号已清空,请重新选择`);
+      }
+
       if (data?.parsed) {
         hideLoading();
         message.success(data.coverImageUrl ? '已根据链接回填标题、指标与封面' : '已根据链接回填标题与指标');
@@ -168,10 +241,14 @@ export function RecommendPostForm({
         hideLoading();
         return;
       }
-      const nextValues: Record<string, string> = {};
+      const nextValues: Record<string, string | dayjs.Dayjs> = {};
       const inferred = inferPlatformFromUrl(rawUrl);
       if (inferred) nextValues.platform = inferred;
       if (!form.getFieldValue('title')) nextValues.title = inferTitleFromUrl(rawUrl);
+      // 解析彻底失败:publishedAt 还是空(必填项),兜底当天,避免运营卡在提交按钮上
+      if (!form.getFieldValue('publishedAt')) {
+        nextValues.publishedAt = dayjs();
+      }
       form.setFieldsValue(nextValues);
       latestThumbRef.current = '';
       hideLoading();
@@ -334,18 +411,25 @@ export function RecommendPostForm({
             <Form.Item name="shares" label="转发数" initialValue={0}>
               <InputNumber min={0} precision={0} style={{ width: '100%' }} placeholder="0" />
             </Form.Item>
-            <Form.Item name="accountId" label="来源账号 ID">
-              {accountOptions.length > 0 ? (
+            <Form.Item name="accountId" label="来源账号">
+              {filteredAccountOptions.length > 0 ? (
                 <Select
                   allowClear
                   showSearch
                   optionFilterProp="label"
                   placeholder="可选:留空表示未关联账号"
-                  options={accountOptions.map((a) => ({
+                  notFoundContent="当前平台暂无可用账号,可手动输入账号 ID"
+                  options={filteredAccountOptions.map((a) => ({
                     value: a.id,
-                    label: a.name ? `${a.name} (${a.id})` : a.id,
+                    // label 只显示账号名称,后端 id 是技术字段,运营不需要看;
+                    // 平台过滤后同平台下账号名基本唯一,无需 id 辅助区分
+                    label: a.name || a.id,
                   }))}
                 />
+              ) : accountOptions.length > 0 ? (
+                // 平台已选但当前平台下没有账号:回退成自由输入,允许运营手动填账号 ID
+                //   (这是原页面就支持的能力,不能因为加了平台过滤就关掉)
+                <Input allowClear placeholder="当前平台下无账号,可手动输入账号 ID" />
               ) : (
                 <Input allowClear placeholder="可选:账号 ID(留空表示未关联账号)" />
               )}
