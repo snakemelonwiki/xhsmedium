@@ -637,7 +637,20 @@ export class LeadsService {
   }
 
   async update(id: string, dto: Partial<Lead>): Promise<void> {
-    await this.leadRepository.update(id, dto);
+    const patch: Partial<Lead> = { ...dto };
+    const nextAssignedSalesUserId = patch.assignedSalesUserId;
+    if (nextAssignedSalesUserId !== undefined && nextAssignedSalesUserId !== null && String(nextAssignedSalesUserId).trim()) {
+      const current = await this.leadRepository.findOne({ where: { id } });
+      const wasDispatched = current && (
+        (current.isDispatched as unknown) === 1 ||
+        (current.isDispatched as unknown) === '1' ||
+        (current.isDispatched as unknown) === true
+      );
+      if (wasDispatched && patch.isDispatched === undefined) {
+        patch.isDispatched = 0 as any;
+      }
+    }
+    await this.leadRepository.update(id, patch);
   }
 
   /**

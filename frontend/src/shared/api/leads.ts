@@ -55,6 +55,32 @@ function idText(value: unknown): string {
   return text(value) ?? '';
 }
 
+function imageUrl(value: unknown): string | undefined {
+  const raw = text(value);
+  if (!raw) return undefined;
+  if (/^https?:\/\//i.test(raw)) {
+    try {
+      const url = new URL(raw);
+      if (url.hostname === 'uploads' || isLocalUploadUrl(url)) {
+        return url.pathname.startsWith('/uploads/')
+          ? url.pathname
+          : `/uploads${url.pathname}`;
+      }
+    } catch {
+      return raw;
+    }
+    return raw;
+  }
+  const normalized = raw.replace(/^\/+/, '');
+  if (normalized.startsWith('uploads/')) return `/${normalized}`;
+  return raw;
+}
+
+function isLocalUploadUrl(url: URL): boolean {
+  return url.pathname.startsWith('/uploads/')
+    && ['localhost', '127.0.0.1', '::1', '0.0.0.0'].includes(url.hostname.toLowerCase());
+}
+
 function mapLead(raw: RawRecord): SalesLead {
   return {
     id: idText(raw.id),
@@ -90,7 +116,7 @@ function mapLead(raw: RawRecord): SalesLead {
     latestFollowAt: text(raw.latestFollowAt) ?? text(raw.lastFollowAt) ?? text(raw.followedAt),
     nextFollowAt: text(raw.nextFollowTime) ?? text(raw.next_follow_time) ?? text(raw.nextFollowAt) ?? text(raw.next_follow_at),
     note: text(raw.note),
-    captureImageUrl: text(raw.captureImageUrl) ?? text(raw.capture_image_url),
+    captureImageUrl: imageUrl(raw.captureImageUrl ?? raw.capture_image_url),
     leadCode: text(raw.leadCode) ?? text(raw.lead_code),
     addMethod: text(raw.addMethod) ?? text(raw.add_method),
     ip: text(raw.ip),

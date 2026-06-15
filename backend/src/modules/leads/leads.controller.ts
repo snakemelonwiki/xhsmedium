@@ -149,7 +149,7 @@ export class LeadsController {
   }
 
   private resolveScope(role?: string, scope?: string): 'self' | 'employee' | 'all' {
-    if (role === 'admin' || role === 'owner') {
+    if (role === 'admin' || role === 'owner' || role === 'supervisor') {
       return (scope as any) || 'all';
     }
     if (role === 'academic' && scope === 'academic-orders') {
