@@ -209,9 +209,13 @@ export class OrdersService {
       }
       leadContact = lead.contactInfo || '';
       const pricing = await this.resolveLeadOrderPricing(manager, lead, amountNum);
-      // v1.3 / CROSS-4: 在同一事务内生成订单编号 ORD-YYYYMMDD-XXXXX
-      // 必须在 INSERT Order 之前完成（行锁在同一事务内保持），避免并发时序号重复。
-      generatedOrderCode = await this.generateOrderCode(manager);
+      // 在同一事务内生成订单编号，沿用既有顺序号来源与行锁机制，只调整展示规则。
+      // 必须在 INSERT Order 之前完成，避免并发时序号重复。
+      generatedOrderCode = await this.generateOrderCode(manager, {
+        productType: dto.productType,
+        serviceType: dto.serviceType,
+        major: lead.clientMajorResearch || lead.majorContent || null,
+      });
       orderCode = generatedOrderCode;
       // v1.3 / SA-8: 销售成交的 serviceType 字段可以同时承载"产品类型"语义,
       // 但前端会把产品类型/服务类型分开传。后端保持 serviceType 字段为原"服务类型",
@@ -419,35 +423,50 @@ export class OrdersService {
   }
 
   /**
-   * v1.3 / CROSS-4: 生成订单编号 ORD-YYYYMMDD-XXXXX。
-   * - YYYYMMDD：业务统一用 UTC+8 当日日期作为分界（与日志/前端展示一致）
-   * - XXXXX：5 位当日自增序号，从 00001 开始每日重置
-   * - 并发安全：依赖 orders_order_code_seq 单行 (seq_date) + SELECT ... FOR UPDATE 行锁
-   *   保证同一秒内多次成交不会拿到重复序号；事务内调用即可获得行锁语义。
-   *
-   * 注意：必须传入 EntityManager（来自外层 transaction 的 manager），
-   * 不能直接用 Repository 走新连接 — 否则行锁无法跨调用保持。
+   * 生成成交订单编号，沿用既有当日顺序号表与事务行锁，仅调整编号模板。
    */
-  private async generateOrderCode(manager: EntityManager): Promise<string> {
-    // 业务统一用 UTC+8（北京时间）作为日期分界，避免跨时区部署时出现日期错位。
+  private async generateOrderCode(
+    manager: EntityManager,
+    options: { productType?: string | null; serviceType?: string | null; major?: string | null },
+  ): Promise<string> {
+    // 校验并锁定当日顺序号，确保并发成交时递增顺序稳定。
+    const { dateKey, compactDate } = this.getOrderCodeDateParts();
+    const rawSequence = await this.getNextOrderCodeSequence(manager, dateKey);
+
+    // 按文档模板拼接订单编号：YL + 顺序编号（190开始） + 产品类型 + 服务类型 + 日期 + 专业。
+    const displaySequence = rawSequence + 189;
+    const productType = this.normalizeOrderCodeSegment(options.productType);
+    const serviceType = this.normalizeOrderCodeSegment(options.serviceType);
+    const major = this.normalizeOrderCodeSegment(options.major);
+    return `YL${displaySequence}${productType}${serviceType}${compactDate}${major}`;
+  }
+
+  /**
+   * 计算订单编号使用的北京时间日期片段。
+   */
+  private getOrderCodeDateParts(): { dateKey: string; compactDate: string } {
     const now = new Date();
     const utc8Ms = now.getTime() + 8 * 3600 * 1000;
     const utc8 = new Date(utc8Ms);
     const yyyy = utc8.getUTCFullYear();
     const mm = String(utc8.getUTCMonth() + 1).padStart(2, '0');
     const dd = String(utc8.getUTCDate()).padStart(2, '0');
-    const dateKey = `${yyyy}-${mm}-${dd}`;
-    const orderCodePrefix = `ORD-${yyyy}${mm}${dd}-`;
+    return {
+      dateKey: `${yyyy}-${mm}-${dd}`,
+      compactDate: `${yyyy}${mm}${dd}`,
+    };
+  }
 
-    // 先保证当日行存在（INSERT ... ON DUPLICATE KEY UPDATE 不变更 current_seq，仅保证行可被锁）。
-    // uk_orders_order_code_seq_date 唯一索引保证每天 1 行。
+  /**
+   * 获取下一个订单顺序号，沿用 orders_order_code_seq 的按日递增来源。
+   */
+  private async getNextOrderCodeSequence(manager: EntityManager, dateKey: string): Promise<number> {
     await manager.query(
       `INSERT INTO orders_order_code_seq (seq_date, current_seq)
        VALUES (?, 0)
        ON DUPLICATE KEY UPDATE seq_date = seq_date`,
       [dateKey],
     );
-    // 行锁：FOR UPDATE 阻塞其他事务对该行的读取，确保自增串行化。
     const rows: Array<{ current_seq: number | string }> = await manager.query(
       `SELECT current_seq FROM orders_order_code_seq WHERE seq_date = ? FOR UPDATE`,
       [dateKey],
@@ -459,7 +478,15 @@ export class OrdersService {
       `UPDATE orders_order_code_seq SET current_seq = ? WHERE seq_date = ?`,
       [nextSeq, dateKey],
     );
-    return `${orderCodePrefix}${String(nextSeq).padStart(5, '0')}`;
+    return nextSeq;
+  }
+
+  /**
+   * 标准化订单编号片段，去掉空白与分隔符，缺失时返回空串避免拼出 null/undefined。
+   */
+  private normalizeOrderCodeSegment(value?: string | null): string {
+    if (value === undefined || value === null) return '';
+    return String(value).trim().replace(/[\s\-_/]+/g, '');
   }
 
   private async getActorContext(
