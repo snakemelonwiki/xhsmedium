@@ -258,6 +258,7 @@ export default function OperationCollaborationPage() {
           dataSource={items}
           loading={loading}
           pagination={{ ...pagination, showSizeChanger: true }}
+          scroll={{ x: 'max-content' }}
           onChange={(next: TablePaginationConfig) => void load(next.current ?? 1, next.pageSize ?? 20, period, statusFilter)}
           locale={{ emptyText: <Empty description="暂无协同任务" /> }}
           search={false}

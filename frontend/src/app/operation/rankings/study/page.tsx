@@ -816,6 +816,7 @@ export default function StudyRankingsPage({ routeBase = '/operation' }: StudyRan
                 columns={accountColumns}
                 dataSource={accounts}
                 pagination={false}
+                scroll={{ x: 'max-content' }}
                 locale={{ emptyText: <Empty description="暂无账号数据" /> }}
               />
               <Pagination
@@ -887,25 +888,25 @@ export default function StudyRankingsPage({ routeBase = '/operation' }: StudyRan
               <Typography.Paragraph>{selectedPost.copywriting}</Typography.Paragraph>
             )}
             <Row gutter={16}>
-              <Col span={6}>
+              <Col xs={12} sm={6}>
                 <Typography.Text type="secondary">点赞</Typography.Text>
                 <Typography.Text strong style={{ display: 'block', fontSize: 18 }}>
                   {selectedPost.metrics.likes}
                 </Typography.Text>
               </Col>
-              <Col span={6}>
+              <Col xs={12} sm={6}>
                 <Typography.Text type="secondary">评论</Typography.Text>
                 <Typography.Text strong style={{ display: 'block', fontSize: 18 }}>
                   {selectedPost.metrics.comments}
                 </Typography.Text>
               </Col>
-              <Col span={6}>
+              <Col xs={12} sm={6}>
                 <Typography.Text type="secondary">收藏</Typography.Text>
                 <Typography.Text strong style={{ display: 'block', fontSize: 18 }}>
                   {selectedPost.metrics.favorites}
                 </Typography.Text>
               </Col>
-              <Col span={6}>
+              <Col xs={12} sm={6}>
                 <Typography.Text type="secondary">客资</Typography.Text>
                 <Typography.Text strong type="success" style={{ display: 'block', fontSize: 18 }}>
                   {selectedPost.metrics.leadsCount}

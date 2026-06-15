@@ -22,6 +22,7 @@ export function PageHeaderBar({
 }: PageHeaderBarProps) {
   return (
     <div
+      data-page-header
       className={className}
       style={{
         display: 'flex',
@@ -40,7 +41,7 @@ export function PageHeaderBar({
           <Typography.Text type="secondary">{description}</Typography.Text>
         ) : null}
       </Space>
-      {actions ? <Space wrap>{actions}</Space> : null}
+      {actions ? <Space wrap data-page-header-actions>{actions}</Space> : null}
     </div>
   );
 }

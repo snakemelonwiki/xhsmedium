@@ -61,7 +61,8 @@ body {
 }
 
 .app-header-context {
-  display: grid;
+  display: flex;
+  align-items: center;
   gap: 3px;
 }
 
@@ -396,6 +397,179 @@ body {
   .lead-card-header {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  /* 工具栏内搜索和按钮在平板端全宽 */
+  .toolbar-row > .ant-space {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .toolbar-row .ant-input-search {
+    flex: 1;
+    min-width: 0;
+  }
+}
+
+/* ---- 移动端响应式适配 ---- */
+
+/* 平板：缩小内容区 padding */
+@media (max-width: 1023px) {
+  .app-content {
+    padding: 20px 20px 28px;
+  }
+}
+
+/* 手机：进一步缩小 padding + 隐藏 header 副标题 */
+@media (max-width: 767px) {
+  .app-content {
+    padding: 12px 12px 24px;
+  }
+
+  .app-header {
+    height: 56px;
+    padding: 0 12px;
+  }
+
+  .app-header-eyebrow {
+    display: none;
+  }
+
+  .app-header-title.ant-typography {
+    font-size: 15px;
+    line-height: 22px;
+  }
+
+  /* 筛选栏：清除固定宽度，元素全宽/自适应 */
+  .toolbar-row .ant-input-search,
+  .toolbar-row .ant-input-affix-wrapper,
+  .toolbar-row .ant-select,
+  .toolbar-row .ant-picker {
+    width: 100% !important;
+    max-width: 100%;
+  }
+
+  .toolbar-row > .ant-space {
+    flex: 1;
+    min-width: 0;
+    flex-wrap: wrap;
+    width: 100%;
+  }
+
+  /* 筛选卡片内所有控件全宽 */
+  .ant-card .ant-input-search,
+  .ant-card .ant-input-affix-wrapper,
+  .ant-card .ant-picker,
+  .ant-card .ant-select,
+  .ant-card .ant-input-number {
+    width: 100% !important;
+    max-width: 100%;
+  }
+
+  .ant-card > .ant-space,
+  .ant-card .ant-space {
+    flex-wrap: wrap;
+    width: 100%;
+  }
+
+  .metric-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+  }
+
+  /* 弹窗在手机端全宽展开 */
+  .ant-modal {
+    max-width: calc(100vw - 24px);
+    margin: 0 12px;
+  }
+
+  .ant-modal-content {
+    padding: 20px 16px;
+  }
+
+  /* Drawer 在手机端更窄留白 */
+  .ant-drawer-content-wrapper {
+    max-width: 85vw;
+  }
+
+  /* 详情描述列表在手机端强制垂直排列 */
+  .ant-descriptions-view table {
+    display: block;
+  }
+
+  .ant-descriptions-view tbody {
+    display: block;
+  }
+
+  .ant-descriptions-view tr {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .ant-descriptions-item {
+    padding-bottom: 12px;
+  }
+
+  /* Segmented 控件在手机端允许换行 */
+  .ant-segmented-group {
+    flex-wrap: wrap;
+  }
+
+  /* Tabs 在手机端支持横向滚动 */
+  .ant-tabs-nav-list {
+    overflow-x: auto;
+    max-width: calc(100vw - 48px);
+  }
+}
+
+/* 超小屏：统计卡片单列 + 登录页紧凑 + 搜索栏垂直堆叠 */
+@media (max-width: 480px) {
+  .metric-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .app-content > .page-stack > .toolbar-row h2.ant-typography {
+    font-size: 22px;
+    line-height: 30px;
+  }
+
+  /* 搜索+按钮在超小屏垂直堆叠 */
+  .toolbar-row > .ant-space {
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
+  }
+
+  .toolbar-row .ant-input-search,
+  .toolbar-row .ant-btn {
+    width: 100%;
+  }
+
+  .login-shell {
+    padding: 12px;
+  }
+
+  .login-aside,
+  .login-card {
+    border-radius: 16px;
+  }
+
+  .login-aside {
+    padding: 22px 18px;
+    gap: 8px;
+  }
+
+  .login-aside h1 {
+    font-size: 24px;
+  }
+
+  .login-card {
+    padding: 20px 16px;
+    gap: 12px;
+  }
+
+  .login-card h2 {
+    font-size: 20px;
   }
 }
 

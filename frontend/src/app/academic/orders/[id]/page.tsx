@@ -1325,6 +1325,7 @@ export default function AcademicOrderDetailPage() {
                   rowKey="id"
                   size="small"
                   pagination={false}
+                  scroll={{ x: 'max-content' }}
                   dataSource={abnormalFeedbacks}
                   columns={[
                     {

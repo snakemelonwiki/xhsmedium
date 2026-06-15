@@ -504,6 +504,7 @@ export default function OperationRankingsPage() {
           columns={columns}
           dataSource={itemsWithGap}
           pagination={false}
+          scroll={{ x: 'max-content' }}
           locale={{ emptyText: <Empty description="暂无榜单数据" /> }}
         />
         <Pagination

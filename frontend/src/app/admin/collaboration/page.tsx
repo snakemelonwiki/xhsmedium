@@ -121,6 +121,7 @@ export default function AdminCollaborationPage() {
           columns={columns}
           dataSource={items}
           pagination={false}
+          scroll={{ x: 'max-content' }}
           locale={{ emptyText: <Empty description="暂无协同任务" /> }}
         />
         <Pagination

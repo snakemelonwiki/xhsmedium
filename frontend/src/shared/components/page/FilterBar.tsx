@@ -15,6 +15,7 @@ export type FilterBarProps = {
 export function FilterBar({ children, extra, className, style }: FilterBarProps) {
   return (
     <div
+      data-filter-bar
       className={className}
       style={{
         display: 'flex',
@@ -29,8 +30,8 @@ export function FilterBar({ children, extra, className, style }: FilterBarProps)
         ...style,
       }}
     >
-      <Space wrap>{children}</Space>
-      {extra ? <Space wrap>{extra}</Space> : null}
+      <Space wrap data-filter-bar-content>{children}</Space>
+      {extra ? <Space wrap data-filter-bar-extra>{extra}</Space> : null}
     </div>
   );
 }

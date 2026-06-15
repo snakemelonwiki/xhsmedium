@@ -1,7 +1,7 @@
 'use client';
 
-import { DownloadOutlined, ReloadOutlined } from '@ant-design/icons';
-import { Alert, Button, Card, Input, Modal, Pagination, Select, Space, Table, Tag, Typography, message } from 'antd';
+import { DownloadOutlined, FilterOutlined, ReloadOutlined } from '@ant-design/icons';
+import { Alert, Button, Card, Drawer, Input, Modal, Pagination, Select, Space, Table, Tag, Typography, message } from 'antd';
 import type { TableColumnsType } from 'antd';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
@@ -13,6 +13,7 @@ import { readStoredUser } from '@/shared/auth/auth';
 import type { OrderItem, OrderScope, OrderStatusCode } from '@/shared/types/orders';
 import { HANDOVER_STATUS_OPTIONS, HandoverStatusCode, handoverStatusMeta, orderStatusMeta, paidStatusMeta } from '@/shared/api/enums';
 import { formatDateTime } from '@/shared/utils/date-format';
+import { useResponsiveBreakpoint } from '@/shared/hooks/useResponsiveBreakpoint';
 import { QuickRangePicker } from '@/shared/components/date';
 import type { DateRangeValue } from '@/shared/components/date';
 
@@ -125,6 +126,9 @@ export function OrderTable({
   const [exportPaidStatus, setExportPaidStatus] = useState<string>('');
   const isClaimPool = listMode === 'claimPool';
   const isFollowup = listMode === 'followup';
+
+  const { isMobile } = useResponsiveBreakpoint();
+  const [filterDrawerOpen, setFilterDrawerOpen] = useState(false);
 
   async function loadOrders(
     nextPage = page,
@@ -447,7 +451,7 @@ export function OrderTable({
             {description ? <Typography.Paragraph type="secondary">{description}</Typography.Paragraph> : null}
           </div>
         <Space wrap>
-          {showStatusFilter && !isClaimPool ? (
+          {!isMobile && showStatusFilter && !isClaimPool ? (
             <Select
               value={statusFilter}
               style={{ width: 168 }}
@@ -458,7 +462,7 @@ export function OrderTable({
               ]}
             />
           ) : null}
-          {!isClaimPool && !isFollowup && actionMode !== 'academic' ? (
+          {!isMobile && !isClaimPool && !isFollowup && actionMode !== 'academic' ? (
             <Select
               value={handoverFilter}
               style={{ width: 144 }}
@@ -467,7 +471,7 @@ export function OrderTable({
               placeholder="交接状态"
             />
           ) : null}
-          {actionMode === 'sales' || actionMode === 'academic' ? (
+          {!isMobile && (actionMode === 'sales' || actionMode === 'academic') ? (
             <Select
               value={abnormalOnly ? 'abnormal' : 'all'}
               style={{ width: 132 }}
@@ -477,6 +481,11 @@ export function OrderTable({
                 { label: '仅含异常', value: 'abnormal' },
               ]}
             />
+          ) : null}
+          {isMobile && (showStatusFilter || (!isClaimPool && !isFollowup && actionMode !== 'academic') || (actionMode === 'sales' || actionMode === 'academic')) ? (
+            <Button icon={<FilterOutlined />} onClick={() => setFilterDrawerOpen(true)}>
+              筛选
+            </Button>
           ) : null}
           {toolbarExtra}
           <Button icon={<ReloadOutlined />} onClick={() => loadOrders()} loading={loading}>
@@ -488,6 +497,51 @@ export function OrderTable({
         </Space>
       </div>
       ) : null}
+
+      {/* Mobile filter drawer */}
+      {isMobile && (
+        <Drawer
+          title="筛选条件"
+          open={filterDrawerOpen}
+          onClose={() => setFilterDrawerOpen(false)}
+          placement="bottom"
+          height="auto"
+        >
+          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            {showStatusFilter && !isClaimPool ? (
+              <Select
+                value={statusFilter}
+                style={{ width: '100%' }}
+                onChange={setStatusFilter}
+                options={[
+                  { label: '全部状态', value: '' },
+                  ...orderStatusOptions,
+                ]}
+              />
+            ) : null}
+            {!isClaimPool && !isFollowup && actionMode !== 'academic' ? (
+              <Select
+                value={handoverFilter}
+                style={{ width: '100%' }}
+                onChange={(value) => setHandoverFilter(value as HandoverStatusCode | '')}
+                options={HANDOVER_STATUS_OPTIONS}
+                placeholder="交接状态"
+              />
+            ) : null}
+            {actionMode === 'sales' || actionMode === 'academic' ? (
+              <Select
+                value={abnormalOnly ? 'abnormal' : 'all'}
+                style={{ width: '100%' }}
+                onChange={(value) => setAbnormalOnly(value === 'abnormal')}
+                options={[
+                  { label: '全部订单', value: 'all' },
+                  { label: '仅含异常', value: 'abnormal' },
+                ]}
+              />
+            ) : null}
+          </Space>
+        </Drawer>
+      )}
 
       {error ? <Alert type="warning" showIcon message={error} /> : null}
 

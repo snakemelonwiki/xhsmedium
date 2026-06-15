@@ -1,8 +1,8 @@
 'use client';
 
-import { DownloadOutlined, EyeOutlined } from '@ant-design/icons';
+import { DownloadOutlined, EyeOutlined, FilterOutlined } from '@ant-design/icons';
 import { ProTable, type ProColumns } from '@ant-design/pro-components';
-import { Button, Card, Empty, Input, message, Modal, Select, Space, Spin, Typography } from 'antd';
+import { Button, Card, Drawer, Empty, Input, message, Modal, Select, Space, Spin, Typography } from 'antd';
 import type { TablePaginationConfig } from 'antd';
 import dayjs from 'dayjs';
 import { useSearchParams } from 'next/navigation';
@@ -13,6 +13,7 @@ import { getLeadDetail, listCollaborationTasks, listLeadFollowRecords, listSales
 import { getAdminLeadsStats } from '@/shared/api/admin';
 import { QuickRangePicker, RANGE_PRESETS_FULL } from '@/shared/components/date';
 import type { DateRangeValue } from '@/shared/components/date';
+import { useResponsiveBreakpoint } from '@/shared/hooks/useResponsiveBreakpoint';
 import { PostTitleCell } from '@/shared/components/dashboard/PlatformAnalysisPanel';
 import { ReminderButton } from '@/shared/components/notifications/ReminderButton';
 import { LeadTimeline } from '@/shared/components/leads';
@@ -76,6 +77,9 @@ export default function OperationLeadsPage() {
   const [detailTimeline, setDetailTimeline] = useState<LeadTimelineItem[]>([]);
   const [timelineLoading, setTimelineLoading] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
+
+  const { isMobile } = useResponsiveBreakpoint();
+  const [filterDrawerOpen, setFilterDrawerOpen] = useState(false);
 
   // 从 URL 参数初始化筛选条件
   useEffect(() => {
@@ -354,108 +358,224 @@ export default function OperationLeadsPage() {
           <Typography.Paragraph type="secondary">回看自己录入客资的分配、添加、跟进和协同状态。</Typography.Paragraph>
         </div>
         <Space wrap>
-          <QuickRangePicker
-            value={filters.dateRange}
-            onChange={(dateRange) => {
-              const next = { ...filters, dateRange, from: undefined, to: undefined };
-              setFilters(next);
-              void load(1, pagination.pageSize, next);
-            }}
-            presets={RANGE_PRESETS_FULL}
-            variant="select"
-            selectWidth={120}
-            selectPlaceholder="快捷时间"
-          />
-          <Select
-            allowClear
-            aria-label="筛选平台"
-            placeholder="全部平台"
-            style={{ width: 120 }}
-            value={filters.platform}
-            options={[
-              { label: '小红书', value: 'xiaohongshu' },
-              { label: '抖音', value: 'douyin' },
-            ]}
-            onChange={(platform) => {
-              const next = { ...filters, platform };
-              setFilters(next);
-              void load(1, pagination.pageSize, next);
-            }}
-          />
-          <Select
-            allowClear
-            aria-label="筛选处理状态"
-            placeholder="处理状态"
-            style={{ width: 120 }}
-            value={filters.processStatus}
-            options={[
-              { label: '未联系', value: 'not_contacted' },
-              { label: '待通过', value: 'waiting_pass' },
-              { label: '沟通中', value: 'communicating' },
-              { label: '已报价', value: 'quoted' },
-              { label: '待成交', value: 'deal_pending' },
-              { label: '已成交', value: 'deal_done' },
-              { label: '无效', value: 'invalid' },
-            ]}
-            onChange={(processStatus) => {
-              const next = { ...filters, processStatus };
-              setFilters(next);
-              void load(1, pagination.pageSize, next);
-            }}
-          />
-          <Select
-            allowClear
-            aria-label="筛选添加状态"
-            placeholder="添加状态"
-            style={{ width: 130 }}
-            value={filters.addStatus}
-            options={[
-              { label: '未添加', value: 'not_added' },
-              { label: '已申请', value: 'applied' },
-              { label: '未通过', value: 'not_passed' },
-              { label: '运营已提醒', value: 'operation_reminded' },
-              { label: '已添加', value: 'added' },
-            ]}
-            onChange={(addStatus) => {
-              const next = { ...filters, addStatus };
-              setFilters(next);
-              void load(1, pagination.pageSize, next);
-            }}
-          />
-          <Select
-            allowClear
-            aria-label="筛选协同状态"
-            placeholder="协同状态"
-            style={{ width: 130 }}
-            value={filters.collaborationStatus}
-            options={[
-              { label: '无', value: 'none' },
-              { label: '协同中', value: 'pending' },
-              { label: '处理中', value: 'handling' },
-              { label: '已处理', value: 'handled' },
-            ]}
-            onChange={(collaborationStatus) => {
-              const next = { ...filters, collaborationStatus };
-              setFilters(next);
-              void load(1, pagination.pageSize, next);
-            }}
-          />
-          <Input.Search
-            allowClear
-            placeholder="搜索来源作品"
-            style={{ width: 160 }}
-            onSearch={(sourcePost) => {
-              const next = { ...filters, sourcePost };
-              setFilters(next);
-              void load(1, pagination.pageSize, next);
-            }}
-          />
+          {!isMobile && (
+            <>
+              <QuickRangePicker
+                value={filters.dateRange}
+                onChange={(dateRange) => {
+                  const next = { ...filters, dateRange, from: undefined, to: undefined };
+                  setFilters(next);
+                  void load(1, pagination.pageSize, next);
+                }}
+                presets={RANGE_PRESETS_FULL}
+                variant="select"
+                selectWidth={120}
+                selectPlaceholder="快捷时间"
+              />
+              <Select
+                allowClear
+                aria-label="筛选平台"
+                placeholder="全部平台"
+                style={{ width: 120 }}
+                value={filters.platform}
+                options={[
+                  { label: '小红书', value: 'xiaohongshu' },
+                  { label: '抖音', value: 'douyin' },
+                ]}
+                onChange={(platform) => {
+                  const next = { ...filters, platform };
+                  setFilters(next);
+                  void load(1, pagination.pageSize, next);
+                }}
+              />
+              <Select
+                allowClear
+                aria-label="筛选处理状态"
+                placeholder="处理状态"
+                style={{ width: 120 }}
+                value={filters.processStatus}
+                options={[
+                  { label: '未联系', value: 'not_contacted' },
+                  { label: '待通过', value: 'waiting_pass' },
+                  { label: '沟通中', value: 'communicating' },
+                  { label: '已报价', value: 'quoted' },
+                  { label: '待成交', value: 'deal_pending' },
+                  { label: '已成交', value: 'deal_done' },
+                  { label: '无效', value: 'invalid' },
+                ]}
+                onChange={(processStatus) => {
+                  const next = { ...filters, processStatus };
+                  setFilters(next);
+                  void load(1, pagination.pageSize, next);
+                }}
+              />
+              <Select
+                allowClear
+                aria-label="筛选添加状态"
+                placeholder="添加状态"
+                style={{ width: 130 }}
+                value={filters.addStatus}
+                options={[
+                  { label: '未添加', value: 'not_added' },
+                  { label: '已申请', value: 'applied' },
+                  { label: '未通过', value: 'not_passed' },
+                  { label: '运营已提醒', value: 'operation_reminded' },
+                  { label: '已添加', value: 'added' },
+                ]}
+                onChange={(addStatus) => {
+                  const next = { ...filters, addStatus };
+                  setFilters(next);
+                  void load(1, pagination.pageSize, next);
+                }}
+              />
+              <Select
+                allowClear
+                aria-label="筛选协同状态"
+                placeholder="协同状态"
+                style={{ width: 130 }}
+                value={filters.collaborationStatus}
+                options={[
+                  { label: '无', value: 'none' },
+                  { label: '协同中', value: 'pending' },
+                  { label: '处理中', value: 'handling' },
+                  { label: '已处理', value: 'handled' },
+                ]}
+                onChange={(collaborationStatus) => {
+                  const next = { ...filters, collaborationStatus };
+                  setFilters(next);
+                  void load(1, pagination.pageSize, next);
+                }}
+              />
+              <Input.Search
+                allowClear
+                placeholder="搜索来源作品"
+                style={{ width: 160 }}
+                onSearch={(sourcePost) => {
+                  const next = { ...filters, sourcePost };
+                  setFilters(next);
+                  void load(1, pagination.pageSize, next);
+                }}
+              />
+            </>
+          )}
+          {isMobile && (
+            <Button icon={<FilterOutlined />} onClick={() => setFilterDrawerOpen(true)}>
+              筛选
+            </Button>
+          )}
           <Button icon={<DownloadOutlined />} loading={exporting} onClick={handleExport}>
             导出
           </Button>
           <Button onClick={() => void load()}>刷新</Button>
         </Space>
       </div>
+
+      {/* Mobile filter drawer */}
+      {isMobile && (
+        <Drawer
+          title="筛选条件"
+          open={filterDrawerOpen}
+          onClose={() => setFilterDrawerOpen(false)}
+          placement="bottom"
+          height="auto"
+        >
+          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            <QuickRangePicker
+              value={filters.dateRange}
+              onChange={(dateRange) => {
+                const next = { ...filters, dateRange, from: undefined, to: undefined };
+                setFilters(next);
+                void load(1, pagination.pageSize, next);
+              }}
+              presets={RANGE_PRESETS_FULL}
+              variant="select"
+              selectPlaceholder="快捷时间"
+              style={{ width: '100%' }}
+            />
+            <Select
+              allowClear
+              placeholder="全部平台"
+              style={{ width: '100%' }}
+              value={filters.platform}
+              options={[
+                { label: '小红书', value: 'xiaohongshu' },
+                { label: '抖音', value: 'douyin' },
+              ]}
+              onChange={(platform) => {
+                const next = { ...filters, platform };
+                setFilters(next);
+                void load(1, pagination.pageSize, next);
+              }}
+            />
+            <Select
+              allowClear
+              placeholder="处理状态"
+              style={{ width: '100%' }}
+              value={filters.processStatus}
+              options={[
+                { label: '未联系', value: 'not_contacted' },
+                { label: '待通过', value: 'waiting_pass' },
+                { label: '沟通中', value: 'communicating' },
+                { label: '已报价', value: 'quoted' },
+                { label: '待成交', value: 'deal_pending' },
+                { label: '已成交', value: 'deal_done' },
+                { label: '无效', value: 'invalid' },
+              ]}
+              onChange={(processStatus) => {
+                const next = { ...filters, processStatus };
+                setFilters(next);
+                void load(1, pagination.pageSize, next);
+              }}
+            />
+            <Select
+              allowClear
+              placeholder="添加状态"
+              style={{ width: '100%' }}
+              value={filters.addStatus}
+              options={[
+                { label: '未添加', value: 'not_added' },
+                { label: '已申请', value: 'applied' },
+                { label: '未通过', value: 'not_passed' },
+                { label: '运营已提醒', value: 'operation_reminded' },
+                { label: '已添加', value: 'added' },
+              ]}
+              onChange={(addStatus) => {
+                const next = { ...filters, addStatus };
+                setFilters(next);
+                void load(1, pagination.pageSize, next);
+              }}
+            />
+            <Select
+              allowClear
+              placeholder="协同状态"
+              style={{ width: '100%' }}
+              value={filters.collaborationStatus}
+              options={[
+                { label: '无', value: 'none' },
+                { label: '协同中', value: 'pending' },
+                { label: '处理中', value: 'handling' },
+                { label: '已处理', value: 'handled' },
+              ]}
+              onChange={(collaborationStatus) => {
+                const next = { ...filters, collaborationStatus };
+                setFilters(next);
+                void load(1, pagination.pageSize, next);
+              }}
+            />
+            <Input.Search
+              allowClear
+              placeholder="搜索来源作品"
+              style={{ width: '100%' }}
+              onSearch={(sourcePost) => {
+                const next = { ...filters, sourcePost };
+                setFilters(next);
+                void load(1, pagination.pageSize, next);
+              }}
+            />
+          </Space>
+        </Drawer>
+      )}
+
       <Card>
         <ProTable<SalesLead>
           rowKey="id"
@@ -463,6 +583,7 @@ export default function OperationLeadsPage() {
           dataSource={items}
           loading={loading}
           pagination={{ ...pagination, showSizeChanger: true }}
+          scroll={{ x: 'max-content' }}
           onChange={(next: TablePaginationConfig) => void load(next.current ?? 1, next.pageSize ?? 20, filters)}
           locale={{ emptyText: <Empty description="暂无客资" /> }}
           search={false}

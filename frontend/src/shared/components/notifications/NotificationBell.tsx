@@ -1,11 +1,12 @@
 'use client';
 
 import { BellOutlined } from '@ant-design/icons';
-import { Badge, Button, Dropdown, Empty, List, Space, Typography } from 'antd';
+import { Badge, Button, Drawer, Dropdown, Empty, List, Space, Typography } from 'antd';
 import { useRouter } from 'next/navigation';
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 
 import { useNotifications } from '@/shared/contexts/NotificationContext';
+import { useResponsiveBreakpoint } from '@/shared/hooks/useResponsiveBreakpoint';
 import { StatusTag } from '@/shared/components/status';
 import type { NotificationItem } from '@/shared/types/notifications';
 
@@ -21,6 +22,8 @@ type NotificationBellProps = {
 export function NotificationBell(_props: NotificationBellProps = {}) {
   const router = useRouter();
   const { items, unreadCount, loading, refresh, markRead } = useNotifications();
+  const { isMobile } = useResponsiveBreakpoint();
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
   const openNotification = useCallback(
     async (item: NotificationItem) => {
@@ -37,8 +40,8 @@ export function NotificationBell(_props: NotificationBellProps = {}) {
     [markRead, router],
   );
 
-  const overlay = (
-    <div className="notification-panel" style={{ maxWidth: 360 }}>
+  const panelContent = (
+    <div className="notification-panel">
       <Space direction="vertical" size={12} className="page-stack" style={{ width: '100%' }}>
         <div className="notification-panel-header">
           <Typography.Text strong>消息提醒</Typography.Text>
@@ -80,12 +83,38 @@ export function NotificationBell(_props: NotificationBellProps = {}) {
     </div>
   );
 
+  const triggerButton = (
+    <Button type="text" icon={<Badge count={unreadCount} size="small"><BellOutlined /></Badge>}>
+      消息
+    </Button>
+  );
+
+  if (!isMobile) {
+    return (
+      <Dropdown popupRender={() => panelContent} trigger={['click']} placement="bottomRight">
+        {triggerButton}
+      </Dropdown>
+    );
+  }
+
   return (
-    <Dropdown popupRender={() => overlay} trigger={['click']} placement="bottomRight">
-      <Button type="text" icon={<Badge count={unreadCount} size="small"><BellOutlined /></Badge>}>
-        消息
-      </Button>
-    </Dropdown>
+    <>
+      <Badge count={unreadCount} size="small">
+        <Button type="text" icon={<BellOutlined />} onClick={() => setDrawerOpen(true)}>
+          消息
+        </Button>
+      </Badge>
+      <Drawer
+        open={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        placement="bottom"
+        height="auto"
+        closable={false}
+        styles={{ body: { padding: 0 } }}
+      >
+        {panelContent}
+      </Drawer>
+    </>
   );
 }
 

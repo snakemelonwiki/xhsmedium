@@ -227,6 +227,7 @@ export default function AdminImportsPage() {
           columns={columns}
           dataSource={items}
           pagination={false}
+          scroll={{ x: 'max-content' }}
           locale={{ emptyText: <Empty description="暂无导入记录" /> }}
         />
         <Pagination

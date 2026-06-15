@@ -230,7 +230,7 @@ function PlatformColumn({ bucket, rankings, dist, loading }: PlatformColumnProps
     >
       {/* 顶部 3 张概览卡 */}
       <Row gutter={[8, 8]} style={{ marginBottom: 12 }}>
-        <Col span={8}>
+        <Col xs={24} sm={8}>
           <Card size="small" style={{ background: '#fafafa' }}>
             <Space size={4} align="center" style={{ marginBottom: 4 }}>
               <TrophyOutlined style={{ color: '#52c41a' }} />
@@ -250,7 +250,7 @@ function PlatformColumn({ bucket, rankings, dist, loading }: PlatformColumnProps
             />
           </Card>
         </Col>
-        <Col span={8}>
+        <Col xs={24} sm={8}>
           <Card size="small" style={{ background: '#fafafa' }}>
             <Space size={4} align="center" style={{ marginBottom: 4 }}>
               <RiseOutlined style={{ color: '#fa541c' }} />
@@ -271,7 +271,7 @@ function PlatformColumn({ bucket, rankings, dist, loading }: PlatformColumnProps
             />
           </Card>
         </Col>
-        <Col span={8}>
+        <Col xs={24} sm={8}>
           <Card size="small" style={{ background: '#fafafa' }}>
             <Space size={4} align="center" style={{ marginBottom: 4 }}>
               <CrownOutlined style={{ color: '#722ed1' }} />
@@ -307,7 +307,7 @@ function PlatformColumn({ bucket, rankings, dist, loading }: PlatformColumnProps
 
       {/* 3 个榜单 */}
       <Row gutter={[8, 8]}>
-        <Col span={8}>
+        <Col xs={24} sm={8}>
           {/* W7 修复：标题应与排序键一致——排序键是 leadCount（客资数），标题用"获客数榜" */}
           {/* v1.3 T3.4 修复：列已改为 traffic (likes+comments+favorites)，表头同步改"账号流量榜" */}
         <Typography.Title level={5} style={{ marginTop: 0, marginBottom: 4, fontSize: 13 }}>
@@ -328,7 +328,7 @@ function PlatformColumn({ bucket, rankings, dist, loading }: PlatformColumnProps
             )}
           </Skeleton>
         </Col>
-        <Col span={8}>
+        <Col xs={24} sm={8}>
           <Typography.Title level={5} style={{ marginTop: 0, marginBottom: 4, fontSize: 13 }}>
             获客效率榜 Top {TOP_N}
           </Typography.Title>
@@ -347,7 +347,7 @@ function PlatformColumn({ bucket, rankings, dist, loading }: PlatformColumnProps
             )}
           </Skeleton>
         </Col>
-        <Col span={8}>
+        <Col xs={24} sm={8}>
           <Typography.Title level={5} style={{ marginTop: 0, marginBottom: 4, fontSize: 13 }}>
             获客贴效率榜 Top {TOP_N}
           </Typography.Title>

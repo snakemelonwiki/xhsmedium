@@ -392,6 +392,7 @@ export default function OperationAccountsPage() {
           loading={loading}
           columns={columns}
           dataSource={items}
+          scroll={{ x: 'max-content' }}
           rowClassName={(record) => (pinnedAccountId && record.id === pinnedAccountId ? 'ant-table-row-selected' : '')}
           pagination={false}
           locale={{ emptyText: <Empty description="暂无账号" /> }}

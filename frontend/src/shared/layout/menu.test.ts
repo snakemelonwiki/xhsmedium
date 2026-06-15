@@ -17,3 +17,10 @@ describe('role menu items', () => {
     }
   }, 30000);
 });
+
+describe('useResponsiveBreakpoint', () => {
+  it('is exported from the shared hooks module', async () => {
+    const mod = await import('@/shared/hooks/useResponsiveBreakpoint');
+    expect(mod.useResponsiveBreakpoint).toBeTypeOf('function');
+  });
+});
