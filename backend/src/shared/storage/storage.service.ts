@@ -1,6 +1,7 @@
 import { Global, Inject, Injectable, Module, Optional } from '@nestjs/common';
 import * as fs from 'fs';
 import * as path from 'path';
+import { resolveUploadsRoot } from '../utils/project-paths';
 
 /**
  * 对象存储抽象层（T-22）
@@ -50,8 +51,7 @@ export class StorageService {
   ) {
     this.env = env || process.env;
     this.driver = this.env.OBJECT_STORAGE_DRIVER || 'local';
-    // 编译后位于 dist/shared/storage/storage.service.js，上溯四级到仓库根
-    this.uploadsRoot = path.join(__dirname, '..', '..', '..', '..', 'uploads');
+    this.uploadsRoot = resolveUploadsRoot(__dirname);
     try {
       if (!fs.existsSync(this.uploadsRoot)) {
         fs.mkdirSync(this.uploadsRoot, { recursive: true });
