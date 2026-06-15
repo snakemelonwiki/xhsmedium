@@ -223,6 +223,20 @@ export const APP_MENU_ITEMS: AppMenuItem[] = [
     roles: ACADEMIC_ROLE_SCOPE,
   },
   {
+    key: 'academic-teacher-specialties',
+    label: '专业方向管理',
+    path: '/academic/teacher-specialties',
+    icon: <TagsOutlined />,
+    roles: ACADEMIC_ROLE_SCOPE,
+  },
+  {
+    key: 'academic-teacher-order-types',
+    label: '接单类型管理',
+    path: '/academic/teacher-order-types',
+    icon: <TagsOutlined />,
+    roles: ACADEMIC_ROLE_SCOPE,
+  },
+  {
     key: 'academic-orders',
     label: '订单池',
     path: '/academic/orders',
@@ -343,7 +357,7 @@ export const APP_MENU_ITEMS: AppMenuItem[] = [
   },
   {
     key: 'admin-employees',
-    label: '员工管理',
+    label: '运营管理',
     path: '/admin/employees',
     icon: <TeamOutlined />,
     roles: ['admin', 'owner'],
@@ -353,20 +367,6 @@ export const APP_MENU_ITEMS: AppMenuItem[] = [
     label: '账号管理',
     path: '/admin/accounts',
     icon: <ShopOutlined />,
-    roles: ['admin', 'owner'],
-  },
-  {
-    key: 'admin-teacher-specialties',
-    label: '专业方向管理',
-    path: '/admin/teacher-specialties',
-    icon: <TagsOutlined />,
-    roles: ['admin', 'owner'],
-  },
-  {
-    key: 'admin-teacher-order-types',
-    label: '接单类型管理',
-    path: '/admin/teacher-order-types',
-    icon: <TagsOutlined />,
     roles: ['admin', 'owner'],
   },
   {
