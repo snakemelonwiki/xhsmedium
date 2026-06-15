@@ -9,3 +9,4 @@ backups/
 data.json
 daily-snapshots.json
 .playwright-profiles/
+.worktrees/
