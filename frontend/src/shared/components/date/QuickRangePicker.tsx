@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { Button, DatePicker, Select, Space } from 'antd';
 import type { RangePickerProps } from 'antd/es/date-picker';
@@ -30,7 +30,7 @@ export type QuickRangePickerProps = {
   disabled?: boolean;
   /** 是否允许清空（透传给 antd RangePicker.allowClear）。默认 true。 */
   allowClear?: boolean;
-  /** 透传给 antd RangePicker 的其他 props（value/onChange/disabled 已被本组件占用，禁止覆盖）。 */
+  /** 透传给 antd RangePicker 的其他 props（value/onChange/disabled/已被本组件占用，禁止覆盖）。 */
   pickerProps?: Omit<RangePickerProps, 'value' | 'onChange' | 'disabled' | 'allowClear'>;
   className?: string;
   style?: CSSProperties;
@@ -49,6 +49,13 @@ const { RangePicker } = DatePicker;
  * - variant='buttons'：平铺预设按钮 + RangePicker（适合 ≤6 个预设）
  * - variant='select'：Select 下拉 + RangePicker（适合 ≥6 个预设）
  * 点预设 → onChange 出对应 [now - n*unit, now]；手动改 RangePicker → 预设高亮/选中态自然清空。
+ *
+ * 重要:周一日历特性下,「今日」与「本周」在 isPresetMatch 上逻辑等价(都是
+ * [周一 00:00, 当前时间])。如果仅按"首个匹配预设"判定 activeKey,周一
+ * 点「本周」按钮会被「今日」抢高亮,RangePicker 也不会"看起来"变动。
+ * 修复: 记录用户最近一次主动点击的 preset key,优先用这个 key 作为 activeKey
+ * (即使其它预设也匹配);一旦 value 不再匹配最近点击的 preset (例如用户手动改 RangePicker),
+ * 自动回退到首个匹配的 preset key;value 完全不匹配任何 preset 时,activeKey = null。
  */
 export function QuickRangePicker({
   value,
@@ -64,8 +71,8 @@ export function QuickRangePicker({
   selectPlaceholder = '选择时间段',
   selectWidth = 160,
 }: QuickRangePickerProps) {
-  // 匹配当前 value 的预设 key，用于按钮高亮 / Select 选中。空值 / 改过时间都返回 null。
-  const activeKey = useMemo(() => {
+  // 第一个匹配的预设 key(任意 value,纯静态计算)。
+  const firstMatchKey = useMemo<string | null>(() => {
     if (!value) return null;
     for (const p of presets) {
       if (isPresetMatch(value, p.unit, p.n, p.mode)) return p.key;
@@ -73,8 +80,31 @@ export function QuickRangePicker({
     return null;
   }, [value, presets]);
 
+  // 用户最近一次主动点击的 preset key;手动改 RangePicker 后会被重置。
+  // ref + state 双向: ref 拿到最新值(在 effect 内),state 触发重渲染。
+  const [lastClickedKey, setLastClickedKey] = useState<string | null>(null);
+  const lastClickedKeyRef = useRef<string | null>(null);
+
+  // value 与最近点击的 preset 失去匹配 → 清空(用户手动改过日期)。
+  useEffect(() => {
+    if (!lastClickedKeyRef.current) return;
+    const stillMatches = presets.some(
+      (p) => p.key === lastClickedKeyRef.current && isPresetMatch(value, p.unit, p.n, p.mode),
+    );
+    if (!stillMatches) {
+      lastClickedKeyRef.current = null;
+      setLastClickedKey(null);
+    }
+  }, [value, presets]);
+
+  // 匹配当前 value 的预设 key,用于按钮高亮 / Select 选中。
+  // 优先级: 用户最近点击的 key > 首个匹配 key > null。
+  const activeKey = lastClickedKey ?? firstMatchKey;
+
   const handlePresetClick = (p: DateRangePreset) => {
     if (disabled) return;
+    lastClickedKeyRef.current = p.key;
+    setLastClickedKey(p.key);
     if (p.mode === 'calendar') {
       // 用 calendarStartOf 保证 week = 周一开始，month/year/day 也对齐自然周期。
       // 不依赖 dayjs 全局 locale 设置。
