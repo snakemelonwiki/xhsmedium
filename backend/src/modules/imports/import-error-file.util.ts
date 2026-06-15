@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
+import { resolveRepoRoot } from '../../shared/utils/project-paths';
 
 interface FailedImportRow {
   rowIndex?: number;
@@ -36,7 +37,7 @@ export function writeImportErrorFile(rootDir: string, taskId: string, rows: Fail
  * 获取项目根目录，兼容从根目录或 backend 子目录启动 NestJS。
  */
 export function getProjectRoot(): string {
-  return process.cwd().endsWith('backend') ? join(process.cwd(), '..') : process.cwd();
+  return resolveRepoRoot(process.cwd());
 }
 
 function csvCell(value: unknown): string {
