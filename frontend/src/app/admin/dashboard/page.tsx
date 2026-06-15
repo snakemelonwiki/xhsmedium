@@ -54,6 +54,7 @@ import { useNotificationSocket } from '@/shared/hooks/useNotificationSocket';
 import type { NotificationItem } from '@/shared/types/notifications';
 import { formatDateTime } from '@/shared/utils/date-format';
 import { isPresetMatch } from '@/shared/utils/date-range';
+import { ADMIN_EMPLOYEE_COPY } from '@/app/admin/employees/copy';
 
 // echarts 通过 layout.tsx 注入的 CDN script 暴露为 window.echarts，
 // 它的加载晚于组件首次渲染，需要在 useEffect 内等 ready 后再 init，
@@ -153,8 +154,8 @@ const EXCEPTION_CARDS: ExceptionCard[] = [
 
 const QUICK_ENTRIES = [
   {
-    title: '员工管理',
-    description: '维护员工资料、账号分配和在职状态。',
+    title: ADMIN_EMPLOYEE_COPY.pageTitle,
+    description: ADMIN_EMPLOYEE_COPY.headerDescription,
     href: '/admin/employees',
     icon: <TeamOutlined />,
   },

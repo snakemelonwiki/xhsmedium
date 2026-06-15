@@ -16,6 +16,7 @@ import { useEffect, useState } from 'react';
 
 import { getAdminDashboardSummary } from '@/shared/api/admin';
 import type { AdminDashboardSummary } from '@/shared/types/admin';
+import { ADMIN_EMPLOYEE_COPY } from '@/app/admin/employees/copy';
 
 /**
  * 总后台首页：owner 角色独立的着陆页，复用主管端聚合接口，强调"全局视图"。
@@ -26,7 +27,7 @@ const entries = [
   { title: '客资看板', href: '/admin/leads', description: '查看全部客资、销售归属和跟进状态', icon: <UserSwitchOutlined /> },
   { title: '订单看板', href: '/admin/orders', description: '订单全量视图与教务分配', icon: <ProjectOutlined /> },
   { title: '协同处理', href: '/admin/collaboration', description: '全平台协同任务总览与稽核', icon: <ProjectOutlined /> },
-  { title: '员工管理', href: '/admin/employees', description: '维护员工资料和在职状态', icon: <TeamOutlined /> },
+  { title: ADMIN_EMPLOYEE_COPY.pageTitle, href: '/admin/employees', description: ADMIN_EMPLOYEE_COPY.ownerEntryDescription, icon: <TeamOutlined /> },
   { title: '账号管理', href: '/admin/accounts', description: '管理运营账号、平台和定位信息', icon: <IdcardOutlined /> },
   { title: '基础分析', href: '/admin/analytics', description: '查看流量与客资统计', icon: <LineChartOutlined /> },
   { title: '消息中心', href: '/admin/messages', description: '查看协同与系统通知', icon: <BellOutlined /> },

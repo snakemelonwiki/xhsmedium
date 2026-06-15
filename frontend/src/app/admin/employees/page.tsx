@@ -10,6 +10,7 @@ import { apiClient } from '@/shared/api/apiClient';
 import { listAdminEmployees, saveAdminEmployee } from '@/shared/api/admin';
 import type { AdminEmployee } from '@/shared/types/admin';
 import { validatePasswordStrength } from '@/shared/utils/password';
+import { ADMIN_EMPLOYEE_COPY, buildStatusSummary, getEmployeeDialogCopy } from './copy';
 
 const { Text, Paragraph } = Typography;
 
@@ -28,7 +29,7 @@ const ROLE_OPTIONS = [
   { label: '教务主管', value: 'academic_supervisor' },
   { label: '主管', value: 'supervisor' },
   { label: '系统管理员', value: 'admin' },
-  { label: '员工', value: 'staff' },
+  { label: '运营(兼容旧角色)', value: 'staff' },
 ];
 
 const STATUS_OPTIONS = [
@@ -66,7 +67,7 @@ export default function AdminEmployeesPage() {
 
   // 筛选状态
   const [filterRole, setFilterRole] = useState<string>('');
-  const [filterStatus, setFilterStatus] = useState<string>('');
+  const [filterStatus, setFilterStatus] = useState<string>('在职');
   const [filterDepartment, setFilterDepartment] = useState<string>('');
   const [keyword, setKeyword] = useState('');
 
@@ -80,11 +81,6 @@ export default function AdminEmployeesPage() {
   const [deactivateEmployee, setDeactivateEmployee] = useState<Employee>();
   const [deactivateLoading, setDeactivateLoading] = useState(false);
 
-  // 删除确认弹窗
-  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
-  const [deleteEmployee, setDeleteEmployee] = useState<Employee>();
-  const [deleteLoading, setDeleteLoading] = useState(false);
-
   // 新建登录账号弹窗
   const [createUserModalOpen, setCreateUserModalOpen] = useState(false);
   const [createUserForm] = Form.useForm();
@@ -96,12 +92,14 @@ export default function AdminEmployeesPage() {
   const [changePwdForm] = Form.useForm();
   const [changePwdLoading, setChangePwdLoading] = useState(false);
   const [changePwdResult, setChangePwdResult] = useState<{ username: string; newPassword: string } | null>(null);
+  const statusSummary = buildStatusSummary(items);
 
-  async function load(page = pagination.current, pageSize = pagination.pageSize) {
+  async function load(page = pagination.current, pageSize = pagination.pageSize, statusOverride?: string) {
     setLoading(true);
     try {
-      const result = await listAdminEmployees({ page, pageSize, keyword: keyword.trim() || undefined });
-      // 员工数据已由后端 enrichWithRoles 关联 userId / username / role，
+      const status = statusOverride !== undefined ? statusOverride : filterStatus;
+      const result = await listAdminEmployees({ page, pageSize, keyword: keyword.trim() || undefined, status: status || undefined });
+      // 运营数据已由后端 enrichWithRoles 关联 userId / username / role，
       // 直接使用，无需额外查询 /users
       setItems(result.items as Employee[]);
       setPagination({ current: result.page, pageSize: result.pageSize, total: result.total });
@@ -130,7 +128,7 @@ export default function AdminEmployeesPage() {
 
   async function submit(values: Partial<Employee> & { name: string }) {
     await saveAdminEmployee({ ...editing, ...values } as Parameters<typeof saveAdminEmployee>[0]);
-    messageApi.success(editing ? '员工信息已更新' : '员工已新增');
+    messageApi.success(editing ? ADMIN_EMPLOYEE_COPY.updateSuccess : ADMIN_EMPLOYEE_COPY.addSuccess);
     setOpen(false);
     form.resetFields();
     void load();
@@ -177,33 +175,13 @@ export default function AdminEmployeesPage() {
         method: 'PATCH',
         body: { status: '停用' },
       });
-      messageApi.success(`员工"${deactivateEmployee.name}"已停用`);
+      messageApi.success(ADMIN_EMPLOYEE_COPY.deactivateSuccess(deactivateEmployee.name));
       setDeactivateModalOpen(false);
       void load();
     } catch (err: unknown) {
       messageApi.error((err as Error)?.message || '停用失败');
     } finally {
       setDeactivateLoading(false);
-    }
-  }
-
-  function openDeleteConfirm(record: Employee) {
-    setDeleteEmployee(record);
-    setDeleteModalOpen(true);
-  }
-
-  async function confirmDelete() {
-    if (!deleteEmployee) return;
-    setDeleteLoading(true);
-    try {
-      await apiClient.request(`/employees/${deleteEmployee.id}`, { method: 'DELETE' });
-      messageApi.success(`员工"${deleteEmployee.name}"已删除`);
-      setDeleteModalOpen(false);
-      void load();
-    } catch (err: unknown) {
-      messageApi.error((err as Error)?.message || '删除失败');
-    } finally {
-      setDeleteLoading(false);
     }
   }
 
@@ -352,11 +330,6 @@ export default function AdminEmployeesPage() {
               停用
             </Button>
           )}
-          {record.status !== '离职' && (
-            <Button size="small" danger type="text" onClick={() => openDeleteConfirm(record)}>
-              删除
-            </Button>
-          )}
         </Space>
       ),
     },
@@ -367,9 +340,9 @@ export default function AdminEmployeesPage() {
       {/* 页面标题 */}
       <div className="toolbar-row">
         <div>
-          <Typography.Title level={2}>员工管理</Typography.Title>
+          <Typography.Title level={2}>{ADMIN_EMPLOYEE_COPY.pageTitle}</Typography.Title>
           <Typography.Paragraph type="secondary">
-            维护员工资料、状态和登录账号绑定。支持按角色、部门、状态筛选。
+            {ADMIN_EMPLOYEE_COPY.pageDescription}
           </Typography.Paragraph>
         </div>
         <Space>
@@ -379,9 +352,30 @@ export default function AdminEmployeesPage() {
             onSearch={handleSearch}
             style={{ width: 200 }}
           />
-          <Button type="primary" onClick={() => startEdit()}>新增员工</Button>
+          <Button type="primary" onClick={() => startEdit()}>{ADMIN_EMPLOYEE_COPY.addButton}</Button>
         </Space>
       </div>
+
+      <Row gutter={[12, 12]}>
+        <Col xs={24} md={8}>
+          <Card size="small">
+            <Typography.Text type="secondary">在职运营</Typography.Text>
+            <Typography.Title level={3} style={{ marginTop: 8, marginBottom: 0 }}>{statusSummary.active}</Typography.Title>
+          </Card>
+        </Col>
+        <Col xs={24} md={8}>
+          <Card size="small">
+            <Typography.Text type="secondary">停用运营</Typography.Text>
+            <Typography.Title level={3} style={{ marginTop: 8, marginBottom: 0 }}>{statusSummary.disabled}</Typography.Title>
+          </Card>
+        </Col>
+        <Col xs={24} md={8}>
+          <Card size="small">
+            <Typography.Text type="secondary">离职运营</Typography.Text>
+            <Typography.Title level={3} style={{ marginTop: 8, marginBottom: 0 }}>{statusSummary.resigned}</Typography.Title>
+          </Card>
+        </Col>
+      </Row>
 
       {/* 筛选栏 */}
       <Card size="small">
@@ -399,7 +393,7 @@ export default function AdminEmployeesPage() {
             placeholder="按状态"
             value={filterStatus || undefined}
             options={STATUS_OPTIONS}
-            onChange={(v) => setFilterStatus(v ?? '')}
+            onChange={(v) => { const next = v ?? ''; setFilterStatus(next); load(1, pagination.pageSize, next); }}
             style={{ width: 100 }}
           />
           <Input
@@ -434,9 +428,9 @@ export default function AdminEmployeesPage() {
         />
       </Card>
 
-      {/* 新增/编辑员工弹窗 */}
+      {/* 新增/编辑运营弹窗 */}
       <Modal
-        title={editing ? '编辑员工' : '新增员工'}
+        title={editing ? '编辑运营' : ADMIN_EMPLOYEE_COPY.addButton}
         open={open}
         onCancel={() => { setOpen(false); form.resetFields(); }}
         onOk={() => form.submit()}
@@ -458,7 +452,7 @@ export default function AdminEmployeesPage() {
           </Row>
           <Row gutter={[16, 16]}>
             <Col xs={24} md={12}>
-              {/* 编辑已有员工且未绑定登录账号时，角色不可更改（必须先创建账号） */}
+              {/* 编辑已有运营且未绑定登录账号时，角色不可更改（必须先创建账号） */}
               <Form.Item name="roleType" label="角色">
                 <Select
                   options={ROLE_OPTIONS}
@@ -468,7 +462,7 @@ export default function AdminEmployeesPage() {
               </Form.Item>
               {editing && !editing.userId && (
                 <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: -16, marginBottom: 12 }}>
-                  该员工暂无登录账号，请先
+                  该运营暂无登录账号，请先
                   <Button type="link" size="small" style={{ padding: '0 4px' }} onClick={() => { setOpen(false); openCreateUserModal(editing); }}>
                     创建登录账号
                   </Button>
@@ -499,63 +493,32 @@ export default function AdminEmployeesPage() {
 
       {/* 停用确认弹窗 */}
       <Modal
-        title="停用员工确认"
+        title={getEmployeeDialogCopy('deactivate').title}
         open={deactivateModalOpen}
         onCancel={() => setDeactivateModalOpen(false)}
         footer={[
           <Button key="cancel" onClick={() => setDeactivateModalOpen(false)}>取消</Button>,
           <Button key="confirm" type="primary" danger loading={deactivateLoading} onClick={confirmDeactivate}>
-            确认停用
+            {getEmployeeDialogCopy('deactivate').confirmText}
           </Button>,
         ]}
       >
         <Space direction="vertical" size={12} style={{ width: '100%' }}>
           <Paragraph>
-            即将停用员工：<Text strong>{deactivateEmployee?.name}</Text>
+            即将停用运营：<Text strong>{deactivateEmployee?.name}</Text>
           </Paragraph>
           <Card size="small" type="inner">
             <Paragraph type="warning" style={{ marginBottom: 8 }}>
               停用后将会产生以下影响：
             </Paragraph>
             <ul style={{ marginBottom: 0, paddingLeft: 20 }}>
-              <li>该员工的登录账号将被停用，无法登录系统</li>
-              <li>该员工关联的运营账号将无法正常使用</li>
-              <li>该员工负责的客资将变为待分配状态</li>
-              <li>该员工关联的订单将需要重新分配跟进人</li>
+              <li>该运营的登录账号将被停用，无法登录系统</li>
+              <li>该运营关联的运营账号将无法正常使用</li>
+              <li>该运营负责的客资将变为待分配状态</li>
+              <li>该运营关联的订单将需要重新分配跟进人</li>
             </ul>
           </Card>
-          <Text type="secondary">如需继续，请点击"确认停用"。</Text>
-        </Space>
-      </Modal>
-
-      {/* 删除确认弹窗 */}
-      <Modal
-        title="删除员工确认"
-        open={deleteModalOpen}
-        onCancel={() => setDeleteModalOpen(false)}
-        footer={[
-          <Button key="cancel" onClick={() => setDeleteModalOpen(false)}>取消</Button>,
-          <Button key="confirm" type="primary" danger loading={deleteLoading} onClick={confirmDelete}>
-            确认删除
-          </Button>,
-        ]}
-      >
-        <Space direction="vertical" size={12} style={{ width: '100%' }}>
-          <Paragraph>
-            即将删除员工：<Text strong>{deleteEmployee?.name}</Text>
-          </Paragraph>
-          <Card size="small" type="inner">
-            <Paragraph type="warning" style={{ marginBottom: 8 }}>
-              删除后将会产生以下影响：
-            </Paragraph>
-            <ul style={{ marginBottom: 0, paddingLeft: 20 }}>
-              <li>该员工的登录账号将被停用，无法登录系统</li>
-              <li>该员工关联的运营账号将无法正常使用</li>
-              <li>该员工负责的客资将变为待分配状态</li>
-              <li>该员工关联的订单将需要重新分配跟进人</li>
-            </ul>
-          </Card>
-          <Text type="warning">此操作不可撤销，确认删除吗？</Text>
+          <Text type="secondary">{getEmployeeDialogCopy('deactivate').finalHint}</Text>
         </Space>
       </Modal>
 
@@ -569,7 +532,7 @@ export default function AdminEmployeesPage() {
       >
         <Space direction="vertical" size={12} style={{ width: '100%' }}>
           <Text>
-            为员工 <Text strong>{bindingEmployee?.name}</Text> 绑定已有登录账号
+            为运营 <Text strong>{bindingEmployee?.name}</Text> 绑定已有登录账号
           </Text>
           <Form form={bindForm} layout="vertical" onFinish={submitBindAccount} preserve={false}>
             <Form.Item
@@ -600,7 +563,7 @@ export default function AdminEmployeesPage() {
       >
         <Space direction="vertical" size={12} style={{ width: '100%' }}>
           <Text>
-            为员工 <Text strong>{bindingEmployee?.name}</Text> 创建新的登录账号
+            为运营 <Text strong>{bindingEmployee?.name}</Text> 创建新的登录账号
           </Text>
           <Form form={createUserForm} layout="vertical" onFinish={submitCreateUser} preserve={false}>
             <Form.Item
@@ -641,7 +604,7 @@ export default function AdminEmployeesPage() {
           <Space direction="vertical" size={12} style={{ width: '100%' }}>
             <Card size="small" style={{ background: '#fffbe6', borderColor: '#ffe58f' }}>
               <Paragraph type="warning" style={{ marginBottom: 0 }}>
-                密码修改成功。新密码仅显示一次，请务必复制保存后告知员工。关闭后将无法再次查看。
+                密码修改成功。新密码仅显示一次，请务必复制保存后告知对应运营。关闭后将无法再次查看。
               </Paragraph>
             </Card>
             <div>
@@ -656,7 +619,7 @@ export default function AdminEmployeesPage() {
                   type="primary"
                   onClick={() => {
                     navigator.clipboard.writeText(changePwdResult.newPassword).then(() => {
-                      messageApi.success('密码已复制到剪贴板，请发送给员工并提醒保存');
+                      messageApi.success('密码已复制到剪贴板，请发送给对应运营并提醒保存');
                     }).catch(() => {
                       messageApi.error('复制失败，请手动选中后 Ctrl+C 复制');
                     });
@@ -670,7 +633,7 @@ export default function AdminEmployeesPage() {
         ) : (
           <Space direction="vertical" size={12} style={{ width: '100%' }}>
             <Text>
-              为员工 <Text strong>{changingPwdEmployee?.name}</Text> 修改登录密码
+              为运营 <Text strong>{changingPwdEmployee?.name}</Text> 修改登录密码
             </Text>
             <Form
               form={changePwdForm}

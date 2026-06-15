@@ -49,10 +49,10 @@ export class EmployeesService {
    * 查询员工列表，附带关联的登录账号角色。
    * 当指定 role 时，仅返回角色匹配的员工（operation/staff 视为等价）。
    */
-  async findAll(keyword = '', role?: string): Promise<any[]> {
+  async findAll(keyword = '', role?: string, status?: string): Promise<any[]> {
     const items = await this.employeeRepository.find({
       order: { createdAt: 'DESC' },
-      where: this.keywordWhere(keyword),
+      where: this.buildWhere(keyword, status),
     });
     const enriched = await this.enrichWithRoles(items);
     return this.filterByRole(enriched, role);
@@ -62,10 +62,10 @@ export class EmployeesService {
    * 分页查询员工列表，附带关联的登录账号角色。
    * 当指定 role 时，仅返回角色匹配的员工（operation/staff 视为等价）。
    */
-  async findAllPaged(limit: number, offset: number, keyword = '', role?: string): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
+  async findAllPaged(limit: number, offset: number, keyword = '', role?: string, status?: string): Promise<{ items: any[]; total: number; limit: number; offset: number }> {
     const [items, total] = await this.employeeRepository.findAndCount({
       order: { createdAt: 'DESC' },
-      where: this.keywordWhere(keyword),
+      where: this.buildWhere(keyword, status),
       take: limit,
       skip: offset,
     });
@@ -330,16 +330,18 @@ export class EmployeesService {
   }
 
   /**
-   * 软删除（=停用）员工 + 同步停用关联 user（B 端 1.2 P0-A5 修复）。
+   * 软删除（默认=停用）员工 + 同步停用关联 user（B 端 1.2 P0-A5 修复）。
    * - 不物理删除 employee
+   * - 默认写入“停用”，避免把系统停用与人员离职混成同一口径
+   * - 允许显式传入“离职”，保留真实人员状态语义
    * - 同步将 user.status 设为 'inactive'（保留历史数据归属）
    */
-  async softDelete(id: string): Promise<Employee> {
+  async softDelete(id: string, status = '停用'): Promise<Employee> {
     const before = await this.findById(id);
     if (!before) {
       throw new NotFoundException('员工不存在');
     }
-    await this.employeeRepository.update(id, { status: '离职' });
+    await this.employeeRepository.update(id, { status });
     const linkedUser = await this.userRepository.findOne({ where: { employeeId: id } });
     if (linkedUser) {
       await this.userRepository.update(linkedUser.id, { status: 'inactive' });
@@ -439,18 +441,28 @@ export class EmployeesService {
   }
 
   /**
-   * 组装员工关键字查询条件。
+   * 组装员工查询条件（关键字 + 状态）。
+   * status 为空时不过滤状态。
    */
-  private keywordWhere(keyword: string) {
+  private buildWhere(keyword: string, status?: string) {
     const value = String(keyword || '').trim();
-    if (!value) return undefined;
-    const like = Like(`%${value}%`);
-    return [
-      { name: like },
-      { employeeCode: like },
-      { phone: like },
-      { status: like },
-    ];
+    const statusValue = String(status || '').trim();
+    const conditions: any[] = [];
+
+    if (value) {
+      const like = Like(`%${value}%`);
+      conditions.push({ name: like }, { employeeCode: like }, { phone: like }, { status: like });
+    }
+
+    if (statusValue) {
+      if (conditions.length > 0) {
+        // 关键字和状态同时存在时，取交集（每个关键字条件组合 status）
+        return conditions.map((c) => ({ ...c, status: statusValue }));
+      }
+      return { status: statusValue };
+    }
+
+    return conditions.length > 0 ? conditions : undefined;
   }
 
   /**

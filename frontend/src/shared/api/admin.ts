@@ -213,16 +213,16 @@ export async function listAdminEmployees(query: PageQuery = {}): Promise<PagedRe
 }
 
 export async function saveAdminEmployee(body: Partial<AdminEmployee> & { name: string }) {
-  // 前端表单字段名 roleType → 后端期望 loginRole。
-  // 同时把前端别名 'operations' 翻译为后端枚举 'operation'（与 User.role enum 对齐）。
   const { roleType, ...rest } = body;
-  const loginRole = roleType ? String(roleType).trim() : undefined;
-  const normalizedLoginRole = loginRole === 'operations' ? 'operation' : loginRole;
-  const payload = { ...rest, ...(normalizedLoginRole ? { loginRole: normalizedLoginRole } : {}) };
-  if (payload.id) {
+  if (rest.id) {
+    // 编辑已有员工时，若该员工已绑定 user，后端允许通过 loginRole 同步更新账号角色。
+    // 新建员工时不再透传 loginRole，避免误触发旧接口的一体化“自动创建登录账号”语义。
+    const loginRole = roleType ? String(roleType).trim() : undefined;
+    const normalizedLoginRole = loginRole === 'operations' ? 'operation' : loginRole;
+    const payload = { ...rest, ...(normalizedLoginRole ? { loginRole: normalizedLoginRole } : {}) };
     return apiClient.request(`/employees/${payload.id}`, { method: 'PUT', body: payload });
   }
-  return apiClient.post('/employees', payload);
+  return apiClient.post('/employees', rest);
 }
 
 export async function listAdminAccounts(query: PageQuery = {}): Promise<PagedResult<AdminAccount>> {

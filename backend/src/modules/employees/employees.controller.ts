@@ -142,6 +142,7 @@ export class EmployeesController {
     @Query('search') search?: string,
     @Query('q') q?: string,
     @Query('role') role?: string,
+    @Query('status') status?: string,
   ) {
     if (!ensureEmployeeAdmin(req, res)) return;
     const wantsPaging = limit !== undefined || offset !== undefined;
@@ -152,25 +153,26 @@ export class EmployeesController {
         Number(offset) || 0,
         nextKeyword,
         role,
+        status,
       );
       return res.json(result);
     }
-    const rows = await this.employeesService.findAll(nextKeyword, role);
+    const rows = await this.employeesService.findAll(nextKeyword, role, status);
     return res.json(rows);
   }
 
   /**
-   * 创建员工 + 自动生成登录账号（B 端 1.2 P0-A5 修复）。
+   * 创建员工资料。
    *
    * Body 字段：
    *   - name             必填
    *   - phone            可选
    *   - hireDate         可选 (YYYY-MM-DD)
    *   - status           可选，默认 '在职'
-   *   - loginUsername    可选；缺省时自动生成 (name_手机号后4位)
-   *   - loginPassword    可选；缺省时自动生成 (8~12 位大小写+数字)
-   *   - loginRole        可选；缺省 'operation'
-   *   - createLoginAccount 可选 boolean；缺省 true
+   *   - loginUsername    兼容旧版一体化创建场景，可选
+   *   - loginPassword    兼容旧版一体化创建场景，可选
+   *   - loginRole        兼容旧版一体化创建场景，可选
+   *   - createLoginAccount 可选 boolean；新版主管端缺省 false，旧版显式 true 时仍支持一体化创建
    *
    * 响应：
    *   {
@@ -199,21 +201,19 @@ export class EmployeesController {
         return res.status(400).json({ ok: false, message: `loginRole 不合法: ${nextRole}` });
       }
 
-      // createLoginAccount 默认 true（除非显式 false）
-      const createLoginAccount = body.createLoginAccount === false ? false : true;
+      // 新版 React 主管端“新增员工”只创建员工资料，不自动创建登录账号；
+      // 仅当旧版/兼容方显式传 createLoginAccount=true 时，才走一体化创建账号逻辑。
+      const createLoginAccount = body.createLoginAccount === true;
 
-      // T10: 当需要创建登录账号时，loginUsername 和 loginPassword 必填
+      // 当需要创建登录账号时，用户名/密码都可留空，交由 service 自动生成；
+      // 若前端显式填写密码，则在 controller 层先做一次强度校验。
       if (createLoginAccount) {
-        if (!body.loginUsername || !String(body.loginUsername).trim()) {
-          return res.status(400).json({ ok: false, message: '创建登录账号时，loginUsername 为必填字段' });
-        }
         const loginPassword = String(body.loginPassword || '').trim();
-        if (!loginPassword) {
-          return res.status(400).json({ ok: false, message: '创建登录账号时，loginPassword 为必填字段' });
-        }
-        const strength = validatePasswordStrength(loginPassword);
-        if (!strength.valid) {
-          return res.status(400).json({ ok: false, message: strength.message });
+        if (loginPassword) {
+          const strength = validatePasswordStrength(loginPassword);
+          if (!strength.valid) {
+            return res.status(400).json({ ok: false, message: strength.message });
+          }
         }
       }
 
@@ -276,7 +276,7 @@ export class EmployeesController {
     const isDisable = ['离职', '停用', 'inactive', 'disabled', '离职员工'].includes(nextStatus);
     try {
       if (isDisable) {
-        await this.employeesService.softDelete(id);
+        await this.employeesService.softDelete(id, nextStatus);
       } else {
         await this.employeesService.updateStatus(id, nextStatus);
       }
@@ -335,7 +335,7 @@ export class EmployeesController {
       return res.status(404).json({ ok: false, message: '员工不存在' });
     }
     try {
-      await this.employeesService.softDelete(id);
+      await this.employeesService.softDelete(id, '停用');
     } catch (err: any) {
       if (err.status === 404) {
         return res.status(404).json({ ok: false, message: '员工不存在' });
