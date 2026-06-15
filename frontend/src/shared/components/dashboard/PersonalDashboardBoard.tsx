@@ -301,14 +301,14 @@ export function PersonalDashboardBoard({ employeeId, showRefreshButton = true }:
                 </Space>
               </Space>
             </Row>
-            <Row gutter={8}>
-              <Col span={8}>
+            <Row gutter={[8, 8]}>
+              <Col xs={24} sm={8}>
                 <PlatformPieChart items={platformDist} metric="postCount" loading={loadingDualPlatform} />
               </Col>
-              <Col span={8}>
+              <Col xs={24} sm={8}>
                 <PlatformPieChart items={platformDist} metric="traffic" loading={loadingDualPlatform} />
               </Col>
-              <Col span={8}>
+              <Col xs={24} sm={8}>
                 <PlatformPieChart items={platformDist} metric="leadCount" loading={loadingDualPlatform} />
               </Col>
             </Row>

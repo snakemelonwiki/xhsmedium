@@ -243,6 +243,7 @@ export default function AdminRankingsPage() {
           columns={columns}
           dataSource={items}
           pagination={false}
+          scroll={{ x: 'max-content' }}
           locale={{ emptyText: <Empty description="暂无榜单数据" /> }}
         />
         <Pagination

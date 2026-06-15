@@ -57,4 +57,28 @@ describe('page display components', () => {
     expect(markup).toContain('暂无订单');
     expect(markup).toContain('创建订单');
   });
+
+  it('renders data-page-header-actions attribute when actions are provided', () => {
+    const markup = renderToStaticMarkup(
+      createElement(PageHeaderBar, {
+        title: '测试',
+        actions: createElement('button', null, '操作'),
+      }),
+    );
+
+    expect(markup).toContain('data-page-header-actions');
+  });
+
+  it('renders data-filter-bar-content and data-filter-bar-extra attributes', () => {
+    const markup = renderToStaticMarkup(
+      createElement(
+        FilterBar,
+        { extra: createElement('button', null, '导出') },
+        createElement('input', { placeholder: '关键词' }),
+      ),
+    );
+
+    expect(markup).toContain('data-filter-bar-content');
+    expect(markup).toContain('data-filter-bar-extra');
+  });
 });

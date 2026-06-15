@@ -1,7 +1,13 @@
 'use client';
 
-import { LogoutOutlined, UserOutlined, KeyOutlined } from '@ant-design/icons';
-import { Avatar, App, Button, Dropdown, Form, Input, Layout, Menu, Modal, Space, Typography } from 'antd';
+import {
+  KeyOutlined,
+  LogoutOutlined,
+  MenuFoldOutlined,
+  MenuUnfoldOutlined,
+  UserOutlined,
+} from '@ant-design/icons';
+import { App as AntApp, Avatar, Button, Drawer, Dropdown, Form, Input, Layout, Menu, Modal, Space, Typography } from 'antd';
 import type { MenuProps } from 'antd';
 import { usePathname, useRouter } from 'next/navigation';
 import type { ReactNode } from 'react';
@@ -17,6 +23,7 @@ import { NotificationBell } from '@/shared/components/notifications';
 import { NotificationProvider } from '@/shared/contexts/NotificationContext';
 import { UploadConfigProvider } from '@/shared/contexts/UploadConfigProvider';
 import { getMenuItemsByRole, toAntdMenuItems } from '@/shared/layout/menu';
+import { useResponsiveBreakpoint } from '@/shared/hooks/useResponsiveBreakpoint';
 import { apiClient } from '@/shared/api/apiClient';
 
 const { Content, Header, Sider } = Layout;
@@ -31,7 +38,7 @@ type AppLayoutProps = {
  * 四端口共用后台布局，提供菜单、用户区和消息入口。
  */
 export function AppLayout({ role, title, children }: AppLayoutProps) {
-  const { message: messageApi } = App.useApp();
+  const { message: messageApi } = AntApp.useApp();
   const pathname = usePathname();
   const router = useRouter();
   const [user, setUser] = useState<AppUser>();
@@ -40,6 +47,12 @@ export function AppLayout({ role, title, children }: AppLayoutProps) {
   const [pwLoading, setPwLoading] = useState(false);
   const [pwForm] = Form.useForm();
   const logoutInProgress = useRef(false);
+
+  /* ---- 侧边栏响应式状态 ---- */
+  const { isMobile, isTablet } = useResponsiveBreakpoint();
+  const [collapsed, setCollapsed] = useState(false);
+  const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
+
   const handleAuthenticated = useCallback((nextUser: AppUser) => setUser(nextUser), []);
   const prefetchMenuItem = useCallback((path: string) => router.prefetch(path), [router]);
 
@@ -103,36 +116,93 @@ export function AppLayout({ role, title, children }: AppLayoutProps) {
     }
   }
 
+  const sidebarMenu = (
+    <Menu
+      mode="inline"
+      selectedKeys={pendingPath ? [pendingPath] : selectedKey ? [selectedKey] : []}
+      items={toAntdMenuItems(menuItems, prefetchMenuItem)}
+      onClick={({ key }) => {
+        setPendingPath(String(key) === pathname ? undefined : String(key));
+        if (isMobile) setMobileDrawerOpen(false);
+      }}
+    />
+  );
+
   return (
     <AuthGuard onAuthenticated={handleAuthenticated}>
       <NotificationProvider>
         <UploadConfigProvider>
           <Layout className="app-shell">
-            <Sider width={232} className="app-sider">
-              <div className="app-brand">
-                <span className="app-brand-mark">X</span>
-                <span>运营中台</span>
-              </div>
-              <Menu
-                mode="inline"
-                selectedKeys={pendingPath ? [pendingPath] : selectedKey ? [selectedKey] : []}
-                items={toAntdMenuItems(menuItems, prefetchMenuItem)}
-                onClick={({ key }) => setPendingPath(String(key) === pathname ? undefined : String(key))}
-              />
-            </Sider>
+            {/* 桌面/平板：固定 Sider */}
+            {!isMobile && (
+              <Sider
+                width={232}
+                collapsedWidth={isTablet ? 64 : undefined}
+                collapsible={isTablet}
+                collapsed={isTablet ? collapsed : undefined}
+                onCollapse={isTablet ? setCollapsed : undefined}
+                className="app-sider"
+                trigger={isTablet ? undefined : null}
+              >
+                <div className="app-brand" style={collapsed && isTablet ? { padding: '0 12px', justifyContent: 'center' } : undefined}>
+                  <span className="app-brand-mark">X</span>
+                  {(!collapsed || !isTablet) && <span>运营中台</span>}
+                </div>
+                {sidebarMenu}
+              </Sider>
+            )}
+
+            {/* 移动端：Drawer 菜单 */}
+            {isMobile && (
+              <Drawer
+                title={<><span className="app-brand-mark" style={{ marginRight: 10 }}>X</span>{title}</>}
+                placement="left"
+                width={260}
+                open={mobileDrawerOpen}
+                onClose={() => setMobileDrawerOpen(false)}
+                styles={{ body: { padding: 0 } }}
+              >
+                <nav aria-label="主导航">
+                  {sidebarMenu}
+                </nav>
+              </Drawer>
+            )}
+
             <Layout>
               <Header className="app-header">
                 <div className="app-header-context">
-                  <Typography.Text className="app-header-eyebrow" type="secondary">当前端口</Typography.Text>
-                  <Typography.Title className="app-header-title" level={4}>{title}</Typography.Title>
+                  {/* 移动端：显示汉堡按钮 */}
+                  {isMobile && (
+                    <Button
+                      type="text"
+                      icon={mobileDrawerOpen ? <MenuFoldOutlined /> : <MenuUnfoldOutlined />}
+                      onClick={() => setMobileDrawerOpen(!mobileDrawerOpen)}
+                      aria-label={mobileDrawerOpen ? '关闭菜单' : '打开菜单'}
+                      style={{ marginRight: 8 }}
+                    />
+                  )}
+                  {/* 平板折叠时：也显示展开按钮 */}
+                  {isTablet && collapsed && (
+                    <Button
+                      type="text"
+                      icon={<MenuUnfoldOutlined />}
+                      onClick={() => setCollapsed(false)}
+                      aria-label="打开菜单"
+                      style={{ marginRight: 8 }}
+                    />
+                  )}
+                  <div>
+                    <Typography.Text className="app-header-eyebrow" type="secondary">当前端口</Typography.Text>
+                    <Typography.Title className="app-header-title" level={4}>{title}</Typography.Title>
+                  </div>
                 </div>
-                <Space size={16}>
+                <Space size={isMobile ? 8 : 16}>
                   <NotificationBell pollIntervalMs={60000} />
                   <Dropdown menu={{ items: userMenu }} placement="bottomRight">
-                    <Button type="text">
+                    <Button type="text" aria-label="用户菜单">
                       <Space>
                         <Avatar size="small" icon={<UserOutlined />} />
-                        <span>{user?.name ?? '未登录'}</span>
+                        {!isMobile && <span>{user?.name ?? '未登录'}</span>}
                       </Space>
                     </Button>
                   </Dropdown>

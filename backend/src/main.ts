@@ -130,7 +130,7 @@ async function bootstrap() {
   // Static file serving
   const expressStatic = require('express').static;
   const publicDir = path.join(__dirname, '..', '..', 'public');
-  const uploadsDir = path.join(__dirname, '..', '..', 'uploads');
+  const uploadsDir = path.join(__dirname, '..', '..', '..', 'uploads');
 
   expressApp.use('/uploads', expressStatic(uploadsDir));
   expressApp.use(expressStatic(publicDir, { index: ['index.html'] }));

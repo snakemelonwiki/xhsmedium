@@ -117,6 +117,7 @@ export default function OperationImportsPage() {
           loading={loading}
           columns={columns}
           dataSource={items}
+          scroll={{ x: 'max-content' }}
           // N-P1-08 修复：从通知 deep link ?taskId=xxx 跳过来时，匹配该 id 的行高亮。
           rowClassName={(record) => (highlightTaskId && record.id === highlightTaskId ? 'row-highlight' : '')}
           pagination={false}

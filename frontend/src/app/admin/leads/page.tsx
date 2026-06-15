@@ -7,6 +7,7 @@ import {
   Card,
   Col,
   DatePicker,
+  Drawer,
   Empty,
   Form,
   Input,
@@ -34,6 +35,7 @@ import { createExport, downloadExportUrl, getExport } from '@/shared/api/exports
 import { QuickRangePicker, RANGE_PRESETS_FULL } from '@/shared/components/date';
 import type { DateRangeValue } from '@/shared/components/date';
 import { PostTitleCell } from '@/shared/components/dashboard/PlatformAnalysisPanel';
+import { useResponsiveBreakpoint } from '@/shared/hooks/useResponsiveBreakpoint';
 import { getStatusMeta } from '@/shared/constants/status';
 import type { AdminEmployee } from '@/shared/types/admin';
 import type { AdminLeadsStats } from '@/shared/api/admin';
@@ -186,6 +188,9 @@ export default function AdminLeadsPage() {
   const [salesUsers, setSalesUsers] = useState<CatalogOption[]>([]);
   const [accounts, setAccounts] = useState<CatalogOption[]>([]);
   const [posts, setPosts] = useState<CatalogOption[]>([]);
+
+  const { isMobile } = useResponsiveBreakpoint();
+  const [filterDrawerOpen, setFilterDrawerOpen] = useState(false);
 
   const [reassignLead, setReassignLead] = useState<Lead | null>(null);
   const [selectedSalesUserId, setSelectedSalesUserId] = useState<string>();
@@ -704,13 +709,13 @@ export default function AdminLeadsPage() {
       </div>
 
       {/* 8 统计卡（T5.2: 第 2 张改为按当前平台筛选的"平台客资数"卡，标题随平台变化） */}
-      <Row gutter={12}>
-        <Col span={3}>
+      <Row gutter={[12, 12]}>
+        <Col xs={6} sm={3}>
           <Card size="small">
             <Statistic title="客资总数" value={statsData.total} loading={statsLoading} />
           </Card>
         </Col>
-        <Col span={3}>
+        <Col xs={6} sm={3}>
           <Card size="small" data-testid="platform-leads-card">
             <Statistic
               title={`${currentPlatformLabel}客资数`}
@@ -720,32 +725,32 @@ export default function AdminLeadsPage() {
             />
           </Card>
         </Col>
-        <Col span={3}>
+        <Col xs={6} sm={3}>
           <Card size="small">
             <Statistic title="已分配" value={statsData.assigned} loading={statsLoading} valueStyle={{ color: '#13c2c2' }} />
           </Card>
         </Col>
-        <Col span={3}>
+        <Col xs={6} sm={3}>
           <Card size="small">
             <Statistic title="待添加" value={statsData.pending} loading={statsLoading} valueStyle={{ color: '#faad14' }} />
           </Card>
         </Col>
-        <Col span={3}>
+        <Col xs={6} sm={3}>
           <Card size="small">
             <Statistic title="已通过" value={statsData.added} loading={statsLoading} valueStyle={{ color: '#52c41a' }} />
           </Card>
         </Col>
-        <Col span={3}>
+        <Col xs={6} sm={3}>
           <Card size="small">
             <Statistic title="协同中" value={statsData.collaborating} loading={statsLoading} valueStyle={{ color: '#722ed1' }} />
           </Card>
         </Col>
-        <Col span={3}>
+        <Col xs={6} sm={3}>
           <Card size="small">
             <Statistic title="已成交" value={statsData.dealDone} loading={statsLoading} valueStyle={{ color: '#fa8c16' }} />
           </Card>
         </Col>
-        <Col span={3}>
+        <Col xs={6} sm={3}>
           <Card size="small">
             <Statistic title="无效" value={statsData.invalid} loading={statsLoading} valueStyle={{ color: '#f5222d' }} />
           </Card>
@@ -753,6 +758,11 @@ export default function AdminLeadsPage() {
       </Row>
 
       {/* 筛选栏 */}
+      {isMobile ? (
+        <Button icon={<FilterOutlined />} onClick={() => setFilterDrawerOpen(true)}>
+          筛选
+        </Button>
+      ) : (
       <Card size="small">
         <Space size={12} wrap>
           <Select
@@ -817,6 +827,81 @@ export default function AdminLeadsPage() {
           />
         </Space>
       </Card>
+      )}
+
+      {/* Mobile filter drawer */}
+      {isMobile && (
+        <Drawer
+          title="筛选条件"
+          open={filterDrawerOpen}
+          onClose={() => setFilterDrawerOpen(false)}
+          placement="bottom"
+          height="auto"
+        >
+          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            <Select
+              value={filters.platform}
+              options={platformOptions}
+              onChange={(value) => setFilters((prev) => ({ ...prev, platform: value }))}
+              style={{ width: '100%' }}
+              placeholder="平台"
+            />
+            <Select
+              value={filters.operatorId}
+              options={employeeOptions}
+              onChange={(value) => setFilters((prev) => ({ ...prev, operatorId: value, accountId: '' }))}
+              style={{ width: '100%' }}
+              placeholder="运营"
+              showSearch
+              optionFilterProp="label"
+            />
+            <Select
+              value={filters.salesId}
+              options={salesOptions}
+              onChange={(value) => setFilters((prev) => ({ ...prev, salesId: value }))}
+              style={{ width: '100%' }}
+              placeholder="销售"
+              showSearch
+              optionFilterProp="label"
+            />
+            <Select
+              value={filters.accountId}
+              options={accountOptions}
+              onChange={(value) => setFilters((prev) => ({ ...prev, accountId: value, postId: '' }))}
+              style={{ width: '100%' }}
+              placeholder="来源账号"
+              showSearch
+              optionFilterProp="label"
+            />
+            <Select
+              value={filters.processStatus}
+              options={processStatusOptions}
+              onChange={(value) => setFilters((prev) => ({ ...prev, processStatus: value }))}
+              style={{ width: '100%' }}
+              placeholder="处理状态"
+            />
+            <Select
+              value={filters.addStatus}
+              options={addStatusOptions}
+              onChange={(value) => setFilters((prev) => ({ ...prev, addStatus: value }))}
+              style={{ width: '100%' }}
+              placeholder="添加状态"
+            />
+            <QuickRangePicker
+              value={buildDateRangeValue(filters.startDate, filters.endDate)}
+              onChange={(range) => setFilters((prev) => ({
+                ...prev,
+                startDate: range?.start.format('YYYY-MM-DD') ?? todayDateString(),
+                endDate: range?.end.format('YYYY-MM-DD') ?? todayDateString(),
+              }))}
+              presets={RANGE_PRESETS_FULL}
+              variant="select"
+              selectWidth={120}
+              selectPlaceholder="快捷时间"
+            />
+          </Space>
+        </Drawer>
+      )}
 
       {error ? <Alert type="warning" showIcon message={error} /> : null}
 
@@ -886,12 +971,12 @@ export default function AdminLeadsPage() {
       >
         <Form form={advancedForm} layout="vertical" preserve={false}>
           <Row gutter={12}>
-            <Col span={12}>
+            <Col xs={24} md={12}>
               <Form.Item label="平台" name="platform">
                 <Select options={platformOptions} placeholder="全部平台" allowClear />
               </Form.Item>
             </Col>
-            <Col span={12}>
+            <Col xs={24} md={12}>
               <Form.Item label="运营" name="operatorId">
                 <Select
                   options={employeeOptions}
@@ -902,7 +987,7 @@ export default function AdminLeadsPage() {
                 />
               </Form.Item>
             </Col>
-            <Col span={12}>
+            <Col xs={24} md={12}>
               <Form.Item label="销售" name="salesId">
                 <Select
                   options={salesOptions}
@@ -913,7 +998,7 @@ export default function AdminLeadsPage() {
                 />
               </Form.Item>
             </Col>
-            <Col span={12}>
+            <Col xs={24} md={12}>
               <Form.Item label="来源账号" name="accountId">
                 <Select
                   options={accountOptions}
@@ -924,7 +1009,7 @@ export default function AdminLeadsPage() {
                 />
               </Form.Item>
             </Col>
-            <Col span={12}>
+            <Col xs={24} md={12}>
               <Form.Item label="来源作品" name="postId">
                 <Select
                   options={postOptions}
@@ -935,22 +1020,22 @@ export default function AdminLeadsPage() {
                 />
               </Form.Item>
             </Col>
-            <Col span={12}>
+            <Col xs={24} md={12}>
               <Form.Item label="处理状态" name="processStatus">
                 <Select options={processStatusOptions} placeholder="全部处理状态" allowClear />
               </Form.Item>
             </Col>
-            <Col span={12}>
+            <Col xs={24} md={12}>
               <Form.Item label="添加状态" name="addStatus">
                 <Select options={addStatusOptions} placeholder="全部添加状态" allowClear />
               </Form.Item>
             </Col>
-            <Col span={12}>
+            <Col xs={24} md={12}>
               <Form.Item label="成交状态" name="dealStatus">
                 <Select options={dealStatusOptions} placeholder="全部成交状态" allowClear />
               </Form.Item>
             </Col>
-            <Col span={24}>
+            <Col xs={24}>
               <Form.Item label="创建日期范围" name="dateRange">
                 <RangePicker style={{ width: '100%' }} />
               </Form.Item>

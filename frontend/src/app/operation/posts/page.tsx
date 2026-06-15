@@ -4,6 +4,7 @@ import {
   Alert,
   Button,
   Card,
+  Drawer,
   Empty,
   InputNumber,
   Modal,
@@ -17,7 +18,7 @@ import {
   message,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import { ReloadOutlined } from '@ant-design/icons';
+import { FilterOutlined, ReloadOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
@@ -29,6 +30,7 @@ import { listPosts, refreshPostMetrics, getPostDetail } from '@/shared/api/conte
 import { QuickRangePicker, RANGE_PRESETS_FULL } from '@/shared/components/date';
 import type { DateRangeValue } from '@/shared/components/date';
 import type { ContentPost } from '@/shared/types/content';
+import { useResponsiveBreakpoint } from '@/shared/hooks/useResponsiveBreakpoint';
 import { buildTodayDateRange } from '@/shared/utils/default-date-range';
 import { normalizePostMetric } from '@/shared/utils/post-metrics';
 
@@ -83,6 +85,9 @@ export default function OperationPostsPage() {
   const [metricsModal, setMetricsModal] = useState<{ open: boolean; postId?: string; loading?: boolean; history?: any[] }>({ open: false });
   // Supervisor suggestion modal state
   const [suggestionModal, setSuggestionModal] = useState<{ open: boolean; post?: ContentPost }>({ open: false });
+
+  const { isMobile } = useResponsiveBreakpoint();
+  const [filterDrawerOpen, setFilterDrawerOpen] = useState(false);
 
   async function load(nextPage = page, nextFilters = filters) {
     setLoading(true);
@@ -399,6 +404,13 @@ export default function OperationPostsPage() {
 
       <Card>
         {/* Filter bar */}
+        {isMobile ? (
+          <div style={{ marginBottom: 16 }}>
+            <Button icon={<FilterOutlined />} onClick={() => setFilterDrawerOpen(true)}>
+              筛选
+            </Button>
+          </div>
+        ) : (
         <Space size={8} wrap style={{ marginBottom: 16 }}>
           <Select
             allowClear
@@ -475,6 +487,7 @@ export default function OperationPostsPage() {
             onChange={(value) => applyFilter('leadsMax', typeof value === 'number' ? value : undefined)}
           />
         </Space>
+        )}
 
         {/* Summary row */}
         <div style={{ marginBottom: 12, color: '#888', fontSize: 13 }}>
@@ -499,6 +512,85 @@ export default function OperationPostsPage() {
           showSizeChanger={false}
         />
       </Card>
+
+      {/* Mobile filter drawer */}
+      {isMobile && (
+        <Drawer
+          title="筛选条件"
+          open={filterDrawerOpen}
+          onClose={() => setFilterDrawerOpen(false)}
+          placement="bottom"
+          height="auto"
+        >
+          <Space direction="vertical" size={12} style={{ width: '100%' }}>
+            <Select
+              allowClear
+              placeholder="全部平台"
+              style={{ width: '100%' }}
+              value={filters.platform || undefined}
+              options={platformOptions}
+              onChange={(value) => applyFilter('platform', value || undefined)}
+            />
+            <Select
+              allowClear
+              showSearch
+              placeholder="全部账号"
+              optionFilterProp="label"
+              style={{ width: '100%' }}
+              value={filters.accountId || undefined}
+              options={accounts.map((item) => ({
+                label: item.platform ? `${item.name}（${item.platform}）` : item.name,
+                value: item.id,
+              }))}
+              onChange={(value) => applyFilter('accountId', value || undefined)}
+            />
+            <Select
+              allowClear
+              placeholder="全部类型"
+              style={{ width: '100%' }}
+              value={filters.postType || undefined}
+              options={postTypeOptions}
+              onChange={(value) => applyFilter('postType', value || undefined)}
+            />
+            <QuickRangePicker
+              value={filters.dateRange ?? null}
+              onChange={handleDateRangeChange}
+              presets={RANGE_PRESETS_FULL}
+              variant="select"
+              selectPlaceholder="快捷时间"
+              style={{ width: '100%' }}
+            />
+            <InputNumber
+              min={0}
+              placeholder="最低点赞"
+              style={{ width: '100%' }}
+              value={filters.likesMin}
+              onChange={(value) => applyFilter('likesMin', typeof value === 'number' ? value : undefined)}
+            />
+            <InputNumber
+              min={0}
+              placeholder="最高点赞"
+              style={{ width: '100%' }}
+              value={filters.likesMax}
+              onChange={(value) => applyFilter('likesMax', typeof value === 'number' ? value : undefined)}
+            />
+            <InputNumber
+              min={0}
+              placeholder="最低客资"
+              style={{ width: '100%' }}
+              value={filters.leadsMin}
+              onChange={(value) => applyFilter('leadsMin', typeof value === 'number' ? value : undefined)}
+            />
+            <InputNumber
+              min={0}
+              placeholder="最高客资"
+              style={{ width: '100%' }}
+              value={filters.leadsMax}
+              onChange={(value) => applyFilter('leadsMax', typeof value === 'number' ? value : undefined)}
+            />
+          </Space>
+        </Drawer>
+      )}
 
       {/* Metrics Modal */}
       <Modal

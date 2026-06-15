@@ -444,20 +444,20 @@ export default function AdminEmployeesPage() {
         destroyOnClose
       >
         <Form form={form} layout="vertical" onFinish={submit} preserve={false}>
-          <Row gutter={16}>
-            <Col span={12}>
+          <Row gutter={[16, 16]}>
+            <Col xs={24} md={12}>
               <Form.Item name="name" label="姓名" rules={[{ required: true, message: '请输入姓名' }]}>
                 <Input placeholder="请输入姓名" />
               </Form.Item>
             </Col>
-            <Col span={12}>
+            <Col xs={24} md={12}>
               <Form.Item name="employeeCode" label="工号">
                 <Input placeholder="系统自动生成" disabled />
               </Form.Item>
             </Col>
           </Row>
-          <Row gutter={16}>
-            <Col span={12}>
+          <Row gutter={[16, 16]}>
+            <Col xs={24} md={12}>
               {/* 编辑已有员工且未绑定登录账号时，角色不可更改（必须先创建账号） */}
               <Form.Item name="roleType" label="角色">
                 <Select
@@ -476,19 +476,19 @@ export default function AdminEmployeesPage() {
                 </Text>
               )}
             </Col>
-            <Col span={12}>
+            <Col xs={24} md={12}>
               <Form.Item name="department" label="部门">
                 <Input placeholder="请输入部门" />
               </Form.Item>
             </Col>
           </Row>
           <Row gutter={16}>
-            <Col span={12}>
+            <Col xs={24} md={12}>
               <Form.Item name="phone" label="手机号">
                 <Input placeholder="请输入手机号" />
               </Form.Item>
             </Col>
-            <Col span={12}>
+            <Col xs={24} md={12}>
               <Form.Item name="status" label="状态">
                 <Select options={STATUS_OPTIONS} placeholder="选择状态" />
               </Form.Item>

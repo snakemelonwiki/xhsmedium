@@ -157,14 +157,14 @@ export default function OperationHomePage() {
       </div>
 
       <Skeleton loading={loading} active paragraph={{ rows: 2 }}>
-        <Row gutter={16}>
-          <Col span={8}>
+        <Row gutter={[16, 16]}>
+          <Col xs={12} sm={8}>
             <Card><Statistic title="今日作品" value={todayPostCount} /></Card>
           </Col>
-          <Col span={8}>
+          <Col xs={12} sm={8}>
             <Card><Statistic title="今日客资" value={todayLeadCount} /></Card>
           </Col>
-          <Col span={8}>
+          <Col xs={24} sm={8}>
             <Card>
               <Statistic
                 title="今日流量（点赞+评论+收藏）"
@@ -175,8 +175,8 @@ export default function OperationHomePage() {
             </Card>
           </Col>
         </Row>
-        <Row gutter={16} style={{ marginTop: 12 }}>
-          <Col span={8}>
+        <Row gutter={[16, 16]} style={{ marginTop: 12 }}>
+          <Col xs={12} sm={8}>
             <Card><Statistic title="待处理协同" value={pendingCollabs} /></Card>
           </Col>
         </Row>
@@ -186,7 +186,7 @@ export default function OperationHomePage() {
         <Typography.Title level={4}>快捷入口</Typography.Title>
         <Row gutter={[16, 16]}>
           {ENTRY_CARDS.map((card) => (
-            <Col key={card.key} span={8}>
+            <Col key={card.key} xs={24} sm={12} md={8}>
               <Link href={card.href}>
                 <Card hoverable styles={{ body: { padding: 20 } }}>
                   <Space direction="vertical" size={8} style={{ width: '100%' }}>

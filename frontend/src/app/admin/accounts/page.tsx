@@ -22,6 +22,7 @@ import { useEffect, useState } from 'react';
 
 import { listAdminAccounts, listAdminEmployees, saveAdminAccount } from '@/shared/api/admin';
 import { createExport, downloadExportUrl, getExport } from '@/shared/api/exports';
+import { useResponsiveBreakpoint } from '@/shared/hooks/useResponsiveBreakpoint';
 import type { AdminAccount, AdminEmployee } from '@/shared/types/admin';
 
 type Account = AdminAccount & {
@@ -64,6 +65,7 @@ function getStatusTagColor(value?: string): string {
 export default function AdminAccountsPage() {
   const searchParams = useSearchParams();
   const pinnedAccountId = searchParams.get('id') ?? '';
+  const { isMobile } = useResponsiveBreakpoint();
   const [items, setItems] = useState<Account[]>([]);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
@@ -344,7 +346,7 @@ export default function AdminAccountsPage() {
             查看全公司运营账号，支持新增、编辑、改派和停用操作。
           </Typography.Paragraph>
         </div>
-        <Space>
+        <Space wrap>
           <Input.Search
             allowClear
             value={keyword}
@@ -353,10 +355,10 @@ export default function AdminAccountsPage() {
             onSearch={handleSearch}
             style={{ width: 220 }}
           />
-          <Button icon={<ExportOutlined />} loading={exporting} onClick={handleExport}>
+          <Button icon={<ExportOutlined />} loading={exporting} onClick={handleExport} size={isMobile ? 'small' : 'middle'}>
             导出
           </Button>
-          <Button type="primary" onClick={() => startEdit()}>新增账号</Button>
+          <Button type="primary" onClick={() => startEdit()} size={isMobile ? 'small' : 'middle'}>新增账号</Button>
         </Space>
       </div>
 

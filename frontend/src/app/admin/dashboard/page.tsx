@@ -643,14 +643,14 @@ function PlatformDistPies({ extended, loading }: { extended?: SupervisorExtended
           </Space>
         </Space>
       </Row>
-      <Row gutter={8}>
-        <Col span={8}>
+      <Row gutter={[8, 8]}>
+        <Col xs={24} sm={8}>
           <PieBlock data={dataPost} title="作品占比" loading={loading} />
         </Col>
-        <Col span={8}>
+        <Col xs={24} sm={8}>
           <PieBlock data={dataTraffic} title="流量占比" loading={loading} />
         </Col>
-        <Col span={8}>
+        <Col xs={24} sm={8}>
           <PieBlock data={dataLead} title="客资占比" loading={loading} />
         </Col>
       </Row>

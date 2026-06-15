@@ -159,6 +159,7 @@ export default function SalesOrderDetailPage() {
                 rowKey="id"
                 dataSource={feedbacks}
                 pagination={false}
+                scroll={{ x: 'max-content' }}
                 columns={[
                   {
                     title: '异常类型',

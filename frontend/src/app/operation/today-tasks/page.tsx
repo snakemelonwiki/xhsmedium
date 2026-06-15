@@ -166,25 +166,25 @@ export default function OperationTodayTasksPage() {
       </div>
 
       <Skeleton loading={loading} active paragraph={{ rows: 2 }}>
-        <Row gutter={16}>
-          <Col span={6}>
+        <Row gutter={[16, 16]}>
+          <Col xs={12} sm={12} md={6}>
             <Card><Statistic title="今日作品" value={summaryStats.posts} /></Card>
           </Col>
-          <Col span={6}>
+          <Col xs={12} sm={12} md={6}>
             <Card><Statistic title="今日客资" value={summaryStats.leads} /></Card>
           </Col>
-          <Col span={6}>
+          <Col xs={12} sm={12} md={6}>
             <Card><Statistic title="待处理协同" value={summaryStats.pendingCollabs} /></Card>
           </Col>
-          <Col span={6}>
+          <Col xs={12} sm={12} md={6}>
             <Card><Statistic title="今日成交" value={summaryStats.deals} /></Card>
           </Col>
         </Row>
       </Skeleton>
 
-      <Row gutter={16}>
+      <Row gutter={[16, 16]}>
         {/* 待处理协同任务 */}
-        <Col span={12}>
+        <Col xs={24} lg={12}>
           <Card
             title={
               <Space>
@@ -218,7 +218,7 @@ export default function OperationTodayTasksPage() {
         </Col>
 
         {/* 今日已录入客资（OP-6 改名：原"今日新分配客资"） */}
-        <Col span={12}>
+        <Col xs={24} lg={12}>
           <Card
             title={
               <Space>
@@ -242,7 +242,7 @@ export default function OperationTodayTasksPage() {
 
       <Row gutter={16}>
         {/* 主管建议（OP-6 拆分为独立卡） */}
-        <Col span={12}>
+        <Col xs={24} lg={12}>
           <Card
             title={
               <Space>
@@ -282,7 +282,7 @@ export default function OperationTodayTasksPage() {
         </Col>
 
         {/* 未读消息（OP-6 拆分为独立卡，2026-06-06 优化：消息超长不破版） */}
-        <Col span={24}>
+        <Col xs={24}>
           <Card
             title={
               <Space>
