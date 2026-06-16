@@ -485,11 +485,11 @@ export default function AcademicTeachersPage() {
               <Select options={EDUCATION_OPTIONS} placeholder="请选择学历" allowClear style={{ minWidth: 120 }} />
             </Form.Item>
           </Space>
-          <Form.Item name="researchArea" label="研究领域">
-            <Input placeholder="如：机器学习、自然语言处理" />
-          </Form.Item>
           <Form.Item name="specialty" label="专业方向">
             <Select mode="multiple" placeholder="请选择专业方向" options={specialtyOptions} />
+          </Form.Item>
+          <Form.Item name="researchArea" label="研究领域">
+            <Input placeholder="如：机器学习、自然语言处理" />
           </Form.Item>
           <Form.Item name="direction" label="接单类型">
             <Select mode="multiple" placeholder="请选择接单类型" options={orderTypeOptions} />
