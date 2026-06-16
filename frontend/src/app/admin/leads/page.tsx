@@ -617,14 +617,14 @@ export default function AdminLeadsPage() {
     {
       title: '操作',
       key: 'action',
-      width: 150,
+      width: 160,
       fixed: 'right',
       render: (_: unknown, row: Lead) => (
-        <Space size={4}>
-          <Button size="small" icon={<SwapOutlined />} onClick={() => openReassign(row)}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
+          <Button size="small" block icon={<SwapOutlined />} onClick={() => openReassign(row)}>
             改派
           </Button>
-          <Button size="small" icon={<HistoryOutlined />} onClick={() => openFollowRecords(row)}>
+          <Button size="small" block icon={<HistoryOutlined />} onClick={() => openFollowRecords(row)}>
             跟进
           </Button>
           <Popconfirm
@@ -635,11 +635,11 @@ export default function AdminLeadsPage() {
             okButtonProps={{ danger: true }}
             onConfirm={() => confirmDelete(row)}
           >
-            <Button size="small" danger icon={<DeleteOutlined />}>
+            <Button size="small" block danger icon={<DeleteOutlined />}>
               删除
             </Button>
           </Popconfirm>
-        </Space>
+        </div>
       ),
     },
   ];

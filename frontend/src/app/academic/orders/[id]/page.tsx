@@ -401,7 +401,7 @@ export default function AcademicOrderDetailPage() {
         }),
       }));
       const nextProgressStep = DELIVERY_PROGRESS_STAGES.findIndex((stage) =>
-        (stage.statusValues as readonly string[]).includes(String(deliveryDetail.order.statusStage || '')),
+        (stage.statusValues as readonly string[]).includes(String(deliveryDetail.order.paperProgress || deliveryDetail.order.statusStage || '')),
       );
       setActiveProgressStep(nextProgressStep >= 0 ? nextProgressStep : 0);
       const journalKeys = JOURNAL_STEPS.map((item) => item.key) as string[];
@@ -731,48 +731,46 @@ export default function AcademicOrderDetailPage() {
   // paperProgress 的下拉选项一致（待分配/进行中/待投稿/已投稿/返修中/已录用），所以直接把
   // statusValues[0] 作为兜底写回值。允许覆盖（前进/回退都接受），但同一值不写。
   // 写失败不弹错误 toast —— 不影响本地 UI 步进。
-  async function handleProgressStepClick(step: number) {
-    setActiveProgressStep(step);
+  function handleProgressStepClick(step: number) {
     const stage = DELIVERY_PROGRESS_STAGES[step];
     if (!stage) return;
     const next = stage.statusValues[0] || stage.label;
     const current = String(delivery.order?.paperProgress || '').trim();
+    // 乐观更新：立即更新本地状态，不等 API 返回
+    setActiveProgressStep(step);
     if (next === current) return;
-    try {
-      await updateOrder(orderId, { paper_progress: next });
-      // 同步本地 delivery 缓存，避免回退按钮再次打开页面时值回退。
-      setDelivery((prev) => ({
-        ...prev,
-        order: { ...(prev.order || {}), paperProgress: next },
-      }));
-    } catch (err) {
-      // 静默失败：本地步进已生效，下次保存交付信息时也仍能写回
+    // 乐观同步 delivery 缓存，确保列表列和详情页即时反映
+    setDelivery((prev) => ({
+      ...prev,
+      order: { ...(prev.order || {}), paperProgress: next },
+    }));
+    // 异步保存到后端，不阻塞页面切换
+    updateOrder(orderId, { paper_progress: next }).catch((err) => {
       // eslint-disable-next-line no-console
-      message.warning('进度更新失败，请稍后重试');
       console.error('[order] update paperProgress failed', err);
-    }
+    });
   }
 
   // v1.3 / Task 12: 用户点击「期刊与交付状态」步骤时，把对应 currentStage 写回 orders.current_stage。
   // 列表端的「投稿进度」列会读取该字段。JOURNAL_STEPS 的 key 已经是 orders.current_stage 的合法值。
-  async function handleJournalStepClick(step: number) {
-    setActiveJournalStep(step);
+  function handleJournalStepClick(step: number) {
     const stage = JOURNAL_STEPS[step];
     if (!stage) return;
     const next = stage.key;
     const current = String(delivery.order?.journalStatus || '').trim();
+    // 乐观更新：立即更新本地状态，不等 API 返回
+    setActiveJournalStep(step);
     if (next === current) return;
-    try {
-      await updateOrder(orderId, { current_stage: next });
-      setDelivery((prev) => ({
-        ...prev,
-        order: { ...(prev.order || {}), journalStatus: next },
-      }));
-    } catch (err) {
+    // 乐观同步 delivery 缓存
+    setDelivery((prev) => ({
+      ...prev,
+      order: { ...(prev.order || {}), journalStatus: next },
+    }));
+    // 异步保存到后端，不阻塞页面切换
+    updateOrder(orderId, { current_stage: next }).catch((err) => {
       // eslint-disable-next-line no-console
-      message.warning('进度更新失败，请稍后重试');
       console.error('[order] update currentStage failed', err);
-    }
+    });
   }
 
   useEffect(() => {

@@ -298,6 +298,16 @@ export function OrderTable({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scope, statusFilter, handoverFilter, abnormalOnly]);
 
+  // 履约进度阶段名称映射（paperProgress 值 → 步骤标题）
+  const PROGRESS_STEP_LABEL: Record<string, string> = {
+    '销售建单': '初始', '待补资料': '初始', '待教务审核': '初始', '待补客户资料': '初始',
+    '待分配老师': '分配老师', '老师已接单': '分配老师', 'awaiting_teacher': '分配老师',
+    '写作中': '写作审核',
+    '待投稿': '投稿准备',
+    '已投稿': '投稿后', '审稿中': '投稿后', '返修中': '投稿后',
+    '已录用': '投稿后', '待见刊': '投稿后', '已完成': '投稿后', '异常处理中': '投稿后',
+  };
+
   const columns = useMemo<TableColumnsType<OrderItem>>(() => {
     const baseColumns: TableColumnsType<OrderItem> = [
       {
@@ -342,9 +352,8 @@ export function OrderTable({
         render: renderOrderStatus,
       },
       // v1.3 / Task 12: 跟进列表新增「稿件进度」「投稿进度」两列。
-      // 稿件进度 = paperProgress（履约环节，由教务端 Steps onClick 写回）。
-      // 投稿进度 = currentStage（期刊状态）+ proofStatus / onlineStatus / indexedStatus
-      // （校稿 / Online / 检索 交付状态），一眼看出稿子到哪一步、是否已校稿/Online/检索。
+      // 稿件进度 = 履约进度的阶段名称（由教务端 Steps onClick 写回 paper_progress 后映射）。
+      // 投稿进度 = 期刊与交付状态的阶段名称（由教务端 Steps onClick 写回 current_stage 后映射）。
       // 仅在教务端（academic / abnormal actionMode）展示，销售/admin 视角无意义。
       ...(actionMode === 'academic' || actionMode === 'abnormal' ? [
         {
@@ -352,30 +361,19 @@ export function OrderTable({
           key: 'paperProgress',
           dataIndex: 'paperProgress',
           width: 110,
-          render: (value?: string | null) =>
-            value ? <Tag color="blue">{value}</Tag> : <Typography.Text type="secondary">-</Typography.Text>,
+          render: (value?: string | null) => {
+            const label = value ? PROGRESS_STEP_LABEL[value] || value : '-';
+            return label !== '-' ? <Tag color="blue">{label}</Tag> : <Typography.Text type="secondary">-</Typography.Text>;
+          },
         },
         {
           title: '投稿进度',
           key: 'submissionProgress',
           dataIndex: 'currentStage',
           width: 240,
-          render: (_value: string | null | undefined, record: OrderItem) => {
-            const parts: string[] = [];
-            if (record.currentStage) parts.push(record.currentStage);
-            if (record.proofStatus && record.proofStatus !== 'none') parts.push(`校稿:${record.proofStatus}`);
-            if (record.onlineStatus && record.onlineStatus !== 'none') parts.push(`Online:${record.onlineStatus}`);
-            if (record.indexedStatus && record.indexedStatus !== 'none') parts.push(`检索:${record.indexedStatus}`);
-            if (parts.length === 0) {
-              return <Typography.Text type="secondary">-</Typography.Text>;
-            }
-            return (
-              <Space size={4} wrap>
-                {parts.map((part) => (
-                  <Tag key={part} color="geekblue">{part}</Tag>
-                ))}
-              </Space>
-            );
+          render: (value?: string | null) => {
+            const label = value || '-';
+            return label !== '-' ? <Tag color="geekblue">{label}</Tag> : <Typography.Text type="secondary">-</Typography.Text>;
           },
         },
       ] as any[] : []),
@@ -446,10 +444,10 @@ export function OrderTable({
         if (isFollowup) {
           return (
             <Space>
-              <Button loading={updatingId === record.id} onClick={() => router.push(`/academic/orders/${record.id}`)}>
+              <Button loading={updatingId === record.id} onClick={() => router.push(`/academic/orders/${record.id}?from=followup`)}>
                 跟进
               </Button>
-              <Button onClick={() => router.push(`/academic/orders/${record.id}`)}>编辑</Button>
+              <Button onClick={() => router.push(`/academic/orders/${record.id}?from=followup`)}>编辑</Button>
               <Button loading={remindingId === record.id} onClick={() => remindPayment(record.id)}>
                 提醒销售催款
               </Button>

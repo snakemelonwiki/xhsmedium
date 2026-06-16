@@ -58,9 +58,15 @@ export function AppLayout({ role, title, children }: AppLayoutProps) {
 
   const visibleRole = user?.role ?? role;
   const menuItems = useMemo(() => getMenuItemsByRole(visibleRole), [visibleRole]);
-  const selectedKey = menuItems
-    .filter((item) => pathname === item.path || pathname.startsWith(`${item.path}/`))
-    .sort((a, b) => b.path.length - a.path.length)[0]?.path;
+  const [fromFollowup, setFromFollowup] = useState(false);
+  useEffect(() => {
+    setFromFollowup(window.location.search.includes('from=followup'));
+  }, [pathname]);
+  const selectedKey = fromFollowup
+    ? menuItems.find((item) => item.key === 'academic-followup')?.path ?? ''
+    : menuItems
+        .filter((item) => pathname === item.path || pathname.startsWith(`${item.path}/`))
+        .sort((a, b) => b.path.length - a.path.length)[0]?.path;
 
   useEffect(() => {
     setPendingPath(undefined);
