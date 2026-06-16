@@ -1,7 +1,7 @@
 'use client';
 
 import { DeleteOutlined, DownloadOutlined, ExclamationCircleOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons';
-import { Button, Card, Checkbox, Col, DatePicker, Descriptions, Divider, Empty, Form, Input, InputNumber, Modal, Row, Select, Space, Spin, Steps, Table, Tag, Timeline, Tooltip, Typography, Upload, message } from 'antd';
+import { Button, Card, Checkbox, Col, DatePicker, Descriptions, Divider, Empty, Form, Input, InputNumber, Modal, Popconfirm, Row, Select, Space, Spin, Steps, Table, Tag, Timeline, Tooltip, Typography, Upload, message } from 'antd';
 import type { UploadProps } from 'antd';
 import dayjs, { type Dayjs } from 'dayjs';
 import { useParams, useRouter } from 'next/navigation';
@@ -363,6 +363,8 @@ export default function AcademicOrderDetailPage() {
   const journalStatus = Form.useWatch(['order', 'journalStatus'], deliveryForm);
   const operationMethod = Form.useWatch(['order', 'operationMethod'], deliveryForm);
   const financeValues = Form.useWatch('finance', deliveryForm) || {};
+  const authorRegistrationUrl = Form.useWatch(['order', 'authorRegistrationUrl'], deliveryForm);
+  const backupSubmissionUrl = Form.useWatch(['order', 'backupSubmissionUrl'], deliveryForm);
   const visibleFinanceFieldKeys = new Set(getVisibleFinanceFieldKeys(currentRole));
   const productType = order?.productType ?? order?.serviceType ?? '';
   const isGraduationOrder = isGraduationProductType(productType);
@@ -544,6 +546,17 @@ export default function AcademicOrderDetailPage() {
     }
   }
 
+  function removeAuthorRegistration() {
+    deliveryForm.setFieldsValue({
+      order: {
+        ...(deliveryForm.getFieldValue('order') || {}),
+        authorRegistrationUrl: null,
+        authorRegistrationName: null,
+      },
+    });
+    message.success('作者登记表已删除，请保存交付信息');
+  }
+
   async function uploadBackupSubmission(file: File) {
     setBackupSubmissionUploading(true);
     try {
@@ -561,6 +574,17 @@ export default function AcademicOrderDetailPage() {
     } finally {
       setBackupSubmissionUploading(false);
     }
+  }
+
+  function removeBackupSubmission() {
+    deliveryForm.setFieldsValue({
+      order: {
+        ...(deliveryForm.getFieldValue('order') || {}),
+        backupSubmissionUrl: null,
+        backupSubmissionName: null,
+      },
+    });
+    message.success('备用投稿信息表已删除，请保存交付信息');
   }
 
   function openAbnormalModal() {
@@ -770,7 +794,7 @@ export default function AcademicOrderDetailPage() {
               bordered
               column={{ xs: 1, md: 2 }}
               items={[
-                { key: 'id', label: '订单 ID', children: orderId },
+                { key: 'id', label: '订单编号', children: order?.orderCode || orderId },
                 { key: 'leadId', label: '客资 ID', children: emptyText(order?.leadId) },
                 { key: 'serviceType', label: '服务类型', children: emptyText(order?.serviceType) },
                 // 教务端不显示金额，仅显示付款状态与付款比例
@@ -992,6 +1016,17 @@ export default function AcademicOrderDetailPage() {
                         <Button type="link" onClick={() => openUploadedFile(deliveryForm.getFieldValue(['order', 'authorRegistrationUrl']))}>
                           查看作者信息表
                         </Button>
+                        {authorRegistrationUrl ? (
+                          <Popconfirm
+                            title="确定删除作者登记表？"
+                            description="删除后需要保存交付信息才会写入数据库。"
+                            okText="删除"
+                            cancelText="取消"
+                            onConfirm={removeAuthorRegistration}
+                          >
+                            <Button type="link" danger icon={<DeleteOutlined />}>删除</Button>
+                          </Popconfirm>
+                        ) : null}
                       </Space>
                     </Space>
                   </Form.Item>
@@ -1166,9 +1201,22 @@ export default function AcademicOrderDetailPage() {
                       <Form.Item name={['order', 'backupSubmissionName']} noStyle>
                         <Input readOnly placeholder="未选择任何文件" />
                       </Form.Item>
-                      <Button type="link" onClick={() => openUploadedFile(deliveryForm.getFieldValue(['order', 'backupSubmissionUrl']))}>
-                        查看备用投稿信息表
-                      </Button>
+                      <Space>
+                        <Button type="link" onClick={() => openUploadedFile(deliveryForm.getFieldValue(['order', 'backupSubmissionUrl']))}>
+                          查看备用投稿信息表
+                        </Button>
+                        {backupSubmissionUrl ? (
+                          <Popconfirm
+                            title="确定删除备用投稿信息表？"
+                            description="删除后需要保存交付信息才会写入数据库。"
+                            okText="删除"
+                            cancelText="取消"
+                            onConfirm={removeBackupSubmission}
+                          >
+                            <Button type="link" danger icon={<DeleteOutlined />}>删除</Button>
+                          </Popconfirm>
+                        ) : null}
+                      </Space>
                     </Space>
                   </Card>
                 </>
