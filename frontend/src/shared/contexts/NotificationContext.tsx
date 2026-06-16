@@ -85,6 +85,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(false);
   // 防止 strict mode 双调用 + 多次兜底轮询叠加
   const pollTimerRef = useRef<number | null>(null);
+  const toastShownIdsRef = useRef(new Set<string>());
 
   const token =
     user?.id && typeof window !== 'undefined' ? window.localStorage.getItem('xhsmedium.token') : null;
@@ -126,12 +127,16 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       const normalized = normalizeFromSocket(raw);
       if (normalized) {
         addNotification(normalized);
-        // 弹一个 toast
+        // 弹一个简洁 toast（去重：避免 notification.created + notification:new 双发）
         try {
-          message.info({
-            content: `${normalized.title}${normalized.content ? `: ${normalized.content}` : ''}`,
-            duration: 3,
-          });
+          if (!toastShownIdsRef.current.has(String(normalized.id))) {
+            toastShownIdsRef.current.add(String(normalized.id));
+            if (toastShownIdsRef.current.size > 100) toastShownIdsRef.current.clear();
+            message.info({
+              content: normalized.title || '新通知',
+              duration: 3,
+            });
+          }
         } catch {
           // message 在未挂载时调用可能抛错，吞掉
         }

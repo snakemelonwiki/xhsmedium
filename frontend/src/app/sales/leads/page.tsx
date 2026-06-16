@@ -190,23 +190,15 @@ export default function SalesLeadsPage() {
     }
   }
 
-  // WebSocket 自动刷新：运营新增/分配客资时，实时刷新列表
-  const [wsToken, setWsToken] = useState<string | null>(null);
-  const [wsUserId, setWsUserId] = useState<string | null>(null);
-  useEffect(() => {
-    const user = typeof window !== 'undefined' ? readAuthenticatedUser() : undefined;
-    setWsUserId(user?.id ?? null);
-    setWsToken(typeof window !== 'undefined' ? window.localStorage.getItem('xhsmedium.token') : null);
-  }, []);
-  const { onMessage } = useNotificationSocket({ token: wsToken, userId: wsUserId });
+  // WebSocket 实时刷新：通知过来时刷新客资列表
+  const sockToken = typeof window !== 'undefined' ? window.localStorage.getItem('xhsmedium.token') : null;
+  const sockUser = typeof window !== 'undefined' ? readAuthenticatedUser() : undefined;
+  const { onMessage } = useNotificationSocket({ token: sockToken, userId: sockUser?.id ?? null });
   const loadRef = useRef(loadLeads);
   loadRef.current = loadLeads;
   useEffect(() => {
-    const unsubscribe = onMessage((raw) => {
-      const typeCode = String(raw.typeCode || (raw as any).notificationType || '');
-      if (typeCode === 'lead_assigned' || typeCode === 'customer_added') {
-        loadRef.current();
-      }
+    const unsubscribe = onMessage(() => {
+      loadRef.current();
     });
     return unsubscribe;
   }, [onMessage]);
