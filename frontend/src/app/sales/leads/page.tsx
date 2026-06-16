@@ -32,7 +32,7 @@ import {
 import type { TableColumnsType } from 'antd';
 import dayjs, { type Dayjs } from 'dayjs';
 import { useRouter } from 'next/navigation';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   listSalesLeads,
@@ -55,6 +55,8 @@ import {
   LeadStatus,
 } from '@/shared/constants/lead-status-enums';
 import type { IntentionLevelCode, SalesLead } from '@/shared/types/leads';
+import { readAuthenticatedUser } from '@/shared/auth/auth';
+import { useNotificationSocket } from '@/shared/hooks/useNotificationSocket';
 
 const statusOptions = [
   { label: '全部状态', value: '' },
@@ -187,6 +189,27 @@ export default function SalesLeadsPage() {
       setLoading(false);
     }
   }
+
+  // WebSocket 自动刷新：运营新增/分配客资时，实时刷新列表
+  const [wsToken, setWsToken] = useState<string | null>(null);
+  const [wsUserId, setWsUserId] = useState<string | null>(null);
+  useEffect(() => {
+    const user = typeof window !== 'undefined' ? readAuthenticatedUser() : undefined;
+    setWsUserId(user?.id ?? null);
+    setWsToken(typeof window !== 'undefined' ? window.localStorage.getItem('xhsmedium.token') : null);
+  }, []);
+  const { onMessage } = useNotificationSocket({ token: wsToken, userId: wsUserId });
+  const loadRef = useRef(loadLeads);
+  loadRef.current = loadLeads;
+  useEffect(() => {
+    const unsubscribe = onMessage((raw) => {
+      const typeCode = String(raw.typeCode || (raw as any).notificationType || '');
+      if (typeCode === 'lead_assigned' || typeCode === 'customer_added') {
+        loadRef.current();
+      }
+    });
+    return unsubscribe;
+  }, [onMessage]);
 
   useEffect(() => {
     loadLeads(1, pageSize, filters);
