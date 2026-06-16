@@ -1360,6 +1360,24 @@ export class OrdersService {
       nodeType === '已接收' ||
       nodeType === '已签收';
     if (isReceivedNode && order.handoverStatus !== 'accepted') {
+      // 修复「领取后状态依然为待领取」：orders.handover_status 的 schema 默认值为 'pending'，
+      // 迁移/老数据/未走 close-deal 的订单可能停留在 pending。acceptHandover 状态机只接受
+      // 'handed_over'，被拒后错误会被下方 try/catch 静默吞掉，导致 follow record 写成功但
+      // 订单状态不变。这里先把 pending 推进到 handed_over，再走后续 auto-accept。
+      if (order.handoverStatus === 'pending') {
+        try {
+          await this.orderRepository.update(
+            { id: orderId },
+            { handoverStatus: 'handed_over' },
+          );
+        } catch (err: any) {
+          // eslint-disable-next-line no-console
+          console.error(
+            '[orders] auto promote pending->handed_over on received node failed',
+            err?.message || err,
+          );
+        }
+      }
       // P0-NEW-03: 池单（academic_user_id IS NULL）在教务添加"已接收"节点时，
       // 先把订单认领到当前教务名下（用其 employeeId），再触发自动 acceptHandover。
       // 这样新加的 ownership 校验（order.academicUserId === actor.employeeId）才能通过。
