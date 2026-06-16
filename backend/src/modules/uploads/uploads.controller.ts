@@ -13,14 +13,28 @@ type UploadedMulterFile = {
 };
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
-const ALLOWED_MIME = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
-const ALLOWED_EXT = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif']);
+const ALLOWED_MIME = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'image/gif',
+  // 教务端订单详情：作者登记表 / 备用投稿信息表支持 Word 与 Excel 上传（不做解析）
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/pdf',
+]);
+const ALLOWED_EXT = new Set([
+  '.jpg', '.jpeg', '.png', '.webp', '.gif',
+  '.doc', '.docx', '.xls', '.xlsx', '.pdf',
+]);
 
-function imageMimeOnly(_req: any, file: UploadedMulterFile, cb: (err: any, ok?: boolean) => void) {
+function mediaMimeOnly(_req: any, file: UploadedMulterFile, cb: (err: any, ok?: boolean) => void) {
   const mime = String(file.mimetype || '').toLowerCase();
   const ext = path.extname(file.originalname || '').toLowerCase();
   if (!ALLOWED_MIME.has(mime) && !ALLOWED_EXT.has(ext)) {
-    return cb(new UnsupportedMediaTypeException(`仅支持图片 (jpeg/png/webp/gif)，收到 ${mime || ext || 'unknown'}`), false);
+    return cb(new UnsupportedMediaTypeException(`不支持的文件类型: ${mime || ext || 'unknown'}`), false);
   }
   cb(null, true);
 }
@@ -33,7 +47,7 @@ export class UploadsController {
   @UseInterceptors(
     FileInterceptor('file', {
       limits: { fileSize: MAX_FILE_SIZE, files: 1 },
-      fileFilter: imageMimeOnly,
+      fileFilter: mediaMimeOnly,
     }),
   )
   async upload(
