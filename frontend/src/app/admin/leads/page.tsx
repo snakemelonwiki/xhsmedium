@@ -1,6 +1,6 @@
 'use client';
 
-import { DownloadOutlined, FilterOutlined, ReloadOutlined, SwapOutlined, HistoryOutlined, AppstoreOutlined, UnorderedListOutlined } from '@ant-design/icons';
+import { DeleteOutlined, DownloadOutlined, FilterOutlined, ReloadOutlined, SwapOutlined, HistoryOutlined, AppstoreOutlined, UnorderedListOutlined } from '@ant-design/icons';
 import {
   Alert,
   Button,
@@ -12,6 +12,7 @@ import {
   Form,
   Input,
   Modal,
+  Popconfirm,
   Row,
   Select,
   Space,
@@ -29,7 +30,7 @@ import dayjs, { type Dayjs } from 'dayjs';
 import { useEffect, useMemo, useState } from 'react';
 
 import { apiClient } from '@/shared/api/apiClient';
-import { getAdminLeadsStats, listAdminEmployees, listAdminLeads, listAdminLeadsByPost, type AdminLeadPostAggregate } from '@/shared/api/admin';
+import { getAdminLeadsStats, listAdminEmployees, listAdminLeads, listAdminLeadsByPost, deleteAdminLead, type AdminLeadPostAggregate } from '@/shared/api/admin';
 import { listSourceAccounts, listSourcePosts, listAssignableSalesUsers, type CatalogOption } from '@/shared/api/catalog';
 import { createExport, downloadExportUrl, getExport } from '@/shared/api/exports';
 import { QuickRangePicker, RANGE_PRESETS_FULL } from '@/shared/components/date';
@@ -473,6 +474,17 @@ export default function AdminLeadsPage() {
     }
   }
 
+  async function confirmDelete(lead: Lead) {
+    try {
+      await deleteAdminLead(lead.id);
+      message.success('客资已删除');
+      void loadLeads();
+      void loadStats();
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '客资删除失败');
+    }
+  }
+
   const employeeOptions = useMemo(
     () => [
       { label: '全部运营', value: '' },
@@ -615,6 +627,18 @@ export default function AdminLeadsPage() {
           <Button size="small" icon={<HistoryOutlined />} onClick={() => openFollowRecords(row)}>
             跟进
           </Button>
+          <Popconfirm
+            title="确定删除该客资？"
+            description="删除后不可恢复，操作会写入审计日志。"
+            okText="删除"
+            cancelText="取消"
+            okButtonProps={{ danger: true }}
+            onConfirm={() => confirmDelete(row)}
+          >
+            <Button size="small" danger icon={<DeleteOutlined />}>
+              删除
+            </Button>
+          </Popconfirm>
         </Space>
       ),
     },

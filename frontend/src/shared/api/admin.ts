@@ -176,6 +176,14 @@ export async function listAdminLeads(query: PageQuery = {}): Promise<PagedResult
 }
 
 /**
+ * 主管端删除客资。DELETE /api/leads/:id
+ * 后端会写一条操作日志（action=DELETE, target=lead）后返回 ok。
+ */
+export async function deleteAdminLead(id: string): Promise<{ ok: true }> {
+  return apiClient.delete<{ ok: true }>(`/leads/${encodeURIComponent(id)}`);
+}
+
+/**
  * v1.3 / T5.3：主管端客资看板"按客资量降序"视图——按作品维度聚合 lead 数。
  */
 export async function listAdminLeadsByPost(query: PageQuery = {}, options: { signal?: AbortSignal } = {}): Promise<{ items: AdminLeadPostAggregate[]; total: number }> {
