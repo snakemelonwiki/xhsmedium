@@ -147,15 +147,36 @@ export class TeachersService {
 
   /**
    * 查询老师列表，支持关键字搜索（姓名/专业能力/接单方向/学校）。
+   * @param specialty 专业方向 ID（teacher_specialties.id）；按包含匹配（ID 列表形如 "1,3,5"）。
    */
-  async findAll(keyword = ''): Promise<Teacher[]> {
-    const where = keyword
+  async findAll(keyword = '', specialty = ''): Promise<Teacher[]> {
+    const id = String(specialty || '').trim();
+    const kw = String(keyword || '').trim();
+    if (id) {
+      // 专业筛选走 QueryBuilder：把存储里的 "1,3,5" / "1、3、5" 统一规整为 "1,3,5" 再加逗号包，
+      // 匹配 ",1," 子串，避免子串误匹配（例如 ID=1 命中 "12,34"）。
+      const qb = this.repo.createQueryBuilder('t');
+      qb.where(
+        `CONCAT(',', REPLACE(REPLACE(REPLACE(COALESCE(t.specialty, ''), '、', ','), '，', ','), ' ', ''), ',') LIKE :sid`,
+        { sid: `%,${id},%` },
+      );
+      if (kw) {
+        qb.andWhere(
+          `(t.name LIKE :kw OR t.specialty LIKE :kw OR t.direction LIKE :kw OR t.school LIKE :kw OR t.researchArea LIKE :kw)`,
+          { kw: `%${kw}%` },
+        );
+      }
+      qb.orderBy('t.createdAt', 'DESC');
+      const items = await qb.getMany();
+      return this.resolveTeacherNames(items);
+    }
+    const where = kw
       ? [
-          { name: Like(`%${keyword}%`) },
-          { specialty: Like(`%${keyword}%`) },
-          { direction: Like(`%${keyword}%`) },
-          { school: Like(`%${keyword}%`) },
-          { researchArea: Like(`%${keyword}%`) },
+          { name: Like(`%${kw}%`) },
+          { specialty: Like(`%${kw}%`) },
+          { direction: Like(`%${kw}%`) },
+          { school: Like(`%${kw}%`) },
+          { researchArea: Like(`%${kw}%`) },
         ]
       : {};
     const items = await this.repo.find({ where, order: { createdAt: 'DESC' } });
@@ -164,15 +185,42 @@ export class TeachersService {
 
   /**
    * 分页查询老师列表。
+   * @param specialty 专业方向 ID（teacher_specialties.id）；按包含匹配（ID 列表形如 "1,3,5"）。
    */
-  async findAllPaged(limit: number, offset: number, keyword = ''): Promise<{ items: Teacher[]; total: number; limit: number; offset: number }> {
-    const where = keyword
+  async findAllPaged(
+    limit: number,
+    offset: number,
+    keyword = '',
+    specialty = '',
+  ): Promise<{ items: Teacher[]; total: number; limit: number; offset: number }> {
+    const id = String(specialty || '').trim();
+    const kw = String(keyword || '').trim();
+    if (id) {
+      const qb = this.repo.createQueryBuilder('t');
+      qb.where(
+        `CONCAT(',', REPLACE(REPLACE(REPLACE(COALESCE(t.specialty, ''), '、', ','), '，', ','), ' ', ''), ',') LIKE :sid`,
+        { sid: `%,${id},%` },
+      );
+      if (kw) {
+        qb.andWhere(
+          `(t.name LIKE :kw OR t.specialty LIKE :kw OR t.direction LIKE :kw OR t.school LIKE :kw OR t.researchArea LIKE :kw)`,
+          { kw: `%${kw}%` },
+        );
+      }
+      qb.orderBy('t.createdAt', 'DESC')
+        .take(limit)
+        .skip(offset);
+      const [items, total] = await qb.getManyAndCount();
+      await this.resolveTeacherNames(items);
+      return { items, total, limit, offset };
+    }
+    const where = kw
       ? [
-          { name: Like(`%${keyword}%`) },
-          { specialty: Like(`%${keyword}%`) },
-          { direction: Like(`%${keyword}%`) },
-          { school: Like(`%${keyword}%`) },
-          { researchArea: Like(`%${keyword}%`) },
+          { name: Like(`%${kw}%`) },
+          { specialty: Like(`%${kw}%`) },
+          { direction: Like(`%${kw}%`) },
+          { school: Like(`%${kw}%`) },
+          { researchArea: Like(`%${kw}%`) },
         ]
       : {};
     const [items, total] = await this.repo.findAndCount({

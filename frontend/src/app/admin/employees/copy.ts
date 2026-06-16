@@ -13,19 +13,6 @@ export const ADMIN_EMPLOYEE_COPY = {
   ownerEntryDescription: '维护运营资料和在职状态',
 } as const;
 
-export function buildStatusSummary(items: EmployeeStatusLike[]) {
-  return items.reduce(
-    (acc, item) => {
-      const status = String(item.status || '').trim();
-      if (status === '在职') acc.active += 1;
-      else if (status === '停用') acc.disabled += 1;
-      else if (status === '离职') acc.resigned += 1;
-      return acc;
-    },
-    { active: 0, disabled: 0, resigned: 0 },
-  );
-}
-
 export function getEmployeeDialogCopy(kind: 'deactivate') {
   if (kind === 'deactivate') {
     return {

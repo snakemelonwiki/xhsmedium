@@ -131,6 +131,7 @@ export default function AcademicTeachersPage() {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [keyword, setKeyword] = useState('');
+  const [specialtyId, setSpecialtyId] = useState<string | undefined>(undefined);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Teacher | null>(null);
   const [detailTeacher, setDetailTeacher] = useState<Teacher | null>(null);
@@ -140,11 +141,16 @@ export default function AcademicTeachersPage() {
   const [form] = Form.useForm<TeacherFormValues>();
 
   /* ---------- 加载列表 ---------- */
-  async function load(kw = keyword, p = page) {
+  async function load(kw = keyword, p = page, sp = specialtyId) {
     setLoading(true);
     try {
       const data = await apiClient.get<any>('/teachers', {
-        query: { keyword: kw, limit: PAGE_SIZE, offset: (p - 1) * PAGE_SIZE },
+        query: {
+          keyword: kw,
+          limit: PAGE_SIZE,
+          offset: (p - 1) * PAGE_SIZE,
+          specialty: sp,
+        },
       });
       setItems(data?.items ?? (Array.isArray(data) ? data : []));
       setTotal(data?.total ?? 0);
@@ -170,7 +176,14 @@ export default function AcademicTeachersPage() {
   }, []);
 
   /* ---------- 搜索 ---------- */
-  function handleSearch() { setPage(1); void load(keyword, 1); }
+  function handleSearch() { setPage(1); void load(keyword, 1, specialtyId); }
+
+  /* ---------- 专业筛选 ---------- */
+  function handleSpecialtyChange(value: string | undefined) {
+    setSpecialtyId(value);
+    setPage(1);
+    void load(keyword, 1, value);
+  }
 
   /* ---------- 图片上传 ---------- */
   async function handleUploadImage(file: File): Promise<string | null> {
@@ -234,7 +247,7 @@ export default function AcademicTeachersPage() {
         message.success('老师已添加');
       }
       setModalOpen(false);
-      if (!editing) { setPage(1); void load(keyword, 1); } else { void load(); }
+      if (!editing) { setPage(1); void load(keyword, 1, specialtyId); } else { void load(); }
     } catch {
       message.error('操作失败');
     }
@@ -248,7 +261,7 @@ export default function AcademicTeachersPage() {
       const nextTotal = total - 1;
       const nextPage = Math.min(page, Math.max(1, Math.ceil(nextTotal / PAGE_SIZE)));
       setPage(nextPage);
-      void load(keyword, nextPage);
+      void load(keyword, nextPage, specialtyId);
     } catch {
       message.error('删除失败');
     }
@@ -419,7 +432,17 @@ export default function AcademicTeachersPage() {
             style={{ width: 220 }}
             allowClear
           />
-          <Button icon={<ReloadOutlined />} onClick={() => { setKeyword(''); void load(''); }}>
+          <Select
+            placeholder="按专业方向筛选"
+            value={specialtyId}
+            onChange={handleSpecialtyChange}
+            allowClear
+            style={{ width: 180 }}
+            options={specialtyOptions}
+            showSearch
+            optionFilterProp="label"
+          />
+          <Button icon={<ReloadOutlined />} onClick={() => { setKeyword(''); setSpecialtyId(undefined); void load('', 1, undefined); }}>
             刷新
           </Button>
           <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
@@ -442,7 +465,7 @@ export default function AcademicTeachersPage() {
             total,
             showSizeChanger: false,
             showTotal: (t) => `共 ${t} 位老师`,
-            onChange: (p) => { setPage(p); void load(keyword, p); },
+            onChange: (p) => { setPage(p); void load(keyword, p, specialtyId); },
           }}
           onRow={(record) => ({
             onClick: (e) => {

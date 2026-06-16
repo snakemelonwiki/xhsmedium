@@ -16,6 +16,7 @@ import {
   listAbnormalFeedbacks,
   listOrderFollowRecords,
   remindSalesPayment,
+  updateOrder,
   updateOrderDelivery,
 } from '@/shared/api/orders';
 import { createExport, downloadExportUrl, getExport } from '@/shared/api/exports';
@@ -725,6 +726,55 @@ export default function AcademicOrderDetailPage() {
     });
   }
 
+  // v1.3 / Task 12: 用户点击「履约进度」步骤时，把对应 paperProgress 写回 orders.paper_progress。
+  // 列表端会读取该字段展示「稿件进度」列；DELIVERY_PROGRESS_STAGES 的 statusValues 与
+  // paperProgress 的下拉选项一致（待分配/进行中/待投稿/已投稿/返修中/已录用），所以直接把
+  // statusValues[0] 作为兜底写回值。允许覆盖（前进/回退都接受），但同一值不写。
+  // 写失败不弹错误 toast —— 不影响本地 UI 步进。
+  async function handleProgressStepClick(step: number) {
+    setActiveProgressStep(step);
+    const stage = DELIVERY_PROGRESS_STAGES[step];
+    if (!stage) return;
+    const next = stage.statusValues[0] || stage.label;
+    const current = String(delivery.order?.paperProgress || '').trim();
+    if (next === current) return;
+    try {
+      await updateOrder(orderId, { paper_progress: next });
+      // 同步本地 delivery 缓存，避免回退按钮再次打开页面时值回退。
+      setDelivery((prev) => ({
+        ...prev,
+        order: { ...(prev.order || {}), paperProgress: next },
+      }));
+    } catch (err) {
+      // 静默失败：本地步进已生效，下次保存交付信息时也仍能写回
+      // eslint-disable-next-line no-console
+      message.warning('进度更新失败，请稍后重试');
+      console.error('[order] update paperProgress failed', err);
+    }
+  }
+
+  // v1.3 / Task 12: 用户点击「期刊与交付状态」步骤时，把对应 currentStage 写回 orders.current_stage。
+  // 列表端的「投稿进度」列会读取该字段。JOURNAL_STEPS 的 key 已经是 orders.current_stage 的合法值。
+  async function handleJournalStepClick(step: number) {
+    setActiveJournalStep(step);
+    const stage = JOURNAL_STEPS[step];
+    if (!stage) return;
+    const next = stage.key;
+    const current = String(delivery.order?.journalStatus || '').trim();
+    if (next === current) return;
+    try {
+      await updateOrder(orderId, { current_stage: next });
+      setDelivery((prev) => ({
+        ...prev,
+        order: { ...(prev.order || {}), journalStatus: next },
+      }));
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      message.warning('进度更新失败，请稍后重试');
+      console.error('[order] update currentStage failed', err);
+    }
+  }
+
   useEffect(() => {
     if (loading) return;
     syncSubmissionRows(operationMethod);
@@ -849,9 +899,10 @@ export default function AcademicOrderDetailPage() {
                   <Steps
                     size="small"
                     current={activeProgressStep}
-                    onChange={(step) => {
-                      setActiveProgressStep(step);
-                    }}
+                    // v1.3 / Task 12: 用户点击到哪个环节，实时把对应 paperProgress
+                    // 写回订单主表（orders.paper_progress），便于跟进列表展示「稿件进度」。
+                    // 由于是单字段更新，不影响交付信息的其它字段，无需走 saveOrderDelivery 全量保存。
+                    onChange={handleProgressStepClick}
                     items={DELIVERY_PROGRESS_STAGES.map((s) => ({ title: s.label }))}
                   />
                   <Row gutter={12} style={{ marginTop: 16 }}>
@@ -1238,7 +1289,9 @@ export default function AcademicOrderDetailPage() {
                       <Steps
                         size="small"
                         current={activeJournalStep}
-                        onChange={(step) => setActiveJournalStep(step)}
+                        // v1.3 / Task 12: 用户点击期刊阶段时同步写回 orders.current_stage，
+                        // 便于列表「投稿进度」列展示。失败静默，不影响本地步进。
+                        onChange={handleJournalStepClick}
                         items={JOURNAL_STEPS.map((s) => ({ title: s.label }))}
                       />
                       <Typography.Text

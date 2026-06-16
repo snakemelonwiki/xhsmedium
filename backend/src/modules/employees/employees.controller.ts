@@ -222,6 +222,7 @@ export class EmployeesController {
         phone: body.phone || null,
         hireDate: body.hireDate || null,
         status: normalizeEmployeeStatus(body.status),
+        department: body.department || null,
         loginUsername: body.loginUsername || null,
         loginPassword: body.loginPassword || null,
         loginRole: nextRole,

@@ -1,16 +1,17 @@
 'use client';
 
 import {
-  App, Button, Card, Col, Form, Input, Modal, Popconfirm, Row, Select, Space, Table, Tag, Typography,
+  App, Button, Card, Col, Form, Input, Modal, Popconfirm, Row, Select, Space, Table, Tabs, Tag, Typography,
 } from 'antd';
 import type { TableColumnsType, TablePaginationConfig } from 'antd';
 import { useEffect, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 
 import { apiClient } from '@/shared/api/apiClient';
 import { listAdminEmployees, saveAdminEmployee } from '@/shared/api/admin';
 import type { AdminEmployee } from '@/shared/types/admin';
 import { validatePasswordStrength } from '@/shared/utils/password';
-import { ADMIN_EMPLOYEE_COPY, buildStatusSummary, getEmployeeDialogCopy } from './copy';
+import { ADMIN_EMPLOYEE_COPY, getEmployeeDialogCopy } from './copy';
 
 const { Text, Paragraph } = Typography;
 
@@ -22,6 +23,33 @@ type Employee = AdminEmployee & {
   roleType?: string;
 };
 
+/**
+ * Tab → status 映射。
+ * 默认进入“运营管理”时只显示在职员工；停用/离职的员工通过各自 tab 单独查看。
+ * URL query 形如 ?status=active|disabled|resigned，未带参数时按 active 渲染。
+ */
+type EmployeeTabKey = 'active' | 'disabled' | 'resigned';
+const TAB_TO_STATUS: Record<EmployeeTabKey, string> = {
+  active: '在职',
+  disabled: '停用',
+  resigned: '离职',
+};
+const STATUS_TO_TAB: Record<string, EmployeeTabKey> = {
+  在职: 'active',
+  停用: 'disabled',
+  离职: 'resigned',
+};
+const DEFAULT_TAB: EmployeeTabKey = 'active';
+
+function resolveTabFromQuery(rawStatus: string | null): EmployeeTabKey {
+  if (!rawStatus) return DEFAULT_TAB;
+  const normalized = rawStatus.trim();
+  if (normalized === 'active') return 'active';
+  if (normalized === 'disabled') return 'disabled';
+  if (normalized === 'resigned') return 'resigned';
+  return STATUS_TO_TAB[normalized] ?? DEFAULT_TAB;
+}
+
 const ROLE_OPTIONS = [
   { label: '运营', value: 'operation' },
   { label: '销售', value: 'sales' },
@@ -29,7 +57,7 @@ const ROLE_OPTIONS = [
   { label: '教务主管', value: 'academic_supervisor' },
   { label: '主管', value: 'supervisor' },
   { label: '系统管理员', value: 'admin' },
-  { label: '运营(兼容旧角色)', value: 'staff' },
+  { label: '运营(未分配账号)', value: 'staff' },
 ];
 
 const STATUS_OPTIONS = [
@@ -58,6 +86,8 @@ function getRoleTagColor(value?: string): string {
 
 export default function AdminEmployeesPage() {
   const { message: messageApi } = App.useApp();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [items, setItems] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
@@ -65,9 +95,19 @@ export default function AdminEmployeesPage() {
   const [pagination, setPagination] = useState({ current: 1, pageSize: 20, total: 0 });
   const [form] = Form.useForm();
 
+  // 当前 tab：active=在职 / disabled=停用 / resigned=离职。
+  // 初始值取自 ?status= URL 参数，保证刷新 / 链接直达时一致。
+  const initialTab = resolveTabFromQuery(searchParams?.get('status') ?? null);
+  const [activeTab, setActiveTab] = useState<EmployeeTabKey>(initialTab);
+  const [tabCounts, setTabCounts] = useState<{ active: number; disabled: number; resigned: number; total: number }>({
+    active: 0,
+    disabled: 0,
+    resigned: 0,
+    total: 0,
+  });
+
   // 筛选状态
   const [filterRole, setFilterRole] = useState<string>('');
-  const [filterStatus, setFilterStatus] = useState<string>('在职');
   const [filterDepartment, setFilterDepartment] = useState<string>('');
   const [keyword, setKeyword] = useState('');
 
@@ -81,6 +121,11 @@ export default function AdminEmployeesPage() {
   const [deactivateEmployee, setDeactivateEmployee] = useState<Employee>();
   const [deactivateLoading, setDeactivateLoading] = useState(false);
 
+  // 启用确认弹窗（停用/离职 → 在职）
+  const [reactivateModalOpen, setReactivateModalOpen] = useState(false);
+  const [reactivateEmployee, setReactivateEmployee] = useState<Employee>();
+  const [reactivateLoading, setReactivateLoading] = useState(false);
+
   // 新建登录账号弹窗
   const [createUserModalOpen, setCreateUserModalOpen] = useState(false);
   const [createUserForm] = Form.useForm();
@@ -92,13 +137,17 @@ export default function AdminEmployeesPage() {
   const [changePwdForm] = Form.useForm();
   const [changePwdLoading, setChangePwdLoading] = useState(false);
   const [changePwdResult, setChangePwdResult] = useState<{ username: string; newPassword: string } | null>(null);
-  const statusSummary = buildStatusSummary(items);
 
-  async function load(page = pagination.current, pageSize = pagination.pageSize, statusOverride?: string) {
+  async function load(page = pagination.current, pageSize = pagination.pageSize, tabOverride?: EmployeeTabKey) {
     setLoading(true);
+    const tab = tabOverride ?? activeTab;
     try {
-      const status = statusOverride !== undefined ? statusOverride : filterStatus;
-      const result = await listAdminEmployees({ page, pageSize, keyword: keyword.trim() || undefined, status: status || undefined });
+      const result = await listAdminEmployees({
+        page,
+        pageSize,
+        keyword: keyword.trim() || undefined,
+        status: TAB_TO_STATUS[tab],
+      });
       // 运营数据已由后端 enrichWithRoles 关联 userId / username / role，
       // 直接使用，无需额外查询 /users
       setItems(result.items as Employee[]);
@@ -111,10 +160,49 @@ export default function AdminEmployeesPage() {
     }
   }
 
+  /**
+   * 加载 tab 角标计数（在职 / 停用 / 离职 / 全部）。
+   * 不应用任何关键字/部门筛选，单纯按 status 维度统计，便于侧边栏切换前预知数据量。
+   * 失败时静默回退到当前 tab 的分页 total，避免阻塞主视图。
+   */
+  async function refreshTabCounts() {
+    const fetchStatus = async (status?: string) => {
+      const result = await listAdminEmployees({
+        page: 1,
+        pageSize: 1,
+        status,
+      });
+      return result.total;
+    };
+    try {
+      const [active, disabled, resigned, total] = await Promise.all([
+        fetchStatus(TAB_TO_STATUS.active),
+        fetchStatus(TAB_TO_STATUS.disabled),
+        fetchStatus(TAB_TO_STATUS.resigned),
+        fetchStatus(),
+      ]);
+      setTabCounts({ active, disabled, resigned, total });
+    } catch {
+      // ignore
+    }
+  }
+
   useEffect(() => {
     void load(1, 20);
+    void refreshTabCounts();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  function handleTabChange(next: EmployeeTabKey) {
+    if (next === activeTab) return;
+    setActiveTab(next);
+    setPagination({ current: 1, pageSize: 20, total: 0 });
+    void load(1, 20, next);
+    // 同步 URL，便于深链/书签收藏当前 tab。
+    const params = new URLSearchParams(searchParams?.toString() ?? '');
+    params.set('status', next);
+    router.replace(`/admin/employees?${params.toString()}`, { scroll: false });
+  }
 
   function startEdit(record?: Employee) {
     setEditing(record);
@@ -127,11 +215,18 @@ export default function AdminEmployeesPage() {
   }
 
   async function submit(values: Partial<Employee> & { name: string }) {
-    await saveAdminEmployee({ ...editing, ...values } as Parameters<typeof saveAdminEmployee>[0]);
-    messageApi.success(editing ? ADMIN_EMPLOYEE_COPY.updateSuccess : ADMIN_EMPLOYEE_COPY.addSuccess);
-    setOpen(false);
-    form.resetFields();
-    void load();
+    try {
+      await saveAdminEmployee({ ...editing, ...values } as Parameters<typeof saveAdminEmployee>[0]);
+      messageApi.success(editing ? ADMIN_EMPLOYEE_COPY.updateSuccess : ADMIN_EMPLOYEE_COPY.addSuccess);
+      setOpen(false);
+      form.resetFields();
+      void load();
+      void refreshTabCounts();
+    } catch (err: unknown) {
+      // 任何后端/网络错误都直接抛给用户，避免「点了保存但页面无反应」造成的误判。
+      const msg = (err as { message?: string })?.message || '保存失败，请稍后重试';
+      messageApi.error(msg);
+    }
   }
 
   function openBindModal(record: Employee) {
@@ -154,6 +249,7 @@ export default function AdminEmployeesPage() {
       setBindModalOpen(false);
       bindForm.resetFields();
       void load();
+      void refreshTabCounts();
     } catch (err: unknown) {
       const msg = (err as { message?: string })?.message || '绑定失败';
       messageApi.error(msg);
@@ -178,10 +274,35 @@ export default function AdminEmployeesPage() {
       messageApi.success(ADMIN_EMPLOYEE_COPY.deactivateSuccess(deactivateEmployee.name));
       setDeactivateModalOpen(false);
       void load();
+      void refreshTabCounts();
     } catch (err: unknown) {
       messageApi.error((err as Error)?.message || '停用失败');
     } finally {
       setDeactivateLoading(false);
+    }
+  }
+
+  function openReactivateConfirm(record: Employee) {
+    setReactivateEmployee(record);
+    setReactivateModalOpen(true);
+  }
+
+  async function confirmReactivate() {
+    if (!reactivateEmployee) return;
+    setReactivateLoading(true);
+    try {
+      await apiClient.request(`/employees/${reactivateEmployee.id}`, {
+        method: 'PATCH',
+        body: { status: '在职' },
+      });
+      messageApi.success(`运营"${reactivateEmployee.name}"已重新启用`);
+      setReactivateModalOpen(false);
+      void load();
+      void refreshTabCounts();
+    } catch (err: unknown) {
+      messageApi.error((err as Error)?.message || '启用失败');
+    } finally {
+      setReactivateLoading(false);
     }
   }
 
@@ -243,6 +364,7 @@ export default function AdminEmployeesPage() {
       setCreateUserModalOpen(false);
       createUserForm.resetFields();
       void load();
+      void refreshTabCounts();
     } catch (err: unknown) {
       console.error('[submitCreateUser] Error caught:', err);
       const msg = (err as { message?: string })?.message || '创建失败';
@@ -263,10 +385,9 @@ export default function AdminEmployeesPage() {
     void load(next.current ?? 1, next.pageSize ?? 20);
   }
 
-  // 筛选后的数据
+  // 筛选后的数据（仅角色 / 部门；状态已由 tab 控制，避免和后端 status 过滤重叠）
   const filteredItems = items.filter((item) => {
     if (filterRole && item.roleType !== filterRole && item.role !== filterRole) return false;
-    if (filterStatus && item.status !== filterStatus) return false;
     if (filterDepartment && item.department !== filterDepartment) return false;
     return true;
   });
@@ -325,9 +446,18 @@ export default function AdminEmployeesPage() {
               修改密码
             </Button>
           )}
-          {record.status !== '停用' && (
+          {record.status === '在职' && (
             <Button size="small" danger type="text" onClick={() => openDeactivateConfirm(record)}>
               停用
+            </Button>
+          )}
+          {record.status !== '在职' && (
+            <Button
+              size="small"
+              type="text"
+              onClick={() => openReactivateConfirm(record)}
+            >
+              启用
             </Button>
           )}
         </Space>
@@ -356,28 +486,21 @@ export default function AdminEmployeesPage() {
         </Space>
       </div>
 
-      <Row gutter={[12, 12]}>
-        <Col xs={24} md={8}>
-          <Card size="small">
-            <Typography.Text type="secondary">在职运营</Typography.Text>
-            <Typography.Title level={3} style={{ marginTop: 8, marginBottom: 0 }}>{statusSummary.active}</Typography.Title>
-          </Card>
-        </Col>
-        <Col xs={24} md={8}>
-          <Card size="small">
-            <Typography.Text type="secondary">停用运营</Typography.Text>
-            <Typography.Title level={3} style={{ marginTop: 8, marginBottom: 0 }}>{statusSummary.disabled}</Typography.Title>
-          </Card>
-        </Col>
-        <Col xs={24} md={8}>
-          <Card size="small">
-            <Typography.Text type="secondary">离职运营</Typography.Text>
-            <Typography.Title level={3} style={{ marginTop: 8, marginBottom: 0 }}>{statusSummary.resigned}</Typography.Title>
-          </Card>
-        </Col>
-      </Row>
+      {/* 状态 tab：在职 / 停用 / 离职 三个视角分开查看。
+          角标数字来自 refreshTabCounts，独立于当前分页。 */}
+      <Card size="small" styles={{ body: { paddingTop: 4, paddingBottom: 4 } }}>
+        <Tabs
+          activeKey={activeTab}
+          onChange={(key) => handleTabChange(key as EmployeeTabKey)}
+          items={[
+            { key: 'active', label: `在职运营 (${tabCounts.active})` },
+            { key: 'disabled', label: `停用运营 (${tabCounts.disabled})` },
+            { key: 'resigned', label: `离职运营 (${tabCounts.resigned})` },
+          ]}
+        />
+      </Card>
 
-      {/* 筛选栏 */}
+      {/* 筛选栏（角色 / 部门）*/}
       <Card size="small">
         <Space size={12} wrap>
           <Select
@@ -387,14 +510,6 @@ export default function AdminEmployeesPage() {
             options={ROLE_OPTIONS}
             onChange={(v) => setFilterRole(v ?? '')}
             style={{ width: 120 }}
-          />
-          <Select
-            allowClear
-            placeholder="按状态"
-            value={filterStatus || undefined}
-            options={STATUS_OPTIONS}
-            onChange={(v) => { const next = v ?? ''; setFilterStatus(next); load(1, pagination.pageSize, next); }}
-            style={{ width: 100 }}
           />
           <Input
             allowClear
@@ -406,12 +521,14 @@ export default function AdminEmployeesPage() {
           <Button
             onClick={() => {
               setFilterRole('');
-              setFilterStatus('');
               setFilterDepartment('');
             }}
           >
             重置
           </Button>
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            全部员工：{tabCounts.total} 人
+          </Typography.Text>
         </Space>
       </Card>
 
@@ -519,6 +636,36 @@ export default function AdminEmployeesPage() {
             </ul>
           </Card>
           <Text type="secondary">{getEmployeeDialogCopy('deactivate').finalHint}</Text>
+        </Space>
+      </Modal>
+
+      {/* 启用确认弹窗（停用/离职 → 在职） */}
+      <Modal
+        title="启用运营确认"
+        open={reactivateModalOpen}
+        onCancel={() => setReactivateModalOpen(false)}
+        footer={[
+          <Button key="cancel" onClick={() => setReactivateModalOpen(false)}>取消</Button>,
+          <Button key="confirm" type="primary" loading={reactivateLoading} onClick={confirmReactivate}>
+            确认启用
+          </Button>,
+        ]}
+      >
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <Paragraph>
+            即将重新启用运营：<Text strong>{reactivateEmployee?.name}</Text>
+          </Paragraph>
+          <Card size="small" type="inner">
+            <Paragraph type="warning" style={{ marginBottom: 8 }}>
+              启用后将会产生以下影响：
+            </Paragraph>
+            <ul style={{ marginBottom: 0, paddingLeft: 20 }}>
+              <li>该运营的登录账号将被恢复为 active，可以正常登录系统</li>
+              <li>该运营关联的运营账号将重新可用</li>
+              <li>历史客资/订单归属保持不变，可在分配时再次启用</li>
+            </ul>
+          </Card>
+          <Text type="secondary">原状态：{reactivateEmployee?.status ?? '-'} → 在职</Text>
         </Space>
       </Modal>
 

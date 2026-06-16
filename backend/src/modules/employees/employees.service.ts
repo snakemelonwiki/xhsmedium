@@ -14,6 +14,8 @@ export interface CreateEmployeeWithLoginInput {
   phone?: string | null;
   hireDate?: string | null;
   status?: string;
+  /** v1.4 主管端-员工管理：部门名称（简单字符串，不另建表） */
+  department?: string | null;
 
   // 登录账号字段（可选）
   loginUsername?: string | null;
@@ -182,6 +184,7 @@ export class EmployeesService {
       phone: input.phone || null,
       hireDate: input.hireDate || null,
       status: input.status || '在职',
+      department: input.department || null,
       id: makeId(),
     } as any);
 

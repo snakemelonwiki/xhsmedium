@@ -34,6 +34,13 @@ export interface OrderItem {
   paidStatus: PaidStatusCode | string;
   orderStatus: OrderStatusCode | string;
   handoverStatus?: HandoverStatusCode | string;
+  // v1.3 / Task 12: 跟进列表新增「稿件进度」「投稿进度」两列所用字段。
+  // 稿件进度 = 履约环节，投稿进度 = 期刊与交付状态组合。
+  paperProgress?: string | null;
+  currentStage?: string | null;
+  proofStatus?: string | null;
+  onlineStatus?: string | null;
+  indexedStatus?: string | null;
   remark?: string | null;
   // 教务端详情扩展字段（后端暂未全部返回，缺失时显示 '-'）
   deliveryRequirement?: string | null;

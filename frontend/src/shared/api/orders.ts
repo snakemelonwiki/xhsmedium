@@ -39,6 +39,12 @@ function mapOrder(raw: RawRecord): OrderItem {
     orderStatus: text(raw.orderStatus ?? raw.order_status) ?? 'to_receive',
     handoverStatus: text(raw.handoverStatus ?? raw.handover_status) ?? 'pending',
     orderCode: text(raw.orderCode ?? raw.order_code) ?? null,
+    // v1.3 / Task 12: 跟进列表新增「稿件进度」「投稿进度」两列。
+    paperProgress: text(raw.paperProgress ?? raw.paper_progress) ?? null,
+    currentStage: text(raw.currentStage ?? raw.current_stage) ?? null,
+    proofStatus: text(raw.proofStatus ?? raw.proof_status) ?? null,
+    onlineStatus: text(raw.onlineStatus ?? raw.online_status) ?? null,
+    indexedStatus: text(raw.indexedStatus ?? raw.indexed_status) ?? null,
     remark: text(raw.remark) ?? null,
     deliveryRequirement: text(raw.deliveryRequirement ?? raw.delivery_requirement) ?? null,
     materialStatus: text(raw.materialStatus ?? raw.material_status) ?? null,

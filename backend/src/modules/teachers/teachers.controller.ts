@@ -14,6 +14,7 @@ export class TeachersController {
     @Query('keyword') keyword?: string,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
+    @Query('specialty') specialty?: string,
   ) {
     const wantsPaging = limit !== undefined || offset !== undefined;
     if (wantsPaging) {
@@ -21,9 +22,10 @@ export class TeachersController {
         Number(limit) || 20,
         Number(offset) || 0,
         keyword || '',
+        specialty || '',
       );
     }
-    return this.svc.findAll(keyword || '');
+    return this.svc.findAll(keyword || '', specialty || '');
   }
 
   @Get(':id')

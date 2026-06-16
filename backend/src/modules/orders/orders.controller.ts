@@ -420,6 +420,13 @@ export class OrdersController {
       if (body?.academic_user_id !== undefined && !ACADEMIC_DELIVERY_ROLES.includes(role)) {
         return res.status(403).json({ ok: false, message: '当前角色不允许修改教务归属' });
       }
+      // v1.3 / Task 12: 稿件进度 / 投稿进度属于教务内部维护字段，仅教务/主管/admin/owner 可改
+      if ((body?.paper_progress !== undefined || body?.paperProgress !== undefined) && !ACADEMIC_DELIVERY_ROLES.includes(role)) {
+        return res.status(403).json({ ok: false, message: '当前角色不允许修改稿件进度' });
+      }
+      if ((body?.current_stage !== undefined || body?.currentStage !== undefined) && !ACADEMIC_DELIVERY_ROLES.includes(role)) {
+        return res.status(403).json({ ok: false, message: '当前角色不允许修改投稿进度' });
+      }
       await this.ordersService.update(id, userId, {
         order_status: body?.order_status,
         paid_status: body?.paid_status,
@@ -429,6 +436,9 @@ export class OrdersController {
         payment_stage: body?.payment_stage ?? body?.paymentStage,
         client_paid: body?.client_paid ?? body?.clientPaid ?? body?.customerPaid,
         remark: body?.remark,
+        // v1.3 / Task 12: 详情 Steps onClick 触发的单字段更新。
+        paper_progress: body?.paper_progress ?? body?.paperProgress,
+        current_stage: body?.current_stage ?? body?.currentStage,
       });
       // 写操作日志：含 order_status 视为 status_change，否则按 UPDATE
       const isStatusChange = body?.order_status !== undefined;
@@ -447,6 +457,9 @@ export class OrdersController {
           amount: body?.amount,
           payment_stage: body?.payment_stage ?? body?.paymentStage,
           client_paid: body?.client_paid ?? body?.clientPaid ?? body?.customerPaid,
+          // v1.3 / Task 12: 日志同步记录稿件/投稿进度更新，便于审计追溯
+          paper_progress: body?.paper_progress ?? body?.paperProgress,
+          current_stage: body?.current_stage ?? body?.currentStage,
         },
         req,
       });

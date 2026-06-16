@@ -68,6 +68,10 @@ const ORDER_UPDATED_FIELD_LABELS: Record<string, string> = {
   paymentStage: '付款阶段',
   clientPaid: '付款金额',
   remark: '备注',
+  // v1.3 / Task 12: Steps onClick 触发的字段更新也走 ORDER_UPDATED 通知
+  // （销售/主管会看到「稿件进度更新/投稿进度更新」消息，与其它状态变更走同一条通道）
+  paperProgress: '稿件进度',
+  currentStage: '投稿进度',
 };
 
 interface CloseDealDto {
@@ -113,6 +117,10 @@ interface OrderPatchDto {
   payment_stage?: string | null;
   client_paid?: number | string | null;
   remark?: string | null;
+  // v1.3 / Task 12: 用户在订单详情 Steps 上点击时同步更新这两个字段，
+  // 用于跟进列表的「稿件进度」「投稿进度」两列展示。
+  paper_progress?: string | null;
+  current_stage?: string | null;
 }
 
 interface OrderFollowDto {
@@ -1230,6 +1238,22 @@ export class OrdersService {
         next.remark = nextRemark;
       }
     }
+    // v1.3 / Task 12: 跟进列表的「稿件进度」「投稿进度」两列。
+    // 教务端 Steps onClick 时单字段更新，避免走 saveOrderDelivery 全量保存触发一系列其它写入。
+    if (dto.paper_progress !== undefined) {
+      const nextPaperProgress = dto.paper_progress ? String(dto.paper_progress).trim() : null;
+      if (nextPaperProgress !== current.paperProgress) {
+        changedFields.push('paperProgress');
+        next.paperProgress = nextPaperProgress;
+      }
+    }
+    if (dto.current_stage !== undefined) {
+      const nextCurrentStage = dto.current_stage ? String(dto.current_stage).trim() : null;
+      if (nextCurrentStage !== current.currentStage) {
+        changedFields.push('currentStage');
+        next.currentStage = nextCurrentStage;
+      }
+    }
     if (changedFields.length === 0) return;
     if (Object.keys(next).length > 0) {
       await this.orderRepository.update(id, next);
@@ -1880,6 +1904,15 @@ export class OrdersService {
       customerName: row.customerName,
       articlePurpose: row.articlePurpose,
       salesContact: row.salesContact,
+      // v1.3 / Task 12: 跟进列表新增「稿件进度」「投稿进度」两列所用字段。
+      // 稿件进度 = paperProgress（论文进度 / 履约环节），由教务端 Steps onClick 写回。
+      // 投稿进度 = currentStage（期刊状态）+ proofStatus（校稿）+ onlineStatus（Online）+ indexedStatus（检索）
+      // 4 个子状态拼接而成，便于一眼看到稿子的期刊 + 交付进展。
+      paperProgress: row.paperProgress,
+      currentStage: row.currentStage,
+      proofStatus: row.proofStatus,
+      onlineStatus: row.onlineStatus,
+      indexedStatus: row.indexedStatus,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };

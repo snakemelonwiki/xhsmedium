@@ -339,6 +339,44 @@ export function OrderTable({
         key: 'orderStatus',
         render: renderOrderStatus,
       },
+      // v1.3 / Task 12: 跟进列表新增「稿件进度」「投稿进度」两列。
+      // 稿件进度 = paperProgress（履约环节，由教务端 Steps onClick 写回）。
+      // 投稿进度 = currentStage（期刊状态）+ proofStatus / onlineStatus / indexedStatus
+      // （校稿 / Online / 检索 交付状态），一眼看出稿子到哪一步、是否已校稿/Online/检索。
+      // 仅在教务端（academic / abnormal actionMode）展示，销售/admin 视角无意义。
+      ...(actionMode === 'academic' || actionMode === 'abnormal' ? [
+        {
+          title: '稿件进度',
+          key: 'paperProgress',
+          dataIndex: 'paperProgress',
+          width: 110,
+          render: (value?: string | null) =>
+            value ? <Tag color="blue">{value}</Tag> : <Typography.Text type="secondary">-</Typography.Text>,
+        },
+        {
+          title: '投稿进度',
+          key: 'submissionProgress',
+          dataIndex: 'currentStage',
+          width: 240,
+          render: (_value: string | null | undefined, record: OrderItem) => {
+            const parts: string[] = [];
+            if (record.currentStage) parts.push(record.currentStage);
+            if (record.proofStatus && record.proofStatus !== 'none') parts.push(`校稿:${record.proofStatus}`);
+            if (record.onlineStatus && record.onlineStatus !== 'none') parts.push(`Online:${record.onlineStatus}`);
+            if (record.indexedStatus && record.indexedStatus !== 'none') parts.push(`检索:${record.indexedStatus}`);
+            if (parts.length === 0) {
+              return <Typography.Text type="secondary">-</Typography.Text>;
+            }
+            return (
+              <Space size={4} wrap>
+                {parts.map((part) => (
+                  <Tag key={part} color="geekblue">{part}</Tag>
+                ))}
+              </Space>
+            );
+          },
+        },
+      ] as any[] : []),
       ...(actionMode === 'academic' ? [] : [
         {
           title: '交接',
@@ -374,7 +412,7 @@ export function OrderTable({
       title: '操作',
       key: 'actions',
       fixed: 'right',
-      width: actionMode === 'sales' ? 320 : (actionMode === 'admin' ? 150 : 210),
+      width: actionMode === 'sales' ? 320 : (actionMode === 'admin' ? 150 : 290),
       render: (_value, record) => {
         if (actionMode === 'admin') {
           return (
@@ -409,6 +447,7 @@ export function OrderTable({
               <Button loading={updatingId === record.id} onClick={() => router.push(`/academic/orders/${record.id}`)}>
                 跟进
               </Button>
+              <Button onClick={() => router.push(`/academic/orders/${record.id}`)}>编辑</Button>
               <Button loading={remindingId === record.id} onClick={() => remindPayment(record.id)}>
                 提醒销售催款
               </Button>
@@ -552,7 +591,8 @@ export function OrderTable({
           dataSource={displayItems}
           loading={loading}
           pagination={false}
-          scroll={{ x: 1040 }}
+          // v1.3 / Task 12: 加了稿件进度(110)+ 投稿进度(240) 两列，horizontal scroll 阈值从 1040 提到 1440。
+          scroll={{ x: 1440 }}
         />
         <Pagination
           current={page}
