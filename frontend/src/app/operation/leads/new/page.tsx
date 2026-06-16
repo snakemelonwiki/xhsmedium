@@ -368,8 +368,12 @@ function parseLeadText(raw: string): Record<string, string> {
     else if (/预算/.test(keyNorm) && valueNorm) {
       result.budget = valueNorm;
     }
-    // 具体情况/专业/需求
-    else if (/具体|专业|需求/.test(keyNorm) && valueNorm) {
+    // 需求备注/需求说明/备注
+    if (/需求备注|需求说明|^备注$|备注内容/.test(keyNorm) && valueNorm) {
+      result.requirementNote = valueNorm;
+    }
+    // 具体情况/专业/需求（不包含"需求备注"）
+    else if (/具体|专业|需求(?!备注)/.test(keyNorm) && valueNorm) {
       result.majorContent = valueNorm;
     }
     // 昵称
@@ -388,8 +392,10 @@ function parseLeadText(raw: string): Record<string, string> {
 
   // 如果是结构化模板，直接返回
   if (isStructured) {
-    // 完整文本填入需求备注
-    result.requirementNote = text;
+    // 只在没有结构化提取到备注时，才用全文填充
+    if (!result.requirementNote) {
+      result.requirementNote = text;
+    }
     return result;
   }
 
