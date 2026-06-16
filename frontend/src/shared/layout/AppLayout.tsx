@@ -92,6 +92,9 @@ export function AppLayout({ role, title, children }: AppLayoutProps) {
           // 后端登出失败不应阻塞前端清理
         }
         clearAuth();
+        // 小延迟确保 clearAuth 的 abort 信号已传播，阻止旧 token 的
+        // in-flight 请求（如通知轮询）触发 refresh 并弹出 AuthExpiredError
+        await new Promise((resolve) => setTimeout(resolve, 100));
         router.replace('/login');
       },
     },

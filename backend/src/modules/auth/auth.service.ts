@@ -215,6 +215,11 @@ export class AuthService {
    * 根据当前有效 JWT 重新签发长会话 token，并返回最新用户信息。
    */
   async refreshToken(token: string): Promise<any> {
+    // 检查 token 是否已被撤销（防止已登出的旧 token 被 refresh 后用于新登录用户）
+    if (await this.isTokenRevoked(token)) {
+      throw new UnauthorizedException({ message: '登录已失效，请重新登录' });
+    }
+
     let payload: any;
     try {
       payload = this.jwtService.verify(token);

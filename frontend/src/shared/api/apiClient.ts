@@ -22,6 +22,8 @@ export interface RequestOptions extends Omit<RequestInit, 'body'> {
 
 const TOKEN_KEY = STORAGE_KEYS.token;
 
+let authClearedController: AbortController | null = null;
+
 function defaultGetToken(): string | null {
   if (typeof window === 'undefined') return null;
   return window.localStorage.getItem(TOKEN_KEY);
@@ -29,6 +31,13 @@ function defaultGetToken(): string | null {
 
 function defaultClearToken(): void {
   if (typeof window === 'undefined') return;
+  // Abort all pending requests from the previous session to prevent
+  // stale in-flight requests (e.g. notification polling) from
+  // triggering refresh with a revoked token
+  if (authClearedController) {
+    authClearedController.abort();
+  }
+  authClearedController = new AbortController();
   window.localStorage.removeItem(TOKEN_KEY);
   window.localStorage.removeItem(STORAGE_KEYS.user);
   notifyAuthChanged();
@@ -131,6 +140,7 @@ export function createApiClient(options: ApiClientOptions = {}) {
       ...requestOptions,
       headers,
       body,
+      signal: authClearedController?.signal,
     });
 
     // 消费后端 TokenRefreshInterceptor 自动续期的 X-New-Token 响应头
@@ -237,6 +247,9 @@ async function tryRefreshAndRetry(retry: () => Promise<Response>): Promise<{ ok:
 async function doRefresh(): Promise<boolean> {
   const token = defaultGetToken();
   if (!token) return false;
+  // 如果在 refresh 过程中 token 已经被清除了（例如 logout 后切换账号），
+  // 立即返回 false，避免用旧 token refresh 成功后再写回 localStorage
+  if (authClearedController?.signal.aborted) return false;
   try {
     const resp = await fetch('/api/auth/refresh', {
       method: 'POST',
