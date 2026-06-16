@@ -57,7 +57,7 @@ const ROLE_OPTIONS = [
   { label: '教务主管', value: 'academic_supervisor' },
   { label: '主管', value: 'supervisor' },
   { label: '系统管理员', value: 'admin' },
-  { label: '运营(未分配账号)', value: 'staff' },
+  { label: '运营', value: 'staff' },
 ];
 
 const STATUS_OPTIONS = [
