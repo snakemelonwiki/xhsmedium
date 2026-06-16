@@ -537,14 +537,36 @@ export class LeadsService {
         { search: `%${filters.search.trim()}%` },
       );
     }
-    if (filters.from) qb.andWhere('l.created_at >= :from', { from: filters.from });
-    if (filters.to) qb.andWhere('l.created_at < :to', { to: filters.to });
+    if (filters.from) {
+      // 修复主管客资看板「看不到当天客资」：YYYY-MM-DD 被 MySQL 当作 00:00:00，
+      // 配合 `< to` 会让 to===from 时退化成空区间（当天的 14:00/16:00 等全被排除）。
+      // 这里把 from 补成 00:00:00，to 补成 23:59:59 并把比较改成 `<=`（含当天）。
+      const fromStr = this.normalizeDayBoundary(filters.from, 'start');
+      qb.andWhere('l.created_at >= :from', { from: fromStr });
+    }
+    if (filters.to) {
+      const toStr = this.normalizeDayBoundary(filters.to, 'end');
+      qb.andWhere('l.created_at <= :to', { to: toStr });
+    }
     if (filters.postType) {
       qb.andWhere(
         'l.post_id IN (SELECT p.id FROM posts p WHERE p.post_type = :postType)',
         { postType: filters.postType },
       );
     }
+  }
+
+  /**
+   * 把 YYYY-MM-DD 字符串补成"含当天"的边界。
+   * 修复主管客资看板「看不到当天客资」：原 SQL 用 `>= from` / `< to` 直接比较 YYYY-MM-DD，
+   * MySQL 会把 `'2026-06-16'` 当作 `00:00:00`，配合 `< to` 让 to===from 时退化为空区间，
+   * 当天 14:00/16:00 等全部被排除。这里把 from 补 00:00:00、to 补 23:59:59 并改用 `<=`（含当天）。
+   */
+  private normalizeDayBoundary(value: string, edge: 'start' | 'end'): string {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+      return edge === 'start' ? `${value} 00:00:00` : `${value} 23:59:59`;
+    }
+    return value;
   }
 
   private generateLeadCode(): string {
