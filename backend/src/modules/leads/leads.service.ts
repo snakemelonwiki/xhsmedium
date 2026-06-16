@@ -7,6 +7,7 @@ import { Post } from '../../entities/post.entity';
 import { Account } from '../../entities/account.entity';
 import { User } from '../../entities/user.entity';
 import { CollaborationTask } from '../../entities/collaboration-task.entity';
+import { Employee } from '../../entities/employee.entity';
 import { makeId } from '../../shared/utils/id-generator';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NOTIFICATION_TYPES } from '../../shared/notifications';
@@ -137,6 +138,8 @@ export class LeadsService {
     private readonly userRepository: Repository<User>,
     @InjectRepository(CollaborationTask)
     private readonly collaborationRepository: Repository<CollaborationTask>,
+    @InjectRepository(Employee)
+    private readonly employeeRepository: Repository<Employee>,
     private readonly notificationsService: NotificationsService,
     private readonly operationLogsService: OperationLogsService,
     private readonly usersService: UsersService,
@@ -355,7 +358,7 @@ export class LeadsService {
         employeeId: r.l_employee_id,
         employeeName: r.employee_name || null,
         operatorId: r.l_employee_id,
-        operatorName: r.l_sales_user_name || r.l_assigned_sales_user_name || null,
+        operatorName: r.employee_name || null,
         accountId: r.l_account_id,
         accountName: r.account_name || null,
         sourceAccountId: r.l_account_id,
@@ -1620,12 +1623,16 @@ export class LeadsService {
     const posts = rows.length <= 200
       ? await this.postsByIds(rows.flatMap((row) => [row.postId || '', row.matchedPostId || '']))
       : new Map<string, Post>();
+    const employees = rows.length <= 200
+      ? await this.employeesByIds(rows.map((row) => row.employeeId))
+      : new Map<string, Employee>();
     return rows.map((row) => this.mapLead(
       row,
       latest.get(row.id),
       latestCollaboration.get(row.id),
       accounts.get(row.accountId),
       row.postId ? posts.get(row.postId) : row.matchedPostId ? posts.get(row.matchedPostId) : undefined,
+      employees.get(row.employeeId),
     ));
   }
 
@@ -1633,6 +1640,13 @@ export class LeadsService {
     const ids = Array.from(new Set(accountIds.filter(Boolean)));
     if (ids.length === 0) return new Map();
     const rows = await this.accountRepository.find({ where: { id: In(ids) } });
+    return new Map(rows.map((row) => [row.id, row]));
+  }
+
+  private async employeesByIds(employeeIds: string[]): Promise<Map<string, Employee>> {
+    const ids = Array.from(new Set(employeeIds.filter(Boolean)));
+    if (ids.length === 0) return new Map();
+    const rows = await this.employeeRepository.find({ where: { id: In(ids) } });
     return new Map(rows.map((row) => [row.id, row]));
   }
 
@@ -1681,12 +1695,13 @@ export class LeadsService {
     latestCollaboration?: CollaborationTask,
     account?: Account,
     post?: Post,
+    employee?: Employee,
   ): any {
     return {
       id: row.id,
       employeeId: row.employeeId,
       operatorId: row.employeeId,
-      operatorName: row.salesUserName || row.assignedSalesUserName || null,
+      operatorName: employee?.name || null,
       accountId: row.accountId,
       accountName: account?.accountName || null,
       sourceAccountId: row.accountId,

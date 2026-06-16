@@ -6,6 +6,7 @@ import { Post } from '../../entities/post.entity';
 import { Account } from '../../entities/account.entity';
 import { User } from '../../entities/user.entity';
 import { CollaborationTask } from '../../entities/collaboration-task.entity';
+import { Employee } from '../../entities/employee.entity';
 import { LeadsController } from './leads.controller';
 import { LeadsService } from './leads.service';
 import { NotificationsModule } from '../notifications/notifications.module';
@@ -15,7 +16,7 @@ import { UsersModule } from '../users/users.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Lead, LeadFollowRecord, Post, Account, User, CollaborationTask]),
+    TypeOrmModule.forFeature([Lead, LeadFollowRecord, Post, Account, User, CollaborationTask, Employee]),
     NotificationsModule,
     CollaborationTasksModule,
     OperationLogsModule,

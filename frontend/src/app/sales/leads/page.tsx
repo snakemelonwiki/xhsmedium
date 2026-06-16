@@ -457,6 +457,12 @@ export default function SalesLeadsPage() {
       ),
     },
     {
+      title: '运营',
+      key: 'operator',
+      width: 100,
+      render: (_v, lead) => lead.operator?.name || '-',
+    },
+    {
       title: 'IP / 地区',
       dataIndex: 'ip',
       key: 'ip',
@@ -478,8 +484,6 @@ export default function SalesLeadsPage() {
       key: 'requirement',
       width: 200,
       ellipsis: true,
-      // 我的客资以协同加好友为主，客户需求挪到详情查看
-      hidden: true,
       render: (_v, lead) => lead.requirementNote || lead.note || '-',
     },
     {
