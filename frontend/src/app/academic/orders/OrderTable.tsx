@@ -205,6 +205,8 @@ export function OrderTable({
     setUpdatingId(id);
     try {
       await createOrderFollowRecord(id, { nodeType: '已接收', content: '教务领取订单' });
+      // 领取后显式把订单状态改为进行中，确保列表刷新后不再显示为待领取
+      await updateOrder(id, { order_status: 'in_progress' });
       message.success('订单已领取');
       await loadOrders();
     } catch (err) {
