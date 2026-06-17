@@ -62,6 +62,7 @@ interface LeadFilterOptions {
   status?: string;
   addStatus?: string;
   processStatus?: string;
+  intentionLevel?: string;
   search?: string;
   from?: string;
   to?: string;
@@ -539,6 +540,7 @@ export class LeadsService {
     if (filters.status) qb.andWhere('l.status = :status', { status: filters.status });
     if (filters.addStatus) qb.andWhere('l.add_status = :addStatus', { addStatus: filters.addStatus });
     if (filters.processStatus) qb.andWhere('l.process_status = :processStatus', { processStatus: filters.processStatus });
+    if (filters.intentionLevel) qb.andWhere('l.intention_level = :intentionLevel', { intentionLevel: filters.intentionLevel });
     // BUG-2: 新增筛选条件
     if (filters.assignedSalesUserId) qb.andWhere('l.assigned_sales_user_id = :assignedSalesUserId', { assignedSalesUserId: filters.assignedSalesUserId });
     if (filters.postId) {
