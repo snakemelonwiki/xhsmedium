@@ -15,6 +15,17 @@ import { randomUUID } from 'crypto';
 const sessions = new Map<string, any>();
 
 /**
+ * refresh 失败的细分原因。前端日志据此分类是哪种登录失效，便于定位
+ * "大量 toast 雪崩"问题的真正诱因（撤销 / 签名失效 / 过期 / 停用 等）。
+ */
+export type AuthExpiredReason =
+  | 'token_revoked' // token 已加入撤销表（同设备登出 / 异地登录把这边踢了）
+  | 'invalid_signature' // JWT 验签失败（多见于 JWT_SECRET 变化、部署 / 环境切换）
+  | 'token_expired' // 自然过期且无法解出 payload（保留位）
+  | 'invalid_payload' // payload 缺 sub 等关键字段
+  | 'user_inactive'; // 账号被停用 / 已删除
+
+/**
  * 连续登录失败次数达到该阈值时，自动将账号 status 设为 'locked'。
  * 锁定的账号可由 admin/owner 在主管端解锁（POST /api/users/staff-unlock 等）。
  *
@@ -215,9 +226,20 @@ export class AuthService {
    * 根据当前有效 JWT 重新签发长会话 token，并返回最新用户信息。
    */
   async refreshToken(token: string): Promise<any> {
+    // refresh 失败时，把"为何 401"用 reason 字段透出来，便于前端日志定位是
+    // 哪一类登录失效（被撤销 / 签名失效 / 自然过期 / 账号停用 / payload 不合法）。
+    // 文案统一保留 message: '登录已失效，请重新登录'，前端按 reason 走分支即可。
+    const reject = (reason: AuthExpiredReason): never => {
+      this.logger.warn(`[refreshToken] rejected: reason=${reason}`);
+      throw new UnauthorizedException({
+        message: '登录已失效，请重新登录',
+        reason,
+      });
+    };
+
     // 检查 token 是否已被撤销（防止已登出的旧 token 被 refresh 后用于新登录用户）
     if (await this.isTokenRevoked(token)) {
-      throw new UnauthorizedException({ message: '登录已失效，请重新登录' });
+      reject('token_revoked');
     }
 
     let payload: any;
@@ -228,20 +250,21 @@ export class AuthService {
         try {
           payload = this.jwtService.verify(token, { ignoreExpiration: true });
         } catch {
-          throw new UnauthorizedException({ message: '登录已失效，请重新登录' });
+          // 签名或结构校验都过不了 —— 通常是 JWT_SECRET 变化（部署 / 环境切换）
+          reject('invalid_signature');
         }
       } else {
-        throw new UnauthorizedException({ message: '登录已失效，请重新登录' });
+        reject('invalid_signature');
       }
     }
 
     if (!payload?.sub) {
-      throw new UnauthorizedException({ message: '登录已失效，请重新登录' });
+      reject('invalid_payload');
     }
 
     const user = await this.userRepository.findOne({ where: { id: payload.sub } });
     if (!user || user.status !== 'active') {
-      throw new UnauthorizedException({ message: '登录已失效，请重新登录' });
+      reject('user_inactive');
     }
 
     const employee = user.employeeId

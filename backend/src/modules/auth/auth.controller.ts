@@ -1,6 +1,7 @@
-import { Controller, Post, Get, Req, Res, HttpStatus } from '@nestjs/common';
+import { Body, Controller, Post, Get, Req, Res, HttpStatus, Logger } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { AuthService } from './auth.service';
+import { Public } from '../../common/auth.guard';
 import { OperationLogsService } from '../operation-logs/operation-logs.service';
 import { getSessionUserId } from '../../common/session.utils';
 import {
@@ -12,6 +13,17 @@ import {
 
 @Controller('auth')
 export class AuthController {
+  private readonly logger = new Logger('AuthExpiredTelemetry');
+
+  /**
+   * 简单 IP 级节流：同 IP 同 reason 在窗口内最多打一条日志，
+   * 防止"全员雪崩"时把 pm2 日志冲掉，也避免被恶意客户端刷 log 卷盘。
+   *   key   = `${ip}|${reason}`
+   *   value = 上次打印时间戳（ms）
+   */
+  private static readonly EXPIRED_LOG_THROTTLE_MS = 5_000;
+  private static readonly expiredLogLastSeen = new Map<string, number>();
+
   constructor(
     private readonly authService: AuthService,
     private readonly operationLogs: OperationLogsService,
@@ -107,5 +119,70 @@ export class AuthController {
         console.error('[auth] operation log failed', logErr?.message || logErr);
       });
     return res.json({ ok: true, revoked });
+  }
+
+  /**
+   * 前端「登录已失效」遥测上报（Public 路由，**不需要登录**，因为此刻 token 已失效）。
+   *
+   * 设计目的：把浏览器侧 `console.warn('[auth] 登录已失效')` 的内容回流到 NestJS Logger，
+   * 这样运维只看 `pm2 logs lan-backend` 就能掌握全量"被踢"事件分布，不用挨个让用户截图 DevTools。
+   *
+   * 可观测字段：
+   *   - reason: 后端 refreshToken 透出的失败原因（token_revoked / invalid_signature / ...）
+   *   - userId: localStorage 里登出前缓存的用户 id（best-effort，可能为空）
+   *   - role:   登出前缓存的角色（便于按角色聚合分布）
+   *   - route:  用户当时停留的前端路由（pathname），定位"哪个页面踩到的"
+   *   - ua:     浏览器 UA（区分 Mobile / 旧 Chrome 之类的环境因素）
+   *   - ip:     从 X-Forwarded-For / req.ip 解析（Nginx 透传）
+   *
+   * 防滥用：同 IP 同 reason 在 5s 内只打 1 条日志（避免雪崩刷盘）。
+   * 安全约束：所有字段做长度截断 + 类型保护，绝不直接信任客户端输入。
+   */
+  @Post('expired-event')
+  @Public()
+  async reportExpiredEvent(
+    @Body() body: { reason?: unknown; userId?: unknown; role?: unknown; route?: unknown },
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    const truncate = (raw: unknown, max: number): string => {
+      if (raw === undefined || raw === null) return '';
+      const s = typeof raw === 'string' ? raw : String(raw);
+      // 同时把不可见控制字符干掉，避免日志被恶意改色 / 改行
+      const sanitized = s.replace(/[\x00-\x1f\x7f]/g, '?');
+      return sanitized.length > max ? `${sanitized.slice(0, max)}…` : sanitized;
+    };
+
+    const ip = parseIp(req) || '0.0.0.0';
+    const reason = truncate(body?.reason, 32) || 'unknown';
+    const userId = truncate(body?.userId, 64);
+    const role = truncate(body?.role, 16);
+    const route = truncate(body?.route, 200);
+    const ua = truncate(req.headers['user-agent'], 200);
+
+    // 节流：同 IP 同 reason 在窗口内只放行一条
+    const throttleKey = `${ip}|${reason}`;
+    const now = Date.now();
+    const last = AuthController.expiredLogLastSeen.get(throttleKey) || 0;
+    if (now - last < AuthController.EXPIRED_LOG_THROTTLE_MS) {
+      // 不打日志但仍返回 204（避免客户端重试）
+      return res.status(HttpStatus.NO_CONTENT).end();
+    }
+    AuthController.expiredLogLastSeen.set(throttleKey, now);
+
+    // 顺手清理过期 key，避免 Map 无限膨胀（廉价 O(n)，n 一般 <几百）
+    if (AuthController.expiredLogLastSeen.size > 500) {
+      for (const [k, t] of AuthController.expiredLogLastSeen) {
+        if (now - t > AuthController.EXPIRED_LOG_THROTTLE_MS * 4) {
+          AuthController.expiredLogLastSeen.delete(k);
+        }
+      }
+    }
+
+    this.logger.warn(
+      `[client:expired] reason=${reason} userId=${userId || '-'} role=${role || '-'} ip=${ip} route=${route || '-'} ua="${ua}"`,
+    );
+
+    return res.status(HttpStatus.NO_CONTENT).end();
   }
 }

@@ -2,10 +2,35 @@ import type { PagedResult, PageQuery } from '@/shared/types/pagination';
 import { notifyAuthChanged, readTokenUserId, STORAGE_KEYS, type AppUser } from '@/shared/auth/auth';
 
 export class AuthExpiredError extends Error {
-  constructor(message = '登录已失效，请重新登录') {
+  /**
+   * 后端 refresh 失败时透出的细分原因（token_revoked / invalid_signature /
+   * user_inactive 等），便于排查"登录已失效 toast 雪崩"是哪一类源头。
+   */
+  reason?: string;
+  /**
+   * 标记本错误已经在 apiClient 层做过统一 toast；调用方在 catch 里
+   * **不要** 再调 `message.error(err.message)`，避免叠 N 条 toast。
+   */
+  readonly silent = true;
+
+  constructor(message = '登录已失效，请重新登录', reason?: string) {
     super(message);
     this.name = 'AuthExpiredError';
+    this.reason = reason;
   }
+}
+
+/**
+ * 调用方判断"是不是登录失效错误"的统一入口。
+ * 之所以单独导出而不是直接 `err instanceof AuthExpiredError`：
+ * 跨 chunk / 跨 hot-reload 时 instanceof 偶尔会失效，name 比较更稳。
+ */
+export function isAuthExpiredError(err: unknown): err is AuthExpiredError {
+  return Boolean(
+    err &&
+      (err instanceof AuthExpiredError ||
+        (typeof err === 'object' && (err as { name?: string }).name === 'AuthExpiredError')),
+  );
 }
 
 export interface ApiClientOptions {
@@ -166,11 +191,27 @@ export function createApiClient(options: ApiClientOptions = {}) {
       if (refreshed.ok) {
         return refreshed.payload as T;
       }
+      // 把 refresh 失败时后端返回的 reason 一并广播出去：
+      //   1) AntdProvider 据此弹"单条"去重 toast（key='auth-expired'）
+      //   2) NotificationContext 据此立即停掉 60s 兜底轮询，避免雪崩
+      //   3) 业务页面调用方用 isAuthExpiredError(err) 跳过自己的 message.error
+      // 同时**在 clearToken 把 localStorage 抹掉之前**先快照 userId/role，
+      // 让 AntdProvider 远程上报时还能带上身份维度。
+      const reason = refreshed.reason;
+      const snapshot = getStoredUser();
       clearToken();
       if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('auth:expired'));
+        window.dispatchEvent(
+          new CustomEvent('auth:expired', {
+            detail: {
+              reason,
+              userId: snapshot?.id ? String(snapshot.id) : undefined,
+              role: snapshot?.role ? String(snapshot.role) : undefined,
+            },
+          }),
+        );
       }
-      throw new AuthExpiredError();
+      throw new AuthExpiredError(undefined, reason);
     }
 
     const payload = await parseResponse(response);
@@ -218,17 +259,24 @@ export function createApiClient(options: ApiClientOptions = {}) {
  * 注意：refresh 失败时**不**在这里 clearToken；由调用方决定（避免把"已登出"和"网络抖
  * 动导致 refresh 失败"混为一谈，让用户在 dashboard 看到友好提示）。
  */
-let inFlightRefresh: Promise<boolean> | null = null;
+let inFlightRefresh: Promise<RefreshOutcome> | null = null;
 
-async function tryRefreshAndRetry(retry: () => Promise<Response>): Promise<{ ok: true; payload: unknown } | { ok: false }> {
+/**
+ * /auth/refresh 调用结果。reason 仅在失败时由后端透出，便于前端日志归类。
+ */
+type RefreshOutcome = { ok: true } | { ok: false; reason?: string };
+
+async function tryRefreshAndRetry(
+  retry: () => Promise<Response>,
+): Promise<{ ok: true; payload: unknown } | { ok: false; reason?: string }> {
   try {
     if (!inFlightRefresh) {
       inFlightRefresh = doRefresh();
     }
     const refreshed = await inFlightRefresh;
-    if (!refreshed) return { ok: false };
+    if (!refreshed.ok) return { ok: false, reason: refreshed.reason };
     const replay = await retry();
-    if (replay.status === 401) return { ok: false };
+    if (replay.status === 401) return { ok: false, reason: 'replay_401' };
     const payload = await parseResponse(replay);
     if (!replay.ok) {
       // 续签后重放仍非 2xx：当成"业务错误"抛出去，让调用方处理
@@ -247,25 +295,37 @@ async function tryRefreshAndRetry(retry: () => Promise<Response>): Promise<{ ok:
   }
 }
 
-async function doRefresh(): Promise<boolean> {
+async function doRefresh(): Promise<RefreshOutcome> {
   const token = defaultGetToken();
-  if (!token) return false;
+  if (!token) return { ok: false, reason: 'no_token' };
   // 如果在 refresh 过程中 token 已经被清除了（例如 logout 后切换账号），
   // 立即返回 false，避免用旧 token refresh 成功后再写回 localStorage
-  if (authClearedController?.signal.aborted) return false;
+  if (authClearedController?.signal.aborted) return { ok: false, reason: 'aborted' };
   try {
     const resp = await fetch('/api/auth/refresh', {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}` },
     });
-    if (!resp.ok) return false;
+    if (!resp.ok) {
+      // 把后端 reason 透传出去（auth.service.ts:refreshToken 会带 reason 字段）
+      let reason: string | undefined;
+      try {
+        const data = (await parseResponse(resp)) as { reason?: string } | null;
+        if (data && typeof (data as any).reason === 'string') {
+          reason = (data as any).reason as string;
+        }
+      } catch {
+        /* ignore parse error */
+      }
+      return { ok: false, reason: reason || `http_${resp.status}` };
+    }
     const data = (await parseResponse(resp)) as { token?: string } | null;
     const newToken = data && typeof data === 'object' ? (data as any).token : null;
-    if (typeof newToken !== 'string' || !newToken) return false;
+    if (typeof newToken !== 'string' || !newToken) return { ok: false, reason: 'no_new_token' };
     persistRefreshedToken(newToken);
-    return true;
+    return { ok: true };
   } catch {
-    return false;
+    return { ok: false, reason: 'network_error' };
   } finally {
     // 让下一次 401 重新发起 refresh
     queueMicrotask(() => {

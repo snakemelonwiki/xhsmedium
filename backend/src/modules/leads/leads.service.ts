@@ -183,6 +183,24 @@ export class LeadsService {
     return user?.id || null;
   }
 
+  /**
+   * 平台英文代码 → 中文展示名映射。
+   * 用于通知弹窗等用户可见的场景，提升可读性。
+   */
+  private getPlatformLabel(platform: string | null | undefined): string {
+    if (!platform) return '';
+    const normalized = String(platform).toLowerCase().trim();
+    const map: Record<string, string> = {
+      xiaohongshu: '小红书',
+      douyin: '抖音',
+      xhs: '小红书',
+      dy: '抖音',
+      '小红书': '小红书',
+      '抖音': '抖音',
+    };
+    return map[normalized] || platform;
+  }
+
   async findAll(): Promise<any[]> {
     const rows = await this.leadRepository.find({ order: { createdAt: 'DESC' } });
     return this.mapLeads(rows);
@@ -642,20 +660,20 @@ export class LeadsService {
     // §11.1 lead_assigned: 客资被直接分配给销售时通知销售。
     if (dto.assignedSalesUserId) {
       const customerName = dto.nickname || dto.contactInfo || '未知客户';
-      // 构造来源信息：优先用作品名，其次账号名
-      const sourceInfo = [
-        dto.postId ? `作品ID: ${dto.postId}` : null,
-        dto.accountId ? `账号ID: ${dto.accountId}` : null,
-        dto.platform ? `平台: ${dto.platform}` : null,
-        dto.ip ? `IP: ${dto.ip}` : null,
-      ].filter(Boolean).join(' | ');
+      const platformLabel = this.getPlatformLabel(dto.platform);
+      // 构造客资详情：平台（中文）、联系方式、需求备注
+      const details: string[] = [];
+      if (platformLabel) details.push(`平台：${platformLabel}`);
+      if (dto.contactInfo) details.push(`联系方式：${dto.contactInfo}`);
+      if (dto.requirementNote) details.push(`需求备注：${dto.requirementNote}`);
+      const content = details.length > 0 ? details.join('\n') : `客资 ${customerName} 已分配给您，请尽快跟进`;
       await this.notificationsService.create({
         receiverIds: [dto.assignedSalesUserId],
         senderId: null,
         portType: 'sales',
         typeCode: NOTIFICATION_TYPES.LEAD_ASSIGNED,
         title: `新分配客资: ${customerName}`,
-        content: sourceInfo || `客资 ${customerName} 已分配给您，请尽快跟进`,
+        content,
         relatedId: leadId,
         relatedType: 'lead',
       });
