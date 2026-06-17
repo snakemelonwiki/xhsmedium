@@ -117,6 +117,60 @@ export class OrdersController {
     }
   }
 
+  @Post('academic/orders')
+  async createAcademicOrder(
+    @Body() body: any,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    const session = (req as any).session;
+    const role = session?.role || '';
+    const userId = getSessionUserId(req) || '';
+    if (!ACADEMIC_DELIVERY_ROLES.includes(role)) {
+      return res.status(403).json({ ok: false, message: '当前角色不允许直接创建订单' });
+    }
+    if (!userId) {
+      return res.status(401).json({ ok: false, message: 'unauthenticated' });
+    }
+    try {
+      const result = await this.ordersService.createAcademicOrder(userId, {
+        serviceType: body?.serviceType ?? null,
+        productType: body?.productType ?? null,
+        guaranteeType: body?.guaranteeType ?? null,
+        amount: body?.amount ?? null,
+        paidStatus: body?.paidStatus ?? null,
+        paymentStage: body?.paymentStage ?? null,
+        clientPaid: body?.clientPaid ?? body?.customerPaid ?? null,
+        customerName: body?.customerName ?? null,
+        educationLevel: body?.educationLevel ?? null,
+        major: body?.major ?? null,
+        area: body?.area ?? null,
+        articlePurpose: body?.articlePurpose ?? null,
+        salesContact: body?.salesContact ?? null,
+        deliveryRequirement: body?.deliveryRequirement ?? null,
+        remark: body?.remark ?? null,
+      });
+      await this.logSafe({
+        userId,
+        action: OPERATION_LOG_ACTIONS.CREATE,
+        targetType: OPERATION_LOG_TARGET_TYPES.ORDER,
+        targetId: result.orderId,
+        detail: {
+          from: 'academic.orders.create',
+          serviceType: body?.serviceType ?? null,
+          productType: body?.productType ?? null,
+          amount: body?.amount ?? null,
+          orderCode: result.orderCode,
+        },
+        req,
+      });
+      return res.json({ ok: true, orderId: result.orderId, orderCode: result.orderCode });
+    } catch (err: any) {
+      const status = err?.status || 422;
+      return res.status(status).json({ ok: false, message: err?.message || 'invalid' });
+    }
+  }
+
   /**
    * 教务端首页六宫格汇总。
    * 必须放在 `@Get('orders/:id')` 之前，避免 'academic' 被路由参数 :id 抢占。

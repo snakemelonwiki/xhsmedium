@@ -1,12 +1,12 @@
 'use client';
 
-import { DownloadOutlined, FilterOutlined, ReloadOutlined } from '@ant-design/icons';
-import { Alert, Button, Card, Drawer, Input, Modal, Pagination, Select, Space, Table, Tag, Typography, message } from 'antd';
+import { DownloadOutlined, FilterOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
+import { Alert, Button, Card, Drawer, Form, Input, InputNumber, Modal, Pagination, Select, Space, Table, Tag, Typography, message } from 'antd';
 import type { TableColumnsType } from 'antd';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
-import { createOrderFollowRecord, listOrders, remindSalesPayment, updateOrder } from '@/shared/api/orders';
+import { createAcademicOrder, createOrderFollowRecord, listOrders, remindSalesPayment, type AcademicCreateOrderPayload, updateOrder } from '@/shared/api/orders';
 import { updateLeadDealStatus } from '@/shared/api/leads';
 import { createExport, downloadExportUrl, getExport, type ExportFilter } from '@/shared/api/exports';
 import { readStoredUser } from '@/shared/auth/auth';
@@ -42,6 +42,40 @@ const orderStatusOptions: { label: string; value: OrderStatusCode }[] = [
   { label: '已完成', value: 'completed' },
   { label: '异常', value: 'abnormal' },
 ];
+
+const serviceTypeOptions = [
+  { label: '辅导', value: '辅导' },
+  { label: '全流程', value: '全流程' },
+  { label: '润色', value: '润色' },
+  { label: '返修', value: '返修' },
+  { label: '代投', value: '代投' },
+];
+
+const productTypeOptions = [
+  { label: '专利', value: '专利' },
+  { label: '期刊论文', value: '期刊论文' },
+  { label: '硕士毕业论文', value: '硕士毕业论文' },
+  { label: '博士毕业论文', value: '博士毕业论文' },
+  { label: '基金', value: '基金' },
+  { label: 'EI 会议', value: 'EI会议' },
+  { label: '普刊', value: '普刊' },
+  { label: '国际会议', value: '国际会议' },
+];
+
+const guaranteeTypeOptions = [
+  { label: '保录', value: '保录' },
+  { label: '保盲审', value: '保盲审' },
+  { label: '不保', value: '不保' },
+];
+
+const paymentStageOptions = [
+  { label: '已付定金', value: '已付定金' },
+  { label: '已付中期', value: '已付中期' },
+  { label: '已付尾款', value: '已付尾款' },
+  { label: '全款', value: '全款' },
+];
+
+type AcademicOrderFormValues = AcademicCreateOrderPayload;
 
 // 旧版 paidStatusMeta / orderStatusMeta 内联字典已删除，统一消费 shared/api/enums。
 // 选中后 v1.3 P0 修复才能在「销售端订单详情」和「教务端订单详情」一致显示中文。
@@ -119,6 +153,9 @@ export function OrderTable({
   const [remindingId, setRemindingId] = useState('');
   const [assigningOrder, setAssigningOrder] = useState<OrderItem>();
   const [assignAcademicUserId, setAssignAcademicUserId] = useState('');
+  const [createOrderOpen, setCreateOrderOpen] = useState(false);
+  const [createOrderSubmitting, setCreateOrderSubmitting] = useState(false);
+  const [createOrderForm] = Form.useForm<AcademicOrderFormValues>();
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const [exportSubmitting, setExportSubmitting] = useState(false);
   const [exportRange, setExportRange] = useState<DateRangeValue>(null);
@@ -126,6 +163,8 @@ export function OrderTable({
   const [exportPaidStatus, setExportPaidStatus] = useState<string>('');
   const isClaimPool = listMode === 'claimPool';
   const isFollowup = listMode === 'followup';
+
+  const exportingRef = useRef(false);
 
   const { isMobile } = useResponsiveBreakpoint();
   const [filterDrawerOpen, setFilterDrawerOpen] = useState(false);
@@ -245,8 +284,44 @@ export function OrderTable({
     setAssignAcademicUserId('');
   }
 
+  async function submitCreateOrder() {
+    if (createOrderSubmitting) return;
+    const values = await createOrderForm.validateFields().catch(() => null);
+    if (!values) return;
+    setCreateOrderSubmitting(true);
+    try {
+      const result = await createAcademicOrder({
+        serviceType: values.serviceType || null,
+        productType: values.productType || null,
+        guaranteeType: values.guaranteeType || null,
+        amount: values.amount != null ? values.amount : null,
+        paidStatus: values.paidStatus || null,
+        paymentStage: values.paymentStage || null,
+        clientPaid: values.clientPaid != null ? values.clientPaid : null,
+        customerName: values.customerName || null,
+        educationLevel: values.educationLevel || null,
+        major: values.major || null,
+        area: values.area || null,
+        articlePurpose: values.articlePurpose || null,
+        salesContact: values.salesContact || null,
+        deliveryRequirement: values.deliveryRequirement || null,
+        remark: values.remark || null,
+      });
+      message.success(`订单创建成功，编号：${result.orderCode || result.orderId}`);
+      setCreateOrderOpen(false);
+      createOrderForm.resetFields();
+      await loadOrders();
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '创建订单失败');
+    } finally {
+      setCreateOrderSubmitting(false);
+    }
+  }
+
   async function submitExportOrders() {
+    if (exportSubmitting) return;
     setExportSubmitting(true);
+    exportingRef.current = true;
     const hide = message.loading('正在生成导出文件...', 0);
     try {
       const filter: ExportFilter = {
@@ -263,7 +338,7 @@ export function OrderTable({
       // 轮询导出状态，最多等待30秒
       let attempts = 0;
       const maxAttempts = 30;
-      while (attempts < maxAttempts) {
+      while (attempts < maxAttempts && exportingRef.current) {
         await new Promise((resolve) => setTimeout(resolve, 1000));
         const exportTask = await getExport(result.id);
         if (exportTask.status === 'completed') {
@@ -290,13 +365,19 @@ export function OrderTable({
       message.error(err instanceof Error ? err.message : '导出任务创建失败');
     } finally {
       setExportSubmitting(false);
+      exportingRef.current = false;
     }
   }
 
   useEffect(() => {
     loadOrders(1, pageSize, statusFilter, handoverFilter, abnormalOnly);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scope, statusFilter, handoverFilter, abnormalOnly]);
+  }, [scope, statusFilter, handoverFilter, abnormalOnly, pageSize]);
+
+  useEffect(() => {
+    return () => {
+      exportingRef.current = false;
+    };
+  }, []);
 
   // 履约进度阶段名称映射（paperProgress 值 → 步骤标题）
   const PROGRESS_STEP_LABEL: Record<string, string> = {
@@ -527,6 +608,11 @@ export function OrderTable({
             </Button>
           ) : null}
           {toolbarExtra}
+          {(actionMode === 'academic' || actionMode === 'abnormal') && (
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOrderOpen(true)}>
+              新建订单
+            </Button>
+          )}
           <Button icon={<ReloadOutlined />} onClick={() => loadOrders()} loading={loading}>
             刷新
           </Button>
@@ -685,6 +771,133 @@ export function OrderTable({
             />
           </div>
         </Space>
+      </Modal>
+
+      {/* 教务端新建订单 */}
+      <Modal
+        title="新建订单"
+        open={createOrderOpen}
+        maskClosable={false}
+        onCancel={() => {
+          const values = createOrderForm.getFieldsValue();
+          const hasValues = Object.values(values).some((v) => v !== undefined && v !== null && v !== '');
+          if (hasValues) {
+            Modal.confirm({
+              title: '确认关闭',
+              content: '已填写的内容将不会保存，确定关闭吗？',
+              onOk: () => {
+                setCreateOrderOpen(false);
+                createOrderForm.resetFields();
+              },
+            });
+          } else {
+            setCreateOrderOpen(false);
+            createOrderForm.resetFields();
+          }
+        }}
+        onOk={submitCreateOrder}
+        confirmLoading={createOrderSubmitting}
+        width={720}
+        destroyOnClose
+        okText="创建订单"
+      >
+        <Form form={createOrderForm} layout="vertical" preserve={false}>
+          <Typography.Title level={5} style={{ marginTop: 0 }}>客户信息</Typography.Title>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 16px' }}>
+            <Form.Item name="customerName" label="客户姓名">
+              <Input placeholder="如：张三" />
+            </Form.Item>
+            <Form.Item name="educationLevel" label="学历">
+              <Select
+                allowClear
+                placeholder="选择学历"
+                options={[
+                  { label: '专科', value: '专科' },
+                  { label: '本科', value: '本科' },
+                  { label: '硕士', value: '硕士' },
+                  { label: '博士', value: '博士' },
+                  { label: '职称', value: '职称' },
+                ]}
+              />
+            </Form.Item>
+            <Form.Item name="major" label="专业方向">
+              <Input placeholder="如：计算机科学与技术" />
+            </Form.Item>
+            <Form.Item name="area" label="地区">
+              <Input placeholder="如：北京" />
+            </Form.Item>
+            <Form.Item name="articlePurpose" label="用途" className="full-row">
+              <Input placeholder="如：毕业、评职称、申博" />
+            </Form.Item>
+          </div>
+
+          <Typography.Title level={5}>订单信息</Typography.Title>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 16px' }}>
+            <Form.Item name="serviceType" label="服务类型">
+              <Select allowClear placeholder="选择服务类型" options={serviceTypeOptions} />
+            </Form.Item>
+            <Form.Item name="productType" label="产品类型">
+              <Select allowClear placeholder="选择产品类型" options={productTypeOptions} />
+            </Form.Item>
+            <Form.Item name="guaranteeType" label="保障类型">
+              <Select allowClear placeholder="选择保障类型" options={guaranteeTypeOptions} />
+            </Form.Item>
+          </div>
+
+          <Typography.Title level={5}>
+            付款信息
+            <Typography.Text type="danger" style={{ fontSize: 14, fontWeight: 400, marginLeft: 8 }}>* 必填</Typography.Text>
+          </Typography.Title>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 16px' }}>
+            <Form.Item
+              name="amount"
+              label="订单金额"
+              rules={[{ required: true, message: '请输入订单金额' }]}
+            >
+              <InputNumber style={{ width: '100%' }} min={0} precision={2} placeholder="0.00" prefix="¥" />
+            </Form.Item>
+            <Form.Item
+              name="clientPaid"
+              label="客户已付金额"
+              rules={[{ required: true, message: '请输入客户已付金额' }]}
+            >
+              <InputNumber style={{ width: '100%' }} min={0} precision={2} placeholder="0.00" prefix="¥" />
+            </Form.Item>
+            <Form.Item
+              name="paidStatus"
+              label="付款状态"
+              rules={[{ required: true, message: '请选择付款状态' }]}
+            >
+              <Select
+                placeholder="选择付款状态"
+                options={[
+                  { label: '已付定金', value: 'partial' },
+                  { label: '全款', value: 'paid' },
+                ]}
+              />
+            </Form.Item>
+            <Form.Item
+              name="paymentStage"
+              label="付款阶段"
+              rules={[{ required: true, message: '请选择付款阶段' }]}
+            >
+              <Select placeholder="选择付款阶段" options={paymentStageOptions} />
+            </Form.Item>
+          </div>
+
+          <Typography.Title level={5}>其他信息</Typography.Title>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 16px' }}>
+            <Form.Item name="salesContact" label="销售联系方式">
+              <Input placeholder="如：微信号/手机号" />
+            </Form.Item>
+            <Form.Item name="deliveryRequirement" label="交付要求">
+              <Input placeholder="如：1 个月内交付初稿" />
+            </Form.Item>
+            <Form.Item name="remark" label="备注" className="full-row">
+              <Input.TextArea rows={3} placeholder="其他需要说明的信息（如客资来源、特殊要求等）" />
+            </Form.Item>
+          </div>
+        </Form>
       </Modal>
     </Space>
   );

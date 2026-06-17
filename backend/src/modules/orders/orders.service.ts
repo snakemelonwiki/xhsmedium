@@ -90,6 +90,24 @@ interface CloseDealDto {
   expectedHandleTime?: string | Date | null;
 }
 
+interface AcademicCreateOrderDto {
+  serviceType?: string | null;
+  productType?: string | null;
+  guaranteeType?: string | null;
+  amount?: number | string | null;
+  paidStatus?: string | null;
+  paymentStage?: string | null;
+  clientPaid?: number | string | null;
+  customerName?: string | null;
+  educationLevel?: string | null;
+  major?: string | null;
+  area?: string | null;
+  articlePurpose?: string | null;
+  salesContact?: string | null;
+  deliveryRequirement?: string | null;
+  remark?: string | null;
+}
+
 interface ListOrdersOptions {
   role?: string;
   status?: string;
@@ -318,6 +336,102 @@ export class OrdersService {
       // eslint-disable-next-line no-console
       console.error('[orders] notify deal closed failed', err?.message || err);
     }
+
+    return { orderId, orderCode, orderFinanceId };
+  }
+
+  async createAcademicOrder(
+    academicUserId: string,
+    dto: AcademicCreateOrderDto,
+  ): Promise<{ orderId: string; orderCode: string | null; orderFinanceId: string }> {
+    if (!academicUserId) {
+      throw new BadRequestException('academic user required');
+    }
+    const amountNum = this.resolveRequiredAmount(dto.amount);
+    const paidStatus = this.normalizeRequiredPaidStatus(dto.paidStatus);
+    const paymentStage = this.normalizeRequiredPaymentStage(dto.paymentStage);
+    const clientPaid = this.normalizePositiveMoney(dto.clientPaid);
+    if (clientPaid === null) {
+      throw new BadRequestException('付款金额必填且必须大于0');
+    }
+    const orderId = makeId();
+    const orderFinanceId = makeId();
+    let orderCode: string | null = null;
+    const amountStr = amountNum.toFixed(2);
+    const clientPending = this.computePending(amountStr, clientPaid) || '0.00';
+    const mergedServiceType = dto.serviceType || (dto.productType ? String(dto.productType) : null) || null;
+    const remark = this.composeRemark({ ...dto, clientRequirementNote: dto.deliveryRequirement }, undefined);
+
+    await this.dataSource.transaction(async (manager) => {
+      orderCode = await this.generateOrderCode(manager, {
+        productType: dto.productType,
+        serviceType: dto.serviceType,
+        major: dto.major,
+      });
+      await manager.query(
+        `INSERT INTO orders
+         (id, lead_id, sales_user_id, academic_user_id, service_type, amount,
+          paid_status, order_status, handover_status, remark, order_code,
+          product_type, guarantee_type, payment_stage, customer_name,
+          education_level, major, area, article_purpose, sales_contact,
+          created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+        [
+          orderId,
+          null,
+          null,
+          academicUserId,
+          mergedServiceType,
+          amountStr,
+          paidStatus,
+          'to_receive',
+          'accepted',
+          remark,
+          orderCode,
+          dto.productType || null,
+          dto.guaranteeType || null,
+          paymentStage,
+          dto.customerName || null,
+          dto.educationLevel || null,
+          dto.major || null,
+          dto.area || null,
+          dto.articlePurpose || null,
+          dto.salesContact || null,
+        ],
+      );
+
+      await manager.query(
+        `INSERT INTO order_finance
+         (id, order_id, order_amount, client_paid, client_pending,
+          teacher_price, teacher_paid, teacher_pending, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+        [
+          orderFinanceId,
+          orderId,
+          amountStr,
+          clientPaid,
+          clientPending,
+          null,
+          null,
+          null,
+        ],
+      );
+
+      const followId = makeId();
+      await manager.query(
+        `INSERT INTO order_follow_records
+         (id, order_id, user_id, node_type, content, next_remind_at, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+        [
+          followId,
+          orderId,
+          academicUserId,
+          '教务建单',
+          `教务直接创建订单${orderCode ? `（订单编号 ${orderCode}）` : ''}`,
+          null,
+        ],
+      );
+    });
 
     return { orderId, orderCode, orderFinanceId };
   }

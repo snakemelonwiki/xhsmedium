@@ -380,6 +380,28 @@ export async function listOrderFollowRecords(id: string): Promise<OrderFollowRec
   return normalizePagedResult<RawRecord>(payload).items.map(mapOrderFollowRecord);
 }
 
+export type AcademicCreateOrderPayload = {
+  serviceType?: string | null;
+  productType?: string | null;
+  guaranteeType?: string | null;
+  amount?: number | string | null;
+  paidStatus?: string | null;
+  paymentStage?: string | null;
+  clientPaid?: number | string | null;
+  customerName?: string | null;
+  educationLevel?: string | null;
+  major?: string | null;
+  area?: string | null;
+  articlePurpose?: string | null;
+  salesContact?: string | null;
+  deliveryRequirement?: string | null;
+  remark?: string | null;
+};
+
+export async function createAcademicOrder(body: AcademicCreateOrderPayload) {
+  return apiClient.post<{ ok: boolean; orderId: string; orderCode: string | null }>(`/academic/orders`, body);
+}
+
 export async function updateOrder(id: string, body: Record<string, unknown>) {
   return apiClient.patch(`/orders/${id}`, body);
 }
