@@ -30,6 +30,15 @@ const ALLOWED_EXT = new Set([
   '.doc', '.docx', '.xls', '.xlsx', '.pdf',
 ]);
 
+function decodeUploadFilename(raw: string): string {
+  if (!raw) return raw;
+  try {
+    return Buffer.from(raw, 'latin1').toString('utf8');
+  } catch {
+    return raw;
+  }
+}
+
 function mediaMimeOnly(_req: any, file: UploadedMulterFile, cb: (err: any, ok?: boolean) => void) {
   const mime = String(file.mimetype || '').toLowerCase();
   const ext = path.extname(file.originalname || '').toLowerCase();
@@ -82,7 +91,7 @@ export class UploadsController {
       bucket: targetBucket,
       storage: this.storageService.resolveEffectiveDriver({ driverOverride }),
       fileType: file.mimetype,
-      originalName: file.originalname,
+      originalName: decodeUploadFilename(file.originalname),
       size: file.size,
     };
   }

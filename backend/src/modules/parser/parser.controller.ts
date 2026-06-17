@@ -25,6 +25,15 @@ const HTTP_CODE_FOR_CODE: Record<string, number> = {
   exhausted: 502,
 };
 
+function decodeUploadFilename(raw: string): string {
+  if (!raw) return raw;
+  try {
+    return Buffer.from(raw, 'latin1').toString('utf8');
+  } catch {
+    return raw;
+  }
+}
+
 /**
  * 通用帖子解析端点
  *   POST /api/parser/parse
@@ -132,7 +141,7 @@ export class ParserController {
     try {
       const result = await this.parserService.parseImage({
         buffer: file.buffer,
-        originalname: file.originalname,
+        originalname: decodeUploadFilename(file.originalname),
         mimetype: file.mimetype,
         size: file.size,
       });
