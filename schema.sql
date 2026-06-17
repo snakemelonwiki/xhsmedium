@@ -381,8 +381,8 @@ CREATE TABLE IF NOT EXISTS collaboration_tasks (
 -- ============================================================
 CREATE TABLE IF NOT EXISTS orders (
   id                       VARCHAR(64)  PRIMARY KEY,
-  lead_id                  VARCHAR(64)  NOT NULL COMMENT '关联客资ID',
-  sales_user_id            VARCHAR(64)  NOT NULL COMMENT '销售用户ID',
+  lead_id                  VARCHAR(64)  NULL COMMENT '关联客资ID（教务直建订单可为空）',
+  sales_user_id            VARCHAR(64)  NULL COMMENT '销售用户ID（教务直建订单可为空）',
   academic_user_id         VARCHAR(64)  NULL COMMENT '教务用户ID',
   service_type             VARCHAR(64)  NULL COMMENT '服务类型',
   -- v1.3 增量（M28 / SA-8 成交录入 + AC-1 教务端我的成交）

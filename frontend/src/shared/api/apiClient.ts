@@ -167,6 +167,9 @@ export function createApiClient(options: ApiClientOptions = {}) {
         return refreshed.payload as T;
       }
       clearToken();
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('auth:expired'));
+      }
       throw new AuthExpiredError();
     }
 

@@ -22,6 +22,7 @@ interface BoardPatchDto {
   addStatus?: string;
   intention?: string | null;
   intentionLevel?: string;
+  invalidReason?: string | null;
   nextFollowTime?: string | Date | null;
   followNote?: string;
   followType?: string;
@@ -739,6 +740,7 @@ export class LeadsService {
     if (normalized.addStatus !== undefined) next.addStatus = normalized.addStatus || 'not_added';
     if (dto.intention !== undefined) next.intention = dto.intention || null;
     if (dto.intentionLevel !== undefined) next.intentionLevel = dto.intentionLevel || 'pending';
+    if (dto.invalidReason !== undefined) next.invalidReason = dto.invalidReason || null;
     if (dto.nextFollowTime !== undefined) {
       next.nextFollowTime = dto.nextFollowTime ? new Date(dto.nextFollowTime) : null;
     }

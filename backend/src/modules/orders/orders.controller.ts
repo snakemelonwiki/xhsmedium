@@ -16,6 +16,7 @@ import {
 } from '../../shared/operation-logs.constants';
 
 const ACADEMIC_DELIVERY_ROLES = ['admin', 'owner', 'supervisor', 'academic', 'academic_supervisor'];
+const ALLOWED_CLOSE_DEAL_ROLES = ['sales', 'admin', 'supervisor', 'owner'];
 
 @Controller()
 @UseGuards(AuthGuard)
@@ -70,6 +71,10 @@ export class OrdersController {
     @Res() res: Response,
   ) {
     const session = (req as any).session;
+    const role = session?.role || '';
+    if (!ALLOWED_CLOSE_DEAL_ROLES.includes(role)) {
+      return res.status(403).json({ ok: false, message: '无权操作：仅销售/主管/管理员可关闭客资' });
+    }
     const salesUserId = getSessionUserId(req) || body?.salesUserId || '';
     if (!salesUserId) {
       return res.status(401).json({ ok: false, message: 'unauthenticated' });
@@ -522,10 +527,18 @@ export class OrdersController {
   @Get('orders/:id/follow-records')
   async listFollowRecords(
     @Param('id') id: string,
+    @Req() req: Request,
     @Res() res: Response,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
   ) {
+    const session = (req as any).session;
+    const userId = getSessionUserId(req) || '';
+    const role = session?.role || '';
+    const canAccess = await this.ordersService.canAccessOrder(id, { userId, role });
+    if (!canAccess) {
+      return res.status(404).json({ ok: false, message: 'not found' });
+    }
     // §9 / AC-10.2 跟进记录天然分页，直接返回 { items, total, limit, offset } 对象。
     const result = await this.ordersService.listFollowRecords(
       id,
@@ -544,7 +557,18 @@ export class OrdersController {
   // =====================================================================
 
   @Get('orders/:id/handover')
-  async getHandover(@Param('id') id: string, @Res() res: Response) {
+  async getHandover(
+    @Param('id') id: string,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    const session = (req as any).session;
+    const userId = getSessionUserId(req) || '';
+    const role = session?.role || '';
+    const canAccess = await this.ordersService.canAccessOrder(id, { userId, role });
+    if (!canAccess) {
+      return res.status(404).json({ ok: false, message: 'not found' });
+    }
     try {
       const data = await this.ordersService.getHandoverStatus(id);
       return res.json({ ok: true, ...data });

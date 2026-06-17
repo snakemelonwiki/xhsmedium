@@ -185,20 +185,7 @@ export class OrdersService {
     if (!salesUserId) {
       throw new BadRequestException('sales user required');
     }
-    // v1.3 / BF-09 close-deal-amount: 订单金额必填且 > 0。
-    // 老接口允许 amount 为 null / 0，导致成交订单无金额（财务对账、补单均受影响）。
-    // 强校验：缺失、null、空字符串、0、负数 一律拒绝。
-    const rawAmount = dto.amount;
-    let amountNum: number | null = null;
-    if (rawAmount !== undefined && rawAmount !== null && rawAmount !== '') {
-      const parsed = typeof rawAmount === 'number' ? rawAmount : Number(rawAmount);
-      if (Number.isFinite(parsed) && parsed > 0) {
-        amountNum = parsed;
-      }
-    }
-    if (amountNum === null) {
-      throw new BadRequestException('订单金额必填且必须大于0');
-    }
+    const amountNum = this.resolveRequiredAmount(dto.amount);
     const paidStatus = this.normalizeRequiredPaidStatus(dto.paidStatus);
     const paymentStage = this.normalizeRequiredPaymentStage(dto.paymentStage);
     const clientPaid = this.normalizePositiveMoney(dto.clientPaid);
@@ -215,32 +202,21 @@ export class OrdersService {
       if (!lead) {
         throw new NotFoundException('lead not found');
       }
+      if (!lead.assignedSalesUserId || lead.assignedSalesUserId !== salesUserId) {
+        throw new ForbiddenException('无权关闭该客资');
+      }
       leadContact = lead.contactInfo || '';
       const pricing = await this.resolveLeadOrderPricing(manager, lead, amountNum);
-      // 在同一事务内生成订单编号，沿用既有顺序号来源与行锁机制，只调整展示规则。
-      // 必须在 INSERT Order 之前完成，避免并发时序号重复。
       generatedOrderCode = await this.generateOrderCode(manager, {
         productType: dto.productType,
         serviceType: dto.serviceType,
         major: lead.clientMajorResearch || lead.majorContent || null,
       });
       orderCode = generatedOrderCode;
-      // v1.3 / SA-8: 销售成交的 serviceType 字段可以同时承载"产品类型"语义,
-      // 但前端会把产品类型/服务类型分开传。后端保持 serviceType 字段为原"服务类型",
-      // 新加的"产品类型/保障类型/付款阶段"等放到 remark / order_finance 阶段备注中。
       const mergedServiceType = dto.serviceType
         || (dto.productType ? String(dto.productType) : null)
         || null;
-      // BF-09b 修复 (2026-06-04) — 改用 raw SQL 替代 manager.insert() / manager.update():
-      //   TypeORM 1.0 在 InsertQueryBuilder/UpdateQueryBuilder 的 `addFrom` 路径里会
-      //   把 entity class 当作 entityTarget 传入 `entityOrProperty(this.subQuery())`。
-      //   entityTarget 是 ES6 class 时,无 new 调用抛 "Class constructor X cannot be
-      //   invoked without 'new'"。本补丁虽在 main.ts 加了 addFrom monkey-patch 绕开
-      //   hasMetadata 检查,但 entity class 与 metadata 注册顺序在 NestJS 异步初始化
-      //   下不稳定,仍可能漏判。raw SQL 100% 绕开 TypeORM 1.0 这条 bug 路径,且语义
-      //   与 insert/update 等价（带参数化,无 SQL 注入风险）。
       const remark = this.composeRemark(dto, pricing);
-      // 上面已经校验 amountNum > 0；统一以 string 形式落库。
       const amountStr = pricing.finalAmount;
       const clientPending = this.computePending(amountStr, clientPaid) || '0.00';
       const customerName = lead.nickname || lead.contactInfo || null;
@@ -286,7 +262,6 @@ export class OrdersService {
         ],
       );
 
-      // v1.3 / SA-9: 创建 order_finance(订单额/已付/待付 = 订单额 - 已付 = 订单额)。
       await manager.query(
         `INSERT INTO order_finance
          (id, order_id, order_amount, client_paid, client_pending,
@@ -304,7 +279,6 @@ export class OrdersService {
         ],
       );
 
-      // v1.3 / SA-9: 落首条 order_follow_records(销售成交记录)。
       const followContent = this.composeFollowContent(dto, generatedOrderCode, pricing);
       const followId = makeId();
       await manager.query(
@@ -322,19 +296,7 @@ export class OrdersService {
       );
     });
 
-    // §11.1 deal_closed: 通知教务 / 主管。
-    // 简化版：通知所有 academic / admin / owner 角色的用户。
-    //
-    // BF-09b 修复 (2026-06-04) — 避免 TypeORM 1.0 `this.subQuery is not a function`：
-    //   原写法 `.where('user.role IN (:...roles)', { roles: [...] })` 在 TypeORM 1.0 下
-    //   会被当成子查询构造器并调用 `this.subQuery()`，新版本该方法签名变更而抛错。
-    //   即便改成 `In([...])`，`createQueryBuilder().where({...}).getMany()` 仍会在
-    //   `addFrom` 解析时触发 `entityTarget(this.subQuery())`(QueryBuilder.js:440)，
-    //   报错依旧。最稳的绕过方式：走 `Repository.find({ where })` 不创建 QueryBuilder，
-    //   完全避开 subQuery 解析路径。
     try {
-      // 走原始 SQL 绕开 TypeORM 1.0 `this.subQuery is not a function`（Repository.find
-      // 内部 createQueryBuilder + applyFindOptions 仍会触发 subQuery 解析路径）。
       const rawReceivers: Array<{ id: string }> = await this.dataSource.query(
         `SELECT id FROM users WHERE role IN (?, ?, ?)`,
         ['academic', 'admin', 'owner'],
@@ -358,6 +320,16 @@ export class OrdersService {
     }
 
     return { orderId, orderCode, orderFinanceId };
+  }
+
+  private resolveRequiredAmount(rawAmount: number | string | null | undefined): number {
+    if (rawAmount !== undefined && rawAmount !== null && rawAmount !== '') {
+      const parsed = typeof rawAmount === 'number' ? rawAmount : Number(rawAmount);
+      if (Number.isFinite(parsed) && parsed > 0) {
+        return parsed;
+      }
+    }
+    throw new BadRequestException('订单金额必填且必须大于0');
   }
 
   /**
@@ -931,7 +903,7 @@ export class OrdersService {
         where: { orderId: id },
         order: { createdAt: 'DESC' },
       }),
-      this.leadRepository.findOne({ where: { id: order.leadId } }),
+      order.leadId ? this.leadRepository.findOne({ where: { id: order.leadId } }) : Promise.resolve(null),
     ]);
     const names = await this.lookupUserNames([order.salesUserId, order.academicUserId]);
     const mappedOrder = this.mapOrder(order, names);

@@ -8,7 +8,7 @@ import { createLeadFollowRecord, listSalesLeads, listTomorrowFollowups, updateLe
 import { LeadCard } from '@/shared/components/leads';
 import { LeadStatus, LeadAddStatus, LeadProcessStatus, CollaborationStatus } from '@/shared/constants/lead-status-enums';
 import { useSubmitLock } from '@/shared/hooks/useSubmitLock';
-import type { SalesLead } from '@/shared/types/leads';
+import type { IntentionLevelCode, SalesLead } from '@/shared/types/leads';
 
 type QueueKey = 'all' | 'new' | 'notPassed' | 'operationHandled' | 'due';
 
@@ -34,14 +34,15 @@ export default function SalesFollowupsPage() {
     setLoading(true);
     setError('');
     try {
-      const [assigned, notPassed, operationHandled, inFollowup, dueFollowups] = await Promise.all([
+      const [assigned, notPassed, operationHandled, inFollowup, invalid, dueFollowups] = await Promise.all([
         listSalesLeads({ pageSize: 50, status: LeadStatus.ASSIGNED }).catch(() => ({ items: [] as SalesLead[] })),
         listSalesLeads({ pageSize: 50, addStatus: LeadAddStatus.NOT_PASSED }).catch(() => ({ items: [] as SalesLead[] })),
         listSalesLeads({ pageSize: 50, status: LeadStatus.OPERATION_HANDLED }).catch(() => ({ items: [] as SalesLead[] })),
         listSalesLeads({ pageSize: 50, status: LeadStatus.IN_FOLLOWUP }).catch(() => ({ items: [] as SalesLead[] })),
+        listSalesLeads({ pageSize: 50, status: LeadStatus.INVALID }).catch(() => ({ items: [] as SalesLead[] })),
         listTomorrowFollowups({ pageSize: 50 }).catch(() => ({ items: [] as SalesLead[] })),
       ]);
-      setItems(dedupeLeads([...assigned.items, ...notPassed.items, ...operationHandled.items, ...inFollowup.items, ...dueFollowups.items]));
+      setItems(dedupeLeads([...assigned.items, ...notPassed.items, ...operationHandled.items, ...inFollowup.items, ...invalid.items, ...dueFollowups.items]));
     } catch (err) {
       const text = err instanceof Error ? err.message : '待跟进客资加载失败';
       setError(text);
@@ -66,6 +67,7 @@ export default function SalesFollowupsPage() {
         addStatus: values.addStatus,
         processStatus: values.processStatus,
         intentionLevel: values.intentionLevel,
+        invalidReason: values.intentionLevel === 'invalid' ? values.invalidReason || null : null,
         nextFollowTime: values.nextFollowTime,
       };
       try {
@@ -74,6 +76,7 @@ export default function SalesFollowupsPage() {
           addStatus: values.addStatus,
           processStatus: values.processStatus,
           intentionLevel: values.intentionLevel,
+          invalidReason: values.intentionLevel === 'invalid' ? values.invalidReason || null : null,
           followNote: values.content,
           nextFollowTime: values.nextFollowTime,
         });
@@ -161,9 +164,30 @@ export default function SalesFollowupsPage() {
                 { label: '高意向', value: 'high' },
                 { label: '中意向', value: 'medium' },
                 { label: '低意向', value: 'low' },
+                { label: '无效', value: 'invalid' },
                 { label: '待判断', value: 'unknown' },
               ]}
             />
+          </Form.Item>
+          <Form.Item noStyle shouldUpdate={(prev, next) => prev.intentionLevel !== next.intentionLevel}>
+            {({ getFieldValue }) => (
+              getFieldValue('intentionLevel') === 'invalid' ? (
+                <Form.Item name="invalidReason" label="无效原因" rules={[{ required: true, message: '请选择无效原因' }]}>
+                  <Select
+                    allowClear
+                    placeholder="请选择无效原因"
+                    options={[
+                      { label: '客户不需要', value: '客户不需要' },
+                      { label: '客户预算不足', value: '客户预算不足' },
+                      { label: '客户已流失', value: '客户已流失' },
+                      { label: '联系方式错误', value: '联系方式错误' },
+                      { label: '重复客资', value: '重复客资' },
+                      { label: '其他', value: '其他' },
+                    ]}
+                  />
+                </Form.Item>
+              ) : null
+            )}
           </Form.Item>
           <Form.Item name="nextFollowTime" label="下次跟进时间">
             <DatePicker showTime format="YYYY/MM/DD HH:mm" style={{ width: '100%' }} placeholder="选择下次跟进时间" />

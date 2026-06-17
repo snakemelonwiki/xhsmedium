@@ -27,11 +27,11 @@ export class Order {
   @PrimaryColumn({ length: 64 })
   id: string;
 
-  @Column({ name: 'lead_id', length: 64 })
-  leadId: string;
+  @Column({ name: 'lead_id', length: 64, nullable: true })
+  leadId: string | null;
 
-  @Column({ name: 'sales_user_id', length: 64 })
-  salesUserId: string;
+  @Column({ name: 'sales_user_id', length: 64, nullable: true })
+  salesUserId: string | null;
 
   @Column({ name: 'academic_user_id', length: 64, nullable: true })
   academicUserId: string | null;

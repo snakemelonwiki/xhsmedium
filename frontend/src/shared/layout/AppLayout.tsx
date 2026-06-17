@@ -72,6 +72,15 @@ export function AppLayout({ role, title, children }: AppLayoutProps) {
     setPendingPath(undefined);
   }, [pathname]);
 
+  // 全局监听 token 过期事件，自动跳转登录页
+  useEffect(() => {
+    function handleAuthExpired() {
+      router.replace('/login');
+    }
+    window.addEventListener('auth:expired', handleAuthExpired);
+    return () => window.removeEventListener('auth:expired', handleAuthExpired);
+  }, [router]);
+
   const userMenu: MenuProps['items'] = [
     {
       key: 'change-password',

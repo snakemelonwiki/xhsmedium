@@ -22,7 +22,7 @@ import {
 import type { TableColumnsType } from 'antd';
 import dayjs, { type Dayjs } from 'dayjs';
 import { useRouter } from 'next/navigation';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   createLeadFollowRecord,
@@ -60,6 +60,7 @@ type FollowFormValues = {
   clientTimeRequirement?: string;
   objectionPoint?: string;
   intentionLevel?: IntentionLevelCode;
+  invalidReason?: string;
   followAction?: string;
   content?: string;
   nextFollowTime?: Dayjs | null;
@@ -67,6 +68,7 @@ type FollowFormValues = {
 
 type IntentionFormValues = {
   intentionLevel: IntentionLevelCode;
+  invalidReason?: string;
 };
 
 export default function SalesLeadFollowupPage() {
@@ -84,21 +86,46 @@ export default function SalesLeadFollowupPage() {
   const [followForm] = Form.useForm<FollowFormValues>();
   const [intentionForm] = Form.useForm<IntentionFormValues>();
   const [submitting, setSubmitting] = useState(false);
+  const autoSetInvalidRef = useRef(false);
 
   async function load(nextPage = page, nextPageSize = pageSize) {
     setLoading(true);
     setError('');
     try {
-      const result = await listSalesLeads({
+      // 主查询：已添加通过的客资
+      const mainResult = await listSalesLeads({
         page: nextPage,
         pageSize: nextPageSize,
         addStatus: LeadAddStatus.ADDED,
         intentionLevel: intentionFilter || undefined,
       });
-      setItems(result.items);
-      setTotal(result.total);
-      setPage(result.page);
-      setPageSize(result.pageSize);
+      // 同时拉取无效客资（可能 addStatus 不是 ADDED，但也应出现在客资跟进面板）
+      let invalidItems: SalesLead[] = [];
+      if (!intentionFilter || intentionFilter === 'invalid') {
+        try {
+          const invalidResult = await listSalesLeads({
+            page: 1,
+            pageSize: 200,
+            intentionLevel: 'invalid',
+          });
+          invalidItems = invalidResult.items;
+        } catch {
+          // 静默失败
+        }
+      }
+      // 合并去重（先算唯一数量再合并，避免 merged.has 始终为 true 的 bug）
+      const mainIds = new Set(mainResult.items.map((l) => l.id));
+      const uniqueInvalidCount = invalidItems.filter((l) => !mainIds.has(l.id)).length;
+      const merged = new Map<string | number, SalesLead>();
+      mainResult.items.forEach((lead) => merged.set(lead.id, lead));
+      // 仅在首页或筛选无效时才合并无效客资，避免无效客资出现在每一页
+      if (nextPage === 1 || intentionFilter === 'invalid') {
+        invalidItems.forEach((lead) => merged.set(lead.id, lead));
+      }
+      setItems(Array.from(merged.values()));
+      setTotal(mainResult.total + (nextPage === 1 && !intentionFilter ? uniqueInvalidCount : 0));
+      setPage(mainResult.page);
+      setPageSize(mainResult.pageSize);
     } catch (err) {
       const text = err instanceof Error ? err.message : '客资跟进加载失败';
       setError(text);
@@ -110,8 +137,7 @@ export default function SalesLeadFollowupPage() {
 
   useEffect(() => {
     load(1, pageSize);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [intentionFilter]);
+  }, [intentionFilter, pageSize]);
 
   const sortedItems = useMemo(() => {
     return [...items].sort((a, b) => {
@@ -129,6 +155,7 @@ export default function SalesLeadFollowupPage() {
       clientTimeRequirement: lead.clientTimeRequirement || undefined,
       objectionPoint: lead.objectionPoint || undefined,
       intentionLevel: (lead.intentionLevel as IntentionLevelCode) || undefined,
+      invalidReason: lead.invalidReason || undefined,
       followAction: lead.followAction || undefined,
       content: undefined,
       nextFollowTime: lead.nextFollowAt ? dayjs(lead.nextFollowAt) : null,
@@ -141,6 +168,12 @@ export default function SalesLeadFollowupPage() {
     if (!values) return;
     setSubmitting(true);
     try {
+      const finalIntention = values.intentionLevel || followOpen.intentionLevel;
+      const isInvalid = finalIntention === 'invalid';
+      if (isInvalid && !values.invalidReason) {
+        message.warning('标记为无效客资需要选择无效原因');
+        return;
+      }
       await createLeadFollowRecord(String(followOpen.id), {
         content: values.content || '',
         clientDegree: values.clientDegree || null,
@@ -149,12 +182,14 @@ export default function SalesLeadFollowupPage() {
         objectionPoint: values.objectionPoint || null,
         followAction: values.followAction || null,
         followActionAt: new Date().toISOString(),
-        intentionLevel: values.intentionLevel || followOpen.intentionLevel,
+        intentionLevel: isInvalid ? 'invalid' : finalIntention,
+        invalidReason: isInvalid ? (values.invalidReason || null) : null,
         nextFollowTime: values.nextFollowTime ? values.nextFollowTime.toISOString() : undefined,
       });
       message.success('跟进记录已保存');
       setFollowOpen(null);
       followForm.resetFields();
+      autoSetInvalidRef.current = false;
       await load();
     } catch (err) {
       message.error(err instanceof Error ? err.message : '跟进保存失败');
@@ -167,6 +202,7 @@ export default function SalesLeadFollowupPage() {
     setIntentionOpen(lead);
     intentionForm.setFieldsValue({
       intentionLevel: (lead.intentionLevel as IntentionLevelCode) || 'pending',
+      invalidReason: lead.invalidReason || undefined,
     });
   }
 
@@ -178,6 +214,7 @@ export default function SalesLeadFollowupPage() {
     try {
       await updateLeadIntentionLevel(String(intentionOpen.id), {
         intentionLevel: values.intentionLevel,
+        invalidReason: values.intentionLevel === 'invalid' ? (values.invalidReason || null) : null,
       });
       message.success('意向程度已更新');
       setIntentionOpen(null);
@@ -335,7 +372,7 @@ export default function SalesLeadFollowupPage() {
       <Modal
         title={followOpen ? `写跟进 · ${followOpen.customerName}` : '写跟进'}
         open={Boolean(followOpen)}
-        onCancel={() => { setFollowOpen(null); followForm.resetFields(); }}
+        onCancel={() => { setFollowOpen(null); followForm.resetFields(); autoSetInvalidRef.current = false; }}
         onOk={submitFollow}
         confirmLoading={submitting}
         width={720}
@@ -387,6 +424,26 @@ export default function SalesLeadFollowupPage() {
                 ]}
               />
             </Form.Item>
+            <Form.Item noStyle shouldUpdate={(prev, next) => prev.intentionLevel !== next.intentionLevel}>
+              {({ getFieldValue }) => (
+                getFieldValue('intentionLevel') === 'invalid' ? (
+                  <Form.Item name="invalidReason" label="无效原因" rules={[{ required: true, message: '请选择无效原因' }]}>
+                    <Select
+                      allowClear
+                      placeholder="请选择无效原因"
+                      options={[
+                        { label: '客户不需要', value: '客户不需要' },
+                        { label: '客户预算不足', value: '客户预算不足' },
+                        { label: '客户已流失', value: '客户已流失' },
+                        { label: '联系方式错误', value: '联系方式错误' },
+                        { label: '重复客资', value: '重复客资' },
+                        { label: '其他', value: '其他' },
+                      ]}
+                    />
+                  </Form.Item>
+                ) : null
+              )}
+            </Form.Item>
             <Form.Item name="followAction" label="具体跟进措施">
               <Input placeholder="如：明天下午 3 点发修改方案" />
             </Form.Item>
@@ -394,7 +451,21 @@ export default function SalesLeadFollowupPage() {
               <DatePicker showTime format="YYYY/MM/DD HH:mm" style={{ width: '100%' }} placeholder="选择下次跟进时间" />
             </Form.Item>
             <Form.Item name="content" label="跟进备注" className="full-row" rules={[{ required: true, message: '请输入跟进内容' }]}>
-              <Input.TextArea rows={3} placeholder="记录本次沟通重点和下一步动作" />
+              <Input.TextArea
+                rows={3}
+                placeholder="记录本次沟通重点和下一步动作（含「无效客资」会自动标记为无效意向）"
+                onChange={(e) => {
+                  const val = e.target.value || '';
+                  if (val.includes('无效客资')) {
+                    if (!autoSetInvalidRef.current) {
+                      followForm.setFieldValue('intentionLevel', 'invalid');
+                      autoSetInvalidRef.current = true;
+                    }
+                  } else {
+                    autoSetInvalidRef.current = false;
+                  }
+                }}
+              />
             </Form.Item>
           </div>
         </Form>
@@ -420,6 +491,26 @@ export default function SalesLeadFollowupPage() {
                 { label: '待判断', value: 'pending' },
               ]}
             />
+          </Form.Item>
+          <Form.Item noStyle shouldUpdate={(prev, next) => prev.intentionLevel !== next.intentionLevel}>
+            {({ getFieldValue }) => (
+              getFieldValue('intentionLevel') === 'invalid' ? (
+                <Form.Item name="invalidReason" label="无效原因" rules={[{ required: true, message: '请选择无效原因' }]}>
+                  <Select
+                    allowClear
+                    placeholder="请选择无效原因"
+                    options={[
+                      { label: '客户不需要', value: '客户不需要' },
+                      { label: '客户预算不足', value: '客户预算不足' },
+                      { label: '客户已流失', value: '客户已流失' },
+                      { label: '联系方式错误', value: '联系方式错误' },
+                      { label: '重复客资', value: '重复客资' },
+                      { label: '其他', value: '其他' },
+                    ]}
+                  />
+                </Form.Item>
+              ) : null
+            )}
           </Form.Item>
         </Form>
       </Modal>
