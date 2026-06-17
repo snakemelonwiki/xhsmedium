@@ -177,12 +177,43 @@ export default function OperationLeadNewPage() {
             <div className="form-grid">
               <Form.Item className="full-row" label="粘贴解析">
                 <Input.TextArea
-                  rows={3}
+                  rows={4}
+                  style={{ resize: 'vertical' }}
                   value={pasteText}
                   onChange={(event) => setPasteText(event.target.value)}
-                  placeholder="粘贴客户昵称、微信/手机号、平台和需求描述"
+                  placeholder={`昵称：张三\n微信：zhangsan123\n来源：小红书（账号名）\n需求备注：论文辅导`}
                 />
-                <div style={{ marginTop: 8, textAlign: 'right' }}>
+                <div style={{ marginTop: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <details style={{ fontSize: 13 }}>
+                    <summary style={{ cursor: 'pointer', color: '#1677ff', userSelect: 'none' }}>
+                      查看输入示例
+                    </summary>
+                    <div style={{
+                      marginTop: 8,
+                      padding: '10px 12px',
+                      background: '#fafafa',
+                      border: '1px solid #f0f0f0',
+                      borderRadius: 6,
+                      position: 'relative',
+                    }}>
+                      <pre style={{ margin: 0, whiteSpace: 'pre-wrap', fontFamily: 'inherit', fontSize: 13, lineHeight: 1.8 }}>
+{`昵称：张三
+微信：zhangsan123
+来源：小红书（账号名）
+需求备注：论文辅导`}
+                      </pre>
+                      <Button
+                        size="small"
+                        style={{ position: 'absolute', top: 6, right: 6 }}
+                        onClick={() => {
+                          navigator.clipboard.writeText('昵称：张三\n微信：zhangsan123\n来源：小红书（账号名）\n需求备注：论文辅导');
+                          message.success('示例已复制，粘贴到输入框后点击识别');
+                        }}
+                      >
+                        复制
+                      </Button>
+                    </div>
+                  </details>
                   <Button onClick={parsePastedLead}>识别</Button>
                 </div>
               </Form.Item>
