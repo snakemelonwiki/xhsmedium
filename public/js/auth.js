@@ -109,6 +109,7 @@ async function loadData() {
 
 // ===== L511-L575 renderLogin =====
 function renderLogin() {
+  if (typeof resetAuthRedirectFlag === "function") resetAuthRedirectFlag();
   const isOwnerPortal = window.location.port === "3001";
   const title = isOwnerPortal ? "总后台入口" : "运营协作中台";
   const subtitle = isOwnerPortal
@@ -165,6 +166,7 @@ function renderLogin() {
       state.token = data.token;
       state.user = data.user;
       localStorage.setItem("lan_system_token", state.token);
+      if (typeof resetAuthRedirectFlag === "function") resetAuthRedirectFlag();
       await loadData();
       if (typeof initNotificationSocket === "function") initNotificationSocket();
       renderApp();

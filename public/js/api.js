@@ -155,6 +155,11 @@ function abortAllPendingRequests() {
   _activeAbortControllers.clear();
 }
 
+// 登录成功后重置认证状态（清除401重定向标志）
+function resetAuthRedirectFlag() {
+  _isRedirecting401 = false;
+}
+
 // ===== T-17 防双击 helper =====
 // 包裹一个 async 处理函数，在执行期间锁住相同 key，避免重复触发
 const _submittingKeys = new Set();
