@@ -77,6 +77,9 @@ async function _handle401() {
     } else {
       window.location.reload();
     }
+    // 重置标志：允许新登录会话处理后续401
+    // 注意：此时登录页已渲染，标志在整个处理期间保持true防止并发401重复处理
+    _isRedirecting401 = false;
   }
 }
 
