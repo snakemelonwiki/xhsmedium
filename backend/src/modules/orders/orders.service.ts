@@ -647,7 +647,16 @@ export class OrdersService {
    */
   private applyOrderFilters(qb: any, options: ListOrdersOptions): void {
     if (options.status) {
-      qb.andWhere('o.order_status = :status', { status: options.status });
+      if (options.status === 'near_due') {
+        // 即将到期：履约中类目 + updated_at 早于 5 天前（同 getAcademicHomeSummary 逻辑）
+        qb.andWhere(
+          'o.order_status IN (:...nearDueStatuses)',
+          { nearDueStatuses: ['in_progress', 'awaiting_client_info', 'awaiting_teacher', 'to_deliver'] },
+        );
+        qb.andWhere('o.updated_at < DATE_SUB(NOW(), INTERVAL 5 DAY)');
+      } else {
+        qb.andWhere('o.order_status = :status', { status: options.status });
+      }
     }
 
     if (
@@ -1290,6 +1299,14 @@ export class OrdersService {
       if (nextPaymentStage !== current.paymentStage) {
         changedFields.push('paymentStage');
         next.paymentStage = nextPaymentStage;
+        // 付款阶段 → 付款状态自动联动：已付尾款/已付全款 → paid，其余 → partial
+        if (nextPaymentStage) {
+          const derivedPaidStatus = this.derivePaidStatusFromStage(nextPaymentStage);
+          if (derivedPaidStatus && derivedPaidStatus !== current.paidStatus) {
+            changedFields.push('paidStatus');
+            next.paidStatus = derivedPaidStatus;
+          }
+        }
       }
     }
     if (dto.academic_user_id !== undefined) {
@@ -2531,5 +2548,40 @@ export class OrdersService {
       remindStage: row.remindStage,
       createdAt: row.createdAt,
     };
+  }
+
+  /**
+   * 付款阶段 → 付款状态自动联动。
+   * 已付尾款 / 已付全款 → 'paid'；已付定金 / 已付中期 → 'partial'。
+   */
+  private derivePaidStatusFromStage(stage: string): string | null {
+    if (!stage) return null;
+    if (stage.includes('尾款') || stage.includes('全款')) return 'paid';
+    if (stage.includes('定金') || stage.includes('中期')) return 'partial';
+    return null;
+  }
+
+  /**
+   * 删除订单（仅 admin/owner）。
+   * 删除 order + order_finance + order_follow_records，并回退关联 lead 的成交状态。
+   */
+  async remove(id: string, actorUserId: string): Promise<void> {
+    const order = await this.orderRepository.findOne({ where: { id } });
+    if (!order) {
+      throw new NotFoundException('order not found');
+    }
+
+    // 删除关联记录
+    await this.orderFollowRepository.delete({ orderId: id });
+    await this.orderFinanceRepository.delete({ orderId: id });
+    await this.orderRepository.delete(id);
+
+    // 回退关联 lead 的成交状态
+    if (order.leadId) {
+      await this.leadRepository.update(order.leadId, {
+        dealStatus: 'not_deal',
+        processStatus: 'deal_pending',
+      });
+    }
   }
 }

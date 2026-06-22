@@ -257,6 +257,7 @@ export class LeadsController {
         intention: body.intention || null,
         isDispatched,
         wechat: body.wechat || null,
+        salesRemark: body.salesRemark || null,
       });
       return res.json({ ok: true });
     } catch (err: any) {
@@ -352,6 +353,7 @@ export class LeadsController {
       processStatus: body.processStatus,
       addStatus: body.addStatus,
       intention: body.intention,
+      salesRemark: body.salesRemark,
     };
     if (body.isDispatched !== undefined) {
       const nextIsDispatched: 0 | 1 =

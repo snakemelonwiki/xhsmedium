@@ -35,6 +35,8 @@ export interface SalesLead {
   contact?: string;
   phone?: string;
   wechat?: string;
+  /** 销售备注（运营录入时填写的客户微信昵称/微信号） */
+  salesRemark?: string | null;
   source?: LeadSourceSummary;
   operator?: LeadOperatorSummary;
   sales?: LeadSalesSummary;

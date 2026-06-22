@@ -19,6 +19,7 @@ import {
   Typography,
   message,
 } from 'antd';
+import { SearchOutlined } from '@ant-design/icons';
 import type { TableColumnsType } from 'antd';
 import dayjs, { type Dayjs } from 'dayjs';
 import { useRouter } from 'next/navigation';
@@ -31,6 +32,9 @@ import {
 } from '@/shared/api/leads';
 import { StatusTag } from '@/shared/components/status';
 import { formatDateTime } from '@/shared/utils/date-format';
+import { QuickRangePicker } from '@/shared/components/date';
+import type { DateRangeValue } from '@/shared/components/date';
+import { buildTodayDateRange } from '@/shared/utils/default-date-range';
 import {
   LeadAddStatus,
   LeadProcessStatus,
@@ -75,6 +79,8 @@ export default function SalesLeadFollowupPage() {
   const router = useRouter();
   const [items, setItems] = useState<SalesLead[]>([]);
   const [intentionFilter, setIntentionFilter] = useState('');
+  const [search, setSearch] = useState('');
+  const [dateRange, setDateRange] = useState<DateRangeValue>(() => buildTodayDateRange());
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [total, setTotal] = useState(0);
@@ -98,6 +104,9 @@ export default function SalesLeadFollowupPage() {
         pageSize: nextPageSize,
         addStatus: LeadAddStatus.ADDED,
         intentionLevel: intentionFilter || undefined,
+        search: search || undefined,
+        from: dateRange ? dateRange.start.startOf('day').format('YYYY-MM-DD') : undefined,
+        to: dateRange ? dateRange.end.endOf('day').format('YYYY-MM-DD') : undefined,
       });
       // 同时拉取无效客资（可能 addStatus 不是 ADDED，但也应出现在客资跟进面板）
       let invalidItems: SalesLead[] = [];
@@ -107,6 +116,9 @@ export default function SalesLeadFollowupPage() {
             page: 1,
             pageSize: 200,
             intentionLevel: 'invalid',
+            search: search || undefined,
+            from: dateRange ? dateRange.start.startOf('day').format('YYYY-MM-DD') : undefined,
+            to: dateRange ? dateRange.end.endOf('day').format('YYYY-MM-DD') : undefined,
           });
           invalidItems = invalidResult.items;
         } catch {
@@ -137,7 +149,7 @@ export default function SalesLeadFollowupPage() {
 
   useEffect(() => {
     load(1, pageSize);
-  }, [intentionFilter, pageSize]);
+  }, [intentionFilter, pageSize, search, dateRange?.start.valueOf(), dateRange?.end.valueOf()]);
 
   const sortedItems = useMemo(() => {
     return [...items].sort((a, b) => {
@@ -233,7 +245,12 @@ export default function SalesLeadFollowupPage() {
       key: 'customer',
       render: (_v, lead) => (
         <Space direction="vertical" size={0}>
-          <Typography.Text strong>{lead.customerName}</Typography.Text>
+          <Typography.Text strong>
+            {lead.customerName}
+            {lead.salesRemark ? (
+              <Typography.Text type="secondary" style={{ fontSize: 13 }}> ({lead.salesRemark})</Typography.Text>
+            ) : null}
+          </Typography.Text>
           {lead.contact ? (
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
               {lead.contact}
@@ -277,6 +294,19 @@ export default function SalesLeadFollowupPage() {
         const m = map[lead.dealStatus] || { label: lead.dealStatus, color: 'default' };
         return <Tag color={m.color}>{m.label}</Tag>;
       },
+    },
+    {
+      title: '客户学历',
+      key: 'clientDegree',
+      width: 100,
+      render: (_v, lead) => lead.clientDegree || '-',
+    },
+    {
+      title: '专业/研究方向',
+      key: 'major',
+      width: 180,
+      ellipsis: true,
+      render: (_v, lead) => lead.clientMajorResearch || '-',
     },
     {
       title: '最近跟进',
@@ -330,12 +360,24 @@ export default function SalesLeadFollowupPage() {
           </Typography.Paragraph>
         </div>
         <Space wrap>
+          <Input
+            prefix={<SearchOutlined />}
+            placeholder="按微信昵称/微信号搜索"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            allowClear
+            style={{ width: 220 }}
+          />
           <Select
             value={intentionFilter}
             options={intentionLevelOptions}
             onChange={setIntentionFilter}
             style={{ width: 130 }}
             placeholder="意向度"
+          />
+          <QuickRangePicker
+            value={dateRange}
+            onChange={(range) => setDateRange(range ?? buildTodayDateRange())}
           />
           <Button onClick={() => load(page, pageSize)} loading={loading}>刷新</Button>
         </Space>

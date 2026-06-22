@@ -42,7 +42,11 @@ export class RemindersService {
   private static readonly ROLE_TO_PORT_TYPE: Record<string, string> = {
     sales: 'sales',
     operation: 'operations',
+    staff: 'operations',
     supervisor: 'operations',
+    admin: 'operations',
+    academic: 'academic',
+    academic_supervisor: 'academic',
   };
 
   /**

@@ -302,6 +302,8 @@ export class LeadsService {
         'l.objection_point AS l_objection_point',
         'l.follow_action AS l_follow_action',
         'l.follow_action_at AS l_follow_action_at',
+        'l.wechat AS l_wechat',
+        'l.sales_remark AS l_sales_remark',
         'a.account_name AS account_name',
         'p.title AS post_title',
         'p.post_url AS post_url',
@@ -427,6 +429,8 @@ export class LeadsService {
         objectionPoint: r.l_objection_point || null,
         followAction: r.l_follow_action || null,
         followActionAt: r.l_follow_action_at || null,
+        wechat: r.l_wechat || null,
+        salesRemark: r.l_sales_remark || null,
         latestFollowNote: follow?.content || r.l_sales_feedback || r.l_note || null,
         latestFollowAt: follow?.created_at || r.l_sales_updated_at || r.l_updated_at,
         createdAt: r.l_created_at,
@@ -557,7 +561,7 @@ export class LeadsService {
     }
     if (filters.search && filters.search.trim()) {
       qb.andWhere(
-        '(l.contact_info LIKE :search OR l.nickname LIKE :search OR l.lead_code LIKE :search OR l.note LIKE :search)',
+        '(l.contact_info LIKE :search OR l.nickname LIKE :search OR l.lead_code LIKE :search OR l.note LIKE :search OR l.wechat LIKE :search OR l.sales_remark LIKE :search)',
         { search: `%${filters.search.trim()}%` },
       );
     }
@@ -1740,6 +1744,7 @@ export class LeadsService {
       contactInfo: row.contactInfo,
       nickname: row.nickname,
       wechat: row.wechat || null,
+      salesRemark: (row as any).salesRemark || (row as any).sales_remark || null,
       budget: row.budget,
       majorContent: row.majorContent,
       ip: row.ip,

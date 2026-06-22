@@ -84,7 +84,11 @@ export function NotificationBell(_props: NotificationBellProps = {}) {
   );
 
   const triggerButton = (
-    <Button type="text" icon={<Badge count={unreadCount} size="small"><BellOutlined /></Badge>}>
+    <Button
+      type="text"
+      className={unreadCount > 0 ? 'notification-bell-pulse' : undefined}
+      icon={<Badge count={unreadCount} size="small"><BellOutlined /></Badge>}
+    >
       消息
     </Button>
   );

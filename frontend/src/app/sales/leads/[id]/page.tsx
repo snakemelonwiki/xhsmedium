@@ -39,6 +39,7 @@ import {
   type CloseLeadDealPayload,
 } from '@/shared/api/leads';
 import { listOrders } from '@/shared/api/orders';
+import { apiClient } from '@/shared/api/apiClient';
 import { LeadTimeline } from '@/shared/components/leads';
 import { StatusTag } from '@/shared/components/status';
 import { ReminderButton } from '@/shared/components/notifications/ReminderButton';
@@ -140,6 +141,38 @@ export default function SalesLeadDetailPage() {
   const [dealStatusOpen, setDealStatusOpen] = useState(false);
   const [intentionOpen, setIntentionOpen] = useState(false);
   const { submitting, run } = useSubmitLock();
+
+  const [editingRequirement, setEditingRequirement] = useState(false);
+  const [requirementValue, setRequirementValue] = useState('');
+
+  const [editingSalesRemark, setEditingSalesRemark] = useState(false);
+  const [salesRemarkValue, setSalesRemarkValue] = useState('');
+
+  async function submitRequirementNote() {
+    await run(async () => {
+      try {
+        await apiClient.request(`/leads/${leadId}`, { method: 'PUT', body: { requirementNote: requirementValue } });
+        message.success('客户需求已更新');
+        setEditingRequirement(false);
+        await loadDetail();
+      } catch (err) {
+        message.error(err instanceof Error ? err.message : '更新失败');
+      }
+    });
+  }
+
+  async function submitSalesRemark() {
+    await run(async () => {
+      try {
+        await apiClient.request(`/leads/${leadId}`, { method: 'PUT', body: { salesRemark: salesRemarkValue } });
+        message.success('销售备注已更新');
+        setEditingSalesRemark(false);
+        await loadDetail();
+      } catch (err) {
+        message.error(err instanceof Error ? err.message : '更新失败');
+      }
+    });
+  }
 
   async function loadDetail() {
     const [detail, records, collaborations] = await Promise.all([
@@ -414,6 +447,20 @@ export default function SalesLeadDetailPage() {
           items={[
             { key: 'id', label: '客资 ID', children: leadId },
             { key: 'name', label: '客户', children: lead?.customerName ?? '详情接口待补齐' },
+            { key: 'salesRemark', label: '销售备注', children: editingSalesRemark ? (
+              <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                <Input value={salesRemarkValue} onChange={(e) => setSalesRemarkValue(e.target.value)} placeholder="请输入销售备注（客户微信昵称/微信号）" />
+                <Space size={8}>
+                  <Button size="small" type="primary" loading={submitting} onClick={submitSalesRemark}>保存</Button>
+                  <Button size="small" onClick={() => setEditingSalesRemark(false)}>取消</Button>
+                </Space>
+              </Space>
+            ) : (
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Typography.Text>{lead?.salesRemark || '-'}</Typography.Text>
+                <Button size="small" type="link" onClick={() => { setSalesRemarkValue(lead?.salesRemark || ''); setEditingSalesRemark(true); }}>编辑</Button>
+              </div>
+            ) },
             {
               key: 'contact',
               label: '联系方式',
@@ -429,7 +476,20 @@ export default function SalesLeadDetailPage() {
             { key: 'clientDegree', label: '客户学历', children: lead?.clientDegree || '-' },
             { key: 'clientMajorResearch', label: '专业 / 研究方向', children: lead?.clientMajorResearch || '-' },
             { key: 'purpose', label: '用途', children: lead?.purpose ?? '-' },
-            { key: 'requirementNote', label: '客户需求', children: lead?.requirementNote ?? '-' },
+            { key: 'requirementNote', label: '客户需求', children: editingRequirement ? (
+              <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                <Input.TextArea rows={2} value={requirementValue} onChange={(e) => setRequirementValue(e.target.value)} placeholder="请输入客户需求" />
+                <Space size={8}>
+                  <Button size="small" type="primary" loading={submitting} onClick={submitRequirementNote}>保存</Button>
+                  <Button size="small" onClick={() => setEditingRequirement(false)}>取消</Button>
+                </Space>
+              </Space>
+            ) : (
+              <Space size={8}>
+                <Typography.Text>{lead?.requirementNote ?? '-'}</Typography.Text>
+                <Button size="small" type="link" onClick={() => { setRequirementValue(lead?.requirementNote || ''); setEditingRequirement(true); }}>编辑</Button>
+              </Space>
+            ) },
             { key: 'clientTimeRequirement', label: '时间要求', children: lead?.clientTimeRequirement || '-' },
             { key: 'objectionPoint', label: '异议点', children: lead?.objectionPoint || '-' },
             { key: 'followAction', label: '跟进措施', children: lead?.followAction || '-' },
@@ -552,19 +612,8 @@ export default function SalesLeadDetailPage() {
                     <Form.Item noStyle shouldUpdate={(prev, next) => prev.intentionLevel !== next.intentionLevel}>
                       {({ getFieldValue }) => (
                         getFieldValue('intentionLevel') === 'invalid' ? (
-                          <Form.Item name="invalidReason" label="无效原因" rules={[{ required: true, message: '请选择无效原因' }]}>
-                            <Select
-                              allowClear
-                              placeholder="请选择无效原因"
-                              options={[
-                                { label: '客户不需要', value: '客户不需要' },
-                                { label: '客户预算不足', value: '客户预算不足' },
-                                { label: '客户已流失', value: '客户已流失' },
-                                { label: '联系方式错误', value: '联系方式错误' },
-                                { label: '重复客资', value: '重复客资' },
-                                { label: '其他', value: '其他' },
-                              ]}
-                            />
+                          <Form.Item name="invalidReason" label="无效原因" rules={[{ required: true, message: '请输入无效原因' }]}>
+                            <Input.TextArea rows={2} placeholder="请输入无效原因" />
                           </Form.Item>
                         ) : null
                       )}
@@ -811,19 +860,8 @@ export default function SalesLeadDetailPage() {
             {({ getFieldValue }) => {
               const currentStatus = getFieldValue('dealStatus');
               return currentStatus === 'invalid' ? (
-                <Form.Item name="invalidReason" label="无效原因" rules={[{ required: true, message: '请选择无效原因' }]}>
-                  <Select
-                    allowClear
-                    placeholder="请选择无效原因"
-                    options={[
-                      { label: '客户不需要', value: '客户不需要' },
-                      { label: '客户预算不足', value: '客户预算不足' },
-                      { label: '客户已流失', value: '客户已流失' },
-                      { label: '联系方式错误', value: '联系方式错误' },
-                      { label: '重复客资', value: '重复客资' },
-                      { label: '其他', value: '其他' },
-                    ]}
-                  />
+                <Form.Item name="invalidReason" label="无效原因" rules={[{ required: true, message: '请输入无效原因' }]}>
+                  <Input.TextArea rows={2} placeholder="请输入无效原因" />
                 </Form.Item>
               ) : null;
             }}
@@ -858,19 +896,8 @@ export default function SalesLeadDetailPage() {
           <Form.Item noStyle shouldUpdate={(prev, next) => prev.intentionLevel !== next.intentionLevel}>
             {({ getFieldValue }) => (
               getFieldValue('intentionLevel') === 'invalid' ? (
-                <Form.Item name="invalidReason" label="无效原因" rules={[{ required: true, message: '请选择无效原因' }]}>
-                  <Select
-                    allowClear
-                    placeholder="请选择无效原因"
-                    options={[
-                      { label: '客户不需要', value: '客户不需要' },
-                      { label: '客户预算不足', value: '客户预算不足' },
-                      { label: '客户已流失', value: '客户已流失' },
-                      { label: '联系方式错误', value: '联系方式错误' },
-                      { label: '重复客资', value: '重复客资' },
-                      { label: '其他', value: '其他' },
-                    ]}
-                  />
+                <Form.Item name="invalidReason" label="无效原因" rules={[{ required: true, message: '请输入无效原因' }]}>
+                  <Input.TextArea rows={2} placeholder="请输入无效原因" />
                 </Form.Item>
               ) : null
             )}

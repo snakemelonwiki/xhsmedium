@@ -1,5 +1,5 @@
 import {
-  Controller, Get, Post, Patch, Body, Param, Req, Res, Query, UseGuards,
+  Controller, Get, Post, Patch, Delete, Body, Param, Req, Res, Query, UseGuards,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { OrdersService } from './orders.service';
@@ -337,6 +337,35 @@ export class OrdersController {
       return res.json({ ok: true, ...result });
     } catch (err: any) {
       return res.status(500).json({ ok: false, message: err?.message || 'scan failed' });
+    }
+  }
+
+  /**
+   * 删除订单（仅 admin/owner）。
+   * 删除 order / order_finance / order_follow_records，并回退关联 lead 的成交状态。
+   */
+  @Delete('orders/:id')
+  async remove(@Param('id') id: string, @Req() req: Request, @Res() res: Response) {
+    const session = (req as any).session;
+    const role = session?.role || '';
+    if (role !== 'admin' && role !== 'owner') {
+      return res.status(403).json({ ok: false, message: '仅管理员/超级管理员可删除订单' });
+    }
+    const userId = getSessionUserId(req) || '';
+    try {
+      await this.ordersService.remove(id, userId);
+      await this.logSafe({
+        userId,
+        action: OPERATION_LOG_ACTIONS.DELETE,
+        targetType: OPERATION_LOG_TARGET_TYPES.ORDER,
+        targetId: id,
+        detail: { action: 'delete-order' },
+        req,
+      });
+      return res.json({ ok: true });
+    } catch (err: any) {
+      const code = err?.status || 422;
+      return res.status(code).json({ ok: false, message: err?.message || 'delete failed' });
     }
   }
 

@@ -159,6 +159,10 @@ export class Lead {
   @Column({ name: 'wechat', length: 128, nullable: true })
   wechat: string | null;
 
+  /** 销售备注（运营录入时填写的客户微信昵称/微信号，供销售快速识别客户）*/
+  @Column({ name: 'sales_remark', length: 255, nullable: true })
+  salesRemark: string | null;
+
   /** 无效原因（销售标记客资为无效时填写） */
   @Column({ name: 'invalid_reason', length: 255, nullable: true })
   invalidReason: string | null;

@@ -47,11 +47,8 @@ function resolveBaseUrl(): string {
   // 优先使用构建期注入的后端地址
   const fromEnv = process.env.NEXT_PUBLIC_BACKEND_URL;
   if (fromEnv) return fromEnv.replace(/\/+$/, '');
-  // 兜底：使用当前 origin。Next 客户端拿不到后端端口，依赖 next.config.mjs
-  // 的 rewrite 把 /api 转发到后端；WebSocket 需要绕过 rewrite，所以这里要
-  // 显式走与 API 一致的主机。开发期在 .env 中设置 NEXT_PUBLIC_BACKEND_URL
-  // 指向真实后端地址即可；如未设置，回退到当前 origin（同源场景）。
-  return window.location.origin;
+  // 与 next.config.mjs 的默认后端地址保持一致（开发环境后端在 8089）
+  return 'http://localhost:8089';
 }
 
 function ensureSocket(token: string, userId: string | null): SocketState {

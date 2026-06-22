@@ -304,6 +304,19 @@ export default function OperationLeadsPage() {
       render: (_, record) => <StatusTag kind="processStatus" code={record.processStatus} />,
     },
     {
+      title: '客户学历',
+      key: 'clientDegree',
+      width: 100,
+      render: (_, record) => record.clientDegree || '-',
+    },
+    {
+      title: '专业/研究方向',
+      key: 'major',
+      width: 180,
+      ellipsis: true,
+      render: (_, record) => record.clientMajorResearch || '-',
+    },
+    {
       title: '最后更新',
       dataIndex: 'updatedAt',
       width: 160,

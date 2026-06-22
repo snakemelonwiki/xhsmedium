@@ -193,7 +193,7 @@ export default function SalesLeadsPage() {
   // WebSocket 实时刷新：通知过来时刷新客资列表
   const sockToken = typeof window !== 'undefined' ? window.localStorage.getItem('xhsmedium.token') : null;
   const sockUser = typeof window !== 'undefined' ? readAuthenticatedUser() : undefined;
-  const { onMessage } = useNotificationSocket({ token: sockToken, userId: sockUser?.id ?? null });
+  const { onMessage, connected } = useNotificationSocket({ token: sockToken, userId: sockUser?.id ?? null });
   const loadRef = useRef(loadLeads);
   loadRef.current = loadLeads;
   useEffect(() => {
@@ -202,6 +202,33 @@ export default function SalesLeadsPage() {
     });
     return unsubscribe;
   }, [onMessage]);
+
+  // Socket 重新连上时刷新一次：补偿断线期间遗漏的分配通知
+  useEffect(() => {
+    if (connected) {
+      loadRef.current();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connected]);
+
+  // 浏览器标签切回时自动刷新：补偿 WebSocket 断线期间遗漏的分配通知
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        loadRef.current();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => document.removeEventListener('visibilitychange', handleVisibility);
+  }, []);
+
+  // 短轮询兜底：WebSocket 不可靠或断线时，每 10 秒刷新一次
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      loadRef.current();
+    }, 10000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     loadLeads(1, pageSize, filters);
@@ -452,7 +479,12 @@ export default function SalesLeadsPage() {
       render: (_v, lead) => (
         <Space direction="vertical" size={0}>
           <Space size={6}>
-            <Typography.Text strong>{lead.customerName}</Typography.Text>
+            <Typography.Text strong>
+              {lead.customerName}
+              {lead.salesRemark ? (
+                <Typography.Text type="secondary" style={{ fontSize: 13 }}> ({lead.salesRemark})</Typography.Text>
+              ) : null}
+            </Typography.Text>
             {isTodayNotAdded(lead) ? (
               <Tag color="red" icon={<FireOutlined />}>今日未添加</Tag>
             ) : null}
@@ -468,6 +500,11 @@ export default function SalesLeadsPage() {
           ) : (
             <Typography.Text type="secondary">暂无联系方式</Typography.Text>
           )}
+          {lead.wechat ? (
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              微信: {lead.wechat}
+            </Typography.Text>
+          ) : null}
         </Space>
       ),
     },
@@ -682,7 +719,7 @@ export default function SalesLeadsPage() {
         <Space wrap>
           <Input
             prefix={<SearchOutlined />}
-            placeholder="按联系方式/客户姓名搜索"
+            placeholder="按微信昵称/微信号搜索"
             value={filters.search}
             onChange={(e) => setFilters((prev) => ({ ...prev, search: e.target.value }))}
             allowClear
@@ -809,19 +846,8 @@ export default function SalesLeadsPage() {
             <Form.Item noStyle shouldUpdate={(prev, next) => prev.intentionLevel !== next.intentionLevel}>
               {({ getFieldValue }) => (
                 getFieldValue('intentionLevel') === 'invalid' ? (
-                  <Form.Item name="invalidReason" label="无效原因" rules={[{ required: true, message: '请选择无效原因' }]}>
-                    <Select
-                      allowClear
-                      placeholder="请选择无效原因"
-                      options={[
-                        { label: '客户不需要', value: '客户不需要' },
-                        { label: '客户预算不足', value: '客户预算不足' },
-                        { label: '客户已流失', value: '客户已流失' },
-                        { label: '联系方式错误', value: '联系方式错误' },
-                        { label: '重复客资', value: '重复客资' },
-                        { label: '其他', value: '其他' },
-                      ]}
-                    />
+                  <Form.Item name="invalidReason" label="无效原因" rules={[{ required: true, message: '请输入无效原因' }]}>
+                    <Input.TextArea rows={2} placeholder="请输入无效原因" />
                   </Form.Item>
                 ) : null
               )}
@@ -863,19 +889,8 @@ export default function SalesLeadsPage() {
           <Form.Item noStyle shouldUpdate={(prev, next) => prev.intentionLevel !== next.intentionLevel}>
             {({ getFieldValue }) => (
               getFieldValue('intentionLevel') === 'invalid' ? (
-                <Form.Item name="invalidReason" label="无效原因" rules={[{ required: true, message: '请选择无效原因' }]}>
-                  <Select
-                    allowClear
-                    placeholder="请选择无效原因"
-                    options={[
-                      { label: '客户不需要', value: '客户不需要' },
-                      { label: '客户预算不足', value: '客户预算不足' },
-                      { label: '客户已流失', value: '客户已流失' },
-                      { label: '联系方式错误', value: '联系方式错误' },
-                      { label: '重复客资', value: '重复客资' },
-                      { label: '其他', value: '其他' },
-                    ]}
-                  />
+                <Form.Item name="invalidReason" label="无效原因" rules={[{ required: true, message: '请输入无效原因' }]}>
+                  <Input.TextArea rows={2} placeholder="请输入无效原因" />
                 </Form.Item>
               ) : null
             )}
@@ -916,8 +931,9 @@ function buildListQuery(filters: Filters) {
     status: filters.status || undefined,
     addStatus: filters.addStatus || undefined,
     intentionLevel: filters.intentionLevel || undefined,
-    startDate: filters.dateRange ? filters.dateRange.start.startOf('day').toISOString() : undefined,
-    endDate: filters.dateRange ? filters.dateRange.end.endOf('day').toISOString() : undefined,
+    // 用 YYYY-MM-DD 本地日期字符串，让后端 normalizeDayBoundary 补成 00:00:00 / 23:59:59，避免 ISO 时区偏差
+    from: filters.dateRange ? filters.dateRange.start.startOf('day').format('YYYY-MM-DD') : undefined,
+    to: filters.dateRange ? filters.dateRange.end.endOf('day').format('YYYY-MM-DD') : undefined,
     search: filters.search || undefined,
   };
 }

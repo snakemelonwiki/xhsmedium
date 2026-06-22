@@ -589,3 +589,21 @@ body {
   background: linear-gradient(to right, transparent, rgb(255 255 255 / 80%));
   pointer-events: none;
 }
+
+/* 通知铃铛闪烁动画 — 有未读消息时持续脉冲 */
+@keyframes notification-bell-pulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.15); }
+  100% { transform: scale(1); }
+}
+
+@keyframes notification-bell-ripple {
+  0% { box-shadow: 0 0 0 0 rgba(255, 77, 79, 0.5); }
+  70% { box-shadow: 0 0 0 8px rgba(255, 77, 79, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(255, 77, 79, 0); }
+}
+
+.notification-bell-pulse .ant-badge-count {
+  animation: notification-bell-pulse 1.5s ease-in-out infinite,
+             notification-bell-ripple 1.5s ease-in-out infinite;
+}

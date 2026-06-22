@@ -570,7 +570,8 @@ export default function AdminLeadsPage() {
 
   const columns: ColumnsType<Lead> = [
     { title: '客户昵称', dataIndex: 'customerName', width: 120, render: (v: string) => v || '未命名客户' },
-    { title: '联系方式', dataIndex: 'contact', width: 130, render: (v?: string) => maskContact(v) },
+    { title: '联系方式', dataIndex: 'contact', width: 130, render: (v?: string) => v || '-' },
+    { title: '微信', dataIndex: 'wechat', width: 120, render: (v?: string) => v || '-' },
     { title: '平台', dataIndex: 'platform', width: 80 },
     {
       title: '来源作品',

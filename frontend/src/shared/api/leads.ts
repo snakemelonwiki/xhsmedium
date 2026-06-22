@@ -89,6 +89,7 @@ function mapLead(raw: RawRecord): SalesLead {
     contact: text(raw.contact) ?? text(raw.contactInfo),
     phone: text(raw.phone),
     wechat: text(raw.wechat),
+    salesRemark: text(raw.salesRemark) ?? text(raw.sales_remark) ?? null,
     source: {
       platform: text(raw.platform),
       accountId: text(raw.sourceAccountId) ?? text(raw.source_account_id) ?? text(raw.accountId),
