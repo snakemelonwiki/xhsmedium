@@ -88,9 +88,11 @@ const COVER_THUMB_QUALITY = 92;
 const loginContexts = new Map();
 
 // ── 优化：资源拦截 ──────────────────────────────────────────────
-// 屏蔽图片/字体/CSS/媒体/WebSocket，只放行 document/script/xhr/fetch。
+// 屏蔽字体/CSS/媒体/WebSocket，只放行 document/script/xhr/fetch/image。
 // SSR 数据（__INITIAL_STATE__ / RENDER_DATA）在 HTML 原文里，不需要渲染完整页面。
-const BLOCKED_RESOURCE_TYPES = new Set(["image", "stylesheet", "font", "media", "websocket"]);
+// 注意：image 不能屏蔽——capturePostCover 走视口截图兜底时需要 <img> 已加载，
+// 否则封面会是空白图（语义封面失败时）。
+const BLOCKED_RESOURCE_TYPES = new Set(["stylesheet", "font", "media", "websocket"]);
 
 // ── 优化：浏览器上下文池 ────────────────────────────────────────
 // 复用 persistent context，避免每次请求冷启动 Chromium（省 1-3s）。
@@ -197,6 +199,110 @@ function detectPlatform(url) {
 
 function normalizeUrl(url) {
   return String(url || "").trim();
+}
+
+// ── Tier 1：登录墙/不可重试错误（外层 retry 跳过；parser-core 也按 message 分类） ─
+class LoginWallError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "LoginWallError";
+  }
+}
+
+// ── Tier 1：结果缓存（LRU + 5 分钟 TTL） ────────────────────────
+// 同一作品 5 分钟内重复请求直接返回上次结果，省去浏览器加载。
+// key 优先用 platform + 作品 ID（短链/参数变化时仍能命中）。
+const RESULT_CACHE_TTL_MS = 5 * 60 * 1000;
+const RESULT_CACHE_MAX = 200;
+const resultCache = new Map();
+
+function canonicalCacheKey(platform, url) {
+  if (platform === "小红书") {
+    const id = extractXiaohongshuNoteId(url);
+    if (id) return `xhs:${id}`;
+  }
+  if (platform === "抖音") {
+    const id = extractDouyinVideoId(url);
+    if (id) return `douyin:${id}`;
+  }
+  return `${platform}:${url}`;
+}
+
+function getCachedResult(key) {
+  const entry = resultCache.get(key);
+  if (!entry) return null;
+  if (entry.expiresAt < Date.now()) {
+    resultCache.delete(key);
+    return null;
+  }
+  // LRU：访问后挪到队尾
+  resultCache.delete(key);
+  resultCache.set(key, entry);
+  return entry.value;
+}
+
+function setCachedResult(key, value) {
+  if (resultCache.size >= RESULT_CACHE_MAX) {
+    const oldest = resultCache.keys().next().value;
+    if (oldest !== undefined) resultCache.delete(oldest);
+  }
+  resultCache.set(key, { value, expiresAt: Date.now() + RESULT_CACHE_TTL_MS });
+}
+
+// ── Tier 1：短链 HEAD 预展开（避免浏览器加载短链浪费一次完整渲染） ──
+// v.douyin.com / xhslink.com 走 HEAD 请求拿 Location，最多跟 5 跳重定向。
+const SHORT_LINK_HOST_RE = /(^|\.)(v\.douyin\.com|xhslink\.com)$/i;
+
+async function expandShortUrl(url, maxHops = 5) {
+  let current = url;
+  for (let hop = 0; hop < maxHops; hop++) {
+    let parsed;
+    try {
+      parsed = new URL(current);
+    } catch {
+      return current;
+    }
+    if (!SHORT_LINK_HOST_RE.test(parsed.hostname)) return current;
+    const next = await new Promise((resolve) => {
+      const lib = parsed.protocol === "https:" ? require("https") : require("http");
+      const req = lib.request(
+        {
+          hostname: parsed.hostname,
+          port: parsed.port || (parsed.protocol === "https:" ? 443 : 80),
+          path: parsed.pathname + (parsed.search || ""),
+          method: "HEAD",
+          headers: {
+            "User-Agent":
+              "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1",
+            Accept: "*/*",
+          },
+          timeout: 5000,
+        },
+        (res) => {
+          const loc = res.headers.location;
+          res.resume();
+          if (!loc) {
+            resolve(null);
+            return;
+          }
+          try {
+            resolve(new URL(loc, current).toString());
+          } catch {
+            resolve(null);
+          }
+        },
+      );
+      req.on("error", () => resolve(null));
+      req.on("timeout", () => {
+        try { req.destroy(); } catch {}
+        resolve(null);
+      });
+      req.end();
+    });
+    if (!next || next === current) return current;
+    current = next;
+  }
+  return current;
 }
 
 function getProfileDir(platform) {
@@ -381,13 +487,15 @@ function setupDouyinDetailInterceptor(page) {
   let detail = null;
   page.on("response", (response) => {
     const url = response.url();
-    if (!url.includes("/aweme/v1/web/aweme/detail/") && !url.includes("/aweme/v1/web/aweme/related/")) return;
+    if (!url.includes("/aweme/v1/web/aweme/detail/") &&
+        !url.includes("/aweme/v1/web/aweme/related/") &&
+        !url.includes("/aweme/v1/web/aweme/post/")) return;
     response
       .json()
       .then((json) => {
         if (json?.aweme_detail) detail = json.aweme_detail;
-        // 兼容 aweme_list（个人主页弹窗视频场景）
-        if (!detail && json?.aweme_list && json.aweme_list.length > 0) {
+        // 兼容 aweme_list（笔记页 + 个人主页弹窗视频场景）
+        if (!detail && json?.aweme_list?.length > 0) {
           detail = json.aweme_list[0];
         }
       })
@@ -491,6 +599,10 @@ function extractDouyinDetailFromRscHtml(html) {
 
 async function inferDouyinCountsFromHtml(page, videoId) {
   const html = await page.content().catch(() => "");
+  return inferDouyinCountsFromHtmlText(html, videoId);
+}
+
+function inferDouyinCountsFromHtmlText(html, videoId) {
   if (!html) {
     console.log(`[metricsFetcher] 抖音 HTML 为空，跳过正则提取`);
     return { likes: null, comments: null, favorites: null, shares: null };
@@ -1477,12 +1589,27 @@ async function scrapeXiaohongshu(page, targetNoteId, getFeedData) {
   }
 
   const initialState = await readXiaohongshuInitialState(page, noteId);
-  const precise = await readXiaohongshuEngageBar(page);
-  const htmlFallback = await inferXiaohongshuCountsFromHtml(page);
-  const metaTags = await readXiaohongshuMetaTags(page);
-  const xpathTitle = await readXiaohongshuTitleByXPath(page);
-  const domAuthorName = await readXiaohongshuAuthorNameFromDom(page);
-  const domAuthorUrl = await readXiaohongshuAuthorUrlFromDom(page);
+  // ── 优化 #2：8 项独立的 page.evaluate 并行化（节省 300-500ms） ──
+  const [
+    precise,
+    htmlFallback,
+    metaTags,
+    xpathTitle,
+    domAuthorName,
+    domAuthorUrl,
+    fallback,
+    eagerPublishDate,
+  ] = await Promise.all([
+    readXiaohongshuEngageBar(page),
+    inferXiaohongshuCountsFromHtml(page),
+    readXiaohongshuMetaTags(page),
+    readXiaohongshuTitleByXPath(page),
+    readXiaohongshuAuthorNameFromDom(page),
+    readXiaohongshuAuthorUrlFromDom(page),
+    inferCountsFromBody(page),
+    // 提前并行 fetch，避免后续 publishDate lazy await 阻塞主路径
+    readXiaohongshuPublishDate(page),
+  ]);
   const domAuthorId = extractXiaohongshuUserIdFromProfileUrl(domAuthorUrl);
 
   // 指标优先级：feed API > SSR > EngageBar DOM > HTML正则
@@ -1516,7 +1643,7 @@ async function scrapeXiaohongshu(page, targetNoteId, getFeedData) {
   const titleSource = feedCard?.title ? "feed-api" : initialState?.title ? "initialState" : xpathTitle ? "xpath" : metaTags?.title ? "meta-title" : metaTags?.description ? "meta-description" : "empty";
   console.log(`[metricsFetcher] 小红书标题来源: ${titleSource}, title=${title.slice(0, 80)}`);
   // 发布日期：feed API > INITIAL_STATE.note.time > DOM 日期兜底
-  const publishDate = feedCard?.publishedAt || initialState?.publishedAt || await readXiaohongshuPublishDate(page);
+  const publishDate = feedCard?.publishedAt || initialState?.publishedAt || eagerPublishDate;
   if (feedCard?.publishedAt) {
     console.log(`[metricsFetcher] 小红书发布日期来源: feed-api, publishedAt=${feedCard.publishedAt}`);
   } else if (initialState?.publishedAt) {
@@ -1529,7 +1656,6 @@ async function scrapeXiaohongshu(page, targetNoteId, getFeedData) {
   const authorSource = feedCard?.authorName ? "feed-api" : domAuthorName ? "dom" : initialState?.authorName ? "initialState" : metaTags?.authorName ? "meta" : "empty";
   console.log(`[metricsFetcher] 小红书作者来源: ${authorSource}, authorName=${authorName.slice(0, 60)}, authorId=${authorId}`);
 
-  const fallback = await inferCountsFromBody(page);
   return {
     bodyText: fallback.text,
     title,
@@ -1581,6 +1707,16 @@ async function scrapeXiaohongshu(page, targetNoteId, getFeedData) {
 async function readDouyinRenderData(page) {
   try {
     const html = await page.content();
+    return extractDouyinRenderDataFromHtml(html);
+  } catch (err) {
+    console.warn(`[metricsFetcher] 抖音 RENDER_DATA 读取失败: ${err?.message || err}`);
+    return null;
+  }
+}
+
+function extractDouyinRenderDataFromHtml(html) {
+  try {
+    if (!html) return null;
     const match = html.match(/<script\s+id="RENDER_DATA"\s+type="application\/json"[^>]*>([\s\S]*?)<\/script>/i);
     if (!match?.[1]) return null;
     let decoded = match[1].trim();
@@ -1669,7 +1805,7 @@ async function readDouyinCopywritingByXPath(page) {
   return "";
 }
 
-async function scrapeDouyin(page, getDouyinDetail) {
+async function scrapeDouyin(page, getDouyinDetail, preRscDetail = null) {
   const currentUrl = page.url();
   const videoId = extractDouyinVideoId(currentUrl);
   console.log(`[metricsFetcher] 抖音 scrapeDouyin: url=${currentUrl}, videoId=${videoId || '未提取'}`);
@@ -1689,133 +1825,150 @@ async function scrapeDouyin(page, getDouyinDetail) {
     }
   }
 
-  // ── Layer 0: RSC flight data（抖音笔记/图文页 SSR 数据） ──
-  const rscDetail = await readDouyinRscFlightData(page);
+  // ── 优化 #3：一次拿 HTML，RSC / RENDER_DATA / HTML 正则三层复用 ──
+  const html = await page.content().catch(() => "");
+
+  // ── Layer 0: RSC flight data（优先用预提取，避免重复 page.content()） ──
+  const rscDetail = preRscDetail || (html ? extractDouyinDetailFromRscHtml(html) : null);
   const rscMetrics = rscDetail ? extractDouyinFromDetail(rscDetail) : null;
   if (rscMetrics) {
     console.log(`[metricsFetcher] 抖音 RSC 层: title=${rscMetrics.title.slice(0, 60)}, author=${rscMetrics.authorName}, 赞${rscMetrics.likes} 评${rscMetrics.comments} 藏${rscMetrics.favorites} 分享${rscMetrics.shares}`);
   }
 
   // ── Layer 0.5: 传统 RENDER_DATA（兼容旧版视频页） ──
-  const renderData = await readDouyinRenderData(page);
+  const renderData = extractDouyinRenderDataFromHtml(html);
   if (renderData) {
     console.log(`[metricsFetcher] 抖音 RENDER_DATA 层: 赞${renderData.likes} 评${renderData.comments} 藏${renderData.favorites} 分享${renderData.shares}`);
   }
 
   // ── Layer 1: HTML 正则，按 videoId 精确定位 ──
-  const htmlFallback = await inferDouyinCountsFromHtml(page, videoId);
+  const htmlFallback = inferDouyinCountsFromHtmlText(html, videoId);
 
-  // ── Layer 2: DOM 扫描 ──
-  // 模拟 hover 让 tooltip 出来（部分数字可能在 tooltip 里）
-  try {
-    const hoverTargets = await page.locator(
-      '#douyin-right-container svg, #sliderVideo svg'
-    ).all();
-    for (const t of hoverTargets.slice(0, 8)) {
-      try { await t.hover({ timeout: 200 }); } catch {}
-    }
-  } catch {}
+  // ── 优化 #1：高优先级 source 已拿全 4 项 → 跳过昂贵 DOM 兜底（节省 1-2s） ──
+  const isReliable = (m) =>
+    m && m.likes > 0 && m.comments != null && m.favorites != null && m.shares != null;
+  const canShortCircuit = isReliable(apiMetrics) || isReliable(rscMetrics);
 
-  // ── Layer 1.5: XPath 精确定位（抖音笔记页/图文页） ──
-  // 当 SVG walk 方案因 DOM 结构变化失败时，用固定 XPath 兜底。
-  const xpathCounts = await page.evaluate(() => {
-    const parseNum = (text) => {
-      if (!text) return 0;
-      const m = text.trim().match(/(\d+(?:\.\d+)?)\s*([wkW万千K]?)/i);
-      if (!m) return 0;
-      let v = parseFloat(m[1]);
-      const u = m[2].toLowerCase();
-      if (u === "w" || u === "万") v *= 10000;
-      else if (u === "k" || u === "千") v *= 1000;
-      return Math.round(v);
-    };
-    const xpath = (expr) => {
-      try {
-        const r = document.evaluate(expr, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
-        return r.singleNodeValue ? (r.singleNodeValue.textContent || "").trim() : "";
-      } catch { return ""; }
-    };
-    const likes = parseNum(xpath('//*[@id="sliderVideo"]/div[1]/div/div[1]/div[1]/div/div[2]/div[2]/div[1]/div[2]'));
-    const comments = parseNum(xpath('//*[@id="sliderVideo"]/div[1]/div/div[1]/div[1]/div/div[2]/div[3]/div[1]/div[2]'));
-    const favorites = parseNum(xpath('//*[@id="sliderVideo"]/div[1]/div/div[1]/div[1]/div/div[2]/div[4]/div[2]'));
-    const shares = parseNum(xpath('//*[@id="sliderVideo"]/div[1]/div/div[1]/div[1]/div/div[2]/div[5]/div[1]/div[2]'));
-    return { likes, comments, favorites, shares };
-  }).catch(() => null);
+  let xpathCounts = null;
+  let interactiveCounts = null;
+  let fallback = { text: "", likes: null, comments: null, favorites: null, shares: null };
 
-  // 单次 page.evaluate 拿 4 项指标（按 DOM 位置：[点赞, 评论, 收藏, 分享]）
-  const interactiveCounts = await page.evaluate(() => {
-    const root = document.getElementById('douyin-right-container');
-    if (!root) return null;
+  if (canShortCircuit) {
+    console.log(`[metricsFetcher] 抖音 短路：${isReliable(apiMetrics) ? 'API' : 'RSC'} 已拿全 4 项指标，跳过 hover/XPath/DOM 扫描/body 文本兜底`);
+  } else {
+    // ── Layer 2: DOM 扫描前 hover 让 tooltip 出来 ──
+    try {
+      const hoverTargets = await page.locator(
+        '#douyin-right-container svg, #sliderVideo svg'
+      ).all();
+      for (const t of hoverTargets.slice(0, 8)) {
+        try { await t.hover({ timeout: 200 }); } catch {}
+      }
+    } catch {}
 
-    // 抖音把数字拆成多个 span 做位移动画。策略：递归收集容器内所有"纯数字文本"span，
-    // 按文档顺序拼接。还需处理"万 / w"这种单位后缀。
-    const collectNumbers = (el) => {
-      if (!el) return { value: 0, raw: "" };
-      // 收集所有叶子级文本节点
-      const text = el.innerText || el.textContent || "";
-      // 提取数字和单位：1.9万 / 1.9w / 19000
-      const match = text.match(/(\d+(?:\.\d+)?)\s*([wkW万千K]?)/);
-      if (!match) return { value: 0, raw: "" };
-      const num = parseFloat(match[1]);
-      const unit = match[2].toLowerCase();
-      let val = num;
-      if (unit === "w" || unit === "万") val = num * 10000;
-      else if (unit === "k" || unit === "千") val = num * 1000;
-      return { value: Math.round(val), raw: text.trim() };
-    };
+    // ── Layer 1.5: XPath 精确定位（抖音笔记页/图文页） ──
+    // 当 SVG walk 方案因 DOM 结构变化失败时，用固定 XPath 兜底。
+    xpathCounts = await page.evaluate(() => {
+      const parseNum = (text) => {
+        if (!text) return 0;
+        const m = text.trim().match(/(\d+(?:\.\d+)?)\s*([wkW万千K]?)/i);
+        if (!m) return 0;
+        let v = parseFloat(m[1]);
+        const u = m[2].toLowerCase();
+        if (u === "w" || u === "万") v *= 10000;
+        else if (u === "k" || u === "千") v *= 1000;
+        return Math.round(v);
+      };
+      const xpath = (expr) => {
+        try {
+          const r = document.evaluate(expr, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+          return r.singleNodeValue ? (r.singleNodeValue.textContent || "").trim() : "";
+        } catch { return ""; }
+      };
+      const likes = parseNum(xpath('//*[@id="sliderVideo"]/div[1]/div/div[1]/div[1]/div/div[2]/div[2]/div[1]/div[2]'));
+      const comments = parseNum(xpath('//*[@id="sliderVideo"]/div[1]/div/div[1]/div[1]/div/div[2]/div[3]/div[1]/div[2]'));
+      const favorites = parseNum(xpath('//*[@id="sliderVideo"]/div[1]/div/div[1]/div[1]/div/div[2]/div[4]/div[2]'));
+      const shares = parseNum(xpath('//*[@id="sliderVideo"]/div[1]/div/div[1]/div[1]/div/div[2]/div[5]/div[1]/div[2]'));
+      return { likes, comments, favorites, shares };
+    }).catch(() => null);
 
-    // 找含 SVG 的按钮容器（心 / 评论 / 收藏 / 分享），按 DOM 顺序
-    const buttons = [];
-    const walk = (node) => {
-      if (node.tagName === "svg") {
-        // 找最近的有 innerText 的祖先容器
-        let p = node.parentElement;
-        for (let i = 0; i < 5 && p; i++) {
-          const txt = (p.innerText || "").trim();
-          if (txt && /\d/.test(txt) && p.children.length <= 4) {
-            buttons.push(p);
-            return;
+    // 单次 page.evaluate 拿 4 项指标（按 DOM 位置：[点赞, 评论, 收藏, 分享]）
+    interactiveCounts = await page.evaluate(() => {
+      const root = document.getElementById('douyin-right-container');
+      if (!root) return null;
+
+      // 抖音把数字拆成多个 span 做位移动画。策略：递归收集容器内所有"纯数字文本"span，
+      // 按文档顺序拼接。还需处理"万 / w"这种单位后缀。
+      const collectNumbers = (el) => {
+        if (!el) return { value: 0, raw: "" };
+        // 收集所有叶子级文本节点
+        const text = el.innerText || el.textContent || "";
+        // 提取数字和单位：1.9万 / 1.9w / 19000
+        const match = text.match(/(\d+(?:\.\d+)?)\s*([wkW万千K]?)/);
+        if (!match) return { value: 0, raw: "" };
+        const num = parseFloat(match[1]);
+        const unit = match[2].toLowerCase();
+        let val = num;
+        if (unit === "w" || unit === "万") val = num * 10000;
+        else if (unit === "k" || unit === "千") val = num * 1000;
+        return { value: Math.round(val), raw: text.trim() };
+      };
+
+      // 找含 SVG 的按钮容器（心 / 评论 / 收藏 / 分享），按 DOM 顺序
+      const buttons = [];
+      const walk = (node) => {
+        if (node.tagName === "svg") {
+          // 找最近的有 innerText 的祖先容器
+          let p = node.parentElement;
+          for (let i = 0; i < 5 && p; i++) {
+            const txt = (p.innerText || "").trim();
+            if (txt && /\d/.test(txt) && p.children.length <= 4) {
+              buttons.push(p);
+              return;
+            }
+            p = p.parentElement;
           }
-          p = p.parentElement;
+        }
+        for (const c of node.children || []) walk(c);
+      };
+      walk(root);
+
+      // 抖音图文/笔记页结构：每个交互按钮包一层 div，div 里有 SVG + 数字 span
+      //   直接取每个按钮的 innerText（含 SVG 旁所有数字节点拼接）
+      const result = { likes: 0, comments: 0, favorites: 0, shares: 0 };
+      if (buttons.length >= 4) {
+        const keys = ["likes", "comments", "favorites", "shares"];
+        for (let i = 0; i < 4; i++) {
+          const { value, raw } = collectNumbers(buttons[i]);
+          if (value) result[keys[i]] = value;
+        }
+      } else {
+        // 兜底：按 innerText 顺序抓 4 个数字（适配 DOM 结构变化）
+        const text = root.innerText || "";
+        const matches = text.match(/\d+(?:\.\d+)?\s*[wkW万千K]?/g) || [];
+        if (matches.length >= 4) {
+          const parse = (s) => {
+            const m = s.match(/(\d+(?:\.\d+)?)\s*([wkW万千K]?)/);
+            if (!m) return 0;
+            let v = parseFloat(m[1]);
+            const u = m[2].toLowerCase();
+            if (u === "w" || u === "万") v *= 10000;
+            else if (u === "k" || u === "千") v *= 1000;
+            return Math.round(v);
+          };
+          result.likes = parse(matches[0]);
+          result.comments = parse(matches[1]);
+          result.favorites = parse(matches[2]);
+          result.shares = parse(matches[3]);
         }
       }
-      for (const c of node.children || []) walk(c);
-    };
-    walk(root);
+      return result;
+    }).catch(() => null);
 
-    // 抖音图文/笔记页结构：每个交互按钮包一层 div，div 里有 SVG + 数字 span
-    //   直接取每个按钮的 innerText（含 SVG 旁所有数字节点拼接）
-    const result = { likes: 0, comments: 0, favorites: 0, shares: 0 };
-    if (buttons.length >= 4) {
-      const keys = ["likes", "comments", "favorites", "shares"];
-      for (let i = 0; i < 4; i++) {
-        const { value, raw } = collectNumbers(buttons[i]);
-        if (value) result[keys[i]] = value;
-      }
-    } else {
-      // 兜底：按 innerText 顺序抓 4 个数字（适配 DOM 结构变化）
-      const text = root.innerText || "";
-      const matches = text.match(/\d+(?:\.\d+)?\s*[wkW万千K]?/g) || [];
-      if (matches.length >= 4) {
-        const parse = (s) => {
-          const m = s.match(/(\d+(?:\.\d+)?)\s*([wkW万千K]?)/);
-          if (!m) return 0;
-          let v = parseFloat(m[1]);
-          const u = m[2].toLowerCase();
-          if (u === "w" || u === "万") v *= 10000;
-          else if (u === "k" || u === "千") v *= 1000;
-          return Math.round(v);
-        };
-        result.likes = parse(matches[0]);
-        result.comments = parse(matches[1]);
-        result.favorites = parse(matches[2]);
-        result.shares = parse(matches[3]);
-      }
-    }
-    return result;
-  }).catch(() => null);
+    fallback = await inferCountsFromBody(page);
+  }
 
-  const fallback = await inferCountsFromBody(page);
+  // copywriting 始终采集（短路时也保留，因为它来自独立 XPath、与 metric 无关）
   const copywriting = await readDouyinCopywritingByXPath(page);
 
   // 优先级：API 拦截 > RSC > RENDER_DATA > HTML 正则 > XPath > DOM 扫描 > body text
@@ -2022,17 +2175,71 @@ async function launchProfileContext(platform) {
   });
 }
 
-async function fetchMetricsFromUrl(url) {
+/**
+ * 外层入口：负责短链预展开 + 缓存命中 + 重试编排。
+ * 真正的浏览器抓取流程在 _fetchMetricsOnce 里。
+ *
+ * @param {string} url
+ * @param {object} [options]
+ * @param {number} [options.retries=0]  内层重试次数（额外尝试次数）。默认 0：
+ *   生产调用都通过 scripts/parser-core.js 的 fetchWithRetry 重试，
+ *   再叠一层只会撞 nginx 60s 超时；CLI 工具/直连场景显式传 1~2。
+ */
+async function fetchMetricsFromUrl(url, options = {}) {
   const targetUrl = normalizeUrl(url);
   if (!targetUrl) {
     throw new Error("作品链接不能为空");
   }
 
-  const platform = detectPlatform(targetUrl);
+  // 1. 短链 HEAD 预展开（v.douyin.com / xhslink.com）
+  let workingUrl = targetUrl;
+  if (/v\.douyin\.com|xhslink\.com/i.test(targetUrl)) {
+    try {
+      const expanded = await expandShortUrl(targetUrl);
+      if (expanded && expanded !== targetUrl) {
+        console.log(`[metricsFetcher] 短链展开: ${targetUrl} -> ${expanded}`);
+        workingUrl = expanded;
+      }
+    } catch (err) {
+      console.warn(`[metricsFetcher] 短链展开失败，沿用原链接: ${err?.message || err}`);
+    }
+  }
+
+  const platform = detectPlatform(workingUrl);
   if (!platform) {
     throw new Error("暂时只支持小红书和抖音作品链接");
   }
 
+  // 2. 结果缓存（5 分钟 TTL）
+  const cacheKey = canonicalCacheKey(platform, workingUrl);
+  const cached = getCachedResult(cacheKey);
+  if (cached) {
+    console.log(`[metricsFetcher] 缓存命中: key=${cacheKey}`);
+    return { ...cached, fromCache: true };
+  }
+
+  // 3. 重试：网络/超时类错误重试；登录墙/笔记失效（LoginWallError）直接抛
+  const retries = Math.max(0, Number(options.retries ?? 0));
+  const maxAttempts = retries + 1;
+  let lastErr;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const result = await _fetchMetricsOnce(workingUrl, platform);
+      setCachedResult(cacheKey, result);
+      return result;
+    } catch (err) {
+      lastErr = err;
+      if (err instanceof LoginWallError) throw err;
+      if (attempt < maxAttempts) {
+        console.warn(`[metricsFetcher] 第 ${attempt}/${maxAttempts} 次抓取失败，准备重试: ${err?.message || err}`);
+        await new Promise((r) => setTimeout(r, 500 * attempt));
+      }
+    }
+  }
+  throw lastErr;
+}
+
+async function _fetchMetricsOnce(targetUrl, platform) {
   const context = await getContext(platform);
   let page;
   const t0 = Date.now();
@@ -2079,9 +2286,24 @@ async function fetchMetricsFromUrl(url) {
 
     // ── 等待策略：抖音需要完整 SPA 渲染（networkidle + 1s），
     // 小红书需要等待 feed API 返回（networkidle + 500ms）
-    await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => {});
+    // 优化：抖音笔记页 RSC 数据在 HTML 中已可用，提前提取以跳过 networkidle
+    let rscDetailTimely = null;
     if (platform === "抖音") {
-      await page.waitForTimeout(1000);
+      try {
+        const html = await page.content();
+        rscDetailTimely = extractDouyinDetailFromRscHtml(html);
+        if (rscDetailTimely) {
+          console.log(`[metricsFetcher] 抖音 RSC 提前命中（加载耗时 ${Date.now() - tLoad}ms）`);
+        }
+      } catch (err) {
+        console.warn(`[metricsFetcher] 抖音 RSC 提前提取失败: ${err?.message || err}`);
+      }
+    }
+    if (!rscDetailTimely) {
+      await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => {});
+    }
+    if (platform === "抖音") {
+      await page.waitForTimeout(rscDetailTimely ? 200 : 1000);
     } else {
       await page.waitForTimeout(500);
     }
@@ -2092,19 +2314,19 @@ async function fetchMetricsFromUrl(url) {
     if (obstacleCheck.detected) {
       contextReleased = true;
       releaseContext(platform);
-      throw new Error(`当前打开的是${platform}登录页/登录弹窗/新手引导，请先在"链接测试"里点"打开${platform}登录浏览器"完成一次登录。`);
+      throw new LoginWallError(`当前打开的是${platform}登录页/登录弹窗/新手引导，请先在"链接测试"里点"打开${platform}登录浏览器"完成一次登录。`);
     }
 
     const pageTitle = await page.title().catch(() => "");
 
-    const payload = platform === "小红书" ? await scrapeXiaohongshu(page, targetNoteId, getFeedData) : await scrapeDouyin(page, getDouyinDetail);
+    const payload = platform === "小红书" ? await scrapeXiaohongshu(page, targetNoteId, getFeedData) : await scrapeDouyin(page, getDouyinDetail, rscDetailTimely);
 
     // 小红书：先检测笔记是否已失效（被删除/隐藏），再校验笔记存在性
     if (platform === "小红书" && payload?.bodyText) {
       if (isXiaohongshuNoteUnavailable(payload.bodyText, pageTitle)) {
         contextReleased = true;
         releaseContext(platform);
-        throw new Error("小红书笔记已失效，可能已被删除或隐藏，请更换链接重试。");
+        throw new LoginWallError("小红书笔记已失效，可能已被删除或隐藏，请更换链接重试。");
       }
     }
 
@@ -2115,7 +2337,7 @@ async function fetchMetricsFromUrl(url) {
       if (!notePresent) {
         contextReleased = true;
         releaseContext(platform);
-        throw new Error(`当前打开的是小红书登录页/未找到目标笔记，请先在"链接测试"里点"打开小红书登录浏览器"完成一次登录。`);
+        throw new LoginWallError(`当前打开的是小红书登录页/未找到目标笔记，请先在"链接测试"里点"打开小红书登录浏览器"完成一次登录。`);
       }
     }
 
@@ -2130,7 +2352,7 @@ async function fetchMetricsFromUrl(url) {
       // 登录墙 → 从池中移除，下次重新 launch
       contextReleased = true;
       releaseContext(platform);
-      throw new Error(`当前打开的是${platform}登录页，请先在"链接测试"里点"打开${platform}登录浏览器"完成一次登录。`);
+      throw new LoginWallError(`当前打开的是${platform}登录页，请先在"链接测试"里点"打开${platform}登录浏览器"完成一次登录。`);
     }
 
     const normalizedTitle = String((payload && payload.title) || pageTitle || "")
@@ -2173,8 +2395,8 @@ async function fetchMetricsFromUrl(url) {
     console.log(`[metricsFetcher] ${platform} 抓取完成: ${Date.now() - t0}ms (加载${tLoad - t0}ms) 赞${result.likes} 评${result.comments} 藏${result.favorites} 分享${result.shares}`);
     return result;
   } catch (err) {
-    // 非登录墙错误：context 可能已损坏，从池中移除
-    if (!String(err?.message || "").includes("登录页")) {
+    // 非登录墙错误：context 可能已损坏，从池中移除让外层重试时冷启动
+    if (!(err instanceof LoginWallError) && !contextReleased) {
       contextReleased = true;
       releaseContext(platform);
     }
@@ -2780,6 +3002,17 @@ async function capturePostCover(page, platform, preferredNoteId, feedImageList) 
 
     // 5. 兜底：视口截图
     console.log(`[metricsFetcher] capturePostCover step 5: viewport screenshot`);
+    // 等待懒加载图片展开后再截图（小红书/抖音常见 loading="lazy"）
+    try {
+      await page.evaluate(() => {
+        document.querySelectorAll('img[loading="lazy"], img[data-src], img[loading]').forEach((img) => {
+          if (img.dataset.src) img.src = img.dataset.src;
+          img.loading = 'eager';
+          if (img.complete === false) img.setAttribute('loading', 'eager');
+        });
+      });
+      await page.waitForTimeout(300);
+    } catch {}
     const useLocator = process.env.PLAYWRIGHT_HEADLESS !== "0" && platform !== "抖音";
     let buf;
     if (useLocator) {
