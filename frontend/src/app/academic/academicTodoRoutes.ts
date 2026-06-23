@@ -16,14 +16,13 @@ const FALLBACK_ROUTES: Record<AcademicTodoType, string> = {
   inProgress: '/academic/followup?status=in_progress',
   waitingMaterial: '/academic/followup?status=awaiting_client_info',
   waitingTeacher: '/academic/followup?status=awaiting_teacher',
-  nearDue: '/academic/followup?status=near_due',
+  nearDue: '/academic/reminders',
   abnormal: '/academic/abnormal',
 };
 
 const ORDER_TARGETS: Partial<Record<AcademicTodoType, string>> = {
   waitingMaterial: 'client-info',
   waitingTeacher: 'teacher',
-  nearDue: 'progress',
 };
 
 export function buildAcademicTodoHref(target: AcademicTodoTarget): string {

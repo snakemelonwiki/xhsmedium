@@ -1250,7 +1250,8 @@ export class OrdersService {
       throw new NotFoundException('order not found');
     }
     const role = actor?.role || '';
-    if (role !== 'academic' && role !== 'admin' && role !== 'owner') {
+    const allowed = ['academic', 'academic_supervisor', 'supervisor', 'admin', 'owner'];
+    if (!allowed.includes(role)) {
       throw new ForbiddenException('当前角色不允许提醒销售催款');
     }
     const canAccess = await this.canAccessOrder(orderId, actor);

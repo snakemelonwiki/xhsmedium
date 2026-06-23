@@ -68,7 +68,7 @@ const METRIC_CARDS: MetricCard[] = [
   {
     key: 'nearDue',
     title: '即将到期',
-    href: '/academic/followup?status=near_due',
+    href: '/academic/reminders',
     description: '5 天内无进展、需重点跟进的订单',
     icon: <ClockCircleOutlined />,
     accent: '#fa8c16',

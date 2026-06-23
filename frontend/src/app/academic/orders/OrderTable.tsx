@@ -528,7 +528,6 @@ export function OrderTable({
               <Button onClick={() => router.push(`/academic/orders/${record.id}`)}>
                 查看
               </Button>
-              <Button onClick={() => router.push(`/academic/orders/${record.id}?from=followup&mode=edit`)}>编辑</Button>
               <Button loading={remindingId === record.id} onClick={() => remindPayment(record.id)}>
                 提醒销售催款
               </Button>
