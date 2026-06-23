@@ -517,6 +517,7 @@ export class ImportsService implements OnModuleInit, OnModuleDestroy {
             postId: null,
             platform: parsed.platform,
             contactInfo: contactKey,
+            wechat: contactKey,
             nickname: parsed.nickname || '',
             majorContent: parsed.accountName || null,
             note: parsed.remark || null,

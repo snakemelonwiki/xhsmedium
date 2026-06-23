@@ -369,6 +369,13 @@ export const APP_MENU_ITEMS: AppMenuItem[] = [
     roles: ['admin', 'owner', 'supervisor'],
   },
   {
+    key: 'admin-orders',
+    label: '订单管理',
+    path: '/admin/orders',
+    icon: <OrderedListOutlined />,
+    roles: ['admin', 'owner'],
+  },
+  {
     key: 'admin-employees',
     label: '员工管理',
     path: '/admin/employees',

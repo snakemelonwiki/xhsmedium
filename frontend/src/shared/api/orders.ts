@@ -409,6 +409,10 @@ export async function updateOrder(id: string, body: Record<string, unknown>) {
   return apiClient.patch(`/orders/${id}`, body);
 }
 
+export async function deleteOrder(id: string): Promise<{ ok: true }> {
+  return apiClient.delete<{ ok: true }>(`/orders/orders/${id}`);
+}
+
 export async function getOrderDelivery(id: string): Promise<OrderDeliveryDetail> {
   const payload = await apiClient.get<RawRecord>(`/orders/${id}/delivery`);
   const authors = Array.isArray(payload.authors) ? (payload.authors as RawRecord[]) : [];

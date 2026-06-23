@@ -1,12 +1,12 @@
 'use client';
 
-import { DownloadOutlined, FilterOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
-import { Alert, Button, Card, Drawer, Form, Input, InputNumber, Modal, Pagination, Select, Space, Table, Tag, Typography, message } from 'antd';
+import { DownloadOutlined, FilterOutlined, PlusOutlined, ReloadOutlined, DeleteOutlined } from '@ant-design/icons';
+import { Alert, Button, Card, Drawer, Form, Input, InputNumber, Modal, Pagination, Popconfirm, Select, Space, Table, Tag, Typography, message } from 'antd';
 import type { TableColumnsType } from 'antd';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
-import { createAcademicOrder, createOrderFollowRecord, listOrders, remindSalesPayment, type AcademicCreateOrderPayload, updateOrder } from '@/shared/api/orders';
+import { createAcademicOrder, createOrderFollowRecord, listOrders, remindSalesPayment, type AcademicCreateOrderPayload, updateOrder, deleteOrder } from '@/shared/api/orders';
 import { updateLeadDealStatus } from '@/shared/api/leads';
 import { createExport, downloadExportUrl, getExport, type ExportFilter } from '@/shared/api/exports';
 import { readStoredUser } from '@/shared/auth/auth';
@@ -497,9 +497,28 @@ export function OrderTable({
       render: (_value, record) => {
         if (actionMode === 'admin') {
           return (
-            <Button loading={updatingId === record.id} onClick={() => openAssignModal(record)}>
-              分配教务
-            </Button>
+            <Space size={4} wrap>
+              <Button loading={updatingId === record.id} onClick={() => openAssignModal(record)}>
+                分配教务
+              </Button>
+              <Popconfirm
+                title="确定删除该订单？"
+                description="删除后不可恢复。"
+                okText="删除"
+                cancelText="取消"
+                onConfirm={async () => {
+                  try {
+                    await deleteOrder(record.id);
+                    message.success('订单已删除');
+                    loadOrders();
+                  } catch (err) {
+                    message.error(err instanceof Error ? err.message : '删除失败');
+                  }
+                }}
+              >
+                <Button danger icon={<DeleteOutlined />} />
+              </Popconfirm>
+            </Space>
           );
         }
         if (actionMode === 'sales') {

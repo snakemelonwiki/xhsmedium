@@ -527,8 +527,6 @@ export default function SalesLeadsPage() {
       title: '客户学历',
       key: 'clientDegree',
       width: 100,
-      // 我的客资以协同加好友为主，学历信息挪到详情查看
-      hidden: true,
       render: (_v, lead) => lead.clientDegree || '-',
     },
     {
@@ -543,8 +541,6 @@ export default function SalesLeadsPage() {
       key: 'major',
       width: 180,
       ellipsis: true,
-      // 我的客资以协同加好友为主，专业方向挪到详情查看
-      hidden: true,
       render: (_v, lead) => lead.clientMajorResearch || '-',
     },
     {
