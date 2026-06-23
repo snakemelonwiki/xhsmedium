@@ -28,6 +28,7 @@ import { listAdminEmployees } from '@/shared/api/admin';
 import type { ContentPost } from '@/shared/types/content';
 import { todayDateString } from '@/shared/utils/default-date-range';
 import { readAuthenticatedUser } from '@/shared/auth/auth';
+import { getStatusLabel } from '@/shared/constants/lead-status';
 
 const platformOptions = [
   { label: '全部平台', value: '' },
@@ -610,10 +611,10 @@ function SensitiveInfoSection({
                       </Typography.Text>
                     )}
                     <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                      销售分配：{lead.salesUserName || lead.assignedSalesUserId || '未分配'}
+                      销售分配：{lead.salesUserName || lead.assignedSalesUserId || '-'}
                     </Typography.Text>
                     <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                      状态：{lead.status}
+                      状态：{getStatusLabel(lead.status as any) || lead.status || '-'}
                     </Typography.Text>
                   </Space>
                 </Card>

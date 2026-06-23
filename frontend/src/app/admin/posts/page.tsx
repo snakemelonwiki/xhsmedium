@@ -40,6 +40,7 @@ import { createExport, downloadExportUrl, getExport } from '@/shared/api/exports
 import { QuickRangePicker, RANGE_PRESETS_FULL } from '@/shared/components/date';
 import { normalizePostMetric } from '@/shared/utils/post-metrics';
 import { buildPostExportFilter, getPostDetailDisplay, getPostQualityMeta, type PostQualityStatus } from './postDetail';
+import { getStatusLabel } from '@/shared/constants/lead-status';
 
 const DEFAULT_PAGE_SIZE = 15;
 const PAGE_SIZE_OPTIONS = [15, 30, 50, 100];
@@ -1055,7 +1056,7 @@ export default function AdminPostsPage() {
                         { title: '联系方式', dataIndex: 'contactInfo', width: 140, render: (v) => v || '-' },
                         { title: '微信', dataIndex: 'wechat', width: 120, render: (v) => v || '-' },
                         { title: '销售分配', dataIndex: 'salesUserName', width: 110, render: (v) => v || '-' },
-                        { title: '状态', dataIndex: 'status', width: 100, render: (v) => v || '-' },
+                        { title: '状态', dataIndex: 'status', width: 100, render: (v) => getStatusLabel(v as any) || v || '-' },
                         { title: '平台', dataIndex: 'platform', width: 80 },
                         { title: '时间', dataIndex: 'createdAt', width: 110, render: formatDate },
                       ]}
