@@ -436,19 +436,26 @@ export default function OperationPostNewPage() {
       setSubmittingCheck(false);
     }
 
-    await run(async () => {
-      await apiClient.post('/posts', {
-        ...values,
-        accountId,
-        coverThumbUrl,
-        publishedAt,
+    try {
+      await run(async () => {
+        await apiClient.post('/posts', {
+          ...values,
+          accountId,
+          coverThumbUrl,
+          publishedAt,
+        });
+        message.success('作品已录入，可继续录入下一条');
+        form.resetFields();
+        latestThumbRef.current = '';
+        // 修复 (2026-06-13)：6月11日优化意见要求提交成功后不自动跳转，
+        //   停留在录入页面直接录下一个，避免重复点击"作品录入"。
       });
-      message.success('作品已录入，可继续录入下一条');
-      form.resetFields();
-      latestThumbRef.current = '';
-      // 修复 (2026-06-13)：6月11日优化意见要求提交成功后不自动跳转，
-      //   停留在录入页面直接录下一个，避免重复点击"作品录入"。
-    });
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : '提交失败，请稍后重试';
+      message.error(errMsg);
+    } finally {
+      setSubmittingCheck(false);
+    }
   }
 
   /**
