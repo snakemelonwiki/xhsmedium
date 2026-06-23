@@ -243,6 +243,7 @@ export default function AccountAnalysisPage() {
           extra={
             <Space size={8} wrap>
               <Badge color={ACCOUNT_ANALYSIS_LEGEND.leadPost.color} text={ACCOUNT_ANALYSIS_LEGEND.leadPost.text} />
+              <Badge color={ACCOUNT_ANALYSIS_LEGEND.discussionPost.color} text={ACCOUNT_ANALYSIS_LEGEND.discussionPost.text} />
               <Badge color={ACCOUNT_ANALYSIS_LEGEND.personaPost.color} text={ACCOUNT_ANALYSIS_LEGEND.personaPost.text} />
               <Badge color={ACCOUNT_ANALYSIS_LEGEND.empty.color} text={ACCOUNT_ANALYSIS_LEGEND.empty.text} />
               <span style={{ width: 1, height: 12, background: '#d9d9d9' }} />
@@ -288,6 +289,7 @@ export default function AccountAnalysisPage() {
                   extra={
                     <Space size={8} wrap>
                       <Badge color={ACCOUNT_ANALYSIS_LEGEND.leadPost.color} text={ACCOUNT_ANALYSIS_LEGEND.leadPost.text} />
+                      <Badge color={ACCOUNT_ANALYSIS_LEGEND.discussionPost.color} text={ACCOUNT_ANALYSIS_LEGEND.discussionPost.text} />
                       <Badge color={ACCOUNT_ANALYSIS_LEGEND.personaPost.color} text={ACCOUNT_ANALYSIS_LEGEND.personaPost.text} />
                       <Badge color={ACCOUNT_ANALYSIS_LEGEND.empty.color} text={ACCOUNT_ANALYSIS_LEGEND.empty.text} />
                     </Space>
@@ -461,11 +463,13 @@ function pickPlatformDotColor(platform?: string): string {
   return '#bfbfbf';
 }
 
-// 作品录入可选的 3 种类型（与 frontend/src/app/operation/posts/new/page.tsx:331 保持一致）。
+// 后端 normalizePostType（backend/src/shared/utils/normalize.ts）统一输出「帖」，
+// 这里必须用「帖」与之匹配，否则所有帖子会掉进"其他"分组。
+// 与 frontend/src/app/admin/account-analysis/page.tsx:524 保持一致。
 const POST_TYPE_GROUPS: { type: string; label: string; color: string }[] = [
-  { type: '获客贴', label: '获客贴', color: '#fa8c16' },
-  { type: '话题贴', label: '话题贴', color: '#1677ff' },
-  { type: '素人贴', label: '素人贴', color: '#52c41a' },
+  { type: '获客帖', label: '获客帖', color: '#fa8c16' },
+  { type: '讨论帖', label: '讨论帖', color: '#1677ff' },
+  { type: '人设帖', label: '人设帖', color: '#52c41a' },
 ];
 
 /**

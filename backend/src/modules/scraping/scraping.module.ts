@@ -4,20 +4,39 @@ import { ScrapingAlert } from './scraping-alert.entity';
 import { ScrapingAlertService } from './scraping-alert.service';
 import { ScrapingLockService } from './scraping-lock.service';
 import { ScrapingAlertsController } from './scraping.controller';
+import { BrowserPoolService } from './core/browser-pool.service';
+import { ScraperService } from './core/scraper.service';
 
 /**
- * 抓取子模块：全局抓取锁 + 失败告警（owner-only）。
+ * Scraping V2 模块
  *
- * 暴露给 ParserModule 的是：
- *   - ScrapingLockService.run(fn)        串行化抓取任务
- *   - ScrapingAlertService.record*       失败/成功计数与告警写库
+ * 重构后暴露的核心服务：
+ *   - ScrapingLockService:  抓取串行化锁（内存级，单进程互斥）
+ *   - ScrapingAlertService:  失败告警计数与写库
+ *   - BrowserPoolService:    Playwright 浏览器上下文池
+ *   - ScraperService:        统一抓取入口（URL → HAR → 数据提取 → 封面截图）
  *
- * 暴露给前端的是 /api/scraping-alerts 一组 owner 端点。
+ * 旧版依赖（scripts/parser-core.js → metricsFetcher.js）被完全替代，
+ * 不再通过 require('../../../scripts/parser-core') 跨模块调用。
  */
 @Module({
   imports: [TypeOrmModule.forFeature([ScrapingAlert])],
   controllers: [ScrapingAlertsController],
-  providers: [ScrapingAlertService, ScrapingLockService],
-  exports: [ScrapingAlertService, ScrapingLockService],
+  providers: [
+    // V1 服务（向后兼容）
+    ScrapingAlertService,
+    ScrapingLockService,
+    // V2 服务（新架构）
+    BrowserPoolService,
+    ScraperService,
+  ],
+  exports: [
+    // V1 兼容导出（ParserService 仍依赖这些）
+    ScrapingAlertService,
+    ScrapingLockService,
+    // V2 核心导出（供 ParserService 使用）
+    BrowserPoolService,
+    ScraperService,
+  ],
 })
 export class ScrapingModule {}

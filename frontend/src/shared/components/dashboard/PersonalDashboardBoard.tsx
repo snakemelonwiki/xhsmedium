@@ -91,8 +91,12 @@ const OVERVIEW_CARD_KEYS_BY_MODE: Record<OverviewMetricMode, Array<keyof Persona
   leads: ['monthLeadCount', 'monthLeadPostCount', 'totalLeads'],
 };
 
+// 个人看板默认时间范围 = 今日（与 RANGE_PRESETS_FULL 中 `today` 预设对齐：
+// mode='calendar', unit='day' → [startOf('day'), now]）。
+// 之前默认为本月，配合 Select 的"重复选同一项不触发 onChange"陷阱，
+// 容易出现「我选了今日但看到的是 X 天前到今天」的体感 bug。
 const DEFAULT_RANGE_VALUE: DateRangeValue = {
-  start: dayjs().startOf('month'),
+  start: dayjs().startOf('day'),
   end: dayjs(),
 };
 
@@ -566,12 +570,12 @@ const POST_TYPE_SHARE_PLATFORM_OPTIONS: { label: string; value: PersonalPlatform
 ];
 
 const POST_TYPE_SHARE_COLORS: Record<string, string> = {
-  人设贴: '#722ed1',
-  讨论贴: '#fa8c16',
-  获客贴: '#52c41a',
+  人设帖: '#722ed1',
+  讨论帖: '#fa8c16',
+  获客帖: '#52c41a',
 };
 
-const POST_TYPE_DISPLAY_ORDER = ['人设贴', '讨论贴', '获客贴'] as const;
+const POST_TYPE_DISPLAY_ORDER = ['人设帖', '讨论帖', '获客帖'] as const;
 
 function PostTypeSharePieCard({
   items,
@@ -590,7 +594,7 @@ function PostTypeSharePieCard({
   // 聚合：把 scope 范围内的 postTypes 累加，按固定顺序输出
   const aggregated = useMemo(() => {
     const filtered = scope === 'all' ? items : items.filter((it) => it.platform === scope);
-    const acc: Record<string, number> = { 人设贴: 0, 讨论贴: 0, 获客贴: 0 };
+    const acc: Record<string, number> = { 人设帖: 0, 讨论帖: 0, 获客帖: 0 };
     let classifiedTotal = 0;
     for (const it of filtered) {
       const types = it.postTypes || [];
@@ -625,7 +629,7 @@ function PostTypeSharePieCard({
     emptyHTML: '<div class="' + styles.pieChartBoxEmpty + '">暂无数据</div>',
     buildOption: (d) => ({
       title: {
-        text: '三类作品占比（人设贴 / 讨论贴 / 获客贴）',
+        text: '三类作品占比（人设帖 / 讨论帖 / 获客帖）',
         subtext: scope === 'all' ? '全部平台' : scope,
         textStyle: { fontSize: 14, fontWeight: 'normal' },
         subtextStyle: { fontSize: 11 },

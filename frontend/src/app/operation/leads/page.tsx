@@ -44,22 +44,6 @@ const INTENTION_LEVEL_LABELS: Record<string, string> = {
   pending: '待判断',
 };
 
-/** 手机号中间4位脱敏 */
-function maskPhone(phone?: string): string {
-  if (!phone) return '-';
-  if (/^\d{7,}$/.test(phone)) {
-    return phone.slice(0, 3) + '****' + phone.slice(-4);
-  }
-  return phone.slice(0, 2) + '****' + phone.slice(-2);
-}
-
-/** 微信号中间脱敏 */
-function maskWechat(wechat?: string): string {
-  if (!wechat) return '-';
-  if (wechat.length <= 4) return wechat;
-  return wechat.slice(0, 2) + '****' + wechat.slice(-2);
-}
-
 export default function OperationLeadsPage() {
   const searchParams = useSearchParams();
   const [items, setItems] = useState<SalesLead[]>([]);
@@ -261,7 +245,7 @@ export default function OperationLeadsPage() {
         <Space direction="vertical" size={2}>
           <Typography.Text strong>{record.customerName || record.nickname || `客资 ${record.id}`}</Typography.Text>
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            {maskPhone(record.phone || record.contact)} / {maskWechat(record.wechat)}
+            {record.phone || record.contact || '-'} / {record.wechat || '-'}
           </Typography.Text>
         </Space>
       ),
@@ -635,8 +619,8 @@ export default function OperationLeadsPage() {
               <Card size="small" title="基本信息" style={{ marginBottom: 16 }}>
                 <Space direction="vertical" size={8} style={{ width: '100%' }}>
                   <Typography.Text>客户昵称：{detailLead.customerName || detailLead.nickname || '-'}</Typography.Text>
-                  <Typography.Text>手机号：{maskPhone(detailLead.phone || detailLead.contact)}</Typography.Text>
-                  <Typography.Text>微信号：{maskWechat(detailLead.wechat)}</Typography.Text>
+                  <Typography.Text>手机号：{detailLead.phone || detailLead.contact || '-'}</Typography.Text>
+                  <Typography.Text>微信号：{detailLead.wechat || '-'}</Typography.Text>
                   <Typography.Text>IP/地区：{detailLead.ip || '-'}</Typography.Text>
                   <Typography.Text>需求备注：{detailLead.requirementNote || '-'}</Typography.Text>
                   <Typography.Text>

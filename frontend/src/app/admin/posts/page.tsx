@@ -217,8 +217,31 @@ export default function AdminPostsPage() {
   const [sort, setSort] = useState<SortState>({ field: 'publishedAt', order: 'descend' });
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
   const [suggestionDraft, setSuggestionDraft] = useState('');
-  const [leadRecords, setLeadRecords] = useState<Array<{ id: string; customerName: string; platform?: string; createdAt?: string }>>([]);
+  // A-② 修复（2026-06-23）：主管端帖子详情需要显示客户联系方式、销售分配、成交信息（不再脱敏）。
+  // 客资明细沿用 leadRecords（保留 platform/createdAt 字段），并扩展 contactInfo / wechat / salesUserName。
+  // 成交明细新增 orderRecords，调同一 sensitive-info 接口。
+  type AdminLeadRecord = {
+    id: string;
+    customerName: string;
+    platform?: string;
+    createdAt?: string;
+    contactInfo: string | null;
+    wechat: string | null;
+    status: string;
+    salesUserName: string | null;
+  };
+  type AdminOrderRecord = {
+    id: string;
+    customerName: string | null;
+    amount: string | null;
+    paidStatus: string;
+    orderStatus: string;
+    paymentStage: string | null;
+    createdAt: string;
+  };
+  const [leadRecords, setLeadRecords] = useState<AdminLeadRecord[]>([]);
   const [leadRecordsLoading, setLeadRecordsLoading] = useState(false);
+  const [orderRecords, setOrderRecords] = useState<AdminOrderRecord[]>([]);
   const [exportConfirmOpen, setExportConfirmOpen] = useState(false);
   const [exportCountdown, setExportCountdown] = useState(5);
   const [pickPendingId, setPickPendingId] = useState<string | null>(null);
@@ -440,14 +463,15 @@ export default function AdminPostsPage() {
     setSelectedPost(row);
     setSuggestionDraft(row.supervisorSuggestion || '');
     setLeadRecords([]);
+    setOrderRecords([]);
     setDetailLoading(true);
     try {
       const detail = await apiClient.get<any>(`/posts/${encodeURIComponent(row.id)}`);
       const merged = { ...row, ...detail };
       setSelectedPost(merged);
       setSuggestionDraft(merged.supervisorSuggestion || '');
-      // 加载来源客资列表
-      void loadLeadRecords(row.id);
+      // 加载敏感信息（客资 + 成交），仅 supervisor/admin/owner 可访问
+      void loadSensitiveInfo(row.id);
     } catch (err) {
       message.warning(err instanceof Error ? err.message : '作品详情加载失败');
     } finally {
@@ -455,26 +479,41 @@ export default function AdminPostsPage() {
     }
   }
 
-  async function loadLeadRecords(postId: string) {
+  // A-② 修复（2026-06-23）：使用敏感信息接口（GET /posts/:id/sensitive-info），
+  // 由后端按角色（supervisor/admin/owner）授权返回明文联系方式/微信/销售分配/成交信息。
+  async function loadSensitiveInfo(postId: string) {
     setLeadRecordsLoading(true);
     try {
-      // 从 leads 列表中筛选来源为该作品
-      const payload = await apiClient.get<any>('/leads', {
-        query: { scope: 'all', postId, limit: 50, offset: 0 },
-      });
-      const data = payload?.items ?? payload ?? [];
+      const payload = await apiClient.get<any>(`/posts/${encodeURIComponent(postId)}/sensitive-info`);
+      const rawLeads: any[] = Array.isArray(payload?.leads) ? payload.leads : [];
+      const rawOrders: any[] = Array.isArray(payload?.orders) ? payload.orders : [];
       setLeadRecords(
-        Array.isArray(data)
-          ? data.map((item: any) => ({
-              id: String(item.id ?? ''),
-              customerName: item.customerName ?? item.nickname ?? item.contactInfo ?? '未命名客户',
-              platform: item.platform,
-              createdAt: item.createdAt,
-            }))
-          : [],
+        rawLeads.map((item) => ({
+          id: String(item.id ?? ''),
+          customerName: item.customerName ?? item.customer_name ?? item.nickname ?? '未命名客户',
+          platform: item.platform,
+          createdAt: item.createdAt ?? item.created_at,
+          contactInfo: item.contactInfo ?? item.contact_info ?? null,
+          wechat: item.wechat ?? null,
+          status: item.status ?? '',
+          salesUserName: item.salesUserName ?? item.sales_user_name ?? null,
+        })),
       );
-    } catch {
+      setOrderRecords(
+        rawOrders.map((item) => ({
+          id: String(item.id ?? ''),
+          customerName: item.customerName ?? item.customer_name ?? null,
+          amount: item.amount != null ? String(item.amount) : null,
+          paidStatus: item.paidStatus ?? item.paid_status ?? '',
+          orderStatus: item.orderStatus ?? item.order_status ?? '',
+          paymentStage: item.paymentStage ?? item.payment_stage ?? null,
+          createdAt: item.createdAt ?? item.created_at ?? '',
+        })),
+      );
+    } catch (err) {
+      // 403 时是当前角色无权访问 —— 静默清空即可（普通运营/销售不会进入 admin/posts）。
       setLeadRecords([]);
+      setOrderRecords([]);
     } finally {
       setLeadRecordsLoading(false);
     }
@@ -1001,7 +1040,7 @@ export default function AdminPostsPage() {
                 </div>
               </Card>
 
-              {/* 来源客资列表 */}
+              {/* 来源客资列表（含联系方式、微信、销售分配 —— 主管端不脱敏，A-②） */}
               <Card size="small">
                 <Typography.Text strong>来源客资 ({leadRecords.length})</Typography.Text>
                 <Spin spinning={leadRecordsLoading}>
@@ -1012,14 +1051,47 @@ export default function AdminPostsPage() {
                       rowKey="id"
                       pagination={{ pageSize: 5 }}
                       columns={[
-                        { title: '客户', dataIndex: 'customerName', render: (v) => v || '未命名' },
-                        { title: '平台', dataIndex: 'platform' },
-                        { title: '时间', dataIndex: 'createdAt', render: formatDate },
+                        { title: '客户', dataIndex: 'customerName', width: 110, render: (v) => v || '未命名' },
+                        { title: '联系方式', dataIndex: 'contactInfo', width: 140, render: (v) => v || '-' },
+                        { title: '微信', dataIndex: 'wechat', width: 120, render: (v) => v || '-' },
+                        { title: '销售分配', dataIndex: 'salesUserName', width: 110, render: (v) => v || '-' },
+                        { title: '状态', dataIndex: 'status', width: 100, render: (v) => v || '-' },
+                        { title: '平台', dataIndex: 'platform', width: 80 },
+                        { title: '时间', dataIndex: 'createdAt', width: 110, render: formatDate },
                       ]}
                       style={{ marginTop: 8 }}
+                      scroll={{ x: 'max-content' }}
                     />
                   ) : (
                     <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无来源客资" />
+                  )}
+                </Spin>
+              </Card>
+
+              {/* 成交信息（A-②：主管端可见） */}
+              <Card size="small">
+                <Typography.Text strong>成交信息 ({orderRecords.length})</Typography.Text>
+                <Spin spinning={leadRecordsLoading}>
+                  {orderRecords.length > 0 ? (
+                    <Table
+                      size="small"
+                      dataSource={orderRecords}
+                      rowKey="id"
+                      pagination={{ pageSize: 5 }}
+                      columns={[
+                        { title: '订单ID', dataIndex: 'id', width: 160 },
+                        { title: '客户', dataIndex: 'customerName', width: 110, render: (v) => v || '-' },
+                        { title: '金额', dataIndex: 'amount', width: 100, align: 'right', render: (v) => v ?? '-' },
+                        { title: '付款状态', dataIndex: 'paidStatus', width: 90 },
+                        { title: '订单状态', dataIndex: 'orderStatus', width: 100 },
+                        { title: '付款阶段', dataIndex: 'paymentStage', width: 100, render: (v) => v || '-' },
+                        { title: '创建时间', dataIndex: 'createdAt', width: 110, render: formatDate },
+                      ]}
+                      style={{ marginTop: 8 }}
+                      scroll={{ x: 'max-content' }}
+                    />
+                  ) : (
+                    <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无成交信息" />
                   )}
                 </Spin>
               </Card>

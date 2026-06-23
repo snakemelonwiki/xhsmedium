@@ -5,9 +5,12 @@ import {
   BellOutlined,
   IdcardOutlined,
   LineChartOutlined,
+  OrderedListOutlined,
   ProjectOutlined,
+  ScheduleOutlined,
   TeamOutlined,
   UserSwitchOutlined,
+  UsergroupAddOutlined,
   WarningOutlined,
 } from '@ant-design/icons';
 import { Card, Statistic, Space, Typography } from 'antd';
@@ -25,7 +28,10 @@ import { ADMIN_EMPLOYEE_COPY } from '@/app/admin/employees/copy';
 const entries = [
   { title: '主管总览', href: '/admin', description: '今日作品/客资/成交，运营主管全量视图', icon: <BarChartOutlined /> },
   { title: '客资看板', href: '/admin/leads', description: '查看全部客资、销售归属和跟进状态', icon: <UserSwitchOutlined /> },
+  { title: '销售看板', href: '/admin/sales-board', description: '按销售查看客资跟进进度，可留主管建议', icon: <UsergroupAddOutlined /> },
   { title: '订单看板', href: '/admin/orders', description: '订单全量视图与教务分配', icon: <ProjectOutlined /> },
+  { title: '教务订单池', href: '/academic/orders', description: '教务端订单池接入', icon: <OrderedListOutlined /> },
+  { title: '教务订单跟进', href: '/academic/followup', description: '教务端订单跟进接入', icon: <ScheduleOutlined /> },
   { title: '协同处理', href: '/admin/collaboration', description: '全平台协同任务总览与稽核', icon: <ProjectOutlined /> },
   { title: ADMIN_EMPLOYEE_COPY.pageTitle, href: '/admin/employees', description: ADMIN_EMPLOYEE_COPY.ownerEntryDescription, icon: <TeamOutlined /> },
   { title: '账号管理', href: '/admin/accounts', description: '管理运营账号、平台和定位信息', icon: <IdcardOutlined /> },

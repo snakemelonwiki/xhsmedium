@@ -44,13 +44,13 @@ export class DashboardService {
         .select('COALESCE(SUM(p.likes), 0)', 'likes')
         .addSelect('COALESCE(SUM(p.comments), 0)', 'comments')
         .addSelect('COALESCE(SUM(p.favorites), 0)', 'favorites')
-        .addSelect(`COALESCE(SUM(CASE WHEN p.post_type IN ('获客贴', '营销贴') THEN p.traffic ELSE 0 END), 0)`, 'traffic')
+        .addSelect(`COALESCE(SUM(CASE WHEN p.post_type IN ('获客贴','获客帖', '营销贴') THEN p.traffic ELSE 0 END), 0)`, 'traffic')
         .where('p.publishedAt = :today AND p.platform = :platform', { today, platform: '小红书' }).getRawOne(),
       this.postRepo.createQueryBuilder('p')
         .select('COALESCE(SUM(p.likes), 0)', 'likes')
         .addSelect('COALESCE(SUM(p.comments), 0)', 'comments')
         .addSelect('COALESCE(SUM(p.favorites), 0)', 'favorites')
-        .addSelect(`COALESCE(SUM(CASE WHEN p.post_type IN ('获客贴', '营销贴') THEN p.traffic ELSE 0 END), 0)`, 'traffic')
+        .addSelect(`COALESCE(SUM(CASE WHEN p.post_type IN ('获客贴','获客帖', '营销贴') THEN p.traffic ELSE 0 END), 0)`, 'traffic')
         .where('p.publishedAt = :today AND p.platform = :platform', { today, platform: '抖音' }).getRawOne(),
       this.leadRepo.createQueryBuilder('l').select('COUNT(*)', 'count').where('DATE(l.createdAt) = :today', { today }).getRawOne(),
       this.leadRepo.createQueryBuilder('l').select('COUNT(*)', 'count').where("DATE(l.createdAt) = :today AND l.status = '已成交'", { today }).getRawOne(),
@@ -98,7 +98,7 @@ export class DashboardService {
       aggregated[type] = (aggregated[type] || 0) + Number(item.count || 0);
     }
     const total = Object.values(aggregated).reduce((s, v) => s + v, 0) || 1;
-    return ['素人贴', '话题贴', '获客贴'].map((type) => {
+    return ['获客帖', '人设帖', '讨论帖'].map((type) => {
       const count = Number(aggregated[type] || 0);
       return { type, count, ratio: `${Math.round((count / total) * 100)}%` };
     });
@@ -136,8 +136,10 @@ export class DashboardService {
         .select('COUNT(*)', 'postCount')
         .addSelect('COALESCE(SUM(p.likes), 0)', 'likes')
         .addSelect('COUNT(DISTINCT p.account_id)', 'activeAccountCount')
-        .addSelect(`SUM(CASE WHEN p.post_type IN ('获客贴', '营销贴') THEN 1 ELSE 0 END)`, 'leadPostCount')
-        .addSelect(`SUM(CASE WHEN p.post_type NOT IN ('获客贴', '营销贴') THEN 1 ELSE 0 END)`, 'nonLeadPostCount')
+        // 注意：这里语义是"获客贴/营销贴"为获客类，其他三类（人设/讨论/无）归 nonLead；
+        // 与本文件其他地方（:149/:306/:1724/:1762）保持一致，避免 leadPostCount 把全部 3 类都算上。
+        .addSelect(`SUM(CASE WHEN p.post_type IN ('获客贴', '获客帖', '营销贴') THEN 1 ELSE 0 END)`, 'leadPostCount')
+        .addSelect(`SUM(CASE WHEN p.post_type NOT IN ('获客贴', '获客帖', '营销贴') THEN 1 ELSE 0 END)`, 'nonLeadPostCount')
         .getRawOne(),
       leadQb.clone().getCount(),
       this.accountRepo.count({ where: { employeeId } as any }),
@@ -146,8 +148,8 @@ export class DashboardService {
            p.account_id AS account_id,
            COALESCE(a.account_name, p.account_id) AS account_name,
            COUNT(*) AS post_count,
-           COALESCE(SUM(CASE WHEN p.post_type IN ('获客贴', '营销贴') THEN 1 ELSE 0 END), 0) AS lead_post_count,
-           COALESCE(SUM(CASE WHEN p.post_type NOT IN ('获客贴', '营销贴') THEN 1 ELSE 0 END), 0) AS non_lead_post_count,
+           COALESCE(SUM(CASE WHEN p.post_type IN ('获客贴','获客帖', '营销贴') THEN 1 ELSE 0 END), 0) AS lead_post_count,
+           COALESCE(SUM(CASE WHEN p.post_type NOT IN ('获客贴','获客帖', '营销贴') THEN 1 ELSE 0 END), 0) AS non_lead_post_count,
            COALESCE(SUM(p.likes), 0) AS likes,
            (SELECT COUNT(*) FROM leads l WHERE l.account_id = p.account_id AND DATE(l.created_at) BETWEEN ? AND ?) AS lead_count
          FROM posts p
@@ -282,15 +284,11 @@ export class DashboardService {
     filters: { metrics: string; platform: string | null; period: string; from: string; to: string },
   ): Promise<any> {
     const { platform, from, to } = filters;
-    const monthStart = (() => {
-      const now = new Date(to);
-      return new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
-    })();
 
-    // 当前员工的累计 + 本月聚合
-    const paramsAll: any[] = [employeeId];
-    const postWhereAll = ['p.employee_id = ?'];
-    const leadWhereAll = ['l.employee_id = ?'];
+    // 当前员工的累计 + 时间范围聚合
+    const paramsAll: any[] = [employeeId, from, to];
+    const postWhereAll = ['p.employee_id = ?', 'p.published_at BETWEEN ? AND ?'];
+    const leadWhereAll = ['l.employee_id = ?', 'DATE(l.created_at) BETWEEN ? AND ?'];
     if (platform) {
       postWhereAll.push('p.platform = ?');
       paramsAll.push(platform);
@@ -307,7 +305,7 @@ export class DashboardService {
            COALESCE(SUM(p.likes), 0) AS likes,
            COALESCE(SUM(p.comments), 0) AS comments,
            COALESCE(SUM(p.favorites), 0) AS favorites,
-           COALESCE(SUM(CASE WHEN p.post_type IN ('获客贴','营销贴') THEN 1 ELSE 0 END), 0) AS lead_post_count
+           COALESCE(SUM(CASE WHEN p.post_type IN ('获客贴','获客帖','营销贴') THEN 1 ELSE 0 END), 0) AS lead_post_count
          FROM posts p WHERE ${postWhereAllSql}`,
         paramsAll,
       ).then(async (rows: any[]) => {
@@ -325,15 +323,15 @@ export class DashboardService {
           leadCount: Number(leadCountRows[0]?.cnt || 0),
         };
       }),
-      // 本月：仅 posts 表（指标 + 客资贴数）
+      // 时间范围聚合：直接使用 from~to（替代固定本月）
       (async () => {
-        const monthPostParams: any[] = [employeeId, monthStart, to];
+        const monthPostParams: any[] = [employeeId, from, to];
         const monthPostWhere = ['p.employee_id = ?', 'p.published_at BETWEEN ? AND ?'];
         if (platform) {
           monthPostWhere.push('p.platform = ?');
           monthPostParams.push(platform);
         }
-        const monthLeadParams: any[] = [employeeId, monthStart, to];
+        const monthLeadParams: any[] = [employeeId, from, to];
         const monthLeadWhere = ['l.employee_id = ?', 'DATE(l.created_at) BETWEEN ? AND ?'];
         if (platform) {
           monthLeadWhere.push('l.platform = ?');
@@ -346,7 +344,7 @@ export class DashboardService {
                COALESCE(SUM(p.likes), 0) AS likes,
                COALESCE(SUM(p.comments), 0) AS comments,
                COALESCE(SUM(p.favorites), 0) AS favorites,
-               COALESCE(SUM(CASE WHEN p.post_type IN ('获客贴','营销贴') THEN 1 ELSE 0 END), 0) AS lead_post_count
+               COALESCE(SUM(CASE WHEN p.post_type IN ('获客贴','获客帖','营销贴') THEN 1 ELSE 0 END), 0) AS lead_post_count
              FROM posts p WHERE ${monthPostWhere.join(' AND ')}`,
             monthPostParams,
           ),
@@ -365,16 +363,16 @@ export class DashboardService {
           leadCount: Number(leadRows[0]?.cnt || 0),
         };
       })(),
-      // 所有员工聚合：用于名次计算
+      // 所有员工聚合：用于名次计算（加入时间范围）
       (async () => {
-        const empPostParams: any[] = [];
-        const empPostWhere = ['1=1'];
+        const empPostParams: any[] = [from, to];
+        const empPostWhere = ['p.published_at BETWEEN ? AND ?'];
         if (platform) {
           empPostWhere.push('p.platform = ?');
           empPostParams.push(platform);
         }
-        const empLeadParams: any[] = [];
-        const empLeadWhere = ['1=1'];
+        const empLeadParams: any[] = [from, to];
+        const empLeadWhere = ['DATE(l.created_at) BETWEEN ? AND ?'];
         if (platform) {
           empLeadWhere.push('l.platform = ?');
           empLeadParams.push(platform);
@@ -388,7 +386,7 @@ export class DashboardService {
                COALESCE(SUM(p.likes), 0) AS likes,
                COALESCE(SUM(p.comments), 0) AS comments,
                COALESCE(SUM(p.favorites), 0) AS favorites,
-               COALESCE(SUM(CASE WHEN p.post_type IN ('获客贴','营销贴') THEN 1 ELSE 0 END), 0) AS lead_post_count
+               COALESCE(SUM(CASE WHEN p.post_type IN ('获客贴','获客帖','营销贴') THEN 1 ELSE 0 END), 0) AS lead_post_count
              FROM posts p
              LEFT JOIN employees e ON e.id = p.employee_id
              WHERE ${empPostWhere.join(' AND ')}
@@ -441,7 +439,7 @@ export class DashboardService {
     const monthTraffic = monthStats.likes + monthStats.comments + monthStats.favorites;
 
     return {
-      period: { from, to, code: filters.period, monthStart },
+      period: { from, to, code: filters.period, monthStart: from },
       employeeId,
       metrics: filters.metrics,
       platform: filters.platform,
@@ -537,7 +535,7 @@ export class DashboardService {
            COALESCE(a.account_name, p.account_id) AS account_name,
            a.platform AS platform,
            COUNT(*) AS post_count,
-           COALESCE(SUM(CASE WHEN p.post_type IN ('获客贴','营销贴') THEN 1 ELSE 0 END), 0) AS lead_post_count,
+           COALESCE(SUM(CASE WHEN p.post_type IN ('获客贴','获客帖','营销贴') THEN 1 ELSE 0 END), 0) AS lead_post_count,
            COALESCE(SUM(p.likes), 0) AS likes,
            COALESCE(SUM(p.comments), 0) AS comments,
            COALESCE(SUM(p.favorites), 0) AS favorites
@@ -789,7 +787,7 @@ export class DashboardService {
              COALESCE(SUM(p.likes), 0) AS likes,
              COALESCE(SUM(p.comments), 0) AS comments,
              COALESCE(SUM(p.favorites), 0) AS favorites,
-             COALESCE(SUM(CASE WHEN p.post_type IN ('获客贴','营销贴') THEN 1 ELSE 0 END), 0) AS lead_post_count
+             COALESCE(SUM(CASE WHEN p.post_type IN ('获客贴','获客帖','营销贴') THEN 1 ELSE 0 END), 0) AS lead_post_count
            FROM posts p WHERE ${postBaseWhere}`,
           [employeeId, p, from, to],
         ),
@@ -798,15 +796,14 @@ export class DashboardService {
            WHERE l.employee_id = ? AND l.platform = ? AND DATE(l.created_at) BETWEEN ? AND ?`,
           [employeeId, p, from, to],
         ),
-        // T3.1: 三类作品分类（人设贴/讨论贴/获客贴）。历史值映射：
-        //   人设贴 ↔ 素人贴；讨论帖 ↔ 话题贴；获客贴（含历史 营销贴）
-        // 使用 CASE 直接归类，避免 GROUP BY 中重复多值
+        // T3.1: 三类作品分类（人设帖/讨论贴/获客帖）。历史值映射：
+        //   人设帖 ↔ 素人贴/人设贴；讨论贴 ↔ 话题贴/讨论帖；获客帖（含历史 营销贴）
         this.postRepo.query(
           `SELECT
              CASE
-               WHEN p.post_type IN ('人设贴','素人贴') THEN '人设贴'
-               WHEN p.post_type IN ('讨论帖','讨论贴','话题贴') THEN '讨论贴'
-               WHEN p.post_type IN ('获客贴','营销贴') THEN '获客贴'
+               WHEN p.post_type IN ('人设帖','素人贴','人设贴') THEN '人设帖'
+               WHEN p.post_type IN ('讨论帖','讨论贴','话题贴') THEN '讨论帖'
+               WHEN p.post_type IN ('获客帖','获客贴','营销贴') THEN '获客帖'
                ELSE '其他'
              END AS type_alias,
              COUNT(*) AS cnt
@@ -830,9 +827,9 @@ export class DashboardService {
         typeMap.set(t, Number(row.cnt || 0));
       }
       const postTypes = [
-        { type: '人设贴', count: typeMap.get('人设贴') || 0 },
-        { type: '讨论贴', count: typeMap.get('讨论贴') || 0 },
-        { type: '获客贴', count: typeMap.get('获客贴') || 0 },
+        { type: '人设帖', count: typeMap.get('人设帖') || 0 },
+        { type: '讨论帖', count: typeMap.get('讨论帖') || 0 },
+        { type: '获客帖', count: typeMap.get('获客帖') || 0 },
       ];
 
       result.push({
@@ -1129,7 +1126,8 @@ export class DashboardService {
       const bucket = daysMap.get(day)!;
       const leadCount = Number(r.lead_count || 0);
       const traffic = Number(r.likes || 0) + Number(r.comments || 0) + Number(r.favorites || 0);
-      const isLeadPost = ['获客贴', '营销贴'].includes(r.post_type);
+      // 兼容旧数据「贴」与新规范化后的「帖」两种写法；'营销贴' 历史值仍计入获客。
+      const isLeadPost = ['获客贴', '获客帖', '营销贴'].includes(r.post_type);
       bucket.postCount += 1;
       bucket.leadCount += leadCount;
       bucket.traffic += traffic;
@@ -1306,7 +1304,7 @@ export class DashboardService {
     trendPeriod: 'day' | 'week' | 'month',
   ): Promise<any> {
     // IN 列表覆盖业务字面三值 + 历史同义值 + 当前值（normalizePostType 统一归一为 素人贴/话题贴/获客贴）
-    const postTypeAliases = ['人设贴', '讨论贴', '获客帖', '素人贴', '话题贴', '获客贴', '营销贴', '讨论帖', 'note', 'video'];
+    const postTypeAliases = ['人设帖', '人设贴', '讨论贴', '获客帖', '素人贴', '话题贴', '获客贴', '营销贴', '讨论帖', 'note', 'video'];
     const aliasPlaceholders = postTypeAliases.map(() => '?').join(',');
 
     // 1) 平台分布（小红书 / 抖音）—— 作品数 / 客资数 / 流量
@@ -1417,18 +1415,16 @@ export class DashboardService {
     }
 
     // 三类作品占比：归一 + 求百分比
-    const postTypeBuckets: Record<string, number> = { 素人贴: 0, 话题贴: 0, 获客贴: 0 };
+    const postTypeBuckets: Record<string, number> = { '人设帖': 0, '讨论贴': 0, '获客帖': 0 };
     for (const r of postTypeRows as any[]) {
       const t = normalizePostType(r.post_type);
       postTypeBuckets[t] = (postTypeBuckets[t] || 0) + Number(r.count || 0);
     }
-    const postTypeTotal = postTypeBuckets.素人贴 + postTypeBuckets.话题贴 + postTypeBuckets.获客贴;
-    const postTypeDistribution: Array<{ type: string; count: number; ratio: string }> = (['素人贴', '话题贴', '获客贴'] as const).map((type) => {
+    const postTypeTotal = postTypeBuckets['人设帖'] + postTypeBuckets['讨论贴'] + postTypeBuckets['获客帖'];
+    const postTypeDistribution: Array<{ type: string; count: number; ratio: string }> = (['人设帖', '讨论贴', '获客帖'] as const).map((type) => {
       const count = postTypeBuckets[type] || 0;
       const ratio = postTypeTotal > 0 ? `${Math.round((count / postTypeTotal) * 100)}%` : '0%';
-      // 业务对外展示用"人设贴/讨论贴/获客帖"三标签（业务字面要求）
-      const display = type === '素人贴' ? '人设贴' : type === '话题贴' ? '讨论贴' : '获客帖';
-      return { type: display, count, ratio };
+      return { type, count, ratio };
     });
 
     // 获客效率 / 获客帖效率（每平台 + 总计）
@@ -1725,10 +1721,10 @@ export class DashboardService {
            ORDER BY p.published_at ASC`,
           this.appendEfficiencyLeadParams(platform, employeeId, accountId, postParams),
         ),
-        // 6. T6.3 获客帖效率按日：每平台每日 lead_post_count（post_type IN 获客贴/营销贴） / lead_count
+        // 6. T6.3 获客帖效率按日：每平台每日 lead_post_count（post_type IN 获客贴/获客帖/营销贴） / lead_count
         this.postRepo.query(
           `SELECT DATE_FORMAT(p.published_at, '%Y-%m-%d') AS date, p.platform AS platform,
-                  SUM(CASE WHEN p.post_type IN ('获客贴', '营销贴') THEN 1 ELSE 0 END) AS lead_post_count,
+                  SUM(CASE WHEN p.post_type IN ('获客贴', '获客帖', '营销贴') THEN 1 ELSE 0 END) AS lead_post_count,
                   COALESCE((
                     SELECT COUNT(*) FROM leads l
                     WHERE DATE(l.created_at) = DATE(p.published_at)
@@ -1766,7 +1762,7 @@ export class DashboardService {
         this.postRepo.query(
           `SELECT p.employee_id AS employee_id,
                   COALESCE(e.name, p.employee_id) AS name,
-                  SUM(CASE WHEN p.post_type IN ('获客贴', '营销贴') THEN 1 ELSE 0 END) AS lead_post_count,
+                  SUM(CASE WHEN p.post_type IN ('获客贴', '获客帖', '营销贴') THEN 1 ELSE 0 END) AS lead_post_count,
                   COALESCE((
                     SELECT COUNT(*) FROM leads l
                     WHERE l.employee_id = p.employee_id
@@ -1986,9 +1982,14 @@ export class DashboardService {
     const today = todayString();
     const now = new Date(today);
     const firstDay = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+    const from = range.from || firstDay;
+    const to = range.to || today;
     return {
-      from: range.from || firstDay,
-      to: range.to || today,
+      from,
+      // DATETIME 字段的 BETWEEN 问题：当 from=to='2024-06-23' 时，MySQL
+      // 会把它解析为 '2024-06-23 00:00:00'，导致当天非 0 点的数据被漏掉。
+      // 如果 to 只是日期格式（没有时分秒），补到当天最后一秒。
+      to: /^\d{4}-\d{2}-\d{2}$/.test(to) ? to + ' 23:59:59' : to,
     };
   }
 

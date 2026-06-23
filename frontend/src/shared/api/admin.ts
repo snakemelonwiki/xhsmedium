@@ -42,6 +42,15 @@ function mapLead(raw: RawRecord): AdminLead {
     accountId: text(raw.accountId) ?? text(raw.sourceAccountId),
     postId: text(raw.postId) ?? text(raw.sourcePostId),
     employeeId: text(raw.employeeId),
+    // 销售看板进度字段
+    dealStatus: text(raw.dealStatus),
+    dealAmount: text(raw.dealAmount),
+    intentionLevel: text(raw.intentionLevel),
+    nextFollowTime: text(raw.nextFollowTime),
+    followAction: text(raw.followAction),
+    followActionAt: text(raw.followActionAt),
+    supervisorNote: text(raw.supervisorNote),
+    leadCode: text(raw.leadCode),
     assignedSalesUserId: text(raw.assignedSalesUserId),
   };
 }

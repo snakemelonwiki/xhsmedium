@@ -34,6 +34,9 @@ import { OrderSubmission } from './entities/order-submission.entity';
 import { OrderStatusHistory } from './entities/order-status-history.entity';
 import { OrderReminder } from './entities/order-reminder.entity';
 import { OrderFinance } from './entities/order-finance.entity';
+import { OrderPayment } from './entities/order-payment.entity';
+import { TeacherPayment } from './entities/teacher-payment.entity';
+import { OtherExpense } from './entities/other-expense.entity';
 // T8/T9: 作品广场配置表
 import { PlazaConfig } from './entities/plaza-config.entity';
 import { AuthModule } from './modules/auth/auth.module';
@@ -69,6 +72,7 @@ import { StorageModule } from './shared/storage/storage.service';
 import { CacheModule } from './shared/cache.service';
 // T8/T9: 作品广场配置模块
 import { PlazaConfigModule } from './modules/plaza-config/plaza-config.module';
+import { FinanceModule } from './modules/finance/finance.module';
 import { FormattedSqlLogger } from './common/sql-logger';
 import { JwtAuthMiddleware } from './common/jwt-auth.middleware';
 import { TokenRefreshInterceptor } from './common/token-refresh.interceptor';
@@ -117,6 +121,9 @@ import { TokenRefreshInterceptor } from './common/token-refresh.interceptor';
           OrderStatusHistory,
           OrderReminder,
           OrderFinance,
+          OrderPayment,
+          TeacherPayment,
+          OtherExpense,
           PlazaConfig,
         ],
         synchronize: false,
@@ -180,6 +187,7 @@ import { TokenRefreshInterceptor } from './common/token-refresh.interceptor';
     TeacherOrderTypesModule,
     StorageModule,
     CacheModule,
+    FinanceModule,
     // T8/T9: 作品广场配置模块
     PlazaConfigModule,
   ],

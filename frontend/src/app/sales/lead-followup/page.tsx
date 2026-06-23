@@ -269,6 +269,19 @@ export default function SalesLeadFollowupPage() {
       },
     },
     {
+      title: '学历',
+      key: 'clientDegree',
+      width: 80,
+      render: (_v, lead) => lead.clientDegree || '-',
+    },
+    {
+      title: '专业',
+      key: 'clientMajorResearch',
+      width: 120,
+      ellipsis: true,
+      render: (_v, lead) => lead.clientMajorResearch || '-',
+    },
+    {
       title: '添加状态',
       key: 'addStatus',
       render: (_v, lead) => <StatusTag kind="addStatus" code={lead.addStatus ?? LeadAddStatus.ADDED} />,

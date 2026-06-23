@@ -127,11 +127,27 @@ body {
   padding-bottom: 8px;
 }
 
-/* 表格表头固定（长列表滚动时列名不丢失） */
-.ant-table-thead > tr > th {
+/* 表格表头固定（长列表滚动时列名不丢失）
+ * 注意：必须排除 .ant-table-cell-fix-left / .ant-table-cell-fix-right，
+ * 否则会覆盖 antd 固定列在表头 cell 上的横向 sticky 计算，
+ * 导致固定列的 body cell 还能固定，header cell 却被横向滚动带走。
+ * 固定列的纵向 sticky 在下面单独补齐 top:0 与背景。 */
+.ant-table-thead > tr > th:not(.ant-table-cell-fix-left):not(.ant-table-cell-fix-right) {
   position: sticky;
   top: 0;
   z-index: 3;
+  background: #fafafa;
+}
+
+.ant-table-thead > tr > th.ant-table-cell-fix-left {
+  top: 0;
+  z-index: 4;
+  background: #fafafa;
+}
+
+.ant-table-thead > tr > th.ant-table-cell-fix-right {
+  top: 0;
+  z-index: 5;
   background: #fafafa;
 }
 
@@ -574,6 +590,22 @@ body {
 }
 
 /* 固定操作列在最右侧并确保在最上层 */
+.ant-table-cell-fix-left {
+  z-index: 5 !important;
+  background: #fff;
+}
+
+.ant-table-cell-fix-left::before {
+  content: '';
+  position: absolute;
+  right: -8px;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  background: linear-gradient(to left, transparent, rgb(255 255 255 / 80%));
+  pointer-events: none;
+}
+
 .ant-table-cell-fix-right {
   z-index: 10 !important;
   background: #fff;

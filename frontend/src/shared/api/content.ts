@@ -190,6 +190,58 @@ export async function getPostDetail(id: string): Promise<ContentPost> {
   return mapPost(await apiClient.get<RawRecord>(`/posts/${id}`));
 }
 
+export interface PostSensitiveInfo {
+  leads: Array<{
+    id: string;
+    contactInfo: string | null;
+    wechat: string | null;
+    status: string;
+    assignedSalesUserId: string | null;
+    salesUserName: string | null;
+    createdAt: string;
+  }>;
+  orders: Array<{
+    id: string;
+    leadId: string;
+    customerName: string | null;
+    amount: string | null;
+    paidStatus: string;
+    orderStatus: string;
+    handoverStatus: string;
+    paymentStage: string | null;
+    createdAt: string;
+  }>;
+}
+
+export async function getPostSensitiveInfo(id: string): Promise<PostSensitiveInfo> {
+  const payload = await apiClient.get<RawRecord>(`/posts/${id}/sensitive-info`);
+  const raw = (payload ?? {}) as RawRecord;
+  const rawLeads = Array.isArray(raw.leads) ? (raw.leads as RawRecord[]) : [];
+  const rawOrders = Array.isArray(raw.orders) ? (raw.orders as RawRecord[]) : [];
+  return {
+    leads: rawLeads.map((r) => ({
+      id: idText(r.id),
+      contactInfo: text(r.contactInfo ?? r.contact_info) ?? null,
+      wechat: text(r.wechat) ?? null,
+      status: text(r.status) ?? '',
+      assignedSalesUserId: text(r.assignedSalesUserId ?? r.assigned_sales_user_id) ?? null,
+      salesUserName: text(r.salesUserName ?? r.sales_user_name) ?? null,
+      createdAt: text(r.createdAt ?? r.created_at) ?? '',
+    })),
+    orders: rawOrders.map((r) => ({
+      id: idText(r.id),
+      leadId: text(r.leadId ?? r.lead_id) ?? '',
+      customerName: text(r.customerName ?? r.customer_name) ?? null,
+      amount: text(r.amount) ?? null,
+      paidStatus: text(r.paidStatus ?? r.paid_status) ?? '',
+      orderStatus: text(r.orderStatus ?? r.order_status) ?? '',
+      handoverStatus: text(r.handoverStatus ?? r.handover_status) ?? '',
+      paymentStage: text(r.paymentStage ?? r.payment_stage) ?? null,
+      createdAt: text(r.createdAt ?? r.created_at) ?? '',
+    })),
+  };
+}
+
 export async function updatePost(id: string, body: Record<string, unknown>) {
   return apiClient.request(`/posts/${id}`, {
     method: 'PUT',

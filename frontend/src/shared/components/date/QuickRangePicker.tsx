@@ -151,6 +151,15 @@ export function QuickRangePicker({
             const p = presets.find((it) => it.key === key);
             if (p) handlePresetClick(p);
           }}
+          // 修复（2026-06-23）：antd Select 选同一项时 onChange 不会再次触发，
+          // 用户点"今日"以为已刷新，但若上一次的 value 仍是其他预设（例如初始默认或者用户手动改过 RangePicker），
+          // dateRange 不会更新 → 体感是"选了今日还是上次的数据"。
+          // 同时给 onSelect 处理，重复点同一 key 也强制重算一次预设范围（now 也会刷新到当前时刻）。
+          onSelect={(key) => {
+            if (key === undefined || key === null) return;
+            const p = presets.find((it) => it.key === key);
+            if (p) handlePresetClick(p);
+          }}
           options={presets.map((p) => ({ label: p.label, value: p.key }))}
         />
       )}

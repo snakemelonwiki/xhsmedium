@@ -74,6 +74,10 @@ interface PlazaFilters {
   from?: string;
   to?: string;
   userId?: string;
+  likesMin?: number;
+  likesMax?: number;
+  leadsMin?: number;
+  leadsMax?: number;
 }
 
 /**
@@ -204,7 +208,10 @@ export class PostsService {
       const platformSynonyms = expandPlatformSynonyms(filters.platform);
       qb.andWhere('p.platform IN (:...platforms)', { platforms: platformSynonyms });
     }
-    if (filters.postType) qb.andWhere('p.post_type = :postType', { postType: filters.postType });
+    if (filters.postType) {
+      const normalizedPostType = normalizePostType(filters.postType);
+      qb.andWhere('p.post_type = :postType', { postType: normalizedPostType });
+    }
     if (filters.from) qb.andWhere('p.published_at >= :from', { from: filters.from });
     if (filters.to) qb.andWhere('p.published_at <= :to', { to: filters.to });
     if (filters.search) {
@@ -415,8 +422,9 @@ export class PostsService {
       params.push(filters.platform);
     }
     if (filters.postType) {
+      const normalizedPostType = normalizePostType(filters.postType);
       whereParts.push('p.post_type = ?');
-      params.push(filters.postType);
+      params.push(normalizedPostType);
     }
     if (filters.employeeId) {
       whereParts.push('p.employee_id = ?');
@@ -429,6 +437,24 @@ export class PostsService {
     if (filters.to) {
       whereParts.push('p.published_at <= ?');
       params.push(filters.to);
+    }
+
+    // CR-8.1: 补充 likesMin/likesMax/leadsMin/leadsMax 筛选
+    if (filters.likesMin !== undefined && filters.likesMin > 0) {
+      whereParts.push('p.likes >= ?');
+      params.push(filters.likesMin);
+    }
+    if (filters.likesMax !== undefined && filters.likesMax > 0) {
+      whereParts.push('p.likes <= ?');
+      params.push(filters.likesMax);
+    }
+    if (filters.leadsMin !== undefined && filters.leadsMin > 0) {
+      whereParts.push('COALESCE(lc.cnt, 0) >= ?');
+      params.push(filters.leadsMin);
+    }
+    if (filters.leadsMax !== undefined && filters.leadsMax > 0) {
+      whereParts.push('COALESCE(lc.cnt, 0) <= ?');
+      params.push(filters.leadsMax);
     }
 
     let favoriteJoin = '';
@@ -571,6 +597,55 @@ export class PostsService {
     );
     item.leadsCount = Number(countRows[0]?.cnt || 0);
     return item;
+  }
+
+  /**
+   * v1.3 T8: 查询作品关联的敏感信息（客资 + 成交）。
+   * 仅 supervisor / admin / owner 调用。
+   */
+  async findSensitiveInfo(id: string): Promise<{
+    leads: any[];
+    orders: any[];
+  }> {
+    // 关联该作品的客资（联系方式 + 销售分配）
+    const leadRows = await this.postRepository.manager.query(
+      `SELECT id, contact_info, wechat, status, assigned_sales_user_id, sales_user_name, created_at
+       FROM leads WHERE post_id = ? ORDER BY created_at DESC`,
+      [id],
+    );
+    const leads = (leadRows || []).map((r: any) => ({
+      id: r.id,
+      contactInfo: r.contact_info,
+      wechat: r.wechat,
+      status: r.status,
+      assignedSalesUserId: r.assigned_sales_user_id,
+      salesUserName: r.sales_user_name,
+      createdAt: r.created_at,
+    }));
+
+    // 成交信息（通过 leads → orders 关联）
+    const orderRows = await this.postRepository.manager.query(
+      `SELECT o.id, o.lead_id, o.customer_name, o.amount, o.paid_status, o.order_status,
+              o.handover_status, o.payment_stage, o.created_at
+       FROM orders o
+       INNER JOIN leads l ON l.id = o.lead_id
+       WHERE l.post_id = ?
+       ORDER BY o.created_at DESC`,
+      [id],
+    );
+    const orders = (orderRows || []).map((r: any) => ({
+      id: r.id,
+      leadId: r.lead_id,
+      customerName: r.customer_name,
+      amount: r.amount,
+      paidStatus: r.paid_status,
+      orderStatus: r.order_status,
+      handoverStatus: r.handover_status,
+      paymentStage: r.payment_stage,
+      createdAt: r.created_at,
+    }));
+
+    return { leads, orders };
   }
 
   async findByIds(ids: string[], viewer?: PostsListViewer): Promise<any[]> {

@@ -25,6 +25,7 @@ import { UploadConfigProvider } from '@/shared/contexts/UploadConfigProvider';
 import { getMenuItemsByRole, toAntdMenuItems } from '@/shared/layout/menu';
 import { useResponsiveBreakpoint } from '@/shared/hooks/useResponsiveBreakpoint';
 import { apiClient } from '@/shared/api/apiClient';
+import { AdminViewToggle } from '@/app/admin/_shell/AdminViewToggle';
 
 const { Content, Header, Sider } = Layout;
 
@@ -32,12 +33,19 @@ type AppLayoutProps = {
   role: AppRole;
   title: string;
   children: ReactNode;
+  /**
+   * 视图角色覆盖：用于 owner/admin 在不切换登录态的前提下，把菜单临时收敛到主管视图。
+   * 取值优先级最高，仅影响菜单渲染，不影响后端鉴权。
+   */
+  viewRole?: AppRole;
+  /** Header 右侧追加的自定义节点（如视图切换按钮）。 */
+  extraHeaderSlot?: ReactNode;
 };
 
 /**
  * 四端口共用后台布局，提供菜单、用户区和消息入口。
  */
-export function AppLayout({ role, title, children }: AppLayoutProps) {
+export function AppLayout({ role, title, children, viewRole, extraHeaderSlot }: AppLayoutProps) {
   const { message: messageApi } = AntApp.useApp();
   const pathname = usePathname();
   const router = useRouter();
@@ -56,7 +64,7 @@ export function AppLayout({ role, title, children }: AppLayoutProps) {
   const handleAuthenticated = useCallback((nextUser: AppUser) => setUser(nextUser), []);
   const prefetchMenuItem = useCallback((path: string) => router.prefetch(path), [router]);
 
-  const visibleRole = user?.role ?? role;
+  const visibleRole = viewRole ?? user?.role ?? role;
   const menuItems = useMemo(() => getMenuItemsByRole(visibleRole), [visibleRole]);
   const [fromFollowup, setFromFollowup] = useState(false);
   useEffect(() => {
@@ -215,6 +223,8 @@ export function AppLayout({ role, title, children }: AppLayoutProps) {
                   </div>
                 </div>
                 <Space size={isMobile ? 8 : 16}>
+                  <AdminViewToggle />
+                  {extraHeaderSlot}
                   <NotificationBell pollIntervalMs={60000} />
                   <Dropdown menu={{ items: userMenu }} placement="bottomRight">
                     <Button type="text" aria-label="用户菜单">

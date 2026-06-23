@@ -26,6 +26,11 @@ export type AppMenuItem = {
   key: string;
   label: string;
   path: string;
+  /**
+   * 可选的导航目标。默认与 path 相同；当需要 path 保持纯净（用于 pathname 匹配高亮）
+   * 但导航时带 query/hash 时使用，例如主管视图下 /admin/employees?scope=operation。
+   */
+  link?: string;
   icon: ReactNode;
   roles: AppRole[];
 };
@@ -297,7 +302,7 @@ export const APP_MENU_ITEMS: AppMenuItem[] = [
     label: '总览',
     path: '/admin/dashboard',
     icon: <TeamOutlined />,
-    roles: ['admin', 'owner'],
+    roles: ['admin', 'owner', 'supervisor'],
   },
   {
     key: 'admin-rankings',
@@ -325,7 +330,8 @@ export const APP_MENU_ITEMS: AppMenuItem[] = [
     label: '作品看板',
     path: '/admin/posts',
     icon: <OrderedListOutlined />,
-    roles: ['admin', 'owner'],
+    // A-② 修复（2026-06-23）：supervisor 也需要进入主管端作品看板查看详情敏感信息。
+    roles: ['admin', 'owner', 'supervisor'],
   },
   {
     key: 'admin-gallery',
@@ -353,13 +359,41 @@ export const APP_MENU_ITEMS: AppMenuItem[] = [
     label: '客资看板',
     path: '/admin/leads',
     icon: <DatabaseOutlined />,
-    roles: ['admin', 'owner'],
+    roles: ['admin', 'owner', 'supervisor'],
+  },
+  {
+    key: 'admin-sales-board',
+    label: '销售看板',
+    path: '/admin/sales-board',
+    icon: <UsergroupAddOutlined />,
+    roles: ['admin', 'owner', 'supervisor'],
   },
   {
     key: 'admin-employees',
-    label: '运营管理',
+    label: '员工管理',
     path: '/admin/employees',
     icon: <TeamOutlined />,
+    roles: ['admin', 'owner', 'supervisor'],
+  },
+  {
+    key: 'admin-academic-orders',
+    label: '教务订单池',
+    path: '/academic/orders',
+    icon: <OrderedListOutlined />,
+    roles: ['admin', 'owner', 'supervisor'],
+  },
+  {
+    key: 'admin-academic-followup',
+    label: '教务订单跟进',
+    path: '/academic/followup',
+    icon: <ScheduleOutlined />,
+    roles: ['admin', 'owner', 'supervisor'],
+  },
+  {
+    key: 'admin-finance',
+    label: '财务系统',
+    path: '/admin/finance',
+    icon: <FundOutlined />,
     roles: ['admin', 'owner'],
   },
   {
@@ -393,10 +427,25 @@ export const APP_MENU_ITEMS: AppMenuItem[] = [
 ];
 
 /**
+ * 主管视图（owner/admin 切到 supervisor 视图，或 supervisor 自己登录）的菜单 link 覆盖。
+ * path 保持原值（用于 pathname 高亮匹配）；只覆盖 link（用于导航 URL）。
+ * 仅对 admin-employees 生效：员工管理在主管视图下默认带 ?scope=operation 过滤，避免主管误操作其他端账号。
+ */
+const SUPERVISOR_VIEW_LINK_OVERRIDES: Record<string, string> = {
+  'admin-employees': '/admin/employees?scope=operation',
+};
+
+/**
  * 根据角色返回可见菜单。
+ * supervisor 角色（包括 owner/admin 切到主管视图时显式传入的 role）会应用 link 覆盖。
  */
 export function getMenuItemsByRole(role: AppRole): AppMenuItem[] {
-  return APP_MENU_ITEMS.filter((item) => item.roles.includes(role));
+  const items = APP_MENU_ITEMS.filter((item) => item.roles.includes(role));
+  if (role !== 'supervisor') return items;
+  return items.map((item) => {
+    const override = SUPERVISOR_VIEW_LINK_OVERRIDES[item.key];
+    return override ? { ...item, link: override } : item;
+  });
 }
 
 /**
@@ -406,13 +455,17 @@ export function toAntdMenuItems(
   items: AppMenuItem[],
   onNavigateIntent?: (path: string) => void,
 ): MenuProps['items'] {
-  return items.map((item) => ({
-    key: item.path,
-    icon: item.icon,
-    label: (
-      <Link href={item.path} onMouseEnter={() => onNavigateIntent?.(item.path)}>
-        {item.label}
-      </Link>
-    ),
-  }));
+  return items.map((item) => {
+    const href = item.link ?? item.path;
+    return {
+      // key 仍用 path（不含 query），与 AppLayout 的 selectedKey 计算保持一致
+      key: item.path,
+      icon: item.icon,
+      label: (
+        <Link href={href} onMouseEnter={() => onNavigateIntent?.(href)}>
+          {item.label}
+        </Link>
+      ),
+    };
+  });
 }

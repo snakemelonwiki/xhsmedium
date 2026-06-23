@@ -19,6 +19,15 @@ export interface AdminLead {
   postId?: string;
   employeeId?: string;
   assignedSalesUserId?: string;
+  // Phase B 销售看板新增字段（来源：leads 表）
+  dealStatus?: string;
+  dealAmount?: string;
+  intentionLevel?: string;
+  nextFollowTime?: string;
+  followAction?: string;
+  followActionAt?: string;
+  supervisorNote?: string;
+  leadCode?: string;
 }
 
 export interface AdminLeadsStats {

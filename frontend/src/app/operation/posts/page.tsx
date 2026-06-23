@@ -54,11 +54,9 @@ const platformOptions = [
 
 const postTypeOptions = [
   { label: '全部类型', value: '' },
-  { label: '图文', value: '图文' },
-  { label: '视频', value: '视频' },
+  { label: '获客贴', value: '获客贴' },
   { label: '素人贴', value: '素人贴' },
   { label: '话题贴', value: '话题贴' },
-  { label: '获客贴', value: '获客贴' },
   { label: '营销贴', value: '营销贴' },
 ];
 
@@ -85,7 +83,6 @@ export default function OperationPostsPage() {
   const [metricsModal, setMetricsModal] = useState<{ open: boolean; postId?: string; loading?: boolean; history?: any[] }>({ open: false });
   // Supervisor suggestion modal state
   const [suggestionModal, setSuggestionModal] = useState<{ open: boolean; post?: ContentPost }>({ open: false });
-
   const { isMobile } = useResponsiveBreakpoint();
   const [filterDrawerOpen, setFilterDrawerOpen] = useState(false);
 
@@ -371,6 +368,8 @@ export default function OperationPostsPage() {
           <Button size="small" onClick={() => openSuggestionModal(record)}>
             建议
           </Button>
+          {/* A-② 修复（2026-06-23）：敏感信息（联系方式/微信/销售/成交）只有 supervisor/admin/owner 能看，
+              主路径已搬到 /admin/posts 详情。运营端调 /posts/:id/sensitive-info 会 403，按钮在此隐藏。 */}
         </Space>
       ),
     },
@@ -615,6 +614,9 @@ export default function OperationPostsPage() {
           ) : null}
         </Spin>
       </Modal>
+
+      {/* A-② 修复（2026-06-23）：原 Post Detail Modal 已移除，敏感信息（联系方式/微信/销售/成交）
+          仅在主管端 /admin/posts 详情中展示，由后端按角色授权。 */}
 
       {/* Supervisor Suggestion Modal */}
       <Modal

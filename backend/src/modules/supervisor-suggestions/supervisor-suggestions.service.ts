@@ -6,6 +6,7 @@ import { Post } from '../../entities/post.entity';
 import { Account } from '../../entities/account.entity';
 import { Employee } from '../../entities/employee.entity';
 import { User } from '../../entities/user.entity';
+import { Lead } from '../../entities/lead.entity';
 import { NotificationsService } from '../notifications/notifications.service';
 import { makeId } from '../../shared/utils/id-generator';
 
@@ -36,12 +37,17 @@ export class SupervisorSuggestionsService {
     private readonly employeeRepo: Repository<Employee>,
     @InjectRepository(User)
     private readonly userRepo: Repository<User>,
+    @InjectRepository(Lead)
+    private readonly leadRepo: Repository<Lead>,
     private readonly notificationsService: NotificationsService,
   ) {}
 
   /**
    * 创建主管建议并通知对应运营。
-   * 支持关联账号、作品、员工。
+   * 支持关联账号、作品、员工、客资（lead）。
+   * 接收者角色按 targetType 决定：
+   *   - lead → 客资归属销售（role='sales'）
+   *   - 其他 → 关联运营（role='staff'）
    */
   async create(dto: CreateSuggestionDto): Promise<SupervisorSuggestion> {
     const { senderId, targetType, targetId, content } = dto;
@@ -50,8 +56,8 @@ export class SupervisorSuggestionsService {
       throw new Error('targetType、targetId、content 不能为空');
     }
 
-    if (!['post', 'account', 'employee'].includes(targetType)) {
-      throw new Error('targetType 仅支持 post、account、employee');
+    if (!['post', 'account', 'employee', 'lead'].includes(targetType)) {
+      throw new Error('targetType 仅支持 post、account、employee、lead');
     }
 
     // 验证目标对象存在
@@ -60,13 +66,16 @@ export class SupervisorSuggestionsService {
       throw new Error('关联对象不存在');
     }
 
-    // 查找运营用户
+    // 查找接收者用户（lead 找销售，其他找运营）
+    const expectedRole = targetType === 'lead' ? 'sales' : 'staff';
     const user = await this.userRepo.findOne({
-      where: { employeeId, role: 'staff' },
+      where: { employeeId, role: expectedRole },
     });
     const receiverId = user?.id;
     if (!receiverId) {
-      throw new Error('关联员工没有登录账号，无法发送建议');
+      throw new Error(targetType === 'lead'
+        ? '客资归属销售未绑定登录账号，无法发送建议'
+        : '关联员工没有登录账号，无法发送建议');
     }
 
     // 创建建议
@@ -87,7 +96,7 @@ export class SupervisorSuggestionsService {
       await this.notificationsService.create({
         receiverIds: [receiverId],
         senderId,
-        portType: 'operations',
+        portType: expectedRole === 'sales' ? 'sales' : 'operations',
         typeCode: 'supervisor_suggestion',
         title: '主管建议',
         content: `您收到一条主管建议：${content.substring(0, 50)}${content.length > 50 ? '...' : ''}`,
@@ -173,6 +182,8 @@ export class SupervisorSuggestionsService {
 
   /**
    * 根据目标类型和ID解析对应的员工ID。
+   * lead 分支：优先归属销售（assignedSalesUserId 对应 user.employeeId），
+   * 若未分配则回退到客资录入运营（lead.employeeId）。
    */
   private async resolveEmployeeId(targetType: string, targetId: string): Promise<string | null> {
     switch (targetType) {
@@ -186,6 +197,16 @@ export class SupervisorSuggestionsService {
       }
       case 'employee': {
         return targetId;
+      }
+      case 'lead': {
+        const lead = await this.leadRepo.findOne({ where: { id: targetId } });
+        if (!lead) return null;
+        if (!lead.assignedSalesUserId) {
+          throw new Error('该客资未分配销售，无法发送建议');
+        }
+        const salesUser = await this.userRepo.findOne({ where: { id: lead.assignedSalesUserId } });
+        if (salesUser?.employeeId) return salesUser.employeeId;
+        return null;
       }
       default:
         return null;

@@ -5,13 +5,14 @@ import { Post } from '../../entities/post.entity';
 import { Account } from '../../entities/account.entity';
 import { Employee } from '../../entities/employee.entity';
 import { User } from '../../entities/user.entity';
+import { Lead } from '../../entities/lead.entity';
 import { SupervisorSuggestionsController } from './supervisor-suggestions.controller';
 import { SupervisorSuggestionsService } from './supervisor-suggestions.service';
 import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([SupervisorSuggestion, Post, Account, Employee, User]),
+    TypeOrmModule.forFeature([SupervisorSuggestion, Post, Account, Employee, User, Lead]),
     NotificationsModule,
   ],
   controllers: [SupervisorSuggestionsController],

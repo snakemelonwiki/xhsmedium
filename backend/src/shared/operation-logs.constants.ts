@@ -42,6 +42,8 @@ export enum OPERATION_LOG_TARGET_TYPES {
   ABNORMAL_FEEDBACK = 'abnormal_feedback',
   EXPORT_TASK = 'export_task',
   NOTIFICATION = 'notification',
+  TEACHER_PAYMENT = 'teacher_payment',
+  OTHER_EXPENSE = 'other_expense',
 }
 
 /**

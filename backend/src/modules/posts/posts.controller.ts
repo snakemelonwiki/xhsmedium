@@ -461,6 +461,25 @@ export class PostsController {
     return res.json(post);
   }
 
+  /**
+   * v1.3 T8: 作品详情敏感信息（客资/订单）。
+   * 仅 supervisor / admin / owner 可访问。
+   */
+  @Get(':id/sensitive-info')
+  async getPostSensitiveInfo(
+    @Param('id') id: string,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    const session = (req as any).session;
+    const role = String(session?.role || '').toLowerCase();
+    if (!['supervisor', 'admin', 'owner'].includes(role)) {
+      return res.status(403).json({ ok: false, message: '无权查看敏感信息' });
+    }
+    const info = await this.postsService.findSensitiveInfo(id);
+    return res.json({ ok: true, ...info });
+  }
+
   @Put(':id')
   @UseGuards(DebounceGuard)
   async update(@Param('id') id: string, @Body() body: any, @Req() req: Request, @Res() res: Response) {

@@ -1,7 +1,7 @@
 'use client';
 
 import {
-  App, Button, Card, Col, Form, Input, Modal, Popconfirm, Row, Select, Space, Table, Tabs, Tag, Typography,
+  Alert, App, Button, Card, Col, Form, Input, Modal, Popconfirm, Row, Select, Space, Table, Tabs, Tag, Typography,
 } from 'antd';
 import type { TableColumnsType, TablePaginationConfig } from 'antd';
 import { useEffect, useState } from 'react';
@@ -98,6 +98,10 @@ export default function AdminEmployeesPage() {
   // 当前 tab：active=在职 / disabled=停用 / resigned=离职。
   // 初始值取自 ?status= URL 参数，保证刷新 / 链接直达时一致。
   const initialTab = resolveTabFromQuery(searchParams?.get('status') ?? null);
+  // ?scope=operation 时，员工管理仅显示运营端账号（operation / staff）。
+  // 用于运营主管视图：owner/admin 切到主管视图后只看自己管辖的运营端，避免误改销售/教务账号。
+  const scopeParam = searchParams?.get('scope');
+  const isOperationScope = scopeParam === 'operation';
   const [activeTab, setActiveTab] = useState<EmployeeTabKey>(initialTab);
   const [tabCounts, setTabCounts] = useState<{ active: number; disabled: number; resigned: number; total: number }>({
     active: 0,
@@ -385,8 +389,13 @@ export default function AdminEmployeesPage() {
     void load(next.current ?? 1, next.pageSize ?? 20);
   }
 
-  // 筛选后的数据（仅角色 / 部门；状态已由 tab 控制，避免和后端 status 过滤重叠）
+  // 筛选后的数据（仅角色 / 部门；状态已由 tab 控制，避免和后端 status 过滤重叠）。
+  // 主管视图（?scope=operation）下，额外过滤为运营端账号（operation / staff）。
   const filteredItems = items.filter((item) => {
+    if (isOperationScope) {
+      const r = item.roleType || item.role;
+      if (r !== 'operation' && r !== 'staff') return false;
+    }
     if (filterRole && item.roleType !== filterRole && item.role !== filterRole) return false;
     if (filterDepartment && item.department !== filterDepartment) return false;
     return true;
@@ -467,6 +476,15 @@ export default function AdminEmployeesPage() {
 
   return (
     <Space direction="vertical" size={16} className="page-stack">
+      {/* 主管视图提示 */}
+      {isOperationScope && (
+        <Alert
+          type="info"
+          showIcon
+          message="当前为运营主管视图：仅显示运营端账号（operation / staff）。"
+          description="切换回总后台可看到全部角色员工。"
+        />
+      )}
       {/* 页面标题 */}
       <div className="toolbar-row">
         <div>

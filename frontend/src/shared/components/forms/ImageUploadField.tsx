@@ -98,7 +98,11 @@ export function ImageUploadField({
         // v1.3 简化：客户端直接压缩到 thumbMaxWidth，仅上传一份低分辨率图。
         // coverImageUrl 和 coverThumbUrl 共用同一份 URL。
         const blob = await makeThumbnail(file, { maxWidth: thumbMaxWidth, quality: 0.8 });
-        const result: UploadResult = await uploadFile(blob, bucket, { storage: choice.storage });
+        // 压缩后统一为 JPEG，构造 File 时使用 .jpg 扩展名，避免原文件扩展名
+        //（如 .png/.webp）与文件实际 MIME 不一致，导致静态服务返回错误 Content-Type
+        // 而新标签页打开时显示乱码。
+        const uploadFileObj = new File([blob], 'cover.jpg', { type: 'image/jpeg' });
+        const result: UploadResult = await uploadFile(uploadFileObj, bucket, { storage: choice.storage });
         onChange?.(result.url);
         if (!disableThumb) onThumbChange?.(result.url);
 

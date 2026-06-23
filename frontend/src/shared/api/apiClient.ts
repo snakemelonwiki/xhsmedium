@@ -56,13 +56,12 @@ function defaultGetToken(): string | null {
 
 function defaultClearToken(): void {
   if (typeof window === 'undefined') return;
-  // Abort all pending requests from the previous session to prevent
-  // stale in-flight requests (e.g. notification polling) from
-  // triggering refresh with a revoked token
   if (authClearedController) {
     authClearedController.abort();
   }
   authClearedController = new AbortController();
+  // 登出时重置 inFlightRefresh，防止切换账号时旧 token 的 refresh 竞态
+  inFlightRefresh = null;
   window.localStorage.removeItem(TOKEN_KEY);
   window.localStorage.removeItem(STORAGE_KEYS.user);
   notifyAuthChanged();
@@ -81,7 +80,7 @@ function getStoredUser(): AppUser | null {
 
 function isTokenForStoredUser(token: string): boolean {
   const user = getStoredUser();
-  if (!user?.id) return true;
+  if (!user?.id) return false;
   const tokenUserId = readTokenUserId(token);
   return String(tokenUserId || '') === String(user.id);
 }
@@ -279,7 +278,6 @@ async function tryRefreshAndRetry(
     if (replay.status === 401) return { ok: false, reason: 'replay_401' };
     const payload = await parseResponse(replay);
     if (!replay.ok) {
-      // 续签后重放仍非 2xx：当成"业务错误"抛出去，让调用方处理
       const payloadObj = typeof payload === 'object' && payload ? (payload as Record<string, unknown>) : null;
       const reason = payloadObj && typeof payloadObj.reason === 'string' ? String(payloadObj.reason) : '';
       const message =
@@ -288,10 +286,11 @@ async function tryRefreshAndRetry(
       throw new Error(message);
     }
     return { ok: true, payload };
-  } finally {
-    // 不在这里清 inFlightRefresh：成功的请求在同 tick 可能已经回来了，但
-    // 下次新的 401 应该再走一次 refresh（如果 token 真的又过期了）。
-    // 把清空挪到 doRefresh 内部：resolve/reject 一次后下次重新发起。
+  } catch {
+    // inFlightRefresh 意外 rejected（如 localStorage 满导致 persistRefreshedToken 抛异常），
+    // 清除标志让下次 401 重新发起 refresh
+    inFlightRefresh = null;
+    return { ok: false, reason: 'refresh_crashed' };
   }
 }
 
@@ -325,9 +324,11 @@ async function doRefresh(): Promise<RefreshOutcome> {
     persistRefreshedToken(newToken);
     return { ok: true };
   } catch {
+    // 网络错误时立即清除 inFlightRefresh，防止后续 401 复用已失败的 Promise
+    inFlightRefresh = null;
     return { ok: false, reason: 'network_error' };
   } finally {
-    // 让下一次 401 重新发起 refresh
+    // resolve/reject 后让下一次 401 重新发起 refresh
     queueMicrotask(() => {
       inFlightRefresh = null;
     });

@@ -113,10 +113,13 @@ export default function OperationPostEditPage() {
               </Form.Item>
               <Form.Item name="postType" label="作品类型">
                 <Select
+                  allowClear
+                  placeholder="选择作品类型"
                   options={[
-                    { label: '图文', value: 'note' },
-                    { label: '视频', value: 'video' },
-                    { label: '获客贴', value: 'lead_post' },
+                    { label: '获客贴', value: '获客贴' },
+                    { label: '素人贴', value: '素人贴' },
+                    { label: '话题贴', value: '话题贴' },
+                    { label: '营销贴', value: '营销贴' },
                   ]}
                 />
               </Form.Item>

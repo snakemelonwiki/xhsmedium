@@ -15,6 +15,7 @@ import { RemindersService } from './reminders.service';
 import { OrderAbnormalFeedbackService } from './order-abnormal-feedback.service';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { OperationLogsModule } from '../operation-logs/operation-logs.module';
+import { FinanceModule } from '../finance/finance.module';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { OperationLogsModule } from '../operation-logs/operation-logs.module';
     ]),
     NotificationsModule,
     OperationLogsModule,
+    FinanceModule,
   ],
   controllers: [OrdersController],
   providers: [OrdersService, RemindersService, OrderAbnormalFeedbackService],

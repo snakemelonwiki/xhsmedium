@@ -1,17 +1,18 @@
 export const POST_TYPES = {
-  SU_REN: '素人贴',
-  HUA_TI: '话题贴',
-  HUO_KE: '获客贴',
+  HUO_KE: '获客帖',
+  REN_SHE: '人设帖',
+  TAO_LUN: '讨论帖',
 } as const;
 
 export type PostType = (typeof POST_TYPES)[keyof typeof POST_TYPES];
 
 export const normalizePostType = (type: unknown): PostType => {
   const value = String(type || '').trim();
-  if (value === '人设贴') return POST_TYPES.SU_REN;
-  if (value === '讨论帖') return POST_TYPES.HUA_TI;
-  if (value === '营销贴') return POST_TYPES.HUO_KE;
-  return (value as PostType) || POST_TYPES.SU_REN;
+  if (value === '获客贴' || value === '获客帖') return POST_TYPES.HUO_KE;
+  if (value === '素人贴' || value === '人设贴' || value === '人设帖') return POST_TYPES.REN_SHE;
+  if (value === '话题贴' || value === '讨论帖' || value === '讨论贴') return POST_TYPES.TAO_LUN;
+  if (value === '营销贴' || value === '营销帖') return POST_TYPES.HUO_KE;
+  return (value as PostType) || POST_TYPES.HUO_KE;
 };
 
 export const normalizeExternalUrl = (value: unknown): string => {

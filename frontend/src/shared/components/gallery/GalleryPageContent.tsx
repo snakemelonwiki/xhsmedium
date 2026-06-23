@@ -12,6 +12,7 @@ import {
   Pagination,
   Select,
   Space,
+  Spin,
   Tag,
   Typography,
   message,
@@ -21,10 +22,12 @@ import dayjs from 'dayjs';
 import { useEffect, useState } from 'react';
 
 import { listSourceAccounts, type CatalogOption } from '@/shared/api/catalog';
-import { listGalleryPosts, togglePostFavorite } from '@/shared/api/content';
+import { listGalleryPosts, togglePostFavorite, getPostSensitiveInfo, type PostSensitiveInfo } from '@/shared/api/content';
 import { getPlazaConfig, updatePlazaConfig, type PlazaConfig } from '@/shared/api/plaza-config';
+import { listAdminEmployees } from '@/shared/api/admin';
 import type { ContentPost } from '@/shared/types/content';
 import { todayDateString } from '@/shared/utils/default-date-range';
+import { readAuthenticatedUser } from '@/shared/auth/auth';
 
 const platformOptions = [
   { label: '全部平台', value: '' },
@@ -79,12 +82,15 @@ export function GalleryPageContent({
   const [page, setPage] = useState(1);
   const [filters, setFilters] = useState<GalleryFilters>(() => buildDefaultGalleryFilters());
   const [accounts, setAccounts] = useState<CatalogOption[]>([]);
+  const [employees, setEmployees] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
   const [configForm] = Form.useForm<PlazaConfig>();
   const [configLoading, setConfigLoading] = useState(false);
   const [configSaving, setConfigSaving] = useState(false);
   const [detailModal, setDetailModal] = useState<{ open: boolean; post?: ContentPost }>({ open: false });
+  const [sensitiveInfo, setSensitiveInfo] = useState<PostSensitiveInfo | null>(null);
+  const [sensitiveLoading, setSensitiveLoading] = useState(false);
 
   const pageSize = 15;
 
@@ -127,6 +133,15 @@ export function GalleryPageContent({
     listSourceAccounts()
       .then(setAccounts)
       .catch(() => setAccounts([]));
+  }, []);
+
+  useEffect(() => {
+    listAdminEmployees({ page: 1, pageSize: 500, limit: 500 })
+      .then((result) => {
+        const items = result.items || [];
+        setEmployees(items.map((e) => ({ id: e.id, name: e.name || e.employeeCode || e.id })));
+      })
+      .catch(() => setEmployees([]));
   }, []);
 
   useEffect(() => {
@@ -179,7 +194,19 @@ export function GalleryPageContent({
   }
 
   function openDetail(post: ContentPost) {
+    setSensitiveInfo(null);
     setDetailModal({ open: true, post });
+    // 加载敏感信息
+    const user = typeof window !== 'undefined' ? readAuthenticatedUser() : undefined;
+    if (user && ['supervisor', 'admin', 'owner'].includes(user.role)) {
+      setSensitiveLoading(true);
+      getPostSensitiveInfo(post.id)
+        .then(setSensitiveInfo)
+        .catch(() => setSensitiveInfo(null))
+        .finally(() => setSensitiveLoading(false));
+    } else {
+      setSensitiveInfo(null);
+    }
   }
 
   async function saveConfig(values: PlazaConfig) {
@@ -280,6 +307,17 @@ export function GalleryPageContent({
               value: a.id,
             }))}
             onChange={(value) => applyFilter('accountId', value || undefined)}
+          />
+          <Select
+            allowClear
+            showSearch
+            aria-label="筛选运营员工"
+            placeholder="全部员工"
+            optionFilterProp="label"
+            style={{ width: 140 }}
+            value={filters.employeeId || undefined}
+            options={employees.map((e) => ({ label: e.name, value: e.id }))}
+            onChange={(value) => applyFilter('employeeId', value || undefined)}
           />
           <DatePicker.RangePicker
             allowClear
@@ -518,15 +556,112 @@ export function GalleryPageContent({
               </Typography.Paragraph>
             </div>
 
-            <Alert
-              type="info"
-              showIcon={false}
-              message="以下信息已被隐藏：客户联系方式、销售分配、成交信息"
-              style={{ fontSize: 12 }}
+            {/* T8: 运营主管端角色展示敏感信息 */}
+            <SensitiveInfoSection
+              userRole={typeof window !== 'undefined' ? readAuthenticatedUser()?.role : undefined}
+              sensitiveInfo={sensitiveInfo}
+              loading={sensitiveLoading}
             />
           </Space>
         )}
       </Modal>
     </Space>
+  );
+}
+
+// T8: 敏感信息展示区
+function SensitiveInfoSection({
+  userRole,
+  sensitiveInfo,
+  loading,
+}: {
+  userRole: string | undefined;
+  sensitiveInfo: PostSensitiveInfo | null;
+  loading: boolean;
+}) {
+  if (!userRole || !['supervisor', 'admin', 'owner'].includes(userRole)) {
+    return (
+      <Alert
+        type="info"
+        showIcon={false}
+        message="敏感信息仅主管/管理员可见"
+        style={{ fontSize: 12 }}
+      />
+    );
+  }
+
+  return (
+    <Spin spinning={loading}>
+      <Space direction="vertical" size={12} style={{ width: '100%' }}>
+        {/* 客资信息 */}
+        <div>
+          <Typography.Text strong>客户联系方式 / 销售分配</Typography.Text>
+          {sensitiveInfo?.leads && sensitiveInfo.leads.length > 0 ? (
+            <Space direction="vertical" size={4} style={{ marginTop: 8, width: '100%' }}>
+              {sensitiveInfo.leads.map((lead) => (
+                <Card key={lead.id} size="small" style={{ width: '100%' }}>
+                  <Space direction="vertical" size={2}>
+                    <Typography.Text>
+                      联系方式：{lead.contactInfo || '-'}
+                    </Typography.Text>
+                    {lead.wechat && (
+                      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                        微信：{lead.wechat}
+                      </Typography.Text>
+                    )}
+                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                      销售分配：{lead.salesUserName || lead.assignedSalesUserId || '未分配'}
+                    </Typography.Text>
+                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                      状态：{lead.status}
+                    </Typography.Text>
+                  </Space>
+                </Card>
+              ))}
+            </Space>
+          ) : (
+            <Typography.Paragraph type="secondary" style={{ fontSize: 12 }}>
+              暂无客资信息
+            </Typography.Paragraph>
+          )}
+        </div>
+
+        {/* 成交信息 */}
+        <div>
+          <Typography.Text strong>成交信息</Typography.Text>
+          {sensitiveInfo?.orders && sensitiveInfo.orders.length > 0 ? (
+            <Space direction="vertical" size={4} style={{ marginTop: 8, width: '100%' }}>
+              {sensitiveInfo.orders.map((order) => (
+                <Card key={order.id} size="small" style={{ width: '100%' }}>
+                  <Space direction="vertical" size={2}>
+                    <Typography.Text>
+                      客户：{order.customerName || '-'}
+                    </Typography.Text>
+                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                      金额：{order.amount ? `¥${order.amount}` : '-'}
+                    </Typography.Text>
+                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                      付款状态：{order.paidStatus}
+                    </Typography.Text>
+                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                      订单状态：{order.orderStatus}
+                    </Typography.Text>
+                    {order.paymentStage && (
+                      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                        付款阶段：{order.paymentStage}
+                      </Typography.Text>
+                    )}
+                  </Space>
+                </Card>
+              ))}
+            </Space>
+          ) : (
+            <Typography.Paragraph type="secondary" style={{ fontSize: 12 }}>
+              暂无成交信息
+            </Typography.Paragraph>
+          )}
+        </div>
+      </Space>
+    </Spin>
   );
 }

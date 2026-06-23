@@ -245,7 +245,7 @@ export default function SalesLeadsPage() {
       .catch(() => {
         // 静默失败，不影响主流程
       });
-  }, []);
+  }, [connected, loading]);
 
   // 倒计时：已达上限后显示剩余自动恢复时间
   useEffect(() => {
@@ -748,7 +748,11 @@ export default function SalesLeadsPage() {
           />
           <QuickRangePicker
             value={filters.dateRange}
-            onChange={(range) => setFilters((prev) => ({ ...prev, dateRange: range ?? buildTodayDateRange() }))}
+            onChange={(range) => {
+              const next = { ...filters, dateRange: range ?? buildTodayDateRange() };
+              setFilters(next);
+              loadLeads(1, pageSize, next);
+            }}
           />
           <Button icon={<ReloadOutlined />} onClick={() => loadLeads()} loading={loading}>
             刷新

@@ -21,7 +21,7 @@ export class SupervisorSuggestionsController {
   constructor(private readonly service: SupervisorSuggestionsService) {}
 
   /**
-   * 创建主管建议，当前版本支持作品、账号、员工建议。
+   * 创建主管建议，当前版本支持作品、账号、员工、客资建议。
    */
   @Post()
   async create(@Body() body: any, @Req() req: any, @Res() res: Response) {
