@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, LessThanOrEqual, Repository, In } from 'typeorm';
+import { Between, IsNull, LessThanOrEqual, Repository, In } from 'typeorm';
 
 import { Order } from '../../entities/order.entity';
 import { OrderFollowRecord } from '../../entities/order-follow-record.entity';
@@ -12,14 +12,21 @@ import { NOTIFICATION_TYPES } from '../../shared/notifications';
 
 /** 订单节点超时阈值（毫秒），默认 7 天 */
 const NODE_TIMEOUT_MS = 7 * 24 * 3600 * 1000;
+/** 提前预警天数：跟进时间前 7 天发预警通知 */
+const EARLY_WARNING_DAYS = 7;
+const EARLY_WARNING_MS = EARLY_WARNING_DAYS * 24 * 3600 * 1000;
 /** 扫描单轮上限 */
 const SCAN_BATCH = 200;
 const FIXED_REMIND_HOURS = [10, 15, 18] as const;
 
 /**
- * 节点提醒扫描器：每分钟扫描 order_follow_records.next_remind_at <= NOW
- * 且 reminder_sent_at IS NULL 的记录，向跟进人 + 订单当前教务发 ORDER_NODE_DUE 通知；
- * 发送成功后写 reminder_sent_at，保证幂等。
+ * 节点提醒扫描器：
+ * - 到期扫描：每分钟扫描 order_follow_records.next_remind_at <= NOW
+ *   且 reminder_sent_at IS NULL 的记录，向跟进人 + 订单当前教务发 ORDER_NODE_DUE 通知；
+ *   发送成功后写 reminder_sent_at，保证幂等。
+ * - 提前预警扫描：每分钟扫描 next_remind_at 在 7 天内且 early_warning_sent_at IS NULL
+ *   的记录，发 ORDER_NODE_EARLY_WARNING 通知；发送成功后写 early_warning_sent_at，保证幂等。
+ *   两套通知互不干扰，各自独立标记。
  */
 @Injectable()
 export class RemindersService {
@@ -76,6 +83,7 @@ export class RemindersService {
     this.running = true;
     try {
       await this.runOnce();
+      await this.runEarlyWarning();
     } catch (err: any) {
       this.logger.error(`reminder scan failed: ${err?.message || err}`);
     } finally {
@@ -155,6 +163,79 @@ export class RemindersService {
   }
 
   /**
+   * 提前预警扫描：找出 next_remind_at 在 7 天内但还未发过预警的记录，
+   * 向跟进人 + 订单教务 + 销售发 ORDER_NODE_EARLY_WARNING 通知，
+   * 发送成功后写 early_warning_sent_at，保证幂等。
+   */
+  async runEarlyWarning(): Promise<{ scanned: number; sent: number; failed: number }> {
+    const now = new Date();
+    const threshold = new Date(now.getTime() + EARLY_WARNING_MS);
+
+    // 找 next_remind_at 在未来7天内 且 启用提前预警 且 未发过预警 的记录
+    const list = await this.followRepo.find({
+      where: {
+        nextRemindAt: Between(now, threshold),
+        enableEarlyWarning: true,
+        earlyWarningSentAt: IsNull(),
+      },
+      order: { nextRemindAt: 'ASC' },
+      take: 100,
+    });
+    if (!list.length) {
+      return { scanned: 0, sent: 0, failed: 0 };
+    }
+
+    let sent = 0;
+    let failed = 0;
+    const orderIds = Array.from(new Set(list.map((r) => r.orderId).filter(Boolean)));
+    const orders = orderIds.length
+      ? await this.orderRepo.find({ where: orderIds.map((id) => ({ id })) })
+      : [];
+    const orderMap = new Map(orders.map((o) => [o.id, o]));
+
+    for (const record of list) {
+      try {
+        const order = orderMap.get(record.orderId);
+        const receivers = new Set<string>();
+        if (record.userId) receivers.add(record.userId);
+        if (order?.academicUserId) receivers.add(order.academicUserId);
+        if (order?.salesUserId) receivers.add(order.salesUserId);
+
+        const daysLeft = Math.ceil(
+          (new Date(record.nextRemindAt!).getTime() - now.getTime()) / (24 * 3600 * 1000),
+        );
+
+        await this.notifications.create({
+          receiverIds: Array.from(receivers),
+          senderId: null,
+          portType: 'academic',
+          typeCode: NOTIFICATION_TYPES.ORDER_NODE_EARLY_WARNING,
+          title: '订单节点即将到期',
+          content: `订单 ${record.orderId} 节点「${record.nodeType}」将在 ${daysLeft} 天后到期，请提前跟进`,
+          relatedId: record.orderId,
+          relatedType: 'order',
+        });
+
+        await this.followRepo.update(
+          { id: record.id },
+          { earlyWarningSentAt: new Date() },
+        );
+        sent += 1;
+      } catch (err: any) {
+        failed += 1;
+        this.logger.error(
+          `early warning send failed (record=${record.id}, order=${record.orderId}): ${err?.message || err}`,
+        );
+      }
+    }
+
+    if (sent > 0 || failed > 0) {
+      this.logger.log(`early warning scan: scanned=${list.length} sent=${sent} failed=${failed}`);
+    }
+    return { scanned: list.length, sent, failed };
+  }
+
+  /**
    * 查询某用户视角的待提醒列表（教务端"节点提醒"页消费）。
    * - upcomingHours: 把未来 N 小时内即将到期的也带回来
    * - 默认只看自己跟进 + 自己名下订单
@@ -164,15 +245,18 @@ export class RemindersService {
     opts: { upcomingHours?: number; limit?: number } = {},
   ): Promise<any[]> {
     if (!userId) return [];
-    const upcomingHours = Math.max(0, Math.min(opts.upcomingHours ?? 24, 24 * 14));
-    const limit = Math.max(1, Math.min(opts.limit ?? 50, 200));
+    const upcomingHours = Math.max(0, Math.min(opts.upcomingHours ?? 168, 24 * 14));
+    const limit = Math.max(1, Math.min(opts.limit ?? 100, 500));
     const horizon = new Date(Date.now() + upcomingHours * 3600 * 1000);
+    // 未启用提前预警的老记录只看 24h；启用提前预警的才看完整 7 天窗口
+    const dayHorizon = new Date(Date.now() + 24 * 3600 * 1000);
 
     const rows = await this.followRepo
       .createQueryBuilder('fr')
       .leftJoin(Order, 'o', 'o.id = fr.order_id')
       .where('fr.next_remind_at IS NOT NULL')
       .andWhere('fr.next_remind_at <= :horizon', { horizon })
+      .andWhere('(fr.enable_early_warning = true OR fr.next_remind_at <= :dayHorizon)', { dayHorizon })
       .andWhere('(fr.user_id = :uid OR o.academic_user_id = :uid)', { uid: userId })
       .orderBy('fr.next_remind_at', 'ASC')
       .limit(limit)

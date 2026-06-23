@@ -83,14 +83,13 @@ export class OrdersController {
       const result = await this.ordersService.closeDeal(leadId, salesUserId, {
         serviceType: body?.serviceType ?? null,
         amount: body?.amount ?? null,
-        clientPaid: body?.clientPaid ?? body?.customerPaid ?? null,
+        paymentPlan: body?.paymentPlan ?? 'three',
+        depositAmount: body?.depositAmount ?? null,
         remark: body?.remark ?? null,
         productType: body?.productType ?? null,
         guaranteeType: body?.guaranteeType ?? null,
-        paymentStage: body?.paymentStage ?? null,
         clientRequirementNote: body?.clientRequirementNote ?? null,
         contractStatus: body?.contractStatus ?? null,
-        paidStatus: body?.paidStatus ?? null,
         deliveryRequirement: body?.deliveryRequirement ?? null,
         expectedHandleTime: body?.expectedHandleTime ?? null,
       });
@@ -584,6 +583,7 @@ export class OrdersController {
         remindStage: body?.remindStage,
         attachmentUrl: body?.attachmentUrl,
         attachmentName: body?.attachmentName,
+        enableEarlyWarning: body?.enableEarlyWarning,
       });
       // 写操作日志：订单跟进节点
       await this.logSafe({
@@ -871,6 +871,51 @@ export class OrdersController {
         req,
       });
       return res.json({ ok: true });
+    } catch (err: any) {
+      const code = err?.status || 422;
+      return res.status(code).json({ ok: false, message: err?.message || 'invalid' });
+    }
+  }
+
+  /**
+   * 追加付款：在订单详情页录入后续阶段的付款金额。
+   * POST /api/orders/:id/payments
+   */
+  @Post('orders/:id/payments')
+  async addPayment(
+    @Param('id') id: string,
+    @Body() body: any,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    const session = (req as any).session;
+    const actor = {
+      userId: getSessionUserId(req) || '',
+      role: session?.role || '',
+    };
+    if (!actor.userId) {
+      return res.status(401).json({ ok: false, message: 'unauthenticated' });
+    }
+    try {
+      const result = await this.ordersService.addPayment(id, actor, {
+        paymentStage: body?.paymentStage,
+        amount: body?.amount,
+        paidAt: body?.paidAt,
+      });
+      // 写操作日志
+      await this.logSafe({
+        userId: actor.userId,
+        action: OPERATION_LOG_ACTIONS.UPDATE,
+        targetType: OPERATION_LOG_TARGET_TYPES.ORDER,
+        targetId: id,
+        detail: {
+          action: 'add-payment',
+          paymentStage: body?.paymentStage,
+          amount: body?.amount,
+        },
+        req,
+      });
+      return res.json(result);
     } catch (err: any) {
       const code = err?.status || 422;
       return res.status(code).json({ ok: false, message: err?.message || 'invalid' });

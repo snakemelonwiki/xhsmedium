@@ -24,12 +24,12 @@ type ReminderRow = {
   orderStatus?: string | null;
 };
 
-const HORIZON = 24;
+const HORIZON = 168; // 7天，覆盖提前预警窗口
 
 /**
  * 教务端节点提醒页：列出当前用户名下/跟进过的订单中 next_remind_at
- * 已到（红色）或在未来 N 小时内到期（黄色）的记录，方便集中处理。
- * 后端 cron 每分钟扫一次发通知，本页是"看哪些已发/将发"的可视入口。
+ * 已到（红色）或在未来 7 天内到期（黄色）的记录，方便集中处理。
+ * 后端 cron 每分钟扫描：到期→ORDER_NODE_DUE，7天预警→ORDER_NODE_EARLY_WARNING。
  */
 export default function AcademicRemindersPage() {
   const [items, setItems] = useState<ReminderRow[]>([]);

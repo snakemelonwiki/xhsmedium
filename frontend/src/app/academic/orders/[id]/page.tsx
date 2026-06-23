@@ -514,6 +514,19 @@ export default function AcademicOrderDetailPage() {
         );
       }
 
+      // 下次跟进时间变更时：自动创建一条 enable_early_warning=true 的跟进记录
+      const newFollowUpAt = deliveryForm.getFieldValue(['order', 'nextFollowUpAt']);
+      const oldFollowUpAt = delivery.order?.nextFollowUpAt;
+      if (dayjs.isDayjs(newFollowUpAt) && oldFollowUpAt !== newFollowUpAt?.toISOString()) {
+        const followDate = (newFollowUpAt as dayjs.Dayjs).format('YYYY-MM-DD');
+        await createOrderFollowRecord(orderId, {
+          nodeType: '下次跟进提醒',
+          content: `交付信息：${followDate} 到期，请提前准备`,
+          nextRemindAt: (newFollowUpAt as dayjs.Dayjs).toISOString(),
+          enableEarlyWarning: true,
+        });
+      }
+
       message.success('交付信息已保存');
       const next = await getOrderDelivery(orderId);
       setDelivery(next);

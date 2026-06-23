@@ -52,6 +52,7 @@ export type NotificationTypeCode =
   | 'order_accepted'
   | 'order_updated'
   | 'order_node_due'
+  | 'order_node_early_warning'
   | 'order_node_overdue'
   | 'order_abnormal'
   | 'import_done'
@@ -123,6 +124,7 @@ export const STATUS_META: StatusRegistry = {
     order_accepted: { code: 'order_accepted', label: '订单已被接收', color: 'green', role: 'sales', actionHint: '查看进度' },
     order_updated: { code: 'order_updated', label: '订单更新', color: 'cyan', role: 'sales', actionHint: '查看进度' },
     order_node_due: { code: 'order_node_due', label: '订单节点到期', color: 'orange', role: 'academic', actionHint: '处理节点' },
+    order_node_early_warning: { code: 'order_node_early_warning', label: '订单节点预警', color: 'gold', role: 'academic', actionHint: '提前跟进' },
     order_node_overdue: { code: 'order_node_overdue', label: '订单节点超时', color: 'red', role: 'supervisor', actionHint: '查看节点' },
     order_abnormal: { code: 'order_abnormal', label: '订单异常', color: 'red', role: 'sales', actionHint: '处理异常' },
     import_done: { code: 'import_done', label: '导入完成', color: 'green', role: 'admin', actionHint: '下载结果' },

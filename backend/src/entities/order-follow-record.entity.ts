@@ -30,6 +30,21 @@ export class OrderFollowRecord {
   @Column({ name: 'reminder_sent_at', type: 'datetime', nullable: true })
   reminderSentAt: Date | null;
 
+  /**
+   * 提前7天预警发送时间（独立于 reminder_sent_at 的到期通知）。
+   * 非空表示已发过预警，避免重复发送。
+   */
+  @Column({ name: 'early_warning_sent_at', type: 'datetime', nullable: true })
+  earlyWarningSentAt: Date | null;
+
+  /**
+   * 是否启用提前7天预警。
+   * true 时 runEarlyWarning() 会在 next_remind_at 前7天发 ORDER_NODE_EARLY_WARNING 通知；
+   * false（默认）则只走 runOnce() 的到期提醒。
+   */
+  @Column({ name: 'enable_early_warning', type: 'boolean', default: false })
+  enableEarlyWarning: boolean;
+
   @Column({ name: 'attachment_url', type: 'varchar', length: 512, nullable: true })
   attachmentUrl: string | null;
 

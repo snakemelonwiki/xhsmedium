@@ -42,7 +42,7 @@ const BELL_PAGE_SIZE = 8;
  *
  * 不命中（仍走 toast 即可，避免遮屏）：
  *   - export_done / import_done（个人异步任务，结果可在导入导出中心慢看）
- *   - order_node_due / order_node_overdue（系统自动跑的兜底提醒）
+ *   - order_node_due / order_node_early_warning / order_node_overdue（系统自动跑的定时提醒）
  *   - customer_added / customer_not_passed / lead_status_changed（状态变更类）
  *   - lead_source_confirmed
  */

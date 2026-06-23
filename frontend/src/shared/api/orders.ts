@@ -454,6 +454,7 @@ export async function createOrderFollowRecord(
     remindStage?: string;
     attachmentUrl?: string;
     attachmentName?: string;
+    enableEarlyWarning?: boolean;
   },
 ) {
   return apiClient.post(`/orders/${id}/follow-records`, body);

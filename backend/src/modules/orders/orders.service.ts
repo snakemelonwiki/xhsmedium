@@ -148,6 +148,7 @@ interface OrderFollowDto {
   remindStage?: string | null;
   attachmentUrl?: string | null;
   attachmentName?: string | null;
+  enableEarlyWarning?: boolean;
 }
 
 interface OrderDeliveryDto {
@@ -1471,6 +1472,7 @@ export class OrdersService {
       content: dto.content ? String(dto.content).trim() : null,
       nextRemindAt: OrderRemindersService.normalizeRemindAt(dto.nextRemindAt ?? null),
       remindStage: dto.remindStage ? String(dto.remindStage).trim() : null,
+      enableEarlyWarning: dto.enableEarlyWarning === true,
       attachmentUrl: dto.attachmentUrl || null,
       attachmentName: dto.attachmentName || null,
     });
