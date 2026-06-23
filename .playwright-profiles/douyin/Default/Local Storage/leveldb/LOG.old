@@ -1,23 +1,8 @@
-2026/06/23-21:47:26.057 73cc Reusing MANIFEST D:\pycharmProjects\xhsmedium_github\.playwright-profiles\douyin\Default\Local Storage\leveldb/MANIFEST-000001
-2026/06/23-21:47:26.061 73cc Recovering log #46
-2026/06/23-21:47:26.061 73cc Level-0 table #8: started
-2026/06/23-21:47:26.064 73cc Level-0 table #8: 24488 bytes OK
-2026/06/23-21:47:26.064 73cc Recovering log #48
-2026/06/23-21:47:26.066 73cc Reusing old log D:\pycharmProjects\xhsmedium_github\.playwright-profiles\douyin\Default\Local Storage\leveldb/000048.log 
-2026/06/23-21:47:26.067 73cc Delete type=2 #5
-2026/06/23-21:47:26.067 73cc Delete type=2 #41
-2026/06/23-21:47:26.067 73cc Delete type=2 #43
-2026/06/23-21:47:26.067 73cc Delete type=2 #45
-2026/06/23-21:47:26.067 73cc Delete type=0 #46
-2026/06/23-21:47:26.067 73cc Delete type=2 #49
-2026/06/23-21:47:45.755 8d98 Level-0 table #50: started
-2026/06/23-21:47:45.757 8d98 Level-0 table #50: 57607 bytes OK
-2026/06/23-21:47:45.758 8d98 Delete type=0 #48
-2026/06/23-21:47:45.759 8d98 Compacting 4@0 + 0@1 files
-2026/06/23-21:47:45.761 8d98 Generated table #51@0: 63 keys, 40678 bytes
-2026/06/23-21:47:45.761 8d98 Compacted 4@0 + 0@1 files => 40678 bytes
-2026/06/23-21:47:45.762 8d98 compacted to: files[ 0 1 0 0 0 0 0 ]
-2026/06/23-21:47:45.762 8d98 Delete type=2 #3
-2026/06/23-21:47:45.762 8d98 Delete type=2 #6
-2026/06/23-21:47:45.762 8d98 Delete type=2 #8
-2026/06/23-21:47:45.762 8d98 Delete type=2 #50
+2026/04/30-15:51:25.194 34cb05 Reusing MANIFEST /Users/yangqiong/Desktop/mediumc/lan-system/.playwright-profiles/douyin/Default/Local Storage/leveldb/MANIFEST-000001
+2026/04/30-15:51:25.196 34cb05 Recovering log #4
+2026/04/30-15:51:25.197 34cb05 Level-0 table #6: started
+2026/04/30-15:51:25.198 34cb05 Level-0 table #6: 45011 bytes OK
+2026/04/30-15:51:25.198 34cb05 Recovering log #6
+2026/04/30-15:51:25.198 34cb05 Reusing old log /Users/yangqiong/Desktop/mediumc/lan-system/.playwright-profiles/douyin/Default/Local Storage/leveldb/000006.log 
+2026/04/30-15:51:25.199 34cb05 Delete type=0 #4
+2026/04/30-15:51:25.199 34cb05 Delete type=2 #7

@@ -12,10 +12,9 @@
 
 | 脚本 | 用途 | 命令 |
 |------|------|------|
-| `setup-linux.sh` | **Linux 一键部署**（系统依赖 + Node + Playwright + Xvfb + MySQL + PM2 + Nginx） | `sudo bash deploy/setup-linux.sh` |
-| `deploy-app.sh` | 应用部署（仅代码编译 + PM2，需先装好依赖） | `sudo bash deploy/deploy-app.sh` |
 | `install-mysql.sh` | 安装 MySQL 8.0 | `sudo bash deploy/install-mysql.sh` |
 | `init-database.sh` | 初始化数据库和表结构 | `sudo MYSQL_PASSWORD="pwd" bash deploy/init-database.sh` |
+| `deploy-app.sh` | 完整部署应用 | `sudo bash deploy/deploy-app.sh` |
 
 ## 🔄 数据迁移（Node.js）
 
@@ -44,10 +43,7 @@
 ## ⚡ 快速命令
 
 ```bash
-# 全新部署（推荐：一键脚本）
-sudo bash deploy/setup-linux.sh
-
-# 全新部署（分步）
+# 全新部署（一条龙）
 sudo bash deploy/install-mysql.sh && \
 sudo MYSQL_PASSWORD="your_password" bash deploy/init-database.sh && \
 sudo bash deploy/deploy-app.sh
