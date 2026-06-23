@@ -9,7 +9,7 @@
 > - `backend/STABILITY_IMPROVEMENTS.md`（索引/防抖/分页/连接池）
 > - `backend/src/main.ts`（unhandledRejection / uncaughtException 兜底）
 > 范围：B 端四端口（运营/销售/教务/主管）的**性能基准 + 索引验证 + 稳定性兜底 + 并发压测 + 重复提交 + 事务回滚 + 端到端联调**全套用例
-> 服务地址：后端 http://localhost:8089，前端 http://localhost:3002
+> 服务地址：后端 http://localhost:8089，前端 http://localhost:3302
 > 测试账号（密码 test123）：staff `youlunrong`、sales `sales01`、academic `academic02`、admin `youlun`
 
 ---

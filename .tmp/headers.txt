@@ -1,0 +1,14 @@
+HTTP/1.1 200 OK
+X-Powered-By: Express
+Vary: Origin
+Access-Control-Allow-Credentials: true
+Access-Control-Expose-Headers: X-New-Token
+Cache-Control: max-age=30
+X-Cache: HIT
+Content-Type: application/json; charset=utf-8
+Content-Length: 415
+ETag: W/"19f-logromLrpNZ8Dnl3N9JqE9sohb8"
+Date: Mon, 01 Jun 2026 15:38:50 GMT
+Connection: keep-alive
+Keep-Alive: timeout=5
+

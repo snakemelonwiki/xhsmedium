@@ -136,7 +136,7 @@ const ROLE_EXPORT_WHITELIST = {
 - LEAD_SALES_1：leads.id 销售甲成交的客资
 
 后端端口：8089（NestJS）
-前端端口：3002（Next.js，/academic 路径）
+前端端口：3302（Next.js，/academic 路径）
 鉴权：登录后拿 JWT，挂到请求 header 的 Authorization: Bearer <token>
 ```
 
@@ -618,7 +618,7 @@ SELECT id, academic_user_id FROM orders WHERE id='ORDER_ACA_2';
 **业务场景**：教务端详情页应展示"交付要求与资料"卡片 + "销售跟进摘要"卡片 + "订单异常反馈"卡片（仅 academic 角色显示）。
 
 **步骤**：
-1. 浏览器访问 `http://localhost:3002/academic/orders/ORDER_ACA_1`，用 `academic02` 登录。
+1. 浏览器访问 `http://localhost:3302/academic/orders/ORDER_ACA_1`，用 `academic02` 登录。
 
 **预期**：
 - 顶部 4 卡片：基本信息 / 交付要求与资料 / 销售跟进摘要 / 订单异常反馈。

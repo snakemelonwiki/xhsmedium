@@ -1,0 +1,317 @@
+[
+  {
+    "name": "TC-OPLOG-001 login log",
+    "status": "PASS",
+    "detail": "116 login logs"
+  },
+  {
+    "name": "TC-OPLOG-001 invalid token 401",
+    "status": "PASS",
+    "detail": "HTTP 401"
+  },
+  {
+    "name": "TC-OPLOG-001 sales01 ?userId override",
+    "status": "PASS",
+    "detail": "distinct: user-sales-1"
+  },
+  {
+    "name": "TC-OPLOG-001 admin sees all",
+    "status": "PASS",
+    "detail": "admin distinct: 5"
+  },
+  {
+    "name": "TC-OPLOG-002 logout log",
+    "status": "PASS",
+    "detail": "3 logout logs"
+  },
+  {
+    "name": "TC-OPLOG-007/008 assign/reassign logs",
+    "status": "PASS",
+    "detail": "7 assign/reassign"
+  },
+  {
+    "name": "TC-OPLOG-009 status_change log",
+    "status": "PASS",
+    "detail": "25 status_change"
+  },
+  {
+    "name": "TC-OPLOG-010 export logs",
+    "status": "PASS",
+    "detail": "53 export logs"
+  },
+  {
+    "name": "TC-OPLOG-011 view_sensitive log",
+    "status": "PASS",
+    "detail": "34 view_sensitive"
+  },
+  {
+    "name": "TC-OPLOG-012 handover log",
+    "status": "PASS",
+    "detail": "15 handover"
+  },
+  {
+    "name": "TC-OPLOG-014/015 distinct actions",
+    "status": "PASS",
+    "detail": "14 distinct actions (target 15)"
+  },
+  {
+    "name": "TC-ORDP-001 sales orderStatus denied",
+    "status": "PASS",
+    "detail": "HTTP 403 (should be 4xx)"
+  },
+  {
+    "name": "TC-ORDP-002 sales paidStatus denied",
+    "status": "PASS",
+    "detail": "HTTP 403"
+  },
+  {
+    "name": "TC-ORDP-003 sales handoverStatus denied",
+    "status": "PASS",
+    "detail": "HTTP 403"
+  },
+  {
+    "name": "TC-ORDP-004 sales deliveryRequirement+remark allow",
+    "status": "PASS",
+    "detail": "HTTP 200"
+  },
+  {
+    "name": "TC-ORDP-005 sales ownership denied",
+    "status": "PASS",
+    "detail": "HTTP 403"
+  },
+  {
+    "name": "TC-ORDP-006 sales amount denied",
+    "status": "PASS",
+    "detail": "HTTP 403"
+  },
+  {
+    "name": "TC-ORDP-007 boundary 0",
+    "status": "PASS",
+    "detail": "HTTP 403"
+  },
+  {
+    "name": "TC-ORDP-007 boundary -1",
+    "status": "PASS",
+    "detail": "HTTP 403"
+  },
+  {
+    "name": "TC-ORDP-008 sales other order 404",
+    "status": "PASS",
+    "detail": "HTTP 404"
+  },
+  {
+    "name": "TC-ORDP-009 academic02 own orderStatus allow",
+    "status": "PASS",
+    "detail": "HTTP 200"
+  },
+  {
+    "name": "TC-ORDP-010 admin bypass",
+    "status": "PASS",
+    "detail": "HTTP 200"
+  },
+  {
+    "name": "TC-ORDP-011 optimistic lock 412/409",
+    "status": "BLOCKED",
+    "detail": "No If-Match/etag implementation"
+  },
+  {
+    "name": "TC-ORDP-012 PATCH writes update log",
+    "status": "PASS",
+    "detail": "76 update logs"
+  },
+  {
+    "name": "TC-HOAC-001 sales hand-over own",
+    "status": "BLOCKED",
+    "detail": "No pending order for sales01"
+  },
+  {
+    "name": "TC-HOAC-002 academic accept own",
+    "status": "PASS",
+    "detail": "HTTP 201 (academic02 user-test-academic-02 should match)"
+  },
+  {
+    "name": "TC-HOAC-003 reject empty reason",
+    "status": "PASS",
+    "detail": "HTTP 400"
+  },
+  {
+    "name": "TC-HOAC-003 reject with reason",
+    "status": "FAIL",
+    "detail": "HTTP 400"
+  },
+  {
+    "name": "TC-HOAC-005 accept联动orderStatus",
+    "status": "PASS",
+    "detail": "order_status=in_progress, handover=accepted"
+  },
+  {
+    "name": "TC-HOAC-008 handover log",
+    "status": "PASS",
+    "detail": "16 handover logs"
+  },
+  {
+    "name": "TC-HOAC-009 idempotent accept",
+    "status": "PASS",
+    "detail": "HTTP 201"
+  },
+  {
+    "name": "TC-CLOZ-001 sales close own PUT",
+    "status": "PASS",
+    "detail": "HTTP 200"
+  },
+  {
+    "name": "TC-CLOZ-002 sales2 close sales01 403",
+    "status": "PASS",
+    "detail": "HTTP 403"
+  },
+  {
+    "name": "TC-CLOZ-005 staff close sales 403",
+    "status": "PASS",
+    "detail": "HTTP 403"
+  },
+  {
+    "name": "TC-CLOZ-001 again sales01 own (own+pending) PATCH",
+    "status": "PASS",
+    "detail": "HTTP 200"
+  },
+  {
+    "name": "TC-CLOZ-006/010 idempotent close",
+    "status": "PASS",
+    "detail": "HTTP 200"
+  },
+  {
+    "name": "TC-CLOZ-008 close op log",
+    "status": "PASS",
+    "detail": "33 close logs"
+  },
+  {
+    "name": "TC-USEM-001 employee+user auto-create",
+    "status": "PASS",
+    "detail": "joined=1 (employee create response: 201)"
+  },
+  {
+    "name": "TC-USEM-002 employee no user",
+    "status": "PASS",
+    "detail": "linked users=0"
+  },
+  {
+    "name": "TC-USEM-007 FK consistency",
+    "status": "PASS",
+    "detail": "broken: 0+0"
+  },
+  {
+    "name": "TC-USEM-008 disable log",
+    "status": "FAIL",
+    "detail": "action=create, HTTP=200"
+  },
+  {
+    "name": "TC-USEM password field filtered",
+    "status": "BLOCKED",
+    "detail": "HTTP 404"
+  },
+  {
+    "name": "PF-02 list accountName inject",
+    "status": "PASS",
+    "detail": "2/2"
+  },
+  {
+    "name": "PF-02 detail accountName",
+    "status": "PASS",
+    "detail": "accountName=null, sourceAccountName=null"
+  },
+  {
+    "name": "PF-04-001 中文 reason 200",
+    "status": "PASS",
+    "detail": "HTTP 201"
+  },
+  {
+    "name": "PF-04-004 emoji reason",
+    "status": "PASS",
+    "detail": "HTTP 201"
+  },
+  {
+    "name": "PF-10 200ms 后 429",
+    "status": "PASS",
+    "detail": "T0=200 T+200=429"
+  },
+  {
+    "name": "PF-10 1.5s+ 后 200",
+    "status": "PASS",
+    "detail": "T+2s=200"
+  },
+  {
+    "name": "PF-10 cross-user isolated",
+    "status": "PASS",
+    "detail": "cross-user HTTP 200"
+  },
+  {
+    "name": "BF-01 addStatus=已添加",
+    "status": "FAIL",
+    "detail": "0 results"
+  },
+  {
+    "name": "BF-01 addStatus=跟进中",
+    "status": "FAIL",
+    "detail": "0 results"
+  },
+  {
+    "name": "BF-01 addStatus=added",
+    "status": "PASS",
+    "detail": "1 results"
+  },
+  {
+    "name": "BF-01 addStatus=in_followup",
+    "status": "FAIL",
+    "detail": "0 results"
+  },
+  {
+    "name": "BF-01 status=跟进中",
+    "status": "FAIL",
+    "detail": "V1 中文 status"
+  },
+  {
+    "name": "PF-05 /api/leads",
+    "status": "PASS",
+    "detail": "HTTP 401"
+  },
+  {
+    "name": "PF-05 /api/orders",
+    "status": "PASS",
+    "detail": "HTTP 401"
+  },
+  {
+    "name": "PF-05 /api/notifications",
+    "status": "PASS",
+    "detail": "HTTP 401"
+  },
+  {
+    "name": "PF-05 /api/collaboration-tasks",
+    "status": "PASS",
+    "detail": "HTTP 401"
+  },
+  {
+    "name": "PF-06 sales01 -> 3001",
+    "status": "PASS",
+    "detail": "HTTP 403"
+  },
+  {
+    "name": "PF-06 academic -> 3001",
+    "status": "PASS",
+    "detail": "HTTP 403"
+  },
+  {
+    "name": "PF-06 staff -> 3001",
+    "status": "PASS",
+    "detail": "HTTP 403"
+  },
+  {
+    "name": "PF-06 owner -> 3001",
+    "status": "PASS",
+    "detail": "HTTP 200"
+  },
+  {
+    "name": "PF-06 owner -> 3000 (reverse)",
+    "status": "PASS",
+    "detail": "HTTP 403"
+  }
+]

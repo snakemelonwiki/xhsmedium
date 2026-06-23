@@ -1,0 +1,4 @@
+-- AUTO-GENERATED 索引补齐
+
+SET NAMES utf8mb4;
+

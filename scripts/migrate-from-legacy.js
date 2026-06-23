@@ -238,41 +238,90 @@ async function migrateTable(conn, tableName, items, mapper, summary) {
   }
   let inserted = 0, skipped = 0, failed = 0, orphan = 0;
   const orphanList = [];
+  const skippedList = [];   // 跳过的 id + 原因(主键已存在)
+  const failedList = [];    // 失败的 id + 错误
+  // 样例:每张表前 N 条样例,看 mapper 出来的字段
+  // 错误打印:前 N 条详细,超出后只累计不打印(末尾汇总)
+  const SAMPLE_N = 5;
+  const ERROR_LOG_N = 10;
+  let printed = 0;
   for (const raw of items) {
     try {
       const row = mapper(raw);
       // 关键字段缺失 → 标记 orphan,不入库;在末尾汇总报告
       if (!row) {
         orphan += 1;
-        orphanList.push(raw.id || "(no id)");
+        const id = raw.id || "(no id)";
+        orphanList.push(id);
         if (args.verbose) console.log(`  ◌ [${tableName}] orphan: missing required field(s), ${JSON.stringify(raw).slice(0, 120)}`);
         continue;
       }
       if (!row.id) {
         failed += 1;
-        if (args.verbose) console.log(`  ✗ [${tableName}] missing id: ${JSON.stringify(raw).slice(0, 80)}`);
+        const reason = "missing id";
+        failedList.push({ id: "(no id)", reason, payload: JSON.stringify(raw).slice(0, 120) });
+        if (failedList.length <= ERROR_LOG_N) {
+          console.log(`  ✗ [${tableName}] ${reason} | raw=${JSON.stringify(raw).slice(0, 120)}`);
+        }
         continue;
       }
+      // 样例打印:每张表前 SAMPLE_N 条,展示即将入库的字段
+      if (printed < SAMPLE_N) {
+        const label = row.username || row.name || row.title || row.account_name || row.contact_info || "";
+        const fieldCount = Object.keys(row).length;
+        console.log(`    · [${tableName}] sample id=${row.id}  label="${label}"  fields=${fieldCount}`);
+        printed += 1;
+      }
       const r = await insertIfNotExists(conn, tableName, row, "id", args.verbose);
-      if (r.status === "inserted") inserted += 1;
-      else if (r.status === "skipped") skipped += 1;
-      else if (r.status === "would-insert") inserted += 1;
-      if (args.verbose && r.status !== "skipped") {
-        console.log(`  ${r.status === "would-insert" ? "○" : "✓"} [${tableName}] ${row.id} (${row.username || row.name || row.title || row.account_name || row.contact_info || ""})`);
+      if (r.status === "inserted") {
+        inserted += 1;
+        if (args.verbose) {
+          console.log(`  ✓ [${tableName}] inserted ${row.id} (${row.username || row.name || row.title || row.account_name || row.contact_info || ""})`);
+        }
+      } else if (r.status === "skipped") {
+        skipped += 1;
+        skippedList.push({ id: row.id, reason: r.reason || "exists" });
+        // 跳过本身就是幂等成功,只在前 N 条时报一下让用户知道
+        if (skippedList.length <= ERROR_LOG_N) {
+          console.log(`  ○ [${tableName}] skipped ${row.id} (${r.reason || "exists"})`);
+        }
+      } else if (r.status === "would-insert") {
+        inserted += 1;
+        if (args.verbose) {
+          console.log(`  ○ [${tableName}] would-insert ${row.id}`);
+        }
       }
     } catch (e) {
       failed += 1;
-      if (args.verbose) {
-        console.log(`  ✗ [${tableName}] ${raw.id || "(no id)"} → ${e.message}`);
-        if (e.message.includes("undefined")) {
-          for (const [k, v] of Object.entries(row)) {
-            if (v === undefined) console.log(`     undefined: ${k}`);
+      // e.message 通常是 ER_NO_REFERENCED_ROW_2 / ER_DUP_ENTRY / ER_BAD_NULL_ERROR 等,
+      // 还可能带 errno / sqlState / sqlMessage。统一取最可读的那段。
+      const reason = `${e.code || ""} ${e.errno || ""} ${e.message || e}`.trim();
+      const id = (raw && raw.id) || (typeof row !== "undefined" && row && row.id) || "(no id)";
+      failedList.push({ id, reason });
+      if (failedList.length <= ERROR_LOG_N) {
+        console.log(`  ✗ [${tableName}] FAIL id=${id}  ${reason}`);
+        // FK 失败时,把要写入的 row 也打出来,便于对照父表
+        if (e.code === "ER_NO_REFERENCED_ROW_2" || e.errno === 1452) {
+          try {
+            console.log(`     row=${JSON.stringify(row)}`);
+          } catch (_) {}
+        }
+        // undefined 字段调试:顺带扫一下 row
+        if (typeof e.message === "string" && e.message.includes("undefined")) {
+          if (typeof row === "object" && row) {
+            for (const [k, v] of Object.entries(row)) {
+              if (v === undefined) console.log(`     undefined field: ${k}`);
+            }
           }
         }
       }
     }
   }
-  summary[tableName] = { inserted, skipped, failed, orphan, orphanList, total: items.length };
+  summary[tableName] = {
+    inserted, skipped, failed, orphan,
+    orphanList, skippedList, failedList,
+    total: items.length,
+  };
 }
 
 // ─── uploads 拷贝 ───────────────────────────────────────

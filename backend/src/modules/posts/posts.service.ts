@@ -610,7 +610,7 @@ export class PostsService {
     // 关联该作品的客资（联系方式 + 销售分配）
     const leadRows = await this.postRepository.manager.query(
       `SELECT id, contact_info, wechat, status, assigned_sales_user_id, sales_user_name, created_at
-       FROM leads WHERE post_id = ? ORDER BY created_at DESC`,
+       FROM leads WHERE post_id = ? COLLATE utf8mb4_unicode_ci ORDER BY created_at DESC`,
       [id],
     );
     const leads = (leadRows || []).map((r: any) => ({
@@ -628,8 +628,8 @@ export class PostsService {
       `SELECT o.id, o.lead_id, o.customer_name, o.amount, o.paid_status, o.order_status,
               o.handover_status, o.payment_stage, o.created_at
        FROM orders o
-       INNER JOIN leads l ON l.id = o.lead_id
-       WHERE l.post_id = ?
+       INNER JOIN leads l ON l.id = o.lead_id COLLATE utf8mb4_unicode_ci
+       WHERE l.post_id = ? COLLATE utf8mb4_unicode_ci
        ORDER BY o.created_at DESC`,
       [id],
     );

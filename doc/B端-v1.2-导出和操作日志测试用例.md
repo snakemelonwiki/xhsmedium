@@ -102,7 +102,7 @@ pending  ──POST /api/exports 落库──▶  processing  ──setImmediate
 - 协同任务：collaboration_tasks.id = COLLAB_TC_EXP_1（lead_id=LEAD_TC_EXP_1, status=pending）
 
 后端端口：8089  （NestJS）
-前端端口：3002
+前端端口：3302
 鉴权：登录后拿 token，挂到请求 header 的 Authorization: Bearer <token>
 ```
 

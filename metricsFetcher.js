@@ -406,8 +406,17 @@ function extractDouyinFromDetail(detail) {
     let publishDate = "";
     const ts = detail.create_time ?? detail.createTime;
     if (ts) {
-      const d = new Date(Number(ts) * 1000);
-      publishDate = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+      const timestamp = Number(ts);
+      const d = new Date(timestamp * 1000);
+      const dateSource = detail.create_time != null ? "create_time" : "createTime";
+      if (Number.isFinite(timestamp) && Number.isFinite(d.getTime())) {
+        publishDate = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+        console.log(`[metricsFetcher] 抖音发布日期元素抓取: source=${dateSource}, raw=${String(ts)}, parsed=${publishDate}`);
+      } else {
+        console.warn(`[metricsFetcher] 抖音发布日期元素已抓取但未识别: source=${dateSource}, raw=${String(ts)}`);
+      }
+    } else {
+      console.warn("[metricsFetcher] 抖音发布日期元素未找到: source=detail.create_time/detail.createTime");
     }
 
     return {
@@ -1029,26 +1038,13 @@ async function scrapeXiaohongshu(page, providedNoteId = null, apiDetail = null) 
   }
 
   const initialState = await readXiaohongshuInitialState(page, noteId);
-  // ── 优化 #2：8 项独立的 page.evaluate 并行化（节省 300-500ms） ──
-  const [
-    precise,
-    htmlFallback,
-    metaTags,
-    xpathTitle,
-    publishDate,
-    domAuthorName,
-    domAuthorUrl,
-    fallback,
-  ] = await Promise.all([
-    readXiaohongshuEngageBar(page),
-    inferXiaohongshuCountsFromHtml(page),
-    readXiaohongshuMetaTags(page),
-    readXiaohongshuTitleByXPath(page),
-    readXiaohongshuPublishDate(page),
-    readXiaohongshuAuthorNameFromDom(page),
-    readXiaohongshuAuthorUrlFromDom(page),
-    inferCountsFromBody(page),
-  ]);
+  const precise = await readXiaohongshuEngageBar(page);
+  const htmlFallback = await inferXiaohongshuCountsFromHtml(page);
+  const metaTags = await readXiaohongshuMetaTags(page);
+  const xpathTitle = await readXiaohongshuTitleByXPath(page);
+  const publishDate = await readXiaohongshuPublishDate(page);
+  const domAuthorName = await readXiaohongshuAuthorNameFromDom(page);
+  const domAuthorUrl = await readXiaohongshuAuthorUrlFromDom(page);
   const domAuthorId = extractXiaohongshuUserIdFromProfileUrl(domAuthorUrl);
   const likes = parseCount(apiMetrics?.likes) ?? parseCount(initialState?.likes) ?? parseCount(precise?.likes) ?? await readCountBySelectors(page, [
     ".interactions.engage-bar .interact-container .like-wrapper .count",
@@ -1079,11 +1075,11 @@ async function scrapeXiaohongshu(page, providedNoteId = null, apiDetail = null) 
   const title = apiMetrics?.title || initialState?.title || xpathTitle || metaTags?.title || metaTags?.description || "";
   const titleSource = apiMetrics?.title ? "api" : initialState?.title ? "initialState" : xpathTitle ? "xpath" : metaTags?.title ? "meta-title" : metaTags?.description ? "meta-description" : "empty";
   console.log(`[metricsFetcher] 小红书标题来源: ${titleSource}, title=${title.slice(0, 80)}`);
-  // 作者：API > DOM > INITIAL_STATE > meta og:author > empty
-  const authorName = apiMetrics?.authorName || domAuthorName || initialState?.authorName || metaTags?.authorName || "";
-  // 作者 ID：API > 主页链接解析 > SSR
-  const authorId = apiMetrics?.authorId || domAuthorId || initialState?.authorId || "";
-  const authorSource = apiMetrics?.authorName ? "api" : domAuthorName ? "dom" : initialState?.authorName ? "initialState" : metaTags?.authorName ? "meta" : "empty";
+  // 作者：DOM > INITIAL_STATE > meta og:author > empty
+  const authorName = domAuthorName || initialState?.authorName || metaTags?.authorName || "";
+  // 作者 ID：优先从主页链接解析 userId，其次 SSR
+  const authorId = domAuthorId || initialState?.authorId || "";
+  const authorSource = domAuthorName ? "dom" : initialState?.authorName ? "initialState" : metaTags?.authorName ? "meta" : "empty";
   console.log(`[metricsFetcher] 小红书作者来源: ${authorSource}, authorName=${authorName.slice(0, 60)}, authorId=${authorId}`);
 
   return {

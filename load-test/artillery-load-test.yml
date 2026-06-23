@@ -1,0 +1,172 @@
+config:
+  target: "http://localhost:3000"
+  phases:
+    - duration: 30
+      arrivalRate: 5
+      name: "预热阶段"
+    - duration: 60
+      arrivalRate: 15
+      name: "增长阶段"
+    - duration: 120
+      arrivalRate: 25
+      name: "峰值阶段"
+    - duration: 60
+      arrivalRate: 10
+      name: "降低阶段"
+  processor: "./artillery-processor.js"
+  payload:
+    path: "./test-users.csv"
+    fields:
+      - "username"
+      - "password"
+      - "role"
+    order: "sequence"
+  ensure:
+    maxErrorRate: 5
+    p95: 2000
+    p99: 3000
+
+scenarios:
+  - name: "客资看板操作流程"
+    weight: 40
+    flow:
+      - post:
+          url: "/api/auth/login"
+          json:
+            username: "{{ username }}"
+            password: "{{ password }}"
+          capture:
+            - json: "$.token"
+              as: "token"
+          expect:
+            - statusCode: 200
+            - hasProperty: "token"
+      - think: 1
+      - get:
+          url: "/api/leads?limit=10&offset=0"
+          headers:
+            Authorization: "Bearer {{ token }}"
+          expect:
+            - statusCode: 200
+            - contentType: json
+      - think: 2
+      - get:
+          url: "/api/leads?limit=10&offset=10"
+          headers:
+            Authorization: "Bearer {{ token }}"
+          expect:
+            - statusCode: 200
+
+  - name: "作品看板操作流程"
+    weight: 30
+    flow:
+      - post:
+          url: "/api/auth/login"
+          json:
+            username: "{{ username }}"
+            password: "{{ password }}"
+          capture:
+            - json: "$.token"
+              as: "token"
+          expect:
+            - statusCode: 200
+      - think: 1
+      - get:
+          url: "/api/posts?limit=10&offset=0"
+          headers:
+            Authorization: "Bearer {{ token }}"
+          expect:
+            - statusCode: 200
+      - think: 2
+      - get:
+          url: "/api/posts?limit=10&offset=10"
+          headers:
+            Authorization: "Bearer {{ token }}"
+          expect:
+            - statusCode: 200
+
+  - name: "录入客资流程"
+    weight: 15
+    flow:
+      - post:
+          url: "/api/auth/login"
+          json:
+            username: "{{ username }}"
+            password: "{{ password }}"
+          capture:
+            - json: "$.token"
+              as: "token"
+          expect:
+            - statusCode: 200
+      - think: 1
+      - get:
+          url: "/api/accounts?limit=10&offset=0"
+          headers:
+            Authorization: "Bearer {{ token }}"
+          capture:
+            - json: "$.items[0].id"
+              as: "accountId"
+          expect:
+            - statusCode: 200
+      - think: 2
+      - function: "generateLeadData"
+      - post:
+          url: "/api/leads"
+          headers:
+            Authorization: "Bearer {{ token }}"
+          json:
+            accountId: "{{ accountId }}"
+            platform: "{{ platform }}"
+            contactInfo: "{{ contactInfo }}"
+            nickname: "{{ nickname }}"
+            budget: "{{ budget }}"
+            majorContent: "{{ majorContent }}"
+            status: "新客资"
+            note: "负载测试数据"
+          expect:
+            - statusCode: 200
+
+  - name: "录入作品流程"
+    weight: 15
+    flow:
+      - post:
+          url: "/api/auth/login"
+          json:
+            username: "{{ username }}"
+            password: "{{ password }}"
+          capture:
+            - json: "$.token"
+              as: "token"
+          expect:
+            - statusCode: 200
+      - think: 1
+      - get:
+          url: "/api/accounts?limit=10&offset=0"
+          headers:
+            Authorization: "Bearer {{ token }}"
+          capture:
+            - json: "$.items[0].id"
+              as: "accountId"
+          expect:
+            - statusCode: 200
+      - think: 2
+      - function: "generatePostData"
+      - post:
+          url: "/api/posts"
+          headers:
+            Authorization: "Bearer {{ token }}"
+          json:
+            accountId: "{{ accountId }}"
+            platform: "{{ platform }}"
+            title: "{{ title }}"
+            copywriting: "{{ copywriting }}"
+            postType: "{{ postType }}"
+            postUrl: "{{ postUrl }}"
+            traffic: 0
+            likes: 0
+            comments: 0
+            favorites: 0
+            publishedAt: "{{ publishedAt }}"
+            note: "负载测试数据"
+          expect:
+            - statusCode: 200

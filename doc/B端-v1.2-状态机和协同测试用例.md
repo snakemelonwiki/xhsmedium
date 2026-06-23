@@ -5,7 +5,7 @@
 > 范围：客资状态机（含 V1 中文兼容 / 并发乐观锁 / close-deal 事务回滚）、订单状态机（order_status × paid_status × handover_status 三维度，重点 v1.2 新增的 handover 4 路由）、协同任务状态机（含 v1.2 新增 timeout 扫描器 + scope 越权修复）  
 > 依据：`doc/v1.2-完整交付版-AB端任务分配.md` §11.1、`backend/src/modules/orders/orders.service.ts`、`backend/src/modules/collaboration-tasks/collaboration-tasks.service.ts`、`backend/src/modules/leads/leads.service.ts`  
 > 测试账号：见 §0.8，密码统一 `test123`  
-> 后端端口：8089（NestJS），前端端口：3002
+> 后端端口：8089（NestJS），前端端口：3302
 
 ---
 

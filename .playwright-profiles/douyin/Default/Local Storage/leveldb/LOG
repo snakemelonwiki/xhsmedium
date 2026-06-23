@@ -1,3 +1,5 @@
-2026/04/30-16:21:23.744 354c35 Reusing MANIFEST /Users/yangqiong/Desktop/mediumc/lan-system/.playwright-profiles/douyin/Default/Local Storage/leveldb/MANIFEST-000001
-2026/04/30-16:21:23.756 354c35 Recovering log #6
-2026/04/30-16:21:23.756 354c35 Reusing old log /Users/yangqiong/Desktop/mediumc/lan-system/.playwright-profiles/douyin/Default/Local Storage/leveldb/000006.log 
+2026/06/24-00:02:56.523 52f0 Reusing MANIFEST D:\pycharmProjects\xhsmedium_github\.playwright-profiles\douyin\Default\Local Storage\leveldb/MANIFEST-000001
+2026/06/24-00:02:56.527 52f0 Recovering log #49
+2026/06/24-00:02:56.528 52f0 Reusing old log D:\pycharmProjects\xhsmedium_github\.playwright-profiles\douyin\Default\Local Storage\leveldb/000049.log 
+2026/06/24-00:03:05.722 52f0 Level-0 table #54: started
+2026/06/24-00:03:05.725 52f0 Level-0 table #54: 24900 bytes OK

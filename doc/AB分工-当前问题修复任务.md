@@ -85,7 +85,7 @@
 
 ## 备注
 
-- CLAUDE.md 中 "Port 3000 staff / Port 3001 owner" 已与当前 `start.bat`（3002 + 3001 + Nest 8089）不一致，建议本轮顺手更新。
+- CLAUDE.md 中 "Port 3000 staff / Port 3001 owner" 已与当前 `start.bat`（3302 + 3001 + Nest 8089）不一致，建议本轮顺手更新。
 - 现有脚手架已就绪的模块：`backend/src/modules/{collaboration-tasks, imports, lead-drafts, leads-parser, orders, notifications}`，对应 entities 也已建好。本轮重点是把字段、口径、前端入口补齐。
 
 ---

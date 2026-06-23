@@ -6,6 +6,7 @@ import {
   Card,
   Drawer,
   Empty,
+  Image,
   InputNumber,
   Modal,
   Pagination,
@@ -252,10 +253,13 @@ export default function OperationPostsPage() {
       render: (_, record) => (
         <Space size={10} align="start">
           {record.coverThumbUrl || record.coverImageUrl ? (
-            <img
+            <Image
               src={record.coverThumbUrl || record.coverImageUrl}
               alt={record.title}
-              style={{ width: 88, height: 64, objectFit: 'cover', borderRadius: 6, flex: '0 0 auto' }}
+              width={88}
+              height={64}
+              style={{ borderRadius: 6, flex: '0 0 auto', objectFit: 'cover' }}
+              preview={{ mask: '查看大图' }}
             />
           ) : (
             <div style={{ width: 88, height: 64, background: '#f0f0f0', borderRadius: 6, flex: '0 0 auto' }} />

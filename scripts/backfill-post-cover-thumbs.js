@@ -18,12 +18,28 @@
  *   uploads/post-covers/thumbs/<post-id>.jpg
  */
 
-require('dotenv').config();
-
 const fs = require('fs');
 const path = require('path');
 const { spawn, spawnSync } = require('child_process');
 const mysql = require('mysql2/promise');
+
+// 跟 migrate-from-legacy.js 保持一致：优先读 backend/.env(本地开发/已部署),
+// 读不到再退到根 .env,都没有就让 dotenv 用 process.env
+const ENV_PATHS = [
+  path.resolve(__dirname, '..', 'backend', '.env'),
+  path.resolve(__dirname, '..', '.env'),
+];
+let envLoaded = false;
+for (const p of ENV_PATHS) {
+  if (fs.existsSync(p)) {
+    require('dotenv').config({ path: p });
+    envLoaded = true;
+    break;
+  }
+}
+if (!envLoaded) {
+  require('dotenv').config();
+}
 
 const args = new Set(process.argv.slice(2));
 const WRITE = args.has('--write');
@@ -73,37 +89,73 @@ async function main() {
   let generated = 0;
   let skipped = 0;
   let missing = 0;
+  let failed = 0;
 
   for (const row of rows) {
+    const thumbName = `${safeName(row.id)}.jpg`;
+    const thumbPath = path.join(thumbsDir, thumbName);
+    const thumbUrl = `/uploads/post-covers/thumbs/${thumbName}`;
+
+    // 1. 尝试本地路径
     const sourcePath = localUploadPath(row.cover_image_url);
-    if (!sourcePath) {
-      skipped++;
-      console.log(`[skip] ${row.id} non-local cover: ${row.cover_image_url}`);
+
+    if (sourcePath && fs.existsSync(sourcePath)) {
+      // 本地文件存在，直接用 ffmpeg
+      if (!WRITE) {
+        generated++;
+        console.log(`[dry-run] ${row.id} ${row.cover_image_url} -> ${thumbUrl}`);
+        continue;
+      }
+      try {
+        await makeThumb(sourcePath, thumbPath);
+        await pool.query('UPDATE posts SET cover_thumb_url = ? WHERE id = ?', [thumbUrl, row.id]);
+        generated++;
+        console.log(`[ok] ${row.id} -> ${thumbUrl}`);
+      } catch (err) {
+        failed++;
+        console.log(`[fail] ${row.id} ffmpeg error: ${err.message}`);
+      }
       continue;
     }
-    if (!fs.existsSync(sourcePath)) {
+
+    if (sourcePath && !fs.existsSync(sourcePath)) {
+      // 本地路径但文件不存在
       missing++;
       console.log(`[missing] ${row.id} ${sourcePath}`);
       continue;
     }
 
-    const thumbName = `${safeName(row.id)}.jpg`;
-    const thumbPath = path.join(thumbsDir, thumbName);
-    const thumbUrl = `/uploads/post-covers/thumbs/${thumbName}`;
-
-    if (!WRITE) {
-      generated++;
-      console.log(`[dry-run] ${row.id} ${row.cover_image_url} -> ${thumbUrl}`);
+    // 2. 远程 URL：下载到临时文件后生成缩略图
+    const remoteUrl = row.cover_image_url;
+    if (!remoteUrl || !/^https?:\/\//i.test(remoteUrl)) {
+      skipped++;
+      console.log(`[skip] ${row.id} invalid URL: ${remoteUrl}`);
       continue;
     }
 
-    await makeThumb(sourcePath, thumbPath);
-    await pool.query('UPDATE posts SET cover_thumb_url = ? WHERE id = ?', [thumbUrl, row.id]);
-    generated++;
-    console.log(`[ok] ${row.id} -> ${thumbUrl}`);
+    if (!WRITE) {
+      generated++;
+      console.log(`[dry-run] ${row.id} ${remoteUrl} -> ${thumbUrl} (remote)`);
+      continue;
+    }
+
+    const tmpPath = path.join(thumbsDir, `.tmp-${row.id}-${Date.now()}`);
+    try {
+      await downloadFile(remoteUrl, tmpPath);
+      await makeThumb(tmpPath, thumbPath);
+      await pool.query('UPDATE posts SET cover_thumb_url = ? WHERE id = ?', [thumbUrl, row.id]);
+      generated++;
+      console.log(`[ok] ${row.id} -> ${thumbUrl} (remote)`);
+    } catch (err) {
+      failed++;
+      console.log(`[fail] ${row.id} remote download/process error: ${err.message}`);
+    } finally {
+      // 清理临时文件
+      try { fs.unlinkSync(tmpPath); } catch {}
+    }
   }
 
-  console.log(`[post-cover-thumbs] write=${WRITE} force=${FORCE} generated=${generated} skipped=${skipped} missing=${missing}`);
+  console.log(`[post-cover-thumbs] write=${WRITE} force=${FORCE} generated=${generated} skipped=${skipped} missing=${missing} failed=${failed}`);
 }
 
 async function ensureColumn() {
@@ -220,6 +272,43 @@ function makeThumb(sourcePath, thumbPath) {
       if (code === 0) resolve();
       else reject(new Error(`ffmpeg exited ${code}: ${stderr.slice(-500)}`));
     });
+  });
+}
+
+/**
+ * 下载远程图片到本地临时文件。
+ * 使用 Node.js 内置 https/http 模块，不依赖外部库。
+ */
+function downloadFile(url, destPath) {
+  const http = url.startsWith('https') ? require('https') : require('http');
+  return new Promise((resolve, reject) => {
+    const req = http.get(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+        'Referer': url,
+      },
+      timeout: 15000,
+    }, (res) => {
+      // 跟随 302 重定向（最多 3 次）
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        const redirectUrl = new URL(res.headers.location, url).href;
+        downloadFile(redirectUrl, destPath).then(resolve).catch(reject);
+        return;
+      }
+      if (res.statusCode !== 200) {
+        reject(new Error(`HTTP ${res.statusCode} from ${url}`));
+        return;
+      }
+      const file = require('fs').createWriteStream(destPath);
+      res.pipe(file);
+      file.on('finish', () => { file.close(resolve); });
+      file.on('error', (err) => {
+        try { require('fs').unlinkSync(destPath); } catch {}
+        reject(err);
+      });
+    });
+    req.on('error', reject);
+    req.on('timeout', () => { req.destroy(); reject(new Error(`timeout downloading ${url}`)); });
   });
 }
 

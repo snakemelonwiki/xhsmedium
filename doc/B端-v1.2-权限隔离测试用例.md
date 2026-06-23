@@ -87,7 +87,7 @@ const employeeId = session?.employeeId || '';
 
 ```text
 数据库：lan_dual_role_system
-后端端口：8089；前端端口：3000/3001/3002/3003
+后端端口：8089；前端端口：3000/3001/3302/3003
 
 测试账号（密码均为 test123）：
 - staff (运营)：youlunrong  → userId=USR_STAFF_1, employeeId=EMP_STAFF_1

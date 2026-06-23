@@ -3,7 +3,7 @@
 执行时间：2026-06-02 00:40（Asia/Shanghai）  
 执行目录：`D:\workspace\workspace\xsh\xhsmedium\frontend`  
 测试文件：`frontend/e2e/a-admin-live.spec.ts`  
-baseURL：`http://127.0.0.1:3002`  
+baseURL：`http://127.0.0.1:3302`  
 账号：`admin2/test123`、`staff1/test123`
 
 ## 执行命令与结果
@@ -49,7 +49,7 @@ npx playwright test e2e/a-admin-live.spec.ts --project=chromium --reporter=line 
 复现步骤：
 
 1. 使用 `staff1/test123` 登录获取 token。
-2. 请求 `GET http://127.0.0.1:3002/api/employees`，Header 带 `Authorization: Bearer <staff token>`。
+2. 请求 `GET http://127.0.0.1:3302/api/employees`，Header 带 `Authorization: Bearer <staff token>`。
 3. 实际返回 `200`；Playwright 断言 `[401,403]` 失败。
 
 ## 阻塞/未覆盖

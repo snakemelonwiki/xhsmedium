@@ -126,7 +126,7 @@ notifications
 密码统一：test123
 后端端口：8089
 WebSocket：`ws://localhost:8089/notifications`
-前端端口：3002
+前端端口：3302
 ```
 
 ### 0.8 与既有测试用例的衔接
@@ -1256,8 +1256,8 @@ Network 面板观察：每 60s 应有 1 个 GET /api/notifications 请求
 
 ```mermaid
 flowchart LR
-  A[销售甲 userId=USR_SALES_A] --> B1[login 3002/sales<br/>socket connect /notifications]
-  A2[教务甲 userId=USR_ACA_A] --> B2[login 3002/academic<br/>socket connect /notifications]
+  A[销售甲 userId=USR_SALES_A] --> B1[login 3302/sales<br/>socket connect /notifications]
+  A2[教务甲 userId=USR_ACA_A] --> B2[login 3302/academic<br/>socket connect /notifications]
   B1 --> C1[room user:USR_SALES_A]
   B2 --> C2[room user:USR_ACA_A]
   D[教务触发 order_created<br/>receiverIds=USR_ACA_A portType=academic] --> E[emitCreated USR_ACA_A]
@@ -1450,7 +1450,7 @@ WHERE receiver_id='USR_SALES_A' AND read_status=0 AND port_type='sales';
 
 ```mermaid
 flowchart LR
-  A[销售甲 login 3002/sales] --> B[GET /api/notifications]
+  A[销售甲 login 3302/sales] --> B[GET /api/notifications]
   B --> C[resolvePortType role=sales → 'sales']
   C --> D[listForUser portType='sales']
   D --> E[SELECT WHERE receiver_id=USR_SALES_A<br/>AND port_type='sales']

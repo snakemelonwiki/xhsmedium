@@ -242,6 +242,7 @@ CREATE TABLE IF NOT EXISTS leads (
   follow_action            TEXT         NULL COMMENT '具体跟进措施',
   follow_action_at         DATETIME     NULL COMMENT '具体跟进时间',
   wechat                   VARCHAR(128) NULL COMMENT '客资微信号（销售推老师微信后填写）',
+  sales_remark             VARCHAR(255) NULL COMMENT '销售备注（销售/运营自由备注，常用于记录客户微信昵称/微信号）',
   invalid_reason           VARCHAR(255) NULL COMMENT '无效原因（标记无效客资时填写）',
   created_at               DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at               DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -1024,3 +1025,85 @@ CREATE TABLE IF NOT EXISTS scraping_alerts (
   INDEX idx_sa_level_created     (level, created_at),
   INDEX idx_sa_resolved_created  (resolved, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='抓取告警表（owner 专属：抓取连续/累计失败到阈值时自动写入）';
+
+-- ============================================================
+-- 24. order_payments
+-- backend/src/entities/order-payment.entity.ts
+-- 迁移来源：add-finance-tables.sql（Phase D）
+-- ============================================================
+CREATE TABLE IF NOT EXISTS order_payments (
+  id VARCHAR(64) PRIMARY KEY,
+  order_id VARCHAR(64) NOT NULL,
+  stage_code VARCHAR(16) NOT NULL COMMENT '阶段编码: deposit/midterm/final/extra',
+  stage_label VARCHAR(32) DEFAULT NULL COMMENT '展示名（如"定金""中期""尾款"）',
+  stage_index INT NOT NULL DEFAULT 0 COMMENT '0=定金 1=中期 2=尾款 3=额外',
+  amount DECIMAL(12,2) DEFAULT NULL,
+  paid_at DATETIME DEFAULT NULL COMMENT '实际支付时间',
+  note VARCHAR(255) DEFAULT NULL,
+  source VARCHAR(16) NOT NULL DEFAULT 'finance_manual' COMMENT 'sales_close=销售成交自动录入; finance_manual=财务手工录入',
+  recorded_by VARCHAR(64) DEFAULT NULL COMMENT '录入人 userId',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_order_payments_order_stage (order_id, stage_code),
+  KEY idx_order_payments_order_id (order_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='订单分阶段付款记录（客户侧）';
+
+-- ============================================================
+-- 25. teacher_payments
+-- backend/src/entities/teacher-payment.entity.ts
+-- 迁移来源：add-finance-tables.sql（Phase D）
+-- ============================================================
+CREATE TABLE IF NOT EXISTS teacher_payments (
+  id VARCHAR(64) PRIMARY KEY,
+  order_id VARCHAR(64) NOT NULL,
+  teacher_id VARCHAR(64) NOT NULL,
+  stage_code VARCHAR(16) NOT NULL COMMENT '阶段编码: draft/revision/acceptance',
+  stage_label VARCHAR(32) DEFAULT NULL COMMENT '展示名（如"初稿支付""返修支付""录用支付"）',
+  amount DECIMAL(12,2) DEFAULT NULL,
+  paid_at DATETIME DEFAULT NULL COMMENT '实际支付时间',
+  note VARCHAR(255) DEFAULT NULL,
+  recorded_by VARCHAR(64) DEFAULT NULL COMMENT '录入人 userId',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_teacher_payments_order_teacher_stage (order_id, teacher_id, stage_code),
+  KEY idx_teacher_payments_order_id (order_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='老师分阶段付款记录';
+
+-- ============================================================
+-- 26. other_expenses
+-- backend/src/entities/other-expense.entity.ts
+-- 迁移来源：add-finance-tables.sql（Phase D）
+-- ============================================================
+CREATE TABLE IF NOT EXISTS other_expenses (
+  id VARCHAR(64) PRIMARY KEY,
+  category VARCHAR(64) NOT NULL COMMENT '支出分类',
+  amount DECIMAL(12,2) NOT NULL,
+  occurred_at DATETIME DEFAULT NULL COMMENT '实际发生时间',
+  note TEXT DEFAULT NULL,
+  attachment_url VARCHAR(500) DEFAULT NULL COMMENT '附件URL',
+  recorded_by VARCHAR(64) DEFAULT NULL COMMENT '录入人 userId',
+  related_order_id VARCHAR(64) DEFAULT NULL COMMENT '可选关联订单（分摊到该订单利润）',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  KEY idx_other_expenses_related_order_id (related_order_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='其他支出（公司运营成本）';
+
+-- ============================================================
+-- 27. order_finance
+-- backend/src/entities/order-finance.entity.ts
+-- 迁移来源：M25（Phase D）
+-- 业务规则：1:1 关系（UNIQUE order_id），便于单独权限管理
+-- 客户侧 3 字段：订单额 / 已付 / 待付；老师侧 3 字段：接单价 / 已付 / 待付
+-- ============================================================
+CREATE TABLE IF NOT EXISTS order_finance (
+  id              VARCHAR(64) PRIMARY KEY,
+  order_id        VARCHAR(64) NOT NULL UNIQUE COMMENT '所属订单 ID',
+  order_amount    DECIMAL(12,2) NULL COMMENT '订单额（冗余，便于财务独立查询）',
+  client_paid     DECIMAL(12,2) NULL COMMENT '客户已付',
+  client_pending  DECIMAL(12,2) NULL COMMENT '客户待付',
+  teacher_price   DECIMAL(12,2) NULL COMMENT '老师接单价格',
+  teacher_paid    DECIMAL(12,2) NULL COMMENT '已付给老师',
+  teacher_pending DECIMAL(12,2) NULL COMMENT '待付给老师',
+  created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='订单财务扩展';
