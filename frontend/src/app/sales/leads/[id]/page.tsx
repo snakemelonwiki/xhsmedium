@@ -84,12 +84,11 @@ const INTENTION_META: Record<IntentionLevelCode, { label: string; color: string 
 
 type CloseDealFormValues = {
   amount?: number | string;
-  clientPaid?: number | string;
-  paidStatus?: 'partial' | 'paid';
   serviceType?: string;
   productType?: string;
   guaranteeType?: string;
-  paymentStage?: string;
+  paymentPlan?: 'three' | 'four';
+  depositAmount?: number | string;
   clientRequirementNote?: string;
   remark?: string;
 };
@@ -279,8 +278,8 @@ export default function SalesLeadDetailPage() {
   function openCloseDeal() {
     closeDealForm.setFieldsValue({
       clientRequirementNote: lead?.requirementNote || undefined,
-      paidStatus: 'partial',
-      paymentStage: '已付定金',
+      paymentPlan: 'three',
+      depositAmount: undefined,
     });
     setCloseDealOpen(true);
   }
@@ -309,12 +308,11 @@ export default function SalesLeadDetailPage() {
       try {
         const result = await closeLeadDeal(leadId, {
           amount: values.amount ?? null,
-          clientPaid: values.clientPaid ?? null,
-          paidStatus: values.paidStatus ?? 'partial',
+          paymentPlan: values.paymentPlan ?? 'three',
+          depositAmount: values.depositAmount ?? null,
           serviceType: values.serviceType ?? null,
           productType: values.productType ?? null,
           guaranteeType: values.guaranteeType ?? null,
-          paymentStage: values.paymentStage ?? null,
           clientRequirementNote: values.clientRequirementNote ?? lead?.requirementNote ?? null,
           remark: values.remark ?? null,
         });
@@ -802,26 +800,41 @@ export default function SalesLeadDetailPage() {
                 description="提交后，系统会把订单金额和财务订单额写为当前填写金额的 50%。"
               />
             ) : null}
-            <Form.Item name="paidStatus" label="付款状态" initialValue="partial" rules={[{ required: true, message: '请选择付款状态' }]}>
+            <Form.Item name="paymentPlan" label="分期方案" initialValue="three" rules={[{ required: true, message: '请选择分期方案' }]}>
               <Select
                 options={[
-                  { label: '部分付款', value: 'partial' },
-                  { label: '已付款', value: 'paid' },
+                  { label: '分三笔（定金/中期/尾款）', value: 'three' },
+                  { label: '分四笔（定金/前期/中期/后期）', value: 'four' },
                 ]}
               />
             </Form.Item>
-            <Form.Item name="clientPaid" label="付款金额（元）" rules={[{ required: true, message: '请输入付款金额' }]}>
+            <Form.Item
+              name="depositAmount"
+              label="已付定金（元）"
+              rules={[
+                { required: true, message: '请输入已付定金金额' },
+                {
+                  validator: (_rule, value) => {
+                    if (value === undefined || value === null || value === '') {
+                      return Promise.reject(new Error('请输入已付定金金额'));
+                    }
+                    const num = Number(value);
+                    if (!Number.isFinite(num)) {
+                      return Promise.reject(new Error('定金金额必须为数字'));
+                    }
+                    if (num <= 0) {
+                      return Promise.reject(new Error('定金金额必须大于0'));
+                    }
+                    return Promise.resolve();
+                  },
+                },
+              ]}
+            >
               <InputNumber min={0.01} precision={2} style={{ width: '100%' }} placeholder="0.00" />
             </Form.Item>
-            <Form.Item name="paymentStage" label="付款阶段" initialValue="已付定金" className="full-row" rules={[{ required: true, message: '请选择付款阶段' }]}>
-              <Select
-                options={[
-                  { label: '已付定金', value: '已付定金' },
-                  { label: '已付中期', value: '已付中期' },
-                  { label: '已付尾款', value: '已付尾款' },
-                  { label: '已付全款', value: '已付全款' },
-                ]}
-              />
+            {/* 付款状态自动展示：定金不是最后一笔 → 部分付款 */}
+            <Form.Item label="付款状态" className="full-row">
+              <Tag color="orange">部分付款</Tag>
             </Form.Item>
             <Form.Item name="remark" label="成交备注" className="full-row">
               <Input.TextArea rows={2} placeholder="可补充成交背景、客户特殊要求等" />

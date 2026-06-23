@@ -150,7 +150,7 @@ export default function SalesDealsPage() {
     const fallbackClientPaid = record.clientPaid as number | string | null | undefined;
     paymentForm.setFieldsValue({
       paidStatus: normalizePaymentStatus(record.paidStatus),
-      paymentStage: String(record.paymentStage || parsePaymentStage(record.remark) || '已付定金'),
+      paymentStage: String(record.paymentStage || parsePaymentStage(record.remark) || '定金'),
       clientPaid: pickClientPaidValue(undefined, fallbackClientPaid),
     });
     try {
@@ -379,10 +379,10 @@ export default function SalesDealsPage() {
           <Form.Item name="paymentStage" label="付款阶段" rules={[{ required: true, message: '请选择付款阶段' }]}>
             <Select
               options={[
-                { label: '已付定金', value: '已付定金' },
-                { label: '已付中期', value: '已付中期' },
-                { label: '已付尾款', value: '已付尾款' },
-                { label: '已付全款', value: '已付全款' },
+                { label: '定金', value: '定金' },
+                { label: '中期', value: '中期' },
+                { label: '尾款', value: '尾款' },
+                { label: '全款', value: '全款' },
               ]}
             />
           </Form.Item>

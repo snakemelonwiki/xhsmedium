@@ -1,10 +1,11 @@
 'use client';
 
-import { Button, Card, Descriptions, Empty, Space, Spin, Table, Tag, Timeline, Typography, message } from 'antd';
+import { Button, Card, Descriptions, Empty, Modal, Form, InputNumber, Select, Space, Spin, Table, Tag, Timeline, Typography, message } from 'antd';
 import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
+import dayjs from 'dayjs';
 
-import { getOrderDetail, listAbnormalFeedbacks, listOrderFollowRecords } from '@/shared/api/orders';
+import { getOrderDetail, listAbnormalFeedbacks, listOrderFollowRecords, addOrderPayment } from '@/shared/api/orders';
 import type { OrderAbnormalFeedback, OrderFollowRecord, OrderItem } from '@/shared/types/orders';
 import { handoverStatusMeta, orderStatusMeta, paidStatusMeta } from '@/shared/api/enums';
 import { formatDateTime } from '@/shared/utils/date-format';
@@ -70,6 +71,84 @@ export default function SalesOrderDetailPage() {
   const [feedbacks, setFeedbacks] = useState<OrderAbnormalFeedback[]>([]);
   const [loading, setLoading] = useState(false);
 
+  // 录付款弹窗状态
+  const [paymentModalOpen, setPaymentModalOpen] = useState(false);
+  const [paymentForm] = Form.useForm();
+  const [paymentSubmitting, setPaymentSubmitting] = useState(false);
+
+  // 分期方案定义
+  const STAGE_CONFIG: Record<string, { key: string; name: string; order: number }[]> = {
+    three: [
+      { key: '定金', name: '定金', order: 0 },
+      { key: '中期', name: '中期', order: 1 },
+      { key: '尾款', name: '尾款', order: 2 },
+    ],
+    four: [
+      { key: '定金', name: '定金', order: 0 },
+      { key: '前期', name: '前期', order: 1 },
+      { key: '中期', name: '中期', order: 2 },
+      { key: '后期', name: '后期', order: 3 },
+    ],
+  };
+
+  // 解析分期明细
+  const parseStageDetail = (orderItem?: OrderItem): any => {
+    if (!orderItem) return null;
+    try {
+      if ((orderItem as any)?.paymentStageDetail) {
+        return JSON.parse((orderItem as any).paymentStageDetail);
+      }
+    } catch {
+      // ignore
+    }
+    // 兼容旧数据：根据 paymentStage 和 paymentPlan 构造
+    const plan = (orderItem as any)?.paymentPlan || 'three';
+    const currentStage = orderItem?.paymentStage || '定金';
+    const stages = STAGE_CONFIG[plan] || STAGE_CONFIG.three;
+    const currentIndex = stages.findIndex(s => s.key === currentStage);
+    return {
+      plan,
+      stages: stages.map((s, i) => ({
+        name: s.name,
+        label: s.key,
+        amount: i === 0 ? (orderItem?.clientPaid || '0') : '0',
+        paidAt: i === 0 ? (orderItem?.createdAt || null) : null,
+      })),
+      currentStageIndex: currentIndex >= 0 ? currentIndex : 0,
+    };
+  };
+
+  const openPaymentModal = () => {
+    const detail = parseStageDetail(order);
+    if (!detail) return;
+    const nextStage = detail.stages.find((_: any, i: number) => i > detail.currentStageIndex);
+    paymentForm.setFieldsValue({
+      paymentStage: nextStage?.label || '',
+      amount: undefined,
+      paidAt: dayjs().format('YYYY-MM-DD'),
+    });
+    setPaymentModalOpen(true);
+  };
+
+  const submitPayment = async (values: { paymentStage: string; amount: number; paidAt: string }) => {
+    setPaymentSubmitting(true);
+    try {
+      await addOrderPayment(orderId, {
+        paymentStage: values.paymentStage,
+        amount: values.amount,
+        paidAt: values.paidAt,
+      });
+      message.success('付款记录已添加');
+      setPaymentModalOpen(false);
+      paymentForm.resetFields();
+      await loadDetail();
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '添加付款记录失败');
+    } finally {
+      setPaymentSubmitting(false);
+    }
+  };
+
   async function loadDetail() {
     setLoading(true);
     try {
@@ -130,6 +209,67 @@ export default function SalesOrderDetailPage() {
               ]}
             />
           </Card>
+
+          {/* v1.3 / 付款阶段×付款状态联动：分期进度卡片 */}
+          {(() => {
+            const detail = parseStageDetail(order);
+            if (!detail) return null;
+            const totalPaid = detail.stages.reduce((sum: number, s: any) => sum + Number(s.amount), 0);
+            const totalAmount = Number(order?.amount ?? 0);
+            const isPaid = detail.currentStageIndex === detail.stages.length - 1;
+
+            return (
+              <Card title="付款进度">
+                <div style={{ display: 'flex', gap: 12 }}>
+                  {detail.stages.map((stage: any, index: number) => {
+                    const isStagePaid = index <= detail.currentStageIndex;
+                    return (
+                      <div
+                        key={stage.label}
+                        style={{
+                          flex: 1,
+                          textAlign: 'center',
+                          padding: 16,
+                          borderRadius: 8,
+                          border: isStagePaid ? '1px solid #b7eb8f' : '1px solid #d9d9d9',
+                          background: isStagePaid ? '#f6ffed' : index === detail.currentStageIndex + 1 ? '#fff7e6' : '#fafafa',
+                        }}
+                      >
+                        <div style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 8 }}>
+                          {isStagePaid ? '✅' : index === detail.currentStageIndex + 1 ? '⏳' : '⭕'} {stage.name}
+                        </div>
+                        <div style={{ fontSize: 18, color: isStagePaid ? '#52c41a' : '#999' }}>
+                          {isStagePaid ? `¥${stage.amount}` : '-'}
+                        </div>
+                        {isStagePaid && stage.paidAt && (
+                          <div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>
+                            {dayjs(stage.paidAt).format('MM-DD')}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                <div style={{ marginTop: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Typography.Text>
+                    累计已付：<Typography.Text strong style={{ color: '#52c41a' }}>¥{totalPaid.toFixed(2)}</Typography.Text>
+                    {' / '}
+                    待付：<Typography.Text strong style={{ color: '#faad14' }}>¥{Math.max(0, totalAmount - totalPaid).toFixed(2)}</Typography.Text>
+                  </Typography.Text>
+                  <Space>
+                    <Tag color={isPaid ? 'green' : 'orange'}>
+                      {isPaid ? '已完结' : '部分付款'}
+                    </Tag>
+                    {!isPaid && (
+                      <Button type="primary" size="small" onClick={openPaymentModal}>
+                        录付款
+                      </Button>
+                    )}
+                  </Space>
+                </div>
+              </Card>
+            );
+          })()}
 
           <Card title="销售写跟进信息">
             {hasSalesFollowSnapshot(order) ? (
@@ -236,6 +376,48 @@ export default function SalesOrderDetailPage() {
           </Card>
         </Space>
       </Spin>
+
+      {/* 录付款弹窗 */}
+      <Modal
+        title="追加付款"
+        open={paymentModalOpen}
+        onCancel={() => setPaymentModalOpen(false)}
+        onOk={() => paymentForm.submit()}
+        confirmLoading={paymentSubmitting}
+        destroyOnClose
+      >
+        <Form form={paymentForm} layout="vertical" onFinish={submitPayment}>
+          <Form.Item
+            name="paymentStage"
+            label="付款阶段"
+            rules={[{ required: true, message: '请选择付款阶段' }]}
+          >
+            <Select
+              options={(() => {
+                const detail = parseStageDetail(order);
+                if (!detail) return [];
+                return detail.stages
+                  .filter((_: any, i: number) => i > detail.currentStageIndex)
+                  .map((s: any) => ({ label: s.label, value: s.label }));
+              })()}
+            />
+          </Form.Item>
+          <Form.Item
+            name="amount"
+            label="付款金额（元）"
+            rules={[{ required: true, message: '请输入付款金额' }]}
+          >
+            <InputNumber min={0.01} precision={2} style={{ width: '100%' }} placeholder="0.00" />
+          </Form.Item>
+          <Form.Item
+            name="paidAt"
+            label="付款日期"
+            initialValue={dayjs().format('YYYY-MM-DD')}
+          >
+            <input type="date" style={{ width: '100%', padding: '4px 11px', border: '1px solid #d9d9d9', borderRadius: 6, height: 32 }} />
+          </Form.Item>
+        </Form>
+      </Modal>
     </Space>
   );
 }

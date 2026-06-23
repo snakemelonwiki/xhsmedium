@@ -90,6 +90,14 @@ export class Order {
   @Column({ name: 'payment_stage', length: 64, nullable: true })
   paymentStage: string | null;
 
+  /** 分期方案：three=分三笔（定金/中期/尾款） four=分四笔（定金/前期/中期/后期） */
+  @Column({ name: 'payment_plan', length: 16, nullable: true })
+  paymentPlan: string | null;
+
+  /** 分期明细 JSON：{ plan, stages: [{name,label,amount,paidAt}], currentStageIndex } */
+  @Column({ name: 'payment_stage_detail', type: 'text', nullable: true })
+  paymentStageDetail: string | null;
+
   @Column({ name: 'customer_name', length: 128, nullable: true })
   customerName: string | null;
 

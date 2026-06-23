@@ -11,9 +11,8 @@ type NewDealFormValues = {
   productType: string;
   serviceType: string;
   guaranteeType?: string;
-  paymentStage?: string;
-  paidStatus?: 'partial' | 'paid';
-  clientPaid?: number | string;
+  paymentPlan?: 'three' | 'four';
+  depositAmount?: number | string;
   amount: number | string;
   clientRequirementNote?: string;
   leadId: string;
@@ -33,9 +32,8 @@ export default function SalesDealsNewPage() {
         productType: values.productType,
         serviceType: values.serviceType,
         guaranteeType: values.guaranteeType,
-        paymentStage: values.paymentStage,
-        paidStatus: values.paidStatus,
-        clientPaid: values.clientPaid,
+        paymentPlan: values.paymentPlan,
+        depositAmount: values.depositAmount,
         amount: values.amount,
         clientRequirementNote: values.clientRequirementNote,
       });
@@ -120,26 +118,16 @@ export default function SalesDealsNewPage() {
             <Form.Item name="amount" label="成交金额（元）" rules={[{ required: true, message: '请输入成交金额' }]}>
               <InputNumber min={0} precision={2} style={{ width: '100%' }} placeholder="0.00" />
             </Form.Item>
-            <Form.Item name="paidStatus" label="付款状态" initialValue="partial" rules={[{ required: true, message: '请选择付款状态' }]}>
+            <Form.Item name="paymentPlan" label="分期方案" initialValue="three" rules={[{ required: true, message: '请选择分期方案' }]}>
               <Select
                 options={[
-                  { label: '部分付款', value: 'partial' },
-                  { label: '已付款', value: 'paid' },
+                  { label: '分三笔（定金/中期/尾款）', value: 'three' },
+                  { label: '分四笔（定金/前期/中期/后期）', value: 'four' },
                 ]}
               />
             </Form.Item>
-            <Form.Item name="clientPaid" label="付款金额（元）" rules={[{ required: true, message: '请输入付款金额' }]}>
+            <Form.Item name="depositAmount" label="已付定金（元）" rules={[{ required: true, message: '请输入已付定金金额' }]}>
               <InputNumber min={0.01} precision={2} style={{ width: '100%' }} placeholder="0.00" />
-            </Form.Item>
-            <Form.Item name="paymentStage" label="付款阶段" initialValue="已付定金" className="full-row" rules={[{ required: true, message: '请选择付款阶段' }]}>
-              <Select
-                options={[
-                  { label: '已付定金', value: '已付定金' },
-                  { label: '已付中期', value: '已付中期' },
-                  { label: '已付尾款', value: '已付尾款' },
-                  { label: '已付全款', value: '已付全款' },
-                ]}
-              />
             </Form.Item>
             <Form.Item name="clientRequirementNote" label="客户要求备注" className="full-row">
               <Input.TextArea rows={3} placeholder="客户原始诉求、特殊情况等" />

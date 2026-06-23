@@ -32,12 +32,15 @@ function mapOrder(raw: RawRecord): OrderItem {
     productType: text(raw.productType ?? raw.product_type) ?? null,
     guaranteeType: text(raw.guaranteeType ?? raw.guarantee_type) ?? null,
     paymentStage: text(raw.paymentStage ?? raw.payment_stage) ?? null,
+    paymentPlan: text(raw.paymentPlan ?? raw.payment_plan) ?? null,
+    paymentStageDetail: text(raw.paymentStageDetail ?? raw.payment_stage_detail) ?? null,
     customerName: text(raw.customerName ?? raw.customer_name) ?? null,
     articlePurpose: text(raw.articlePurpose ?? raw.article_purpose) ?? null,
     salesContact: text(raw.salesContact ?? raw.sales_contact) ?? null,
     paidStatus: text(raw.paidStatus ?? raw.paid_status) ?? 'unpaid',
     orderStatus: text(raw.orderStatus ?? raw.order_status) ?? 'to_receive',
     handoverStatus: text(raw.handoverStatus ?? raw.handover_status) ?? 'pending',
+    clientPaid: text(raw.clientPaid ?? raw.client_paid) ?? null,
     orderCode: text(raw.orderCode ?? raw.order_code) ?? null,
     // v1.3 / Task 12: 跟进列表新增「稿件进度」「投稿进度」两列。
     paperProgress: text(raw.paperProgress ?? raw.paper_progress) ?? null,
@@ -426,6 +429,17 @@ export async function getOrderDelivery(id: string): Promise<OrderDeliveryDetail>
 
 export async function updateOrderDelivery(id: string, body: OrderDeliveryPayload) {
   return apiClient.patch(`/orders/${id}/delivery`, body);
+}
+
+/**
+ * 追加付款：在订单详情页录入后续阶段的付款金额。
+ * POST /api/orders/:id/payments
+ */
+export async function addOrderPayment(
+  id: string,
+  body: { paymentStage: string; amount: number | string; paidAt?: string },
+): Promise<{ ok: boolean; paymentStageDetail: any; clientPaid: string | null }> {
+  return apiClient.post(`/orders/${id}/payments`, body);
 }
 
 /**

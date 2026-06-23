@@ -69,9 +69,9 @@ const guaranteeTypeOptions = [
 ];
 
 const paymentStageOptions = [
-  { label: '已付定金', value: '已付定金' },
-  { label: '已付中期', value: '已付中期' },
-  { label: '已付尾款', value: '已付尾款' },
+  { label: '定金', value: '定金' },
+  { label: '中期', value: '中期' },
+  { label: '尾款', value: '尾款' },
   { label: '全款', value: '全款' },
 ];
 

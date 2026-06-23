@@ -77,15 +77,15 @@ const ORDER_UPDATED_FIELD_LABELS: Record<string, string> = {
 interface CloseDealDto {
   serviceType?: string | null;
   amount?: number | string | null;
-  clientPaid?: number | string | null;
   remark?: string | null;
   // v1.3 / SA-8 销售成交录入扩展字段
   productType?: string | null;
   guaranteeType?: string | null;
-  paymentStage?: string | null;
+  // v1.3 / 付款阶段×付款状态联动重构：paymentPlan + depositAmount
+  paymentPlan?: 'three' | 'four' | string | null;
+  depositAmount?: number | string | null;
   clientRequirementNote?: string | null;
   contractStatus?: string | null;
-  paidStatus?: string | null;
   deliveryRequirement?: string | null;
   expectedHandleTime?: string | Date | null;
 }
@@ -204,12 +204,17 @@ export class OrdersService {
       throw new BadRequestException('sales user required');
     }
     const amountNum = this.resolveRequiredAmount(dto.amount);
-    const paidStatus = this.normalizeRequiredPaidStatus(dto.paidStatus);
-    const paymentStage = this.normalizeRequiredPaymentStage(dto.paymentStage);
-    const clientPaid = this.normalizePositiveMoney(dto.clientPaid);
-    if (clientPaid === null) {
-      throw new BadRequestException('付款金额必填且必须大于0');
+    // v1.3 / 付款阶段×付款状态联动重构
+    const paymentPlan = this.normalizePaymentPlan(dto.paymentPlan);
+    const depositAmount = this.normalizePositiveMoney(dto.depositAmount);
+    if (depositAmount === null) {
+      throw new BadRequestException('定金金额必填且必须大于0');
     }
+    // 构建分期明细
+    const paymentStageDetail = this.buildPaymentStageDetail(paymentPlan, depositAmount);
+    const paymentStage = paymentStageDetail.stages[0].label; // "定金"
+    const paidStatus: PaidStatus = 'partial'; // 定金阶段固定为部分付款
+    const clientPaid = depositAmount; // 累计已付 = 定金金额
     const orderId = makeId();
     const orderFinanceId = makeId();
     let leadContact = '';
@@ -234,7 +239,7 @@ export class OrdersService {
       const mergedServiceType = dto.serviceType
         || (dto.productType ? String(dto.productType) : null)
         || null;
-      const remark = this.composeRemark(dto, pricing);
+      const remark = this.composeRemark(dto, pricing, paymentStage);
       const amountStr = pricing.finalAmount;
       const clientPending = this.computePending(amountStr, clientPaid) || '0.00';
       const customerName = lead.nickname || lead.contactInfo || null;
@@ -252,10 +257,10 @@ export class OrdersService {
         `INSERT INTO orders
          (id, lead_id, sales_user_id, academic_user_id, service_type, amount,
           paid_status, order_status, handover_status, remark, order_code,
-          product_type, guarantee_type, payment_stage, customer_name,
-          education_level, major, area, article_purpose, sales_contact,
+          product_type, guarantee_type, payment_plan, payment_stage, payment_stage_detail,
+          customer_name, education_level, major, area, article_purpose, sales_contact,
           created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
         [
           orderId,
           leadId,
@@ -270,7 +275,9 @@ export class OrdersService {
           orderCode,
           dto.productType || null,
           dto.guaranteeType || null,
+          paymentPlan,
           paymentStage,
+          JSON.stringify(paymentStageDetail),
           customerName,
           educationLevel,
           major,
@@ -297,7 +304,7 @@ export class OrdersService {
         ],
       );
 
-      const followContent = this.composeFollowContent(dto, generatedOrderCode, pricing);
+      const followContent = this.composeFollowContent(dto, generatedOrderCode, pricing, paymentStage, clientPaid);
       const followId = makeId();
       await manager.query(
         `INSERT INTO order_follow_records
@@ -454,13 +461,14 @@ export class OrdersService {
   private composeRemark(
     dto: CloseDealDto,
     pricing?: { discountApplied: boolean; originalAmount: string; finalAmount: string },
+    paymentStage?: string,
   ): string | null {
     const parts: string[] = [];
     if (dto.clientRequirementNote) parts.push(`客户要求: ${dto.clientRequirementNote}`);
     if (dto.productType) parts.push(`产品: ${dto.productType}`);
     if (dto.serviceType && dto.serviceType !== dto.productType) parts.push(`服务: ${dto.serviceType}`);
     if (dto.guaranteeType) parts.push(`保障: ${dto.guaranteeType}`);
-    if (dto.paymentStage) parts.push(`付款: ${dto.paymentStage}`);
+    if (paymentStage) parts.push(`付款: ${paymentStage}`);
     if (dto.deliveryRequirement) parts.push(`交付要求: ${dto.deliveryRequirement}`);
     if (pricing?.discountApplied) {
       parts.push(`不合格作品半价: 原金额 ${pricing.originalAmount} -> 入单金额 ${pricing.finalAmount}`);
@@ -476,13 +484,15 @@ export class OrdersService {
     dto: CloseDealDto,
     orderCode: string | null,
     pricing?: { discountApplied: boolean; originalAmount: string; finalAmount: string },
+    paymentStage?: string,
+    clientPaid?: string,
   ): string {
     const codeLine = orderCode ? `订单编号 ${orderCode}` : '';
     const amountLine = pricing?.discountApplied
       ? `原金额 ¥${pricing.originalAmount} | 不合格作品半价入单金额 ¥${pricing.finalAmount}`
       : dto.amount != null && dto.amount !== '' ? `金额 ¥${dto.amount}` : '';
-    const stageLine = dto.paymentStage ? `付款阶段 ${dto.paymentStage}` : '';
-    const paidLine = dto.clientPaid != null && dto.clientPaid !== '' ? `已付 ¥${dto.clientPaid}` : '';
+    const stageLine = paymentStage ? `付款阶段 ${paymentStage}` : '';
+    const paidLine = clientPaid != null && clientPaid !== '' ? `已付 ¥${clientPaid}` : '';
     const lines = [codeLine, amountLine, stageLine, paidLine].filter(Boolean);
     return lines.join(' | ') || '销售成交';
   }
@@ -2004,6 +2014,8 @@ export class OrdersService {
       productType: row.productType,
       guaranteeType: row.guaranteeType,
       paymentStage: row.paymentStage,
+      paymentPlan: row.paymentPlan,
+      paymentStageDetail: row.paymentStageDetail,
       customerName: row.customerName,
       articlePurpose: row.articlePurpose,
       salesContact: row.salesContact,
@@ -2413,7 +2425,7 @@ export class OrdersService {
   private normalizeRequiredPaymentStage(value: any): string {
     const paymentStage = String(value || '').trim();
     if (!this.isPaidDepositStage(paymentStage)) {
-      throw new BadRequestException('付款阶段必填，且必须至少为已付定金');
+      throw new BadRequestException('付款阶段必填，且必须至少为定金');
     }
     return paymentStage;
   }
@@ -2450,7 +2462,7 @@ export class OrdersService {
    */
   private async assertAcademicClaimable(order: Order): Promise<void> {
     if (!this.isPaidDepositStage(order.paymentStage)) {
-      throw new BadRequestException('订单未确认已付定金，暂不能领取');
+      throw new BadRequestException('订单未确认定金，暂不能领取');
     }
     const finance = await this.orderFinanceRepository.findOne({ where: { orderId: order.id } });
     const clientPaid = Number(finance?.clientPaid ?? 0);
@@ -2583,5 +2595,154 @@ export class OrdersService {
         processStatus: 'deal_pending',
       });
     }
+  }
+
+  // =====================================================================
+  // v1.3 / 付款阶段×付款状态联动重构
+  // =====================================================================
+
+  /**
+   * 规范化分期方案值。默认 three（分三笔），仅允许 three/four。
+   */
+  private normalizePaymentPlan(value: any): 'three' | 'four' {
+    if (value === 'four' || value === '分四笔') return 'four';
+    return 'three'; // 默认分三笔
+  }
+
+  /**
+   * 根据分期方案和定金金额，构建分期明细 JSON。
+   * 首期（定金）的金额 = depositAmount，其余阶段金额为 0。
+   */
+  private buildPaymentStageDetail(
+    plan: 'three' | 'four',
+    depositAmount: string,
+  ): { plan: 'three' | 'four'; stages: Array<{ name: string; label: string; amount: string; paidAt: string | null }>; currentStageIndex: number } {
+    const threeStages = ['定金', '中期', '尾款'];
+    const fourStages = ['定金', '前期', '中期', '后期'];
+    const stageNames = plan === 'four' ? fourStages : threeStages;
+    return {
+      plan,
+      stages: stageNames.map((name, index) => ({
+        name,
+        label: name,
+        amount: index === 0 ? depositAmount : '0.00',
+        paidAt: index === 0 ? new Date().toISOString() : null,
+      })),
+      currentStageIndex: 0, // 刚付到定金阶段
+    };
+  }
+
+  /**
+   * 追加付款：在订单详情页录入后续阶段的付款金额。
+   * 校验：只能按顺序追加，不能跳过阶段。
+   */
+  async addPayment(
+    orderId: string,
+    actor: { userId: string; role: string },
+    dto: { paymentStage: string; amount: number | string; paidAt?: string },
+  ): Promise<{ ok: boolean; paymentStageDetail: any; clientPaid: string | null }> {
+    // 1. 校验订单存在
+    const order = await this.orderRepository.findOne({ where: { id: orderId } });
+    if (!order) {
+      throw new NotFoundException('order not found');
+    }
+
+    // 2. 校验权限：销售本人或 admin/owner
+    const isAdminLike = actor.role === 'admin' || actor.role === 'owner';
+    if (!isAdminLike && order.salesUserId !== actor.userId) {
+      throw new ForbiddenException('仅订单销售本人或管理员可追加付款');
+    }
+
+    // 3. 解析当前分期明细
+    let detail: any;
+    try {
+      detail = order.paymentStageDetail ? JSON.parse(order.paymentStageDetail) : null;
+    } catch {
+      // 兼容旧数据（没有 paymentStageDetail 的情况）
+      detail = this.buildPaymentStageDetailFallback((order.paymentPlan as 'three' | 'four') || 'three');
+    }
+
+    // 4. 找到目标阶段的索引
+    const targetStageName = String(dto.paymentStage || '').replace('已付', '').trim();
+    const targetIndex = detail.stages.findIndex((s: any) => s.name === targetStageName || s.label === dto.paymentStage);
+    if (targetIndex === -1) {
+      throw new BadRequestException(`无效的付款阶段: ${dto.paymentStage}`);
+    }
+
+    // 5. 校验：不能倒退或重复
+    if (targetIndex <= detail.currentStageIndex) {
+      throw new BadRequestException(`付款阶段不能倒退，当前已付至：${detail.stages[detail.currentStageIndex].label}`);
+    }
+
+    // 6. 校验：不能跳过中间阶段
+    if (targetIndex > detail.currentStageIndex + 1) {
+      throw new BadRequestException(`不能跳过中间阶段，请先录入${detail.stages[detail.currentStageIndex + 1].label}`);
+    }
+
+    // 7. 更新分期明细
+    const newAmount = this.normalizeMoney(dto.amount);
+    if (newAmount === null) {
+      throw new BadRequestException('付款金额必须大于0');
+    }
+    detail.stages[targetIndex].amount = newAmount;
+    detail.stages[targetIndex].paidAt = dto.paidAt || new Date().toISOString();
+    detail.currentStageIndex = targetIndex;
+
+    // 8. 计算累计已付金额
+    const totalPaid = detail.stages.reduce((sum: number, stage: any) => sum + Number(stage.amount), 0);
+    const totalPaidStr = totalPaid.toFixed(2);
+
+    // 9. 自动推导付款状态
+    const isLastStage = targetIndex === detail.stages.length - 1;
+    const nextPaidStatus: PaidStatus = isLastStage ? 'paid' : 'partial';
+    const nextPaymentStage = detail.stages[targetIndex].label;
+
+    // 10. 更新数据库
+    await this.orderRepository.update(orderId, {
+      paymentStage: nextPaymentStage,
+      paidStatus: nextPaidStatus,
+      paymentStageDetail: JSON.stringify(detail),
+    });
+
+    // 11. 更新 order_finance
+    const finance = await this.orderFinanceRepository.findOne({ where: { orderId } });
+    if (finance) {
+      const orderAmount = finance.orderAmount || '0';
+      const clientPending = this.computePending(orderAmount, totalPaidStr);
+      await this.orderFinanceRepository.save({
+        ...finance,
+        clientPaid: totalPaidStr,
+        clientPending,
+      });
+    }
+
+    // 12. 写跟进记录
+    const followId = makeId();
+    await this.orderFollowRepository.save({
+      id: followId,
+      orderId,
+      userId: actor.userId,
+      nodeType: '客户付款',
+      content: `${detail.stages[targetIndex].label} ¥${newAmount}`,
+    });
+
+    return { ok: true, paymentStageDetail: detail, clientPaid: totalPaidStr };
+  }
+
+  /**
+   * 兼容旧数据：没有 paymentStageDetail 时的兜底处理。
+   */
+  private buildPaymentStageDetailFallback(plan: 'three' | 'four'): any {
+    const stageNames = plan === 'four' ? ['定金', '前期', '中期', '后期'] : ['定金', '中期', '尾款'];
+    return {
+      plan,
+      stages: stageNames.map((name, index) => ({
+        name,
+        label: name,
+        amount: index === 0 ? '0.00' : '0.00',
+        paidAt: null,
+      })),
+      currentStageIndex: 0,
+    };
   }
 }

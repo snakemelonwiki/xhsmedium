@@ -27,7 +27,9 @@ export interface OrderItem {
   amount?: string | null;
   productType?: string | null;
   guaranteeType?: string | null;
+  paymentPlan?: string | null;
   paymentStage?: string | null;
+  paymentStageDetail?: string | null;
   customerName?: string | null;
   articlePurpose?: string | null;
   salesContact?: string | null;
@@ -58,6 +60,8 @@ export interface OrderItem {
   requirementNote?: string | null;
   intentionLevel?: string | null;
   nextFollowAt?: string | null;
+  // v1.3 / 付款阶段×付款状态联动：累计已付金额
+  clientPaid?: string | null;
   createdAt?: string;
   updatedAt?: string;
 }
