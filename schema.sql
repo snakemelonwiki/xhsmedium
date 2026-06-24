@@ -465,6 +465,9 @@ CREATE TABLE IF NOT EXISTS orders (
   -- 订单阶段/下次跟进时间
   order_stage              VARCHAR(64)  NULL COMMENT '订单阶段（业务侧对当前所处交付环节的描述）',
   next_follow_at           DATETIME     NULL COMMENT '下次跟进时间',
+  -- v1.3 增量（M41 付款阶段×付款状态联动重构）
+  payment_plan             VARCHAR(16)  NULL COMMENT '分期方案：three（分三笔）/ four（分四笔）',
+  payment_stage_detail     TEXT         NULL COMMENT '分期明细 JSON：{plan,stages:[{name,label,amount,paidAt}],currentStageIndex}',
   created_at               DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at               DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 
@@ -528,6 +531,9 @@ CREATE TABLE IF NOT EXISTS order_follow_records (
   reminder_sent_at DATETIME  NULL COMMENT '节点提醒已发送时间(NULL=未发送)',
   attachment_url   VARCHAR(512) NULL COMMENT '附件 URL（M22 新增）',
   attachment_name  VARCHAR(255) NULL COMMENT '附件原始文件名（M22 新增）',
+  -- v1.3 增量（M42 提前7天预警）
+  early_warning_sent_at DATETIME NULL COMMENT '提前7天预警发送时间（独立于 reminder_sent_at）',
+  enable_early_warning TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否启用提前7天预警（0=仅到期提醒，1=提前7天+到期）',
   created_at     DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
   INDEX idx_order_follow_order_id     (order_id),
