@@ -116,7 +116,17 @@ export class DouyinExtractor {
     };
 
     for (const raw of payloads) {
-      const unescaped = unescapeJsString(raw);
+      let unescaped = unescapeJsString(raw);
+
+      // 部分 __pace_f payload 仍是 URL 编码的 JSON，需要二次解码
+      if (unescaped.includes('%22') || unescaped.includes('%7B')) {
+        try {
+          unescaped = decodeURIComponent(unescaped);
+        } catch {
+          /* 解码失败则继续使用原字符串 */
+        }
+      }
+
       const idx = unescaped.indexOf('"awemeId"');
       if (idx === -1) continue;
 
@@ -251,15 +261,26 @@ export class DouyinExtractor {
 
   private extractFromApi(har: HarSnapshot, awemeIdHint?: string | null): Partial<ScrapedPostData> | null {
     const entries = har.entries.filter((e) =>
-      /\/aweme\/v1\/web\/aweme\/detail\//i.test(e.url) && e.jsonBody,
+      /\/aweme\/v1\/web\/aweme\/(?:detail|post|related)\//i.test(e.url) && (e.jsonBody || e.textBody),
     );
 
     for (const entry of entries) {
-      const data = entry.jsonBody;
-      let detail = data?.aweme_detail;
-      // 兼容 aweme_list（个人主页弹窗视频场景）
-      if (!detail && data?.aweme_list && data.aweme_list.length > 0) {
-        detail = data.aweme_list[0];
+      const data = entry.jsonBody || this.tryDecodeBase64Json(entry.textBody);
+      if (!data || typeof data !== 'object') continue;
+
+      // 1. 优先取 aweme_detail（老视频详情页）
+      let detail = data.aweme_detail;
+
+      // 2. 兼容 aweme_list（个人主页 / 相关推荐）
+      if (!detail && Array.isArray(data.aweme_list) && data.aweme_list.length > 0) {
+        if (awemeIdHint) {
+          detail = data.aweme_list.find((a: any) =>
+            String(a.aweme_id || a.awemeId || '') === awemeIdHint,
+          );
+        }
+        if (!detail) {
+          detail = data.aweme_list[0];
+        }
       }
       if (!detail) continue;
 
@@ -273,6 +294,22 @@ export class DouyinExtractor {
     }
 
     return null;
+  }
+
+  /**
+   * 抖音部分 API 返回 base64 编码的 JSON（如 /aweme/v1/web/aweme/post/）。
+   */
+  private tryDecodeBase64Json(text: string | undefined): any | null {
+    if (!text || typeof text !== 'string') return null;
+    const trimmed = text.trim();
+    if (!/^[A-Za-z0-9+/=]+$/.test(trimmed) || trimmed.length % 4 !== 0) return null;
+    try {
+      const decoded = Buffer.from(trimmed, 'base64').toString('utf8');
+      if (!decoded || decoded.includes('�')) return null;
+      return JSON.parse(decoded);
+    } catch {
+      return null;
+    }
   }
 
   // ── HTML 正则兜底 ──

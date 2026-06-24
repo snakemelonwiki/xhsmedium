@@ -53,7 +53,8 @@ export class BrowserPoolService implements OnModuleDestroy {
     const profileDir = this.getProfileDir(platform);
     this.clearSingletonLocks(profileDir);
 
-    const isHeadless = platform !== '小红书';
+    // 抖音/小红书暂时使用有头模式便于调试，其余平台保持无头
+    const isHeadless = platform !== '小红书' && platform !== '抖音';
     const baseArgs: string[] = [];
     if (platform === '抖音') {
       baseArgs.push('--disable-gpu');

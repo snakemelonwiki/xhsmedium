@@ -164,10 +164,23 @@ export class ScraperService {
       }
 
       // ── 资源拦截：仅抖音启用（小红书需要完整 JS/CSS 执行以触发 API 请求） ──
+      // 临时调试：有头模式下拦截 image 会导致抖音图文/笔记页内容异常，先关闭观察效果
+      // if (platform === '抖音') {
+      //   await page.route('**/*', (route) => {
+      //     const type = route.request().resourceType();
+      //     if (BLOCKED_RESOURCE_TYPES.has(type)) {
+      //       route.abort();
+      //     } else {
+      //       route.continue();
+      //     }
+      //   });
+      // }
+
       if (platform === '抖音') {
+        // 仅拦截明确不影响内容渲染的资源类型
         await page.route('**/*', (route) => {
           const type = route.request().resourceType();
-          if (BLOCKED_RESOURCE_TYPES.has(type)) {
+          if (type === 'websocket' || type === 'eventsource') {
             route.abort();
           } else {
             route.continue();
@@ -183,7 +196,9 @@ export class ScraperService {
           /\/api\/sns\/web\/v[12]\/feed/i,
           /\/api\/sns\/web\/v\d+\/note\b/i,
           /\/aweme\/v1\/web\/aweme\/detail\//i,
+          /\/aweme\/v1\/web\/aweme\/post\//i,
           /\/aweme\/v1\/web\/aweme\/related\//i,
+          /\/aweme\/v2\/web\/aweme\/stats\//i,
           /RENDER_DATA/i,
         ],
         excludeResourceTypes: new Set([
@@ -325,6 +340,12 @@ export class ScraperService {
       if (data.shares === 0 && fallback.shares > 0) data.shares = fallback.shares;
 
       // ── 截图封面 ──
+      // 抖音主页弹窗链接（user/...?modal_id=...）会直接显示主页，modal 关闭后截图会截到主页。
+      // 数据已经从 HAR 中提取完毕，截图前单独导航到标准详情页，保证封面是帖子本身。
+      if (platform === '抖音' && parsed.linkType === 'douyin-modal' && parsed.postId) {
+        await this.navigateToDouyinDetailForScreenshot(page, parsed.postId, opts.log).catch(() => {});
+      }
+
       const cover = await this.captureScreenshot(page, platform);
       if (cover) {
         data.coverImageUrl = cover.coverImageUrl;
@@ -421,6 +442,69 @@ export class ScraperService {
   }
 
   // ── 封面截图 ──
+
+  /**
+   * 抖音 modal 链接（user/...?modal_id=...）会显示用户主页，截图前切到标准详情页。
+   * 优先尝试 /video/<awemeId>，若页面未落在 /video/ 或 /note/ 则 fallback 到 /note/<awemeId>。
+   */
+  private async navigateToDouyinDetailForScreenshot(
+    page: Page,
+    awemeId: string,
+    log: (msg: string) => void,
+  ): Promise<void> {
+    const tryNavigate = async (url: string): Promise<boolean> => {
+      try {
+        log(`[截图准备] 尝试导航到 ${url}`);
+        await page.goto(url, {
+          waitUntil: 'domcontentloaded',
+          timeout: 10000,
+        });
+        // 等待页面初步渲染 + 关键图片开始加载
+        await page.waitForTimeout(2000);
+        // 等待封面/图片加载完成（最多再等 5s）
+        await this.waitForImagesLoaded(page, 5000);
+        // 额外稳定时间
+        await page.waitForTimeout(800);
+        const finalUrl = page.url();
+        log(`[截图准备] 最终 URL: ${finalUrl}`);
+        return /\/video\/|\/note\//.test(finalUrl);
+      } catch (err: any) {
+        log(`[截图准备] 导航失败: ${err?.message || err}`);
+        return false;
+      }
+    };
+
+    const videoUrl = `https://www.douyin.com/video/${awemeId}`;
+    const noteUrl = `https://www.douyin.com/note/${awemeId}`;
+
+    const ok = await tryNavigate(videoUrl);
+    if (!ok) {
+      await tryNavigate(noteUrl);
+    }
+  }
+
+  /**
+   * 等待页面中主要图片加载完成。
+   * 策略：等待所有可见 img 标签的 complete 属性为 true，且自然高度 > 0。
+   */
+  private async waitForImagesLoaded(page: Page, timeoutMs: number = 5000): Promise<void> {
+    try {
+      await page.waitForFunction(
+        () => {
+          const images = Array.from(document.querySelectorAll('img'));
+          const visibleImages = images.filter((img) => {
+            const rect = img.getBoundingClientRect();
+            return rect.width > 100 && rect.height > 100;
+          });
+          if (visibleImages.length === 0) return true;
+          return visibleImages.every((img) => img.complete && img.naturalHeight > 0);
+        },
+        { timeout: timeoutMs },
+      );
+    } catch {
+      // 超时不再等待，避免阻塞
+    }
+  }
 
   private async captureScreenshot(
     page: Page,
