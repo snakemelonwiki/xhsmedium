@@ -1035,7 +1035,7 @@ CREATE TABLE IF NOT EXISTS scraping_alerts (
 -- ============================================================
 -- 24. order_payments
 -- backend/src/entities/order-payment.entity.ts
--- 迁移来源：add-finance-tables.sql（Phase D）
+-- 迁移来源：M43_add-finance-tables.sql（Phase D）
 -- ============================================================
 CREATE TABLE IF NOT EXISTS order_payments (
   id VARCHAR(64) PRIMARY KEY,
@@ -1057,7 +1057,7 @@ CREATE TABLE IF NOT EXISTS order_payments (
 -- ============================================================
 -- 25. teacher_payments
 -- backend/src/entities/teacher-payment.entity.ts
--- 迁移来源：add-finance-tables.sql（Phase D）
+-- 迁移来源：M43_add-finance-tables.sql（Phase D）
 -- ============================================================
 CREATE TABLE IF NOT EXISTS teacher_payments (
   id VARCHAR(64) PRIMARY KEY,
@@ -1078,7 +1078,7 @@ CREATE TABLE IF NOT EXISTS teacher_payments (
 -- ============================================================
 -- 26. other_expenses
 -- backend/src/entities/other-expense.entity.ts
--- 迁移来源：add-finance-tables.sql（Phase D）
+-- 迁移来源：M43_add-finance-tables.sql（Phase D）
 -- ============================================================
 CREATE TABLE IF NOT EXISTS other_expenses (
   id VARCHAR(64) PRIMARY KEY,
