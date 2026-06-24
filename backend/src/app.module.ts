@@ -20,6 +20,7 @@ import { ImportTask } from './entities/import-task.entity';
 import { Notification } from './entities/notification.entity';
 import { Favorite } from './entities/favorite.entity';
 import { PostMetricsHistory } from './entities/post-metrics-history.entity';
+import { PostMetrics } from './entities/post-metrics.entity';
 import { ExportTask } from './entities/export-task.entity';
 import { OperationLog } from './entities/operation-log.entity';
 import { SupervisorSuggestion } from './entities/supervisor-suggestion.entity';
@@ -108,6 +109,7 @@ import { TokenRefreshInterceptor } from './common/token-refresh.interceptor';
           Notification,
           Favorite,
           PostMetricsHistory,
+          PostMetrics,
           ExportTask,
           OperationLog,
           SupervisorSuggestion,

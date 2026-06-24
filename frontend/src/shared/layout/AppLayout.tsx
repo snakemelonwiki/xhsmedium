@@ -25,7 +25,6 @@ import { UploadConfigProvider } from '@/shared/contexts/UploadConfigProvider';
 import { getMenuItemsByRole, toAntdMenuItems } from '@/shared/layout/menu';
 import { useResponsiveBreakpoint } from '@/shared/hooks/useResponsiveBreakpoint';
 import { apiClient } from '@/shared/api/apiClient';
-import { AdminViewToggle } from '@/app/admin/_shell/AdminViewToggle';
 
 const { Content, Header, Sider } = Layout;
 
@@ -223,7 +222,6 @@ export function AppLayout({ role, title, children, viewRole, extraHeaderSlot }: 
                   </div>
                 </div>
                 <Space size={isMobile ? 8 : 16}>
-                  <AdminViewToggle />
                   {extraHeaderSlot}
                   <NotificationBell pollIntervalMs={60000} />
                   <Dropdown menu={{ items: userMenu }} placement="bottomRight">

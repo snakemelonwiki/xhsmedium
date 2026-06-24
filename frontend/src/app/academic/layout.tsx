@@ -1,18 +1,32 @@
 'use client';
 
 import type { ReactNode } from 'react';
+import { useEffect, useState } from 'react';
 
+import { readStoredUser, type AppUser } from '@/shared/auth/auth';
 import { AppLayout } from '@/shared/layout/AppLayout';
-import { useAdminViewMode } from '@/app/admin/_shell/AdminViewModeContext';
 
 export default function AcademicLayout({ children }: { children: ReactNode }) {
-  const { mode } = useAdminViewMode();
-  const isSupervisorView = mode === 'supervisor';
+  const [user, setUser] = useState<AppUser | undefined>();
 
-  // 主管视图下：使用 admin 菜单（filter by supervisor），保持与 admin/layout.tsx 一致的体验
-  if (isSupervisorView) {
+  useEffect(() => {
+    setUser(readStoredUser());
+  }, []);
+
+  const role = user?.role;
+
+  // admin / owner / supervisor 进入教务端 URL 时，按角色显示对应的主管/总后台菜单
+  if (role === 'supervisor') {
     return (
-      <AppLayout role="admin" title="主管端 · 运营主管视图" viewRole="supervisor">
+      <AppLayout role="admin" title="主管端" viewRole="supervisor">
+        {children}
+      </AppLayout>
+    );
+  }
+
+  if (role === 'admin' || role === 'owner') {
+    return (
+      <AppLayout role="admin" title="总后台">
         {children}
       </AppLayout>
     );

@@ -1,19 +1,24 @@
 'use client';
 
 import type { ReactNode } from 'react';
+import { useEffect, useState } from 'react';
 
+import { readStoredUser, type AppUser } from '@/shared/auth/auth';
 import { AppLayout } from '@/shared/layout/AppLayout';
 
-import { useAdminViewMode } from './_shell/AdminViewModeContext';
-
 export default function AdminLayout({ children }: { children: ReactNode }) {
-  const { mode } = useAdminViewMode();
-  const isSupervisorView = mode === 'supervisor';
+  const [user, setUser] = useState<AppUser | undefined>();
+
+  useEffect(() => {
+    setUser(readStoredUser());
+  }, []);
+
+  const isSupervisor = user?.role === 'supervisor';
   return (
     <AppLayout
       role="admin"
-      title={isSupervisorView ? '主管端 · 运营主管视图' : '主管端'}
-      viewRole={isSupervisorView ? 'supervisor' : undefined}
+      title={isSupervisor ? '主管端' : '总后台'}
+      viewRole={isSupervisor ? 'supervisor' : undefined}
     >
       {children}
     </AppLayout>

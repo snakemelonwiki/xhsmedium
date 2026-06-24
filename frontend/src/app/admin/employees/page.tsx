@@ -1,7 +1,7 @@
 'use client';
 
 import {
-  Alert, App, Button, Card, Col, Form, Input, Modal, Popconfirm, Row, Select, Space, Table, Tabs, Tag, Typography,
+  App, Button, Card, Col, Form, Input, Modal, Popconfirm, Row, Select, Space, Table, Tabs, Tag, Typography,
 } from 'antd';
 import type { TableColumnsType, TablePaginationConfig } from 'antd';
 import { useEffect, useState } from 'react';
@@ -476,15 +476,6 @@ export default function AdminEmployeesPage() {
 
   return (
     <Space direction="vertical" size={16} className="page-stack">
-      {/* 主管视图提示 */}
-      {isOperationScope && (
-        <Alert
-          type="info"
-          showIcon
-          message="当前为运营主管视图：仅显示运营端账号（operation / staff）。"
-          description="切换回总后台可看到全部角色员工。"
-        />
-      )}
       {/* 页面标题 */}
       <div className="toolbar-row">
         <div>

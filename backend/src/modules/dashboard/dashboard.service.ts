@@ -1640,11 +1640,13 @@ export class DashboardService {
     const postParams: any[] = [from, to];
     const leadWhere: string[] = ['DATE(l.created_at) BETWEEN ? AND ?'];
     const leadParams: any[] = [from, to];
-    if (platform) {
-      postWhere.push('p.platform = ?');
-      postParams.push(platform);
-      leadWhere.push('l.platform = ?');
-      leadParams.push(platform);
+    const platformAliases = this.getPlatformAliases(platform);
+    if (platformAliases) {
+      const placeholders = platformAliases.map(() => '?').join(',');
+      postWhere.push(`p.platform IN (${placeholders})`);
+      postParams.push(...platformAliases);
+      leadWhere.push(`l.platform IN (${placeholders})`);
+      leadParams.push(...platformAliases);
     }
     if (employeeId) {
       postWhere.push('p.employee_id = ?');
@@ -1746,7 +1748,7 @@ export class DashboardService {
                   COALESCE((
                     SELECT COUNT(*) FROM leads l
                     WHERE l.employee_id = p.employee_id
-                      ${platform ? 'AND l.platform = ?' : ''}
+                      ${platformAliases ? `AND l.platform IN (${platformAliases.map(() => '?').join(',')})` : ''}
                       ${accountId ? 'AND l.account_id = ?' : ''}
                       AND DATE(l.created_at) BETWEEN ? AND ?
                   ), 0) AS lead_count
@@ -1756,7 +1758,7 @@ export class DashboardService {
            GROUP BY p.employee_id, e.name
            ORDER BY lead_count DESC, post_count DESC
            LIMIT 50`,
-          this.appendRatioLeadParams(platform, employeeId, accountId, postParams, from, to),
+          this.appendRatioLeadParams(platformAliases, employeeId, accountId, postParams, from, to),
         ),
         // 8. T6.4 按员工聚合：leadPostCount（获客贴/营销贴） / leadCount
         this.postRepo.query(
@@ -1766,7 +1768,7 @@ export class DashboardService {
                   COALESCE((
                     SELECT COUNT(*) FROM leads l
                     WHERE l.employee_id = p.employee_id
-                      ${platform ? 'AND l.platform = ?' : ''}
+                      ${platformAliases ? `AND l.platform IN (${platformAliases.map(() => '?').join(',')})` : ''}
                       ${accountId ? 'AND l.account_id = ?' : ''}
                       AND DATE(l.created_at) BETWEEN ? AND ?
                   ), 0) AS lead_count
@@ -1776,7 +1778,7 @@ export class DashboardService {
            GROUP BY p.employee_id, e.name
            ORDER BY lead_count DESC, lead_post_count DESC
            LIMIT 50`,
-          this.appendRatioLeadParams(platform, employeeId, accountId, postParams, from, to),
+          this.appendRatioLeadParams(platformAliases, employeeId, accountId, postParams, from, to),
         ),
       ]);
 
@@ -1866,9 +1868,11 @@ export class DashboardService {
     return [...baseParams, ...extra];
   }
 
-  /** efficiencyRatio / leadPostRatio 子查询里额外需要 platform / accountId + from/to */
+  /** efficiencyRatio / leadPostRatio 子查询占位符在 SQL 模板中先于主查询出现，
+   * 因此返回参数顺序必须是 [子查询参数, 主查询参数]。
+   */
   private appendRatioLeadParams(
-    platform: string | null,
+    platformAliases: string[] | null,
     employeeId: string | undefined,
     accountId: string | undefined,
     baseParams: any[],
@@ -1876,12 +1880,12 @@ export class DashboardService {
     to: string,
   ): any[] {
     const extra: any[] = [];
-    if (platform) extra.push(platform);
+    if (platformAliases) extra.push(...platformAliases);
     if (accountId) extra.push(accountId);
     extra.push(from, to);
     // employeeId 已在主表 WHERE 过滤，子查询里不需要再传
     void employeeId;
-    return [...baseParams, ...extra];
+    return [...extra, ...baseParams];
   }
 
   /**
@@ -1975,6 +1979,16 @@ export class DashboardService {
     if (!raw) return null;
     if (raw === 'xhs' || raw === 'xiaohongshu' || raw === '小红书') return '小红书';
     if (raw === 'dy' || raw === 'douyin' || raw === '抖音') return '抖音';
+    return null;
+  }
+
+  /**
+   * 返回归一化平台对应的所有可能 DB 原始值。
+   * 历史/不同模块写入的 platform 字段可能是中文或英文，查询时需要同时兼容。
+   */
+  private getPlatformAliases(platform: string | null): string[] | null {
+    if (platform === '小红书') return ['小红书', 'xiaohongshu', 'xhs'];
+    if (platform === '抖音') return ['抖音', 'douyin', 'dy'];
     return null;
   }
 

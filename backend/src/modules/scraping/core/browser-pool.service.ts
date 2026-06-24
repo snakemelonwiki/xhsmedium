@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { chromium, BrowserContext } from 'playwright';
 import * as fs from 'fs';
 import * as path from 'path';
+import { resolveRepoRoot } from '../../../shared/utils/project-paths';
 
 interface PooledContext {
   ctx: BrowserContext;
@@ -155,8 +156,12 @@ export class BrowserPoolService implements OnModuleDestroy {
 
   private async isHealthy(ctx: BrowserContext): Promise<boolean> {
     try {
-      // pages() 正常返回说明上下文还活着
-      ctx.pages();
+      // 仅 pages() 不够：进程崩溃时 pages() 可能仍返回旧数组。
+      // 与任一页面做一次 evaluate 通信，能真正确认上下文/浏览器是否还活着。
+      const pages = ctx.pages();
+      if (pages.length > 0) {
+        await pages[0].evaluate(() => true);
+      }
       return true;
     } catch {
       return false;
@@ -175,21 +180,9 @@ export class BrowserPoolService implements OnModuleDestroy {
   }
 
   private resolveProfileRoot(): string {
-    const candidates = [
-      path.resolve(__dirname, '../../../../..'), // backend/src/modules/scraping/core/ → 项目根目录
-      path.resolve(__dirname, '../../../../../..'), // backend/dist/modules/scraping/core/ → 项目根目录
-      process.env.PROJECT_ROOT || '',
-    ];
-
-    for (const candidate of candidates) {
-      if (!candidate) continue;
-      if (fs.existsSync(path.join(candidate, '.playwright-profiles')) &&
-          fs.existsSync(path.join(candidate, 'uploads'))) {
-        return path.join(candidate, '.playwright-profiles');
-      }
-    }
-
-    // 兜底：当前工作目录
-    return path.join(process.cwd(), '.playwright-profiles');
+    const root = resolveRepoRoot(__dirname);
+    const profileRoot = path.join(root, '.playwright-profiles');
+    fs.mkdirSync(profileRoot, { recursive: true });
+    return profileRoot;
   }
 }

@@ -6,7 +6,6 @@ import Script from 'next/script';
 import type { ReactNode } from 'react';
 
 import { AntdProvider } from '@/shared/styles/AntdProvider';
-import { AdminViewModeProvider } from '@/app/admin/_shell/AdminViewModeContext';
 
 export const metadata: Metadata = {
   title: '运营中台',
@@ -18,7 +17,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     <html lang="zh-CN">
       <body>
         <AntdProvider>
-          <AdminViewModeProvider>{children}</AdminViewModeProvider>
+          {children}
         </AntdProvider>
         {/* echarts 通过 CDN 全局注入，admin/analytics + PersonalDashboardBoard 复用同一份。
             与老前端 public/index.html 加载方式保持一致，避免在每个页面里重复 import 整包。 */}

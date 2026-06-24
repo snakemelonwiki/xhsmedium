@@ -8,7 +8,7 @@ import { PostMetrics } from '../../entities/post-metrics.entity';
 import { AppSetting } from '../../entities/app-setting.entity';
 import { makeId } from '../../shared/utils/id-generator';
 import { normalizePostType, normalizeTrafficByType, normalizeExternalUrl, normalizeMediaUrl } from '../../shared/utils/normalize';
-import { PostsMetricsService } from './posts-metrics.service';
+import { PostsMetricsService, ScrapedMetrics } from './posts-metrics.service';
 import { FavoritesService } from '../favorites/favorites.service';
 import { PlazaConfigService } from '../plaza-config/plaza-config.service';
 
@@ -1050,6 +1050,23 @@ export class PostsService {
   }
 
   /**
+   * 根据重新解析（抓取）结果更新作品指标。
+   * 用于刷新按钮：重新抓取链接后，仅更新点赞/评论/收藏/分享/流量/更新时间，
+   * 不覆盖标题、封面等作品元数据。
+   */
+  async updatePostFromScraped(id: string, scraped: ScrapedMetrics): Promise<void> {
+    const traffic = Number(scraped.likes || 0) + Number(scraped.comments || 0) + Number(scraped.favorites || 0);
+    await this.postRepository.update(id, {
+      likes: scraped.likes,
+      comments: scraped.comments,
+      favorites: scraped.favorites,
+      shares: Number(scraped.shares || 0),
+      traffic,
+      metricsUpdatedAt: scraped.metricsUpdatedAt,
+    });
+  }
+
+  /**
    * 记录指标历史，同时按天聚合到 post_metrics 表。
    * post_metrics 表按 (post_id, date) 去重。
    */
@@ -1077,38 +1094,39 @@ export class PostsService {
 
   /**
    * 按 (post_id, date) 去重 upsert 到 post_metrics 表。
-   * 用于排行榜和看板聚合查询。
+   * 使用 INSERT ... ON DUPLICATE KEY UPDATE 避免并发刷新时的唯一键冲突，
+   * 同时绕过 TypeORM Date 对象与 MySQL DATE 类型在 where 匹配时的时区/格式问题。
    */
   async upsertDailyMetrics(
     postId: string,
     date: string,
     metrics: { likes?: number; comments?: number; favorites?: number; shares?: number; traffic?: number; views?: number },
   ): Promise<void> {
-    const existing = await this.postMetricsRepository.findOne({
-      where: { postId, date: new Date(date) },
-    });
-    if (existing) {
-      await this.postMetricsRepository.update(existing.id, {
-        likes: metrics.likes ?? existing.likes,
-        comments: metrics.comments ?? existing.comments,
-        favorites: metrics.favorites ?? existing.favorites,
-        shares: metrics.shares ?? existing.shares,
-        traffic: metrics.traffic ?? existing.traffic,
-        views: metrics.views ?? existing.views,
-      });
-    } else {
-      await this.postMetricsRepository.save(this.postMetricsRepository.create({
-        id: makeId(),
+    const id = `${postId}-${date}`;
+    await this.postMetricsRepository.query(
+      `INSERT INTO post_metrics (id, post_id, date, collected_at, likes, comments, favorites, shares, traffic, views)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE
+         likes = VALUES(likes),
+         comments = VALUES(comments),
+         favorites = VALUES(favorites),
+         shares = VALUES(shares),
+         traffic = VALUES(traffic),
+         views = VALUES(views),
+         collected_at = VALUES(collected_at)`,
+      [
+        id,
         postId,
-        date: new Date(date),
-        likes: metrics.likes ?? 0,
-        comments: metrics.comments ?? 0,
-        favorites: metrics.favorites ?? 0,
-        shares: metrics.shares ?? 0,
-        traffic: metrics.traffic ?? 0,
-        views: metrics.views ?? 0,
-      }));
-    }
+        date,
+        new Date(),
+        metrics.likes ?? 0,
+        metrics.comments ?? 0,
+        metrics.favorites ?? 0,
+        metrics.shares ?? 0,
+        metrics.traffic ?? 0,
+        metrics.views ?? 0,
+      ],
+    );
   }
 
   /**

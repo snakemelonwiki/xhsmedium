@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Page } from 'playwright';
 import * as fs from 'fs';
 import * as path from 'path';
+import { resolveRepoRoot } from '../../../shared/utils/project-paths';
 import { BrowserPoolService } from './browser-pool.service';
 import { HarListener } from './har-listener';
 import { XiaohongshuExtractor } from './extractors/xiaohongshu.extractor';
@@ -44,6 +45,8 @@ export class ScraperService {
   private readonly logger = new Logger(ScraperService.name);
   private readonly xhsExtractor = new XiaohongshuExtractor();
   private readonly douyinExtractor = new DouyinExtractor();
+  /** 按平台串行化抓取，避免多个请求共享同一个 persistent context 导致 newPage 时上下文被关闭。 */
+  private readonly platformLocks = new Map<string, Promise<void>>();
 
   constructor(private readonly browserPool: BrowserPoolService) {}
 
@@ -72,41 +75,68 @@ export class ScraperService {
     const platform = parsed.platform === 'xiaohongshu' ? '小红书' : '抖音';
     log(`URL 分类: platform=${parsed.platform}, linkType=${parsed.linkType}, postId=${parsed.postId || 'null'}`);
 
-    let lastErr: Error | null = null;
-    for (let attempt = 0; attempt <= retry; attempt++) {
-      if (attempt > 0) {
-        const backoff = Math.min(1000 * 2 ** (attempt - 1), 8000);
-        log(`重试 ${attempt}/${retry}，等待 ${backoff}ms 后重试`);
-        await sleep(backoff);
-      }
+    return this.withPlatformLock(platform, async () => {
+      let lastErr: Error | null = null;
+      for (let attempt = 0; attempt <= retry; attempt++) {
+        if (attempt > 0) {
+          const backoff = Math.min(1000 * 2 ** (attempt - 1), 8000);
+          log(`重试 ${attempt}/${retry}，等待 ${backoff}ms 后重试`);
+          await sleep(backoff);
+        }
 
-      try {
-        log(`第 ${attempt + 1} 次抓取 ${platform}: ${parsed.normalizedUrl}`);
-        const data = await this.doScrape(parsed, { timeout, log });
-        log(`抓取结果 ${platform}: title=${(data.title || '').slice(0, 60)}, publishedAt=${data.publishedAt || ''}`);
-        return { ok: true, data };
-      } catch (err: any) {
-        lastErr = err;
-        const cls = this.classifyError(err);
-        log(`第 ${attempt + 1} 次失败 [${cls.code}]: ${cls.message}`);
-        if (!cls.retryable || attempt === retry) {
-          return {
-            ok: false,
-            error: { ...cls, platform },
-          };
+        try {
+          log(`第 ${attempt + 1} 次抓取 ${platform}: ${parsed.normalizedUrl}`);
+          const data = await this.doScrape(parsed, { timeout, log });
+          log(`抓取结果 ${platform}: title=${(data.title || '').slice(0, 60)}, publishedAt=${data.publishedAt || ''}`);
+          return { ok: true, data };
+        } catch (err: any) {
+          lastErr = err;
+          const cls = this.classifyError(err);
+          log(`第 ${attempt + 1} 次失败 [${cls.code}]: ${cls.message}`);
+          if (!cls.retryable || attempt === retry) {
+            return {
+              ok: false,
+              error: { ...cls, platform },
+            };
+          }
         }
       }
-    }
 
-    return {
-      ok: false,
-      error: {
-        code: 'exhausted',
-        retryable: false,
-        message: lastErr?.message || '重试用尽',
-        platform,
-      },
-    };
+      return {
+        ok: false,
+        error: {
+          code: 'exhausted',
+          retryable: false,
+          message: lastErr?.message || '重试用尽',
+          platform,
+        },
+      };
+    });
+  }
+
+  /**
+   * 按平台串行锁：保证同一平台同时只有一个抓取任务在执行，
+   * 避免多个请求共享 persistent context 时被互相关闭。
+   */
+  private async withPlatformLock<T>(platform: string, fn: () => Promise<T>): Promise<T> {
+    while (this.platformLocks.has(platform)) {
+      try {
+        await this.platformLocks.get(platform);
+      } catch {
+        // 前一个任务失败也不影响当前任务
+      }
+    }
+    let release: () => void;
+    const lock = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this.platformLocks.set(platform, lock);
+    try {
+      return await fn();
+    } finally {
+      this.platformLocks.delete(platform);
+      release!();
+    }
   }
 
   /**
@@ -117,12 +147,21 @@ export class ScraperService {
     opts: { timeout: number; log: (msg: string) => void },
   ): Promise<ScrapedPostData> {
     const platform = parsed.platform === 'xiaohongshu' ? '小红书' : '抖音';
-    const ctx = await this.browserPool.acquireContext(platform);
+    let ctx = await this.browserPool.acquireContext(platform);
     let page: Page | null = null;
     const t0 = Date.now();
 
     try {
-      page = await ctx.newPage();
+      try {
+        page = await ctx.newPage();
+      } catch (err: any) {
+        // 并发/崩溃可能导致池里上下文已被关闭，立即重建一次
+        if (!err?.message?.includes('closed')) throw err;
+        this.logger.warn(`[Scraper] ${platform} 上下文在 newPage 时已被关闭，尝试重建`);
+        await this.browserPool.releaseContext(platform);
+        ctx = await this.browserPool.acquireContext(platform);
+        page = await ctx.newPage();
+      }
 
       // ── 资源拦截：仅抖音启用（小红书需要完整 JS/CSS 执行以触发 API 请求） ──
       if (platform === '抖音') {
@@ -637,25 +676,10 @@ export class ScraperService {
   // ── 目录解析 ──
 
   private resolveCoversDir(): string {
-    const candidates = [
-      path.resolve(__dirname, '../../../../..'), // backend/src/modules/scraping/core/ → 项目根目录
-      path.resolve(__dirname, '../../../../../..'), // backend/dist/ → 项目根目录
-      process.env.PROJECT_ROOT || '',
-      process.cwd(),
-    ];
-
-    for (const candidate of candidates) {
-      if (!candidate) continue;
-      const dir = path.join(candidate, 'uploads', 'post-covers');
-      try {
-        fs.mkdirSync(dir, { recursive: true });
-        return dir;
-      } catch {
-        /* try next */
-      }
-    }
-
-    return path.join(process.cwd(), 'uploads', 'post-covers');
+    const root = resolveRepoRoot(__dirname);
+    const dir = path.join(root, 'uploads', 'post-covers');
+    fs.mkdirSync(dir, { recursive: true });
+    return dir;
   }
 }
 

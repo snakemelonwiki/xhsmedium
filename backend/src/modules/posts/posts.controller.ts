@@ -15,6 +15,13 @@ import {
   stringifyDetail,
 } from '../../shared/operation-logs.constants';
 
+function assertMetricsNotAllZero(metrics: { likes?: number; comments?: number; favorites?: number; shares?: number }): void {
+  const total = Number(metrics.likes || 0) + Number(metrics.comments || 0) + Number(metrics.favorites || 0) + Number(metrics.shares || 0);
+  if (total === 0) {
+    throw new Error('未获取到有效指标数据（点赞/评论/收藏/分享均为 0），已保留原数据');
+  }
+}
+
 @Controller('posts')
 export class PostsController {
   constructor(
@@ -672,7 +679,8 @@ export class PostsController {
 
     try {
       const metrics = await this.postsMetricsService.fetchMetricsFromUrl(body.postUrl);
-      await this.postsService.updateMetrics(id, metrics);
+      assertMetricsNotAllZero(metrics);
+      await this.postsService.updatePostFromScraped(id, metrics);
       await this.postsService.recordMetricsHistory(id, metrics);
       // metricsUpdatedAt 是 Date，JSON 序列化时序列化为 ISO 字符串（Date.prototype.toJSON）
       return res.json({ ok: true, metrics });
@@ -700,7 +708,8 @@ export class PostsController {
     if (!targetUrl) return res.status(400).json({ message: '请先填写作品链接' });
     try {
       const metrics = await this.postsMetricsService.fetchMetricsFromUrl(targetUrl);
-      await this.postsService.updateMetrics(id, metrics);
+      assertMetricsNotAllZero(metrics);
+      await this.postsService.updatePostFromScraped(id, metrics);
       await this.postsService.recordMetricsHistory(id, metrics);
       try {
         await this.operationLogs.log({
@@ -746,7 +755,8 @@ export class PostsController {
     for (const post of eligible) {
       try {
         const metrics = await this.postsMetricsService.fetchMetricsFromUrl(post.postUrl);
-        await this.postsService.updateMetrics(post.id, metrics);
+        assertMetricsNotAllZero(metrics);
+        await this.postsService.updatePostFromScraped(post.id, metrics);
         await this.postsService.recordMetricsHistory(post.id, metrics);
         results.push({ id: post.id, success: true });
       } catch (error: any) {
