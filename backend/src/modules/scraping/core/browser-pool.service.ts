@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { chromium, BrowserContext } from 'playwright';
 import * as fs from 'fs';
 import * as path from 'path';
+import { resolveRepoRoot } from '../../../shared/utils/project-paths';
 
 interface PooledContext {
   ctx: BrowserContext;
@@ -175,21 +176,9 @@ export class BrowserPoolService implements OnModuleDestroy {
   }
 
   private resolveProfileRoot(): string {
-    const candidates = [
-      path.resolve(__dirname, '../../../../..'), // backend/src/modules/scraping/core/ → 项目根目录
-      path.resolve(__dirname, '../../../../../..'), // backend/dist/modules/scraping/core/ → 项目根目录
-      process.env.PROJECT_ROOT || '',
-    ];
-
-    for (const candidate of candidates) {
-      if (!candidate) continue;
-      if (fs.existsSync(path.join(candidate, '.playwright-profiles')) &&
-          fs.existsSync(path.join(candidate, 'uploads'))) {
-        return path.join(candidate, '.playwright-profiles');
-      }
-    }
-
-    // 兜底：当前工作目录
-    return path.join(process.cwd(), '.playwright-profiles');
+    const root = resolveRepoRoot(__dirname);
+    const profileRoot = path.join(root, '.playwright-profiles');
+    fs.mkdirSync(profileRoot, { recursive: true });
+    return profileRoot;
   }
 }

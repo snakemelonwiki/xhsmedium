@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Page } from 'playwright';
 import * as fs from 'fs';
 import * as path from 'path';
+import { resolveRepoRoot } from '../../../shared/utils/project-paths';
 import { BrowserPoolService } from './browser-pool.service';
 import { HarListener } from './har-listener';
 import { XiaohongshuExtractor } from './extractors/xiaohongshu.extractor';
@@ -637,25 +638,10 @@ export class ScraperService {
   // ── 目录解析 ──
 
   private resolveCoversDir(): string {
-    const candidates = [
-      path.resolve(__dirname, '../../../../..'), // backend/src/modules/scraping/core/ → 项目根目录
-      path.resolve(__dirname, '../../../../../..'), // backend/dist/ → 项目根目录
-      process.env.PROJECT_ROOT || '',
-      process.cwd(),
-    ];
-
-    for (const candidate of candidates) {
-      if (!candidate) continue;
-      const dir = path.join(candidate, 'uploads', 'post-covers');
-      try {
-        fs.mkdirSync(dir, { recursive: true });
-        return dir;
-      } catch {
-        /* try next */
-      }
-    }
-
-    return path.join(process.cwd(), 'uploads', 'post-covers');
+    const root = resolveRepoRoot(__dirname);
+    const dir = path.join(root, 'uploads', 'post-covers');
+    fs.mkdirSync(dir, { recursive: true });
+    return dir;
   }
 }
 
