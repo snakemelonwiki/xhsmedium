@@ -868,6 +868,7 @@ export class OrdersService {
     const effectiveRole = (sessionRole === 'academic_supervisor' || sessionRole === 'admin' || sessionRole === 'owner' || sessionRole === 'supervisor')
       ? sessionRole
       : 'academic';
+    const isAdminLike = effectiveRole === 'admin' || effectiveRole === 'owner' || effectiveRole === 'supervisor' || effectiveRole === 'academic_supervisor';
     const scope: ListOrdersOptions = {
       role: effectiveRole,
       sessionRole: effectiveRole,
@@ -920,35 +921,46 @@ export class OrdersService {
       buildBase().andWhere('o.order_status = :s', { s: 'awaiting_teacher' }),
     );
 
-    // 即将到期：履约中类目 + updated_at 早于 5 天前（≈「7 天内无进展」粗略估算）。
-    // 用 updated_at 兜底，不依赖 order_follow_records.next_remind_at 字段是否填齐。
-    const nearDue = await count(
-      buildBase()
-        .andWhere(
-          "o.order_status IN (:...nearStatuses)",
-          { nearStatuses: ['in_progress', 'awaiting_client_info', 'awaiting_teacher', 'to_deliver'] },
-        )
-        .andWhere('o.updated_at < (NOW() - INTERVAL 5 DAY)'),
-    );
+    // 即将到期：基于 order_follow_records，与节点提醒列表口径一致。
+    // 提前预警（enable_early_warning=true）：未来 7 天内到期；
+    // 当天提醒（enable_early_warning=false）：未来 24 小时内到期。
+    // 权限范围保持与 listPending 一致：普通教务只统计自己跟进或自己教务名下的订单；
+    // admin/owner/supervisor/academic_supervisor 走全量统计。
+    const nearDueHorizon = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    const nearDueDayHorizon = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    const nearDueSubQb = this.orderFollowRepository
+      .createQueryBuilder('fr')
+      .leftJoin(Order, 'o', 'o.id = fr.order_id')
+      .where('fr.next_remind_at IS NOT NULL')
+      .andWhere('fr.next_remind_at <= :horizon', { horizon: nearDueHorizon })
+      .andWhere('(fr.enable_early_warning = true OR fr.next_remind_at <= :dayHorizon)', { dayHorizon: nearDueDayHorizon });
+
+    if (!isAdminLike) {
+      nearDueSubQb.andWhere('(fr.user_id = :uid OR o.academic_user_id = :uid)', { uid: currentUserId || '' });
+    }
+
+    const nearDueRow = await nearDueSubQb
+      .clone()
+      .select('COUNT(DISTINCT fr.order_id)', 'cnt')
+      .getRawOne();
+    const nearDue = Number(nearDueRow?.cnt ?? 0) || 0;
 
     const abnormal = await count(
       buildBase().andWhere('o.order_status = :s', { s: 'abnormal' }),
     );
 
-    const [pendingReceiveTarget, waitingMaterialTarget, waitingTeacherTarget, nearDueTarget] =
+    const [pendingReceiveTarget, waitingMaterialTarget, waitingTeacherTarget, nearDueTargetRow] =
       await Promise.all([
         firstOrderId(buildClaimableReceive()),
         firstOrderId(buildBase().andWhere('o.order_status = :s', { s: 'awaiting_client_info' })),
         firstOrderId(buildBase().andWhere('o.order_status = :s', { s: 'awaiting_teacher' })),
-        firstOrderId(
-          buildBase()
-            .andWhere(
-              "o.order_status IN (:...nearStatuses)",
-              { nearStatuses: ['in_progress', 'awaiting_client_info', 'awaiting_teacher', 'to_deliver'] },
-            )
-            .andWhere('o.updated_at < (NOW() - INTERVAL 5 DAY)'),
-        ),
+        nearDueSubQb
+          .clone()
+          .select('fr.order_id', 'orderId')
+          .orderBy('fr.next_remind_at', 'ASC')
+          .getRawOne(),
       ]);
+    const nearDueTarget = nearDueTargetRow?.orderId ?? null;
 
     const makeTarget = (
       orderId: string | null,
