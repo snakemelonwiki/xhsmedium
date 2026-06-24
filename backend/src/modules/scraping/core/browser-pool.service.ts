@@ -156,8 +156,12 @@ export class BrowserPoolService implements OnModuleDestroy {
 
   private async isHealthy(ctx: BrowserContext): Promise<boolean> {
     try {
-      // pages() 正常返回说明上下文还活着
-      ctx.pages();
+      // 仅 pages() 不够：进程崩溃时 pages() 可能仍返回旧数组。
+      // 与任一页面做一次 evaluate 通信，能真正确认上下文/浏览器是否还活着。
+      const pages = ctx.pages();
+      if (pages.length > 0) {
+        await pages[0].evaluate(() => true);
+      }
       return true;
     } catch {
       return false;

@@ -23,6 +23,10 @@ export class PostMetrics {
   @Column({ type: 'date' })
   date: Date;
 
+  /** 指标采集时间（精确到秒），与 date 同一天但记录实际刷新时刻 */
+  @Column({ name: 'collected_at', type: 'datetime' })
+  collectedAt: Date;
+
   @Column({ type: 'bigint', default: 0 })
   likes: number;
 
