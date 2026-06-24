@@ -12,6 +12,7 @@ import {
 } from '@ant-design/icons';
 import {
   Alert,
+  AutoComplete,
   Button,
   Card,
   DatePicker,
@@ -810,15 +811,16 @@ export default function SalesLeadsPage() {
         <Form form={followForm} layout="vertical" preserve={false}>
           <div className="form-grid">
             <Form.Item name="clientDegree" label="客户学历">
-              <Select
+              <AutoComplete
                 allowClear
                 placeholder="本科/硕士/博士..."
+                maxLength={10}
                 options={[
-                  { label: '本科', value: '本科' },
-                  { label: '硕士', value: '硕士' },
-                  { label: '博士', value: '博士' },
-                  { label: '大专', value: '大专' },
-                  { label: '其他', value: '其他' },
+                  { value: '本科' },
+                  { value: '硕士' },
+                  { value: '博士' },
+                  { value: '大专' },
+                  { value: '在职' },
                 ]}
               />
             </Form.Item>
