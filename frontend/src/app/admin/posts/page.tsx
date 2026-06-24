@@ -41,9 +41,19 @@ import { QuickRangePicker, RANGE_PRESETS_FULL } from '@/shared/components/date';
 import { normalizePostMetric } from '@/shared/utils/post-metrics';
 import { buildPostExportFilter, getPostDetailDisplay, getPostQualityMeta, type PostQualityStatus } from './postDetail';
 import { getStatusLabel } from '@/shared/constants/lead-status';
-
+import { paidStatusMeta, orderStatusMeta } from '@/shared/api/enums';
+import { platformKeyToDisplay } from '@/shared/utils/platform-key';
+import type { IntentionLevelCode } from '@/shared/types/leads';
 const DEFAULT_PAGE_SIZE = 15;
 const PAGE_SIZE_OPTIONS = [15, 30, 50, 100];
+
+const INTENTION_LEVEL_META: Record<IntentionLevelCode, { label: string; color: string }> = {
+  high: { label: '高', color: 'red' },
+  mid: { label: '中', color: 'orange' },
+  low: { label: '低', color: 'blue' },
+  invalid: { label: '无效', color: 'default' },
+  pending: { label: '待判断', color: 'default' },
+};
 
 type PeriodKey = 'today' | 'week' | 'month' | 'all' | 'custom';
 
@@ -86,10 +96,9 @@ const platformOptions = [
 
 const postTypeOptions = [
   { label: '全部类型', value: '' },
-  { label: '种草', value: '种草' },
-  { label: '测评', value: '测评' },
-  { label: '干货', value: '干货' },
-  { label: '日常', value: '日常' },
+  { label: '获客帖', value: '获客帖' },
+  { label: '人设帖', value: '人设帖' },
+  { label: '讨论帖', value: '讨论帖' },
 ];
 
 const leadPostMetricOptions: { label: string; value: LeadPostMetric }[] = [
@@ -230,9 +239,13 @@ export default function AdminPostsPage() {
     wechat: string | null;
     status: string;
     salesUserName: string | null;
+    intentionLevel: string | null;
+    invalidReason: string | null;
+    addStatus: string | null;
   };
   type AdminOrderRecord = {
     id: string;
+    orderCode: string | null;
     customerName: string | null;
     amount: string | null;
     paidStatus: string;
@@ -498,11 +511,15 @@ export default function AdminPostsPage() {
           wechat: item.wechat ?? null,
           status: item.status ?? '',
           salesUserName: item.salesUserName ?? item.sales_user_name ?? null,
+          intentionLevel: item.intentionLevel ?? item.intention_level ?? null,
+          invalidReason: item.invalidReason ?? item.invalid_reason ?? null,
+          addStatus: item.addStatus ?? item.add_status ?? null,
         })),
       );
       setOrderRecords(
         rawOrders.map((item) => ({
           id: String(item.id ?? ''),
+          orderCode: item.orderCode ?? item.order_code ?? null,
           customerName: item.customerName ?? item.customer_name ?? null,
           amount: item.amount != null ? String(item.amount) : null,
           paidStatus: item.paidStatus ?? item.paid_status ?? '',
@@ -860,6 +877,13 @@ export default function AdminPostsPage() {
             showSearch
             optionFilterProp="label"
           />
+          <Select
+            value={filters.postType}
+            options={postTypeOptions}
+            onChange={(value) => setFilters((prev) => ({ ...prev, postType: value }))}
+            style={{ width: 120 }}
+            placeholder="作品类型"
+          />
           <Space size={8} wrap>
             <Radio.Group
               value={filters.leadPostMetric}
@@ -1041,28 +1065,67 @@ export default function AdminPostsPage() {
                 </div>
               </Card>
 
-              {/* 来源客资列表（含联系方式、微信、销售分配 —— 主管端不脱敏，A-②） */}
+              {/* 来源客资列表（含联系方式、微信、销售分配、意向 —— 主管端不脱敏，A-②） */}
               <Card size="small">
                 <Typography.Text strong>来源客资 ({leadRecords.length})</Typography.Text>
                 <Spin spinning={leadRecordsLoading}>
                   {leadRecords.length > 0 ? (
-                    <Table
-                      size="small"
-                      dataSource={leadRecords}
-                      rowKey="id"
-                      pagination={{ pageSize: 5 }}
-                      columns={[
-                        { title: '客户', dataIndex: 'customerName', width: 110, render: (v) => v || '未命名' },
-                        { title: '联系方式', dataIndex: 'contactInfo', width: 140, render: (v) => v || '-' },
-                        { title: '微信', dataIndex: 'wechat', width: 120, render: (v) => v || '-' },
-                        { title: '销售分配', dataIndex: 'salesUserName', width: 110, render: (v) => v || '-' },
-                        { title: '状态', dataIndex: 'status', width: 100, render: (v) => getStatusLabel(v as any) || v || '-' },
-                        { title: '平台', dataIndex: 'platform', width: 80 },
-                        { title: '时间', dataIndex: 'createdAt', width: 110, render: formatDate },
-                      ]}
-                      style={{ marginTop: 8 }}
-                      scroll={{ x: 'max-content' }}
-                    />
+                    <div style={{ marginTop: 8 }}>
+                      {leadRecords.map((lead, index) => {
+                        const intentionMeta = INTENTION_LEVEL_META[(lead.intentionLevel as IntentionLevelCode) ?? 'pending'] ?? { label: lead.intentionLevel || '待判断', color: 'default' };
+                        return (
+                          <div
+                            key={lead.id}
+                            style={{
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'flex-start',
+                              padding: '12px 0',
+                              borderBottom: index < leadRecords.length - 1 ? '1px solid #f0f0f0' : undefined,
+                            }}
+                          >
+                            {/* 左侧：客资详情 */}
+                            <div style={{ flex: 1, minWidth: 0, paddingRight: 16 }}>
+                              <Typography.Text strong>{lead.customerName || '未命名客户'}</Typography.Text>
+                              <div style={{ color: 'rgba(0, 0, 0, 0.45)', fontSize: 12, marginTop: 4 }}>
+                                <span>联系方式：{lead.contactInfo || '-'}</span>
+                                <span style={{ margin: '0 8px' }}>|</span>
+                                <span>微信：{lead.wechat || '-'}</span>
+                              </div>
+                              <div style={{ color: 'rgba(0, 0, 0, 0.45)', fontSize: 12, marginTop: 4 }}>
+                                <span>销售：{lead.salesUserName || '-'}</span>
+                                <span style={{ margin: '0 8px' }}>|</span>
+                                <span>平台：{platformKeyToDisplay(lead.platform) || lead.platform || '-'}</span>
+                                <span style={{ margin: '0 8px' }}>|</span>
+                                <span>{formatDate(lead.createdAt)}</span>
+                              </div>
+                            </div>
+
+                            {/* 右侧：客资意向 & 状态 */}
+                            <div style={{ width: 180, flexShrink: 0, textAlign: 'right' }}>
+                              <div>
+                                <Typography.Text type="secondary" style={{ fontSize: 12 }}>意向：</Typography.Text>
+                                <Tag color={intentionMeta.color}>{intentionMeta.label}</Tag>
+                              </div>
+                              <div style={{ marginTop: 4 }}>
+                                <Typography.Text type="secondary" style={{ fontSize: 12 }}>状态：</Typography.Text>
+                                <Tag>{getStatusLabel(lead.status as any) || lead.status || '-'}</Tag>
+                              </div>
+                              {lead.intentionLevel === 'invalid' && lead.invalidReason ? (
+                                <div style={{ color: '#ff4d4f', fontSize: 12, marginTop: 4 }}>
+                                  无效原因：{lead.invalidReason}
+                                </div>
+                              ) : null}
+                              {lead.addStatus === 'not_added' ? (
+                                <div style={{ marginTop: 4 }}>
+                                  <Tag color="error">未添加</Tag>
+                                </div>
+                              ) : null}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
                   ) : (
                     <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无来源客资" />
                   )}
@@ -1080,11 +1143,27 @@ export default function AdminPostsPage() {
                       rowKey="id"
                       pagination={{ pageSize: 5 }}
                       columns={[
-                        { title: '订单ID', dataIndex: 'id', width: 160 },
+                        { title: '订单编号', dataIndex: 'id', width: 160, render: (_: string, record: AdminOrderRecord) => record.orderCode || record.id },
                         { title: '客户', dataIndex: 'customerName', width: 110, render: (v) => v || '-' },
                         { title: '金额', dataIndex: 'amount', width: 100, align: 'right', render: (v) => v ?? '-' },
-                        { title: '付款状态', dataIndex: 'paidStatus', width: 90 },
-                        { title: '订单状态', dataIndex: 'orderStatus', width: 100 },
+                        {
+                          title: '付款状态',
+                          dataIndex: 'paidStatus',
+                          width: 90,
+                          render: (v: string) => {
+                            const meta = paidStatusMeta(v);
+                            return <Tag color={meta.color}>{meta.label}</Tag>;
+                          },
+                        },
+                        {
+                          title: '订单状态',
+                          dataIndex: 'orderStatus',
+                          width: 100,
+                          render: (v: string) => {
+                            const meta = orderStatusMeta(v);
+                            return <Tag color={meta.color}>{meta.label}</Tag>;
+                          },
+                        },
                         { title: '付款阶段', dataIndex: 'paymentStage', width: 100, render: (v) => v || '-' },
                         { title: '创建时间', dataIndex: 'createdAt', width: 110, render: formatDate },
                       ]}

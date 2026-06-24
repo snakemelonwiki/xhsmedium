@@ -195,9 +195,13 @@ export interface PostSensitiveInfo {
     id: string;
     contactInfo: string | null;
     wechat: string | null;
+    nickname: string | null;
     status: string;
     assignedSalesUserId: string | null;
     salesUserName: string | null;
+    intentionLevel: string | null;
+    invalidReason: string | null;
+    addStatus: string | null;
     createdAt: string;
   }>;
   orders: Array<{
@@ -223,9 +227,13 @@ export async function getPostSensitiveInfo(id: string): Promise<PostSensitiveInf
       id: idText(r.id),
       contactInfo: text(r.contactInfo ?? r.contact_info) ?? null,
       wechat: text(r.wechat) ?? null,
+      nickname: text(r.nickname) ?? null,
       status: text(r.status) ?? '',
       assignedSalesUserId: text(r.assignedSalesUserId ?? r.assigned_sales_user_id) ?? null,
       salesUserName: text(r.salesUserName ?? r.sales_user_name) ?? null,
+      intentionLevel: text(r.intentionLevel ?? r.intention_level) ?? null,
+      invalidReason: text(r.invalidReason ?? r.invalid_reason) ?? null,
+      addStatus: text(r.addStatus ?? r.add_status) ?? null,
       createdAt: text(r.createdAt ?? r.created_at) ?? '',
     })),
     orders: rawOrders.map((r) => ({

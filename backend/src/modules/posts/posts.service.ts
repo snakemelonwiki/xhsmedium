@@ -607,11 +607,16 @@ export class PostsService {
     leads: any[];
     orders: any[];
   }> {
-    // 关联该作品的客资（联系方式 + 销售分配）
+    // 关联该作品的客资（联系方式 + 销售分配 + 意向/添加状态）
     const leadRows = await this.postRepository.manager.query(
       `SELECT l.id, l.contact_info, l.wechat, l.status,
+              l.nickname,
               l.assigned_sales_user_id,
-              COALESCE(l.sales_user_name, e.name, u.username, '') AS sales_user_name,
+              l.platform,
+              COALESCE(l.sales_user_name, l.assigned_sales_user_name, e.name, u.username, '') AS sales_user_name,
+              l.intention_level,
+              l.invalid_reason,
+              l.add_status,
               l.created_at
        FROM leads l
        LEFT JOIN users u ON u.id = l.assigned_sales_user_id COLLATE utf8mb4_unicode_ci
@@ -625,14 +630,19 @@ export class PostsService {
       contactInfo: r.contact_info,
       wechat: r.wechat,
       status: r.status,
+      nickname: r.nickname,
+      platform: r.platform,
       assignedSalesUserId: r.assigned_sales_user_id,
       salesUserName: r.sales_user_name,
+      intentionLevel: r.intention_level,
+      invalidReason: r.invalid_reason,
+      addStatus: r.add_status,
       createdAt: r.created_at,
     }));
 
     // 成交信息（通过 leads → orders 关联）
     const orderRows = await this.postRepository.manager.query(
-      `SELECT o.id, o.lead_id, o.customer_name, o.amount, o.paid_status, o.order_status,
+      `SELECT o.id, o.order_code, o.lead_id, o.customer_name, o.amount, o.paid_status, o.order_status,
               o.handover_status, o.payment_stage, o.created_at
        FROM orders o
        INNER JOIN leads l ON l.id = o.lead_id COLLATE utf8mb4_unicode_ci
@@ -642,6 +652,7 @@ export class PostsService {
     );
     const orders = (orderRows || []).map((r: any) => ({
       id: r.id,
+      orderCode: r.order_code,
       leadId: r.lead_id,
       customerName: r.customer_name,
       amount: r.amount,

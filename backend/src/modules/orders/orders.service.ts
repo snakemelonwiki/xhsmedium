@@ -84,6 +84,9 @@ interface CloseDealDto {
   // v1.3 / 付款阶段×付款状态联动重构：paymentPlan + depositAmount
   paymentPlan?: 'three' | 'four' | string | null;
   depositAmount?: number | string | null;
+  // 兼容旧字段：销售 service 透传，本服务内部计算实际值
+  paymentStage?: string | null;
+  paidStatus?: string | null;
   clientRequirementNote?: string | null;
   contractStatus?: string | null;
   deliveryRequirement?: string | null;

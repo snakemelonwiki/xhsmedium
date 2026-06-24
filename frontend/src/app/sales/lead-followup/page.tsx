@@ -283,31 +283,16 @@ export default function SalesLeadFollowupPage() {
       render: (_v, lead) => lead.clientMajorResearch || '-',
     },
     {
-      title: '添加状态',
-      key: 'addStatus',
-      render: (_v, lead) => <StatusTag kind="addStatus" code={lead.addStatus ?? LeadAddStatus.ADDED} />,
+      title: '微信备注',
+      key: 'salesRemark',
+      width: 140,
+      ellipsis: true,
+      render: (_v, lead) => lead.salesRemark || '-',
     },
     {
       title: '处理状态',
       key: 'processStatus',
       render: (_v, lead) => <StatusTag kind="processStatus" code={lead.processStatus ?? LeadProcessStatus.NOT_CONTACTED} />,
-    },
-    {
-      title: '成交状态',
-      key: 'dealStatus',
-      width: 100,
-      render: (_v, lead) => {
-        if (!lead.dealStatus) return <Typography.Text type="secondary">未产生订单</Typography.Text>;
-        const map: Record<string, { label: string; color: string }> = {
-          not_deal: { label: '未成交', color: 'default' },
-          deal_pending: { label: '成交中', color: 'processing' },
-          deal_done: { label: '已成交', color: 'success' },
-          refunded: { label: '已退款', color: 'error' },
-          invalid: { label: '无效', color: 'default' },
-        };
-        const m = map[lead.dealStatus] || { label: lead.dealStatus, color: 'default' };
-        return <Tag color={m.color}>{m.label}</Tag>;
-      },
     },
     {
       title: '客户学历',
@@ -325,8 +310,19 @@ export default function SalesLeadFollowupPage() {
     {
       title: '最近跟进',
       key: 'latestFollow',
-      width: 150,
-      render: (_v, lead) => lead.latestFollowAt ? formatDateTime(lead.latestFollowAt) : '-',
+      width: 220,
+      render: (_v, lead) => (
+        <Space direction="vertical" size={0}>
+          {lead.latestFollowNote ? (
+            <Typography.Text style={{ whiteSpace: 'pre-wrap' }}>{lead.latestFollowNote}</Typography.Text>
+          ) : (
+            <Typography.Text type="secondary">-</Typography.Text>
+          )}
+          {lead.latestFollowAt ? (
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>{formatDateTime(lead.latestFollowAt)}</Typography.Text>
+          ) : null}
+        </Space>
+      ),
     },
     {
       title: '下次跟进',

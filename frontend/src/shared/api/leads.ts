@@ -31,6 +31,9 @@ export type CloseLeadDealPayload = {
   // v1.3 / SA-8 销售成交录入扩展字段
   productType?: string | null;
   guaranteeType?: string | null;
+  // v1.3 / 付款阶段×付款状态联动重构：paymentPlan + depositAmount
+  paymentPlan?: 'three' | 'four' | string | null;
+  depositAmount?: number | string | null;
   paymentStage?: string | null;
   clientRequirementNote?: string | null;
   remark?: string | null;
