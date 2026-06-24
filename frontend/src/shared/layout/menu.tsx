@@ -309,7 +309,7 @@ export const APP_MENU_ITEMS: AppMenuItem[] = [
     label: '运营排行榜',
     path: '/admin/rankings',
     icon: <FundOutlined />,
-    roles: ['admin', 'owner'],
+    roles: ['admin', 'owner', 'supervisor'],
   },
   {
     key: 'admin-rankings-study',
@@ -323,7 +323,7 @@ export const APP_MENU_ITEMS: AppMenuItem[] = [
     label: '个人看板',
     path: '/admin/personal',
     icon: <BarChartOutlined />,
-    roles: ['admin', 'owner'],
+    roles: ['admin', 'owner', 'supervisor'],
   },
   {
     key: 'admin-posts',
@@ -345,14 +345,14 @@ export const APP_MENU_ITEMS: AppMenuItem[] = [
     label: '推荐作品录入',
     path: '/admin/posts/recommend',
     icon: <ShareAltOutlined />,
-    roles: ['admin', 'owner'],
+    roles: ['admin', 'owner', 'supervisor'],
   },
   {
     key: 'admin-account-analysis',
     label: '账号分析',
     path: '/admin/account-analysis',
     icon: <FundOutlined />,
-    roles: ['admin', 'owner'],
+    roles: ['admin', 'owner', 'supervisor'],
   },
   {
     key: 'admin-leads',
@@ -366,7 +366,7 @@ export const APP_MENU_ITEMS: AppMenuItem[] = [
     label: '销售看板',
     path: '/admin/sales-board',
     icon: <UsergroupAddOutlined />,
-    roles: ['admin', 'owner', 'supervisor'],
+    roles: ['admin', 'owner'],
   },
   {
     key: 'admin-orders',
@@ -387,14 +387,14 @@ export const APP_MENU_ITEMS: AppMenuItem[] = [
     label: '教务订单池',
     path: '/academic/orders',
     icon: <OrderedListOutlined />,
-    roles: ['admin', 'owner', 'supervisor'],
+    roles: ['admin', 'owner'],
   },
   {
     key: 'admin-academic-followup',
     label: '教务订单跟进',
     path: '/academic/followup',
     icon: <ScheduleOutlined />,
-    roles: ['admin', 'owner', 'supervisor'],
+    roles: ['admin', 'owner'],
   },
   {
     key: 'admin-finance',
@@ -408,28 +408,28 @@ export const APP_MENU_ITEMS: AppMenuItem[] = [
     label: '账号管理',
     path: '/admin/accounts',
     icon: <ShopOutlined />,
-    roles: ['admin', 'owner'],
+    roles: ['admin', 'owner', 'supervisor'],
   },
   {
     key: 'admin-analytics',
     label: '分析看板',
     path: '/admin/analytics',
     icon: <FundOutlined />,
-    roles: ['admin', 'owner'],
+    roles: ['admin', 'owner', 'supervisor'],
   },
   {
     key: 'admin-messages',
     label: '消息中心',
     path: '/admin/messages',
     icon: <MessageOutlined />,
-    roles: ['admin', 'owner'],
+    roles: ['admin', 'owner', 'supervisor'],
   },
   {
     key: 'admin-imports',
     label: '导出中心',
     path: '/admin/exports',
     icon: <ImportOutlined />,
-    roles: ['admin', 'owner'],
+    roles: ['admin', 'owner', 'supervisor'],
   },
 ];
 
