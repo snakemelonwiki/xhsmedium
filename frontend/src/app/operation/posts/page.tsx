@@ -133,7 +133,7 @@ export default function OperationPostsPage() {
   async function refreshMetrics(post: ContentPost) {
     try {
       await refreshPostMetrics(post.id, post.postUrl);
-      message.success('已提交刷新');
+      message.success('刷新成功');
       await load(page);
     } catch (err) {
       message.error(err instanceof Error ? err.message : '刷新失败');

@@ -1868,7 +1868,9 @@ export class DashboardService {
     return [...baseParams, ...extra];
   }
 
-  /** efficiencyRatio / leadPostRatio 子查询里额外需要 platform / accountId + from/to */
+  /** efficiencyRatio / leadPostRatio 子查询占位符在 SQL 模板中先于主查询出现，
+   * 因此返回参数顺序必须是 [子查询参数, 主查询参数]。
+   */
   private appendRatioLeadParams(
     platformAliases: string[] | null,
     employeeId: string | undefined,
@@ -1883,7 +1885,7 @@ export class DashboardService {
     extra.push(from, to);
     // employeeId 已在主表 WHERE 过滤，子查询里不需要再传
     void employeeId;
-    return [...baseParams, ...extra];
+    return [...extra, ...baseParams];
   }
 
   /**
