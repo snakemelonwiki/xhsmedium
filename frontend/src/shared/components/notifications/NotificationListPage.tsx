@@ -78,12 +78,47 @@ export function NotificationListPage({ title, description }: NotificationListPag
     await load(page);
   }
 
+  async function readSingle(id: string | number) {
+    // 乐观更新：立即更新本地状态，不等后端响应
+    let wasUnread = false;
+    setItems((prev) => {
+      const filtered = status === 'unread'
+        ? prev.filter((entry) => String(entry.id) !== String(id))
+        : prev.map((entry) => {
+            if (String(entry.id) === String(id) && entry.unread) {
+              wasUnread = true;
+              return { ...entry, unread: false };
+            }
+            return entry;
+          });
+      return filtered;
+    });
+    if (wasUnread) setUnreadCount((n) => Math.max(0, n - 1));
+    if (status === 'unread') setTotal((n) => Math.max(0, n - 1));
+
+    try {
+      await markNotificationRead(id);
+      await load(page, status);
+    } catch (err) {
+      // 失败回滚：重新加载列表
+      await load(page, status);
+      message.error(err instanceof Error ? err.message : '标记已读失败');
+    }
+  }
+
   async function readAll() {
+    // 乐观更新：立即清空未读标记
+    setItems((prev) => prev.map((entry) => ({ ...entry, unread: false })));
+    setUnreadCount(0);
+
     try {
       await markAllNotificationsRead();
       message.success('已全部标记为已读');
-      await load(1, status);
+      // 全部已读后自动切到「未读」筛选用户看到的就是空列表，符合预期
+      setStatus('unread');
     } catch (err) {
+      // 失败回滚：重新加载
+      await load(page, status);
       message.error(err instanceof Error ? err.message : '标记全部已读失败');
     }
   }
@@ -126,15 +161,18 @@ export function NotificationListPage({ title, description }: NotificationListPag
                 className="notification-list-item"
                 actions={[
                   item.unread ? (
-                    <Button key="read" size="small" onClick={() => openNotification(item)}>
-                      查看并已读
+                    <Button
+                      key="read-only"
+                      size="small"
+                      onClick={() => readSingle(item.id)}
+                    >
+                      已读
                     </Button>
-                  ) : (
-                    <Button key="open" size="small" onClick={() => openNotification(item)}>
-                      查看
-                    </Button>
-                  ),
-                ]}
+                  ) : null,
+                  <Button key="open" size="small" onClick={() => openNotification(item)}>
+                    查看
+                  </Button>,
+                ].filter(Boolean)}
               >
                 <List.Item.Meta
                   title={(

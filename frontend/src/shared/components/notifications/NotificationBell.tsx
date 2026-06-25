@@ -1,6 +1,6 @@
 'use client';
 
-import { BellOutlined } from '@ant-design/icons';
+import { BellOutlined, CheckOutlined } from '@ant-design/icons';
 import { Badge, Button, Drawer, Dropdown, Empty, List, Space, Typography } from 'antd';
 import { useRouter } from 'next/navigation';
 import { useCallback, useState } from 'react';
@@ -21,7 +21,7 @@ type NotificationBellProps = {
  */
 export function NotificationBell(_props: NotificationBellProps = {}) {
   const router = useRouter();
-  const { items, unreadCount, loading, refresh, markRead } = useNotifications();
+  const { items, unreadCount, loading, refresh, markRead, markAllRead } = useNotifications();
   const { isMobile } = useResponsiveBreakpoint();
   const [drawerOpen, setDrawerOpen] = useState(false);
 
@@ -40,39 +40,87 @@ export function NotificationBell(_props: NotificationBellProps = {}) {
     [markRead, router],
   );
 
+  const handleReadSingle = useCallback(
+    async (e: React.MouseEvent, item: NotificationItem) => {
+      e.stopPropagation();
+      if (item.unread) {
+        try {
+          await markRead(item.id);
+          await refresh();
+        } catch {
+          // 静默失败
+        }
+      }
+    },
+    [markRead, refresh],
+  );
+
+  const handleReadAll = useCallback(async () => {
+    try {
+      await markAllRead();
+    } catch {
+      // 静默失败，context 里已有 toast
+    }
+  }, [markAllRead]);
+
   const panelContent = (
     <div className="notification-panel">
       <Space direction="vertical" size={12} className="page-stack" style={{ width: '100%' }}>
         <div className="notification-panel-header">
           <Typography.Text strong>消息提醒</Typography.Text>
-          <Button size="small" type="link" onClick={refresh} loading={loading}>刷新</Button>
+          <Space size={8}>
+            <Button size="small" type="link" onClick={refresh} loading={loading}>刷新</Button>
+            <Button size="small" type="link" icon={<CheckOutlined />} onClick={handleReadAll} disabled={!unreadCount}>
+              全部已读
+            </Button>
+          </Space>
         </div>
         {items.length ? (
           <List
             size="small"
             dataSource={items}
             renderItem={(item) => (
-              <List.Item
-                className="notification-item"
-                onClick={() => openNotification(item)}
-              >
-                <Space direction="vertical" size={4} style={{ width: '100%', maxWidth: 320 }}>
-                  <Space size={4} style={{ width: '100%' }}>
-                    <StatusTag kind="notificationType" code={item.notificationType} />
-                    <Typography.Text strong ellipsis={{ tooltip: item.title }} style={{ flex: 1, minWidth: 0 }}>
-                      {item.title}
-                    </Typography.Text>
-                  </Space>
-                  {item.content ? (
-                    <Typography.Text
-                      type="secondary"
-                      ellipsis={{ tooltip: item.content }}
-                      style={{ display: 'block' }}
+              <List.Item className="notification-item">
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: 8,
+                    width: '100%',
+                  }}
+                >
+                  <div
+                    onClick={() => openNotification(item)}
+                    style={{ flex: 1, minWidth: 0, cursor: 'pointer' }}
+                  >
+                    <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                      <Space size={4} style={{ width: '100%' }}>
+                        <StatusTag kind="notificationType" code={item.notificationType} />
+                        <Typography.Text strong ellipsis={{ tooltip: item.title }} style={{ flex: 1, minWidth: 0 }}>
+                          {item.title}
+                        </Typography.Text>
+                      </Space>
+                      {item.content ? (
+                        <Typography.Text
+                          type="secondary"
+                          ellipsis={{ tooltip: item.content }}
+                          style={{ display: 'block' }}
+                        >
+                          {item.content}
+                        </Typography.Text>
+                      ) : null}
+                    </Space>
+                  </div>
+                  {item.unread ? (
+                    <Button
+                      key="read"
+                      size="small"
+                      onClick={(e) => handleReadSingle(e, item)}
                     >
-                      {item.content}
-                    </Typography.Text>
+                      已读
+                    </Button>
                   ) : null}
-                </Space>
+                </div>
               </List.Item>
             )}
           />
