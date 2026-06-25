@@ -2651,8 +2651,8 @@ export class OrdersService {
   }
 
   /**
-   * 追加付款：在订单详情页录入后续阶段的付款金额。
-   * 校验：只能按顺序追加，不能跳过阶段。
+   * 更新付款：在订单详情页录入或修改任意阶段的付款金额。
+   * 允许修改任意阶段，currentStageIndex 自动计算为最后一个已付阶段。
    */
   async addPayment(
     orderId: string,
@@ -2668,7 +2668,7 @@ export class OrdersService {
     // 2. 校验权限：销售本人或 admin/owner
     const isAdminLike = actor.role === 'admin' || actor.role === 'owner';
     if (!isAdminLike && order.salesUserId !== actor.userId) {
-      throw new ForbiddenException('仅订单销售本人或管理员可追加付款');
+      throw new ForbiddenException('仅订单销售本人或管理员可修改付款');
     }
 
     // 3. 解析当前分期明细
@@ -2687,42 +2687,56 @@ export class OrdersService {
       throw new BadRequestException(`无效的付款阶段: ${dto.paymentStage}`);
     }
 
-    // 5. 校验：不能倒退或重复
-    if (targetIndex <= detail.currentStageIndex) {
-      throw new BadRequestException(`付款阶段不能倒退，当前已付至：${detail.stages[detail.currentStageIndex].label}`);
-    }
-
-    // 6. 校验：不能跳过中间阶段
-    if (targetIndex > detail.currentStageIndex + 1) {
-      throw new BadRequestException(`不能跳过中间阶段，请先录入${detail.stages[detail.currentStageIndex + 1].label}`);
-    }
-
-    // 7. 更新分期明细
+    // 5. 更新分期明细（允许修改任意阶段）
     const newAmount = this.normalizeMoney(dto.amount);
     if (newAmount === null) {
-      throw new BadRequestException('付款金额必须大于0');
+      throw new BadRequestException('付款金额必填');
     }
     detail.stages[targetIndex].amount = newAmount;
     detail.stages[targetIndex].paidAt = dto.paidAt || new Date().toISOString();
-    detail.currentStageIndex = targetIndex;
 
-    // 8. 计算累计已付金额
+    // 5.5 校验：分期金额之和不能超过订单总额（允许小于）
+    const orderAmountNum = Number(order.amount || 0);
+    if (orderAmountNum > 0) {
+      const otherStagesSum = detail.stages.reduce(
+        (sum: number, stage: any, i: number) => (i === targetIndex ? sum : sum + Number(stage.amount)),
+        0,
+      );
+      const newTotal = Number(newAmount) + otherStagesSum;
+      if (newTotal > orderAmountNum) {
+        throw new BadRequestException(
+          `分期金额之和（¥${newTotal.toFixed(2)}）不能超过订单金额（¥${orderAmountNum.toFixed(2)}）`,
+        );
+      }
+    }
+
+    // 6. 自动计算 currentStageIndex：最后一个 amount > 0 的阶段
+    let newCurrentStageIndex = -1;
+    for (let i = detail.stages.length - 1; i >= 0; i--) {
+      if (Number(detail.stages[i].amount) > 0) {
+        newCurrentStageIndex = i;
+        break;
+      }
+    }
+    detail.currentStageIndex = newCurrentStageIndex;
+
+    // 7. 计算累计已付金额
     const totalPaid = detail.stages.reduce((sum: number, stage: any) => sum + Number(stage.amount), 0);
     const totalPaidStr = totalPaid.toFixed(2);
 
-    // 9. 自动推导付款状态
-    const isLastStage = targetIndex === detail.stages.length - 1;
-    const nextPaidStatus: PaidStatus = isLastStage ? 'paid' : 'partial';
-    const nextPaymentStage = detail.stages[targetIndex].label;
+    // 8. 自动推导付款状态
+    const isLastStage = newCurrentStageIndex === detail.stages.length - 1;
+    const nextPaidStatus: PaidStatus = isLastStage ? 'paid' : newCurrentStageIndex >= 0 ? 'partial' : 'unpaid';
+    const nextPaymentStage = newCurrentStageIndex >= 0 ? detail.stages[newCurrentStageIndex].label : detail.stages[0].label;
 
-    // 10. 更新数据库
+    // 9. 更新数据库
     await this.orderRepository.update(orderId, {
       paymentStage: nextPaymentStage,
       paidStatus: nextPaidStatus,
       paymentStageDetail: JSON.stringify(detail),
     });
 
-    // 11. 更新 order_finance
+    // 10. 更新 order_finance
     const finance = await this.orderFinanceRepository.findOne({ where: { orderId } });
     if (finance) {
       const orderAmount = finance.orderAmount || '0';
@@ -2734,7 +2748,7 @@ export class OrdersService {
       });
     }
 
-    // 12. 写跟进记录
+    // 11. 写跟进记录
     const followId = makeId();
     await this.orderFollowRepository.save({
       id: followId,

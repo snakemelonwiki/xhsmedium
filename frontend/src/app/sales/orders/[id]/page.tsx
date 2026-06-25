@@ -5,7 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import dayjs from 'dayjs';
 
-import { getOrderDetail, listAbnormalFeedbacks, listOrderFollowRecords, addOrderPayment } from '@/shared/api/orders';
+import { getOrderDetail, listAbnormalFeedbacks, listOrderFollowRecords, addOrderPayment, updateOrder } from '@/shared/api/orders';
 import type { OrderAbnormalFeedback, OrderFollowRecord, OrderItem } from '@/shared/types/orders';
 import { handoverStatusMeta, orderStatusMeta, paidStatusMeta } from '@/shared/api/enums';
 import { formatDateTime } from '@/shared/utils/date-format';
@@ -73,8 +73,15 @@ export default function SalesOrderDetailPage() {
 
   // 录付款弹窗状态
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
+  const [editingStageIndex, setEditingStageIndex] = useState<number | null>(null);
+  const [maxStageAmount, setMaxStageAmount] = useState<number | null>(null);
   const [paymentForm] = Form.useForm();
   const [paymentSubmitting, setPaymentSubmitting] = useState(false);
+
+  // 修改订单金额弹窗状态
+  const [amountModalOpen, setAmountModalOpen] = useState(false);
+  const [amountForm] = Form.useForm();
+  const [amountSubmitting, setAmountSubmitting] = useState(false);
 
   // 分期方案定义
   const STAGE_CONFIG: Record<string, { key: string; name: string; order: number }[]> = {
@@ -118,14 +125,33 @@ export default function SalesOrderDetailPage() {
     };
   };
 
-  const openPaymentModal = () => {
+  const openPaymentModal = (stageIndex?: number) => {
     const detail = parseStageDetail(order);
     if (!detail) return;
-    const nextStage = detail.stages.find((_: any, i: number) => i > detail.currentStageIndex);
+    const targetIndex = stageIndex ?? detail.currentStageIndex + 1;
+    const targetStage = detail.stages[targetIndex];
+    if (!targetStage) return;
+
+    // 计算最大可填金额：订单金额 - 其他阶段之和
+    const orderAmountNum = Number(order?.amount ?? 0);
+    if (orderAmountNum > 0) {
+      const otherStagesSum = detail.stages.reduce(
+        (sum: number, stage: any, i: number) => (i === targetIndex ? sum : sum + Number(stage.amount ?? 0)),
+        0,
+      );
+      const max = Math.max(0, orderAmountNum - otherStagesSum);
+      setMaxStageAmount(max);
+    } else {
+      setMaxStageAmount(null);
+    }
+
+    setEditingStageIndex(targetIndex);
     paymentForm.setFieldsValue({
-      paymentStage: nextStage?.label || '',
-      amount: undefined,
-      paidAt: dayjs().format('YYYY-MM-DD'),
+      paymentStage: targetStage.label,
+      amount: Number(targetStage.amount) > 0 ? Number(targetStage.amount) : undefined,
+      paidAt: targetStage.paidAt
+        ? dayjs(targetStage.paidAt).format('YYYY-MM-DD')
+        : dayjs().format('YYYY-MM-DD'),
     });
     setPaymentModalOpen(true);
   };
@@ -138,14 +164,37 @@ export default function SalesOrderDetailPage() {
         amount: values.amount,
         paidAt: values.paidAt,
       });
-      message.success('付款记录已添加');
+      message.success('付款记录已更新');
       setPaymentModalOpen(false);
+      setEditingStageIndex(null);
       paymentForm.resetFields();
       await loadDetail();
     } catch (err) {
-      message.error(err instanceof Error ? err.message : '添加付款记录失败');
+      message.error(err instanceof Error ? err.message : '更新付款记录失败');
     } finally {
       setPaymentSubmitting(false);
+    }
+  };
+
+  const openAmountModal = () => {
+    amountForm.setFieldsValue({
+      amount: Number(order?.amount) > 0 ? Number(order?.amount) : undefined,
+    });
+    setAmountModalOpen(true);
+  };
+
+  const submitAmount = async (values: { amount: number }) => {
+    setAmountSubmitting(true);
+    try {
+      await updateOrder(orderId, { amount: values.amount });
+      message.success('订单金额已更新');
+      setAmountModalOpen(false);
+      amountForm.resetFields();
+      await loadDetail();
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '更新订单金额失败');
+    } finally {
+      setAmountSubmitting(false);
     }
   };
 
@@ -198,7 +247,12 @@ export default function SalesOrderDetailPage() {
                 { key: 'orderCode', label: '订单编号', children: order?.orderCode || orderId },
                 { key: 'leadId', label: '客资 ID', children: emptyText(order?.leadId) },
                 { key: 'serviceType', label: '服务类型', children: emptyText(order?.serviceType) },
-                { key: 'amount', label: '金额', children: emptyText(order?.amount) },
+                { key: 'amount', label: '金额', children: (
+                  <Space>
+                    {emptyText(order?.amount)}
+                    <Button type="link" size="small" onClick={openAmountModal}>修改</Button>
+                  </Space>
+                ) },
                 { key: 'paidStatus', label: '付款状态', children: statusTag(paidStatusMeta(order?.paidStatus)) },
                 { key: 'orderStatus', label: '订单状态', children: statusTag(orderStatusMeta(order?.orderStatus)) },
                 { key: 'sales', label: '销售', children: emptyText(order?.salesName ?? order?.salesUserId) },
@@ -223,6 +277,7 @@ export default function SalesOrderDetailPage() {
                 <div style={{ display: 'flex', gap: 12 }}>
                   {detail.stages.map((stage: any, index: number) => {
                     const isStagePaid = index <= detail.currentStageIndex;
+                    const hasAmount = Number(stage.amount) > 0;
                     return (
                       <div
                         key={stage.label}
@@ -232,16 +287,18 @@ export default function SalesOrderDetailPage() {
                           padding: 16,
                           borderRadius: 8,
                           border: isStagePaid ? '1px solid #b7eb8f' : '1px solid #d9d9d9',
-                          background: isStagePaid ? '#f6ffed' : index === detail.currentStageIndex + 1 ? '#fff7e6' : '#fafafa',
+                          background: isStagePaid ? '#f6ffed' : hasAmount ? '#e6f7ff' : '#fafafa',
+                          cursor: 'pointer',
                         }}
+                        onClick={() => openPaymentModal(index)}
                       >
                         <div style={{ fontSize: 16, fontWeight: 'bold', marginBottom: 8 }}>
-                          {isStagePaid ? '✅' : index === detail.currentStageIndex + 1 ? '⏳' : '⭕'} {stage.name}
+                          {isStagePaid ? '✅' : hasAmount ? '💰' : '⭕'} {stage.name}
                         </div>
-                        <div style={{ fontSize: 18, color: isStagePaid ? '#52c41a' : '#999' }}>
-                          {isStagePaid ? `¥${stage.amount}` : '-'}
+                        <div style={{ fontSize: 18, color: isStagePaid ? '#52c41a' : hasAmount ? '#1890ff' : '#999' }}>
+                          {hasAmount ? `¥${stage.amount}` : '-'}
                         </div>
-                        {isStagePaid && stage.paidAt && (
+                        {stage.paidAt && (
                           <div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>
                             {dayjs(stage.paidAt).format('MM-DD')}
                           </div>
@@ -260,11 +317,6 @@ export default function SalesOrderDetailPage() {
                     <Tag color={isPaid ? 'green' : 'orange'}>
                       {isPaid ? '已完结' : '部分付款'}
                     </Tag>
-                    {!isPaid && (
-                      <Button type="primary" size="small" onClick={openPaymentModal}>
-                        录付款
-                      </Button>
-                    )}
                   </Space>
                 </div>
               </Card>
@@ -377,11 +429,42 @@ export default function SalesOrderDetailPage() {
         </Space>
       </Spin>
 
+      {/* 修改订单金额弹窗 */}
+      <Modal
+        title="修改订单金额"
+        open={amountModalOpen}
+        onCancel={() => { setAmountModalOpen(false); amountForm.resetFields(); }}
+        onOk={() => amountForm.submit()}
+        confirmLoading={amountSubmitting}
+        destroyOnClose
+      >
+        <Form form={amountForm} layout="vertical" onFinish={submitAmount}>
+          <Form.Item
+            name="amount"
+            label="订单金额（元）"
+            rules={[
+              { required: true, message: '请输入订单金额' },
+              {
+                validator: (_rule, value) => {
+                  if (value == null || value === '') return Promise.resolve();
+                  if (Number(value) <= 0) {
+                    return Promise.reject(new Error('订单金额必须大于 0'));
+                  }
+                  return Promise.resolve();
+                },
+              },
+            ]}
+          >
+            <InputNumber min={0.01} precision={2} style={{ width: '100%' }} placeholder="0.00" />
+          </Form.Item>
+        </Form>
+      </Modal>
+
       {/* 录付款弹窗 */}
       <Modal
-        title="追加付款"
+        title="修改付款金额"
         open={paymentModalOpen}
-        onCancel={() => setPaymentModalOpen(false)}
+        onCancel={() => { setPaymentModalOpen(false); setEditingStageIndex(null); }}
         onOk={() => paymentForm.submit()}
         confirmLoading={paymentSubmitting}
         destroyOnClose
@@ -392,22 +475,28 @@ export default function SalesOrderDetailPage() {
             label="付款阶段"
             rules={[{ required: true, message: '请选择付款阶段' }]}
           >
-            <Select
-              options={(() => {
-                const detail = parseStageDetail(order);
-                if (!detail) return [];
-                return detail.stages
-                  .filter((_: any, i: number) => i > detail.currentStageIndex)
-                  .map((s: any) => ({ label: s.label, value: s.label }));
-              })()}
-            />
+            <Select disabled options={[]} />
           </Form.Item>
           <Form.Item
             name="amount"
-            label="付款金额（元）"
-            rules={[{ required: true, message: '请输入付款金额' }]}
+            label={(() => {
+              const suffix = maxStageAmount != null ? `（上限 ¥${maxStageAmount.toFixed(2)}）` : '';
+              return `付款金额（元）${suffix}`;
+            })()}
+            rules={[
+              { required: true, message: '请输入付款金额' },
+              {
+                validator: (_rule, value) => {
+                  if (maxStageAmount == null) return Promise.resolve();
+                  if (value != null && Number(value) > maxStageAmount) {
+                    return Promise.reject(new Error(`分期金额之和不能超过订单金额，当前上限 ¥${maxStageAmount.toFixed(2)}`));
+                  }
+                  return Promise.resolve();
+                },
+              },
+            ]}
           >
-            <InputNumber min={0.01} precision={2} style={{ width: '100%' }} placeholder="0.00" />
+            <InputNumber min={0} precision={2} style={{ width: '100%' }} placeholder="0.00" />
           </Form.Item>
           <Form.Item
             name="paidAt"
