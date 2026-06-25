@@ -316,6 +316,9 @@ export async function closeLeadDeal(id: string, body: CloseLeadDealPayload) {
     // v1.3 / SA-8 销售成交录入扩展字段
     productType: body.productType ?? null,
     guaranteeType: body.guaranteeType ?? null,
+    // v1.3 / 付款阶段×付款状态联动重构：paymentPlan + depositAmount
+    paymentPlan: body.paymentPlan ?? 'three',
+    depositAmount: body.depositAmount ?? null,
     paymentStage: body.paymentStage ?? null,
     clientRequirementNote: body.clientRequirementNote ?? null,
     remark: body.remark ?? body.deliveryRequirement ?? null,
