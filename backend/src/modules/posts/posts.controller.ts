@@ -22,6 +22,24 @@ function assertMetricsNotAllZero(metrics: { likes?: number; comments?: number; f
   }
 }
 
+/**
+ * 判断请求是否来自本机（仅用于内部刷新接口的访问控制）。
+ * 取 req.ip（Express 在 trust proxy 下会解析 x-forwarded-for），
+ * 同时兜底直接读 connection.remoteAddress / socket.remoteAddress。
+ * 127.0.0.1 / ::1 / ::ffff:127.0.0.1（IPv4-mapped）都算本机。
+ */
+function isLocalRequest(req: Request): boolean {
+  const candidates = [
+    req.ip,
+    (req as any).connection?.remoteAddress,
+    (req as any).socket?.remoteAddress,
+  ].filter(Boolean) as string[];
+  return candidates.some((ip) => {
+    const v = String(ip).toLowerCase();
+    return v === '127.0.0.1' || v === '::1' || v === '::ffff:127.0.0.1';
+  });
+}
+
 @Controller('posts')
 export class PostsController {
   constructor(
@@ -727,6 +745,44 @@ export class PostsController {
         // eslint-disable-next-line no-console
         console.error('[posts] refresh-metrics op log failed', (logErr as any)?.message || logErr);
       }
+      return res.json({ ok: true, metrics });
+    } catch (error: any) {
+      return res.status(400).json({ ok: false, message: error.message || '刷新失败' });
+    }
+  }
+
+  /**
+   * 内部刷新端点（无需鉴权）：仅供本机 scripts/posts-metrics-refresh.js 调用。
+   * POST /api/posts/:id/internal-refresh-metrics  body: { postUrl? }
+   *
+   * 安全约束：
+   *   - @Public() 跳过 JWT，但通过 isLocalRequest() 限定只能从本机访问
+   *     （127.0.0.1 / ::1 / 服务器自身 IP）。外部网络请求一律 403。
+   *   - 与 refresh-metrics 不同：不写 operation_log（无登录态，userId 为空，
+   *     写下去也是脏数据）；其余落库逻辑一致（updatePostFromScraped + 历史）。
+   *   - 这样把"内部定时刷新"与"用户手动刷新"分成两条路，避免依赖 AuthGuard
+   *     "缺 header 放行"的隐式行为，也避免 /refresh-metrics 被当成未鉴权写接口。
+   */
+  @Post(':id/internal-refresh-metrics')
+  @Public()
+  async internalRefreshMetrics(
+    @Param('id') id: string,
+    @Body() body: any,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    if (!isLocalRequest(req)) {
+      return res.status(403).json({ ok: false, message: '内部接口，禁止外部访问' });
+    }
+    const post = await this.postsService.findById(id);
+    if (!post) return res.status(404).json({ ok: false, message: '作品不存在' });
+    const targetUrl = body?.postUrl || post.postUrl;
+    if (!targetUrl) return res.status(400).json({ ok: false, message: '请先填写作品链接' });
+    try {
+      const metrics = await this.postsMetricsService.fetchMetricsFromUrl(targetUrl);
+      assertMetricsNotAllZero(metrics);
+      await this.postsService.updatePostFromScraped(id, metrics);
+      await this.postsService.recordMetricsHistory(id, metrics);
       return res.json({ ok: true, metrics });
     } catch (error: any) {
       return res.status(400).json({ ok: false, message: error.message || '刷新失败' });

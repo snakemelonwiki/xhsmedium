@@ -15,7 +15,7 @@
  *   - 失败作品自动重试 1 次
  *
  * 数据库：直接连接 MySQL（复用 .env 配置）
- * 抓取：调用后端最新 /api/posts/:id/refresh-metrics，复用新版解析逻辑
+ * 抓取：调用后端 /api/posts/:id/internal-refresh-metrics（内部端点，仅本机可访问），复用新版解析逻辑
  */
 
 const mysql = require("mysql2/promise");
@@ -107,7 +107,9 @@ async function updatePostMetrics(conn, post, idx, total) {
   try {
     const controller = new AbortController();
     const timeoutHandle = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-    const response = await fetch(`${BACKEND_URL}/api/posts/${encodeURIComponent(id)}/refresh-metrics`, {
+    // 走专用的「内部刷新」端点：@Public() 无需鉴权，但 controller 内限定仅本机可访问，
+    // 避免 /refresh-metrics（需登录态）被当成未鉴权写接口。
+    const response = await fetch(`${BACKEND_URL}/api/posts/${encodeURIComponent(id)}/internal-refresh-metrics`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -151,9 +153,37 @@ async function updatePostMetrics(conn, post, idx, total) {
   }
 }
 
+// ── 后端服务健康检查 ────────────────────────────────────────────────
+async function checkBackendHealth(timeoutMs = 5000) {
+  try {
+    const controller = new AbortController();
+    const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
+    const response = await fetch(`${BACKEND_URL}/api`, {
+      method: "HEAD",
+      signal: controller.signal,
+    }).finally(() => clearTimeout(timeoutHandle));
+    // 任意 HTTP 状态码都表示后端在线（404 也算）
+    log("INFO", `后端服务健康检查通过: ${BACKEND_URL} (HTTP ${response.status})`);
+    return true;
+  } catch (err) {
+    const reason = err?.name === "AbortError"
+      ? `超时（>${timeoutMs}ms）`
+      : (err?.message || String(err));
+    log("ERROR", `后端服务无法连接: ${BACKEND_URL} — ${reason}`);
+    return false;
+  }
+}
+
 // ── 执行一轮刷新 ──────────────────────────────────────────────────
 async function refreshAll() {
   log("INFO", "=== 开始作品指标刷新 ===");
+
+  // 先检查后端连通性，避免连接不上后端时白跑一轮 MySQL 查询
+  const healthy = await checkBackendHealth();
+  if (!healthy) {
+    log("ERROR", "后端服务不可用，跳过本轮刷新");
+    return { total: 0, success: 0, failed: 0, skipped: true };
+  }
 
   const env = loadEnv();
   let conn;

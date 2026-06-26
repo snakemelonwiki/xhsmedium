@@ -2045,6 +2045,9 @@ function isXiaohongshuNoteUnavailable(bodyText, pageTitle = "") {
   const unavailablePhrases = [
     "笔记暂时无法浏览",
     "该笔记暂时无法浏览",
+    "此笔记暂时无法浏览",
+    "笔记暂无法浏览",
+    "笔记暂时无法查看",
     "笔记不存在",
     "笔记已删除",
     "该内容已下架",
@@ -2052,6 +2055,30 @@ function isXiaohongshuNoteUnavailable(bodyText, pageTitle = "") {
     "内容不存在",
     "笔记已失效",
     "内容已删除",
+    "笔记看不了",
+    "笔记找不到",
+    "作者已设置",
+  ];
+  return unavailablePhrases.some((p) => text.includes(p) || title.includes(p));
+}
+
+/**
+ * 检测抖音视频是否已失效（被删除/隐藏/下架）。
+ * 页面文案特征："你要观看的视频不存在"、"视频不存在"、"视频已删除"、"该视频已被删除"。
+ */
+function isDouyinVideoUnavailable(bodyText, pageTitle = "") {
+  const text = String(bodyText || "").trim();
+  const title = String(pageTitle || "").trim();
+  const unavailablePhrases = [
+    "你要观看的视频不存在",
+    "视频不存在",
+    "视频已删除",
+    "该视频已被删除",
+    "视频已失效",
+    "视频已被删除",
+    "该视频不存在",
+    "内容已删除",
+    "内容不存在",
   ];
   return unavailablePhrases.some((p) => text.includes(p) || title.includes(p));
 }
@@ -2327,6 +2354,15 @@ async function _fetchMetricsOnce(targetUrl, platform) {
         contextReleased = true;
         releaseContext(platform);
         throw new LoginWallError("小红书笔记已失效，可能已被删除或隐藏，请更换链接重试。");
+      }
+    }
+
+    // 抖音：检测视频是否已失效（被删除/下架）
+    if (platform === "抖音" && payload?.bodyText) {
+      if (isDouyinVideoUnavailable(payload.bodyText, pageTitle)) {
+        contextReleased = true;
+        releaseContext(platform);
+        throw new LoginWallError("抖音视频已失效，可能已被删除或下架，请更换链接重试。");
       }
     }
 

@@ -8,7 +8,7 @@ module.exports = {
       exec_mode: "fork",
       env: {
         NODE_ENV: "production",
-        PORT: 8099
+        PORT: 8089
       }
     },
     {
@@ -20,7 +20,7 @@ module.exports = {
       exec_mode: "fork",
       env: {
         NODE_ENV: "production",
-        NEXT_PUBLIC_BACKEND_URL: "http://127.0.0.1:8099"
+        NEXT_PUBLIC_BACKEND_URL: "http://127.0.0.1:8089"
       }
     },
     {
