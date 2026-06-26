@@ -1,5 +1,12 @@
 import { UrlParseResult } from './types';
 
+export interface NavigationResolution {
+  parsed: UrlParseResult;
+  requestedPostId: string | null;
+  actualPostId: string | null;
+  mismatch: boolean;
+}
+
 /**
  * URL 分类器 — 精确识别链接格式，决定后续数据提取策略
  *
@@ -67,6 +74,52 @@ export function parseUrl(raw: string): UrlParseResult {
     normalizedUrl: url,
     postId: null,
     params: {},
+  };
+}
+
+export function resolveParsedAfterNavigation(
+  previous: UrlParseResult,
+  finalUrl: string,
+): NavigationResolution {
+  const reparsed = parseUrl(finalUrl);
+  if (!reparsed.platform || reparsed.platform !== previous.platform) {
+    return {
+      parsed: previous,
+      requestedPostId: previous.postId,
+      actualPostId: reparsed.postId,
+      mismatch: false,
+    };
+  }
+
+  const previousHasExplicitPostId =
+    Boolean(previous.postId) &&
+    ['xhs-standard', 'douyin-video', 'douyin-note', 'douyin-modal'].includes(previous.linkType);
+  const actualPostId = reparsed.postId || null;
+  const mismatch = Boolean(
+    previousHasExplicitPostId &&
+    previous.postId &&
+    actualPostId &&
+    previous.postId !== actualPostId,
+  );
+
+  if (mismatch) {
+    return {
+      parsed: previous,
+      requestedPostId: previous.postId,
+      actualPostId,
+      mismatch: true,
+    };
+  }
+
+  return {
+    parsed: {
+      ...previous,
+      ...reparsed,
+      params: { ...previous.params, ...reparsed.params },
+    },
+    requestedPostId: previous.postId,
+    actualPostId,
+    mismatch: false,
   };
 }
 

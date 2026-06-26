@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ScrapingLockService } from '../scraping/scraping-lock.service';
 import { ScrapingAlertService } from '../scraping/scraping-alert.service';
-import { ScraperService, ScrapingResult, ScrapingFailure } from '../scraping/core';
+import { ScraperService } from '../scraping/core';
 // V1 legacy: openLogin / closeLogin / getLoginStatus 仍走旧链路
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const parserCore = require('../../../scripts/parser-core');
@@ -116,7 +116,8 @@ export class ParserService {
       }).catch((err) => this.logger.warn(`recordFailure swallow: ${(err as any)?.message || err}`));
     } else {
       // 成功：复位连续失败（totalFailed 保留，YAGNI）
-      this.alertService.recordSuccess(result.data?.platform || null);
+      this.alertService.recordSuccess(result.data?.platform || null, source)
+        .catch((err) => this.logger.warn(`recordSuccess swallow: ${(err as any)?.message || err}`));
     }
 
     return result as ParserResult;

@@ -79,9 +79,14 @@ export function AppLayout({ role, title, children, viewRole, extraHeaderSlot }: 
     setPendingPath(undefined);
   }, [pathname]);
 
-  // 全局监听 token 过期事件，自动跳转登录页
+  const lastRedirectAtRef = useRef(0);
+
+  // 全局监听 token 过期事件，自动跳转登录页（5s 防抖，避免网络抖动导致误跳）
   useEffect(() => {
     function handleAuthExpired() {
+      const now = Date.now();
+      if (now - lastRedirectAtRef.current < 5000) return;
+      lastRedirectAtRef.current = now;
       router.replace('/login');
     }
     window.addEventListener('auth:expired', handleAuthExpired);

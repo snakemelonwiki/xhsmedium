@@ -21,6 +21,7 @@ import { HarSnapshot, ScrapedPostData } from '../types';
 
 /** scraper.service 在 page.evaluate 内沿 SSR 路径取出的标量字段 */
 export interface XhsSsrExtracted {
+  noteId?: string;
   title: string;
   authorName?: string;
   authorId?: string;
@@ -53,7 +54,7 @@ export class XiaohongshuExtractor {
     const feed = this.extractFromFeedApi(har, noteIdHint);
     if (this.hasMeaningfulData(feed)) sources.push(feed!);
 
-    const note = this.extractFromNoteApi(har);
+    const note = this.extractFromNoteApi(har, noteIdHint);
     if (this.hasMeaningfulData(note)) sources.push(note!);
 
     const meta = this.extractFromMeta(har);
@@ -143,7 +144,10 @@ export class XiaohongshuExtractor {
           return id === noteIdHint;
         });
       }
-      if (!target) target = items[0];
+      if (!target) {
+        if (noteIdHint) continue;
+        target = items[0];
+      }
 
       const card = target?.note_card || target?.noteCard;
       if (!card) continue;
@@ -157,7 +161,10 @@ export class XiaohongshuExtractor {
 
   // ── Note Detail API 提取（HAR） ──
 
-  private extractFromNoteApi(har: HarSnapshot): Partial<ScrapedPostData> | null {
+  private extractFromNoteApi(
+    har: HarSnapshot,
+    noteIdHint?: string | null,
+  ): Partial<ScrapedPostData> | null {
     const entries = har.entries.filter((e) => {
       // 排除 /note/metrics_report 这类分析端点
       if (/\/note\/metrics_report/i.test(e.url)) return false;
@@ -170,6 +177,10 @@ export class XiaohongshuExtractor {
       if (!noteData) continue;
 
       const note = noteData.note || noteData;
+      if (noteIdHint) {
+        const noteId = String(note?.id || note?.note_id || note?.noteId || '').trim();
+        if (!noteId || noteId !== noteIdHint) continue;
+      }
       const shaped = this.shapeFromXhsNote(note);
       if (shaped) return shaped;
     }

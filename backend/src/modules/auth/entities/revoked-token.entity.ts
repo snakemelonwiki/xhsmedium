@@ -23,6 +23,7 @@ import {
 @Index('idx_revoked_tokens_token', ['tokenHash'])
 @Index('idx_revoked_tokens_user', ['userId'])
 @Index('idx_revoked_tokens_expires', ['expiresAt'])
+@Index('idx_revoked_tokens_revoked', ['revokedAt'])
 export class RevokedToken {
   @PrimaryColumn({ type: 'varchar', length: 64 })
   id: string;

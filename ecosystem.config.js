@@ -44,7 +44,9 @@ module.exports = {
       autorestart: true,
       max_memory_restart: "1G",
       env: {
-        NODE_ENV: "production"
+        NODE_ENV: "production",
+        BACKEND_URL: "http://127.0.0.1:8089",
+        POSTS_REFRESH_TIMEOUT_MS: "30000"
       }
     }
   ]

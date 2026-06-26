@@ -140,6 +140,11 @@ export function normalizePagedResult<T>(payload: unknown): PagedResult<T> {
   return { items, total, page, pageSize };
 }
 
+// 全局防抖：同一 token 短时间内多次 401 → 只 dispatch 一次 auth:expired，
+// 避免网络抖动/并发失败导致事件雪崩。
+let lastAuthExpiredDispatchedAt = 0;
+const AUTH_EXPIRED_DEBOUNCE_MS = 5000;
+
 export function createApiClient(options: ApiClientOptions = {}) {
   const baseUrl = options.baseUrl ?? '/api';
   const fetcher = options.fetcher ?? fetch;
@@ -200,15 +205,19 @@ export function createApiClient(options: ApiClientOptions = {}) {
       const snapshot = getStoredUser();
       clearToken();
       if (typeof window !== 'undefined') {
-        window.dispatchEvent(
-          new CustomEvent('auth:expired', {
-            detail: {
-              reason,
-              userId: snapshot?.id ? String(snapshot.id) : undefined,
-              role: snapshot?.role ? String(snapshot.role) : undefined,
-            },
-          }),
-        );
+        const now = Date.now();
+        if (now - lastAuthExpiredDispatchedAt > AUTH_EXPIRED_DEBOUNCE_MS) {
+          lastAuthExpiredDispatchedAt = now;
+          window.dispatchEvent(
+            new CustomEvent('auth:expired', {
+              detail: {
+                reason,
+                userId: snapshot?.id ? String(snapshot.id) : undefined,
+                role: snapshot?.role ? String(snapshot.role) : undefined,
+              },
+            }),
+          );
+        }
       }
       throw new AuthExpiredError(undefined, reason);
     }

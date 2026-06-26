@@ -15,19 +15,19 @@
  *   - 失败作品自动重试 1 次
  *
  * 数据库：直接连接 MySQL（复用 .env 配置）
+ * 抓取：调用后端最新 /api/posts/:id/refresh-metrics，复用新版解析逻辑
  */
 
 const mysql = require("mysql2/promise");
 const path = require("path");
 const fs = require("fs");
-
-// ── 路径 & 配置 ──────────────────────────────────────────────────
 const PROJECT_ROOT = path.resolve(__dirname, "..");
-const parserCore = require(path.join(PROJECT_ROOT, "backend/scripts/parser-core"));
 
 const LOG_FILE = path.join(PROJECT_ROOT, ".playwright-profiles", "posts-refresh.log");
 const PID_FILE = path.join(PROJECT_ROOT, ".playwright-profiles", "posts-refresh.pid");
 const DEFAULT_MIN_INTERVAL_HOURS = 48; // 2 天
+const BACKEND_URL = String(process.env.BACKEND_URL || "http://127.0.0.1:8089").replace(/\/+$/, "");
+const REQUEST_TIMEOUT_MS = Number(process.env.POSTS_REFRESH_TIMEOUT_MS || 30000);
 
 // ── 随机数工具 ────────────────────────────────────────────────────
 function randomInt(min, max) {
@@ -59,6 +59,12 @@ function loadEnv() {
   for (const line of lines) {
     const m = line.match(/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
     if (m) env[m[1]] = m[2].trim();
+    // if (m) {
+    //   // 去掉值两端可能存在的单/双引号
+    //   let value = m[2].trim();
+    //   value = value.replace(/^['"](.*)['"]$/, "$1");
+    //   env[m[1]] = value;
+    // }
   }
   return env;
 }
@@ -99,18 +105,29 @@ async function updatePostMetrics(conn, post, idx, total) {
   log("INFO", `[${idx + 1}/${total}] 开始刷新: ${id} | ${title?.slice(0, 40) || "无标题"}`);
 
   try {
-    const result = await parserCore.fetchWithRetry(post_url, {
-      retry: 1,
-      timeout: 20000,
-    });
+    const controller = new AbortController();
+    const timeoutHandle = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    const response = await fetch(`${BACKEND_URL}/api/posts/${encodeURIComponent(id)}/refresh-metrics`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ postUrl: post_url || undefined }),
+      signal: controller.signal,
+    }).finally(() => clearTimeout(timeoutHandle));
 
-    if (!result || !result.ok) {
-      const errMsg = result?.error?.message || "抓取失败";
+    let payload = null;
+    try {
+      payload = await response.json();
+    } catch {}
+
+    if (!response.ok || !payload?.ok) {
+      const errMsg = payload?.message || payload?.error?.message || `HTTP ${response.status}`;
       log("WARN", `[${idx + 1}/${total}] 刷新失败: ${id} — ${errMsg}`);
       return { success: false, id, reason: errMsg };
     }
 
-    const d = result.data;
+    const d = payload.metrics || {};
 
     // 校验抓取结果：如果点赞/评论/收藏/分享全为 0，视为空数据，不更新数据库
     const likesVal = Number(d.likes || 0);
@@ -123,19 +140,12 @@ async function updatePostMetrics(conn, post, idx, total) {
       return { success: false, id, reason: "抓取结果为空（全 0）" };
     }
 
-    await conn.execute(
-      `
-      UPDATE posts
-      SET likes = ?, comments = ?, favorites = ?, shares = ?, metrics_updated_at = NOW()
-      WHERE id = ?
-      `,
-      [likesVal, commentsVal, favoritesVal, sharesVal, id]
-    );
-
     log("INFO", `[${idx + 1}/${total}] 刷新成功: ${id} 赞${likesVal} 评${commentsVal} 藏${favoritesVal} 分享${sharesVal}`);
     return { success: true, id, likes: likesVal, comments: commentsVal, favorites: favoritesVal, shares: sharesVal };
   } catch (err) {
-    const errMsg = err?.message || String(err);
+    const errMsg = err?.name === "AbortError"
+      ? `请求超时（>${REQUEST_TIMEOUT_MS}ms）`
+      : (err?.message || String(err));
     log("ERROR", `[${idx + 1}/${total}] 刷新异常: ${id} — ${errMsg}`);
     return { success: false, id, reason: errMsg };
   }

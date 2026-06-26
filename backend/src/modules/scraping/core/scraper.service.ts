@@ -7,7 +7,7 @@ import { BrowserPoolService } from './browser-pool.service';
 import { HarListener } from './har-listener';
 import { XiaohongshuExtractor } from './extractors/xiaohongshu.extractor';
 import { DouyinExtractor } from './extractors/douyin.extractor';
-import { parseUrl } from './url-parser';
+import { parseUrl, resolveParsedAfterNavigation } from './url-parser';
 import {
   ScrapedPostData,
   ScrapingOptions,
@@ -228,13 +228,17 @@ export class ScraperService {
       }
 
       // ── 短链/重定向后回写真实 URL + postId ──
-      try {
-        const finalUrl = page.url();
-        if (finalUrl && finalUrl !== parsed.normalizedUrl) {
-          parsed = this.refreshParsedFromFinalUrl(parsed, finalUrl);
-          opts.log(`重定向后 URL: ${finalUrl}, postId=${parsed.postId || 'null'}`);
+      const finalUrl = page.url();
+      if (finalUrl && finalUrl !== parsed.normalizedUrl) {
+        const resolution = resolveParsedAfterNavigation(parsed, finalUrl);
+        if (resolution.mismatch) {
+          throw new Error(
+            `${platform}作品已删除或已跳转到其他作品页（请求ID=${resolution.requestedPostId}，实际ID=${resolution.actualPostId || 'unknown'}）`,
+          );
         }
-      } catch { /* ignore */ }
+        parsed = resolution.parsed;
+        opts.log(`重定向后 URL: ${finalUrl}, postId=${parsed.postId || 'null'}`);
+      }
 
       // ── 登录墙检测：先取原始 body 文本，避免 dismissObstacles 误删主容器后取不到帖子信号 ──
       const pageTitle = await page.title().catch(() => '');
@@ -248,6 +252,18 @@ export class ScraperService {
         throw new Error(
           `当前打开的是${platform}登录页/登录弹窗，请先在"链接测试"里点"打开${platform}登录浏览器"完成一次登录。`,
         );
+      }
+
+      // ── 小红书笔记删除/失效检测 ──
+      if (platform === '小红书' && this.isXiaohongshuNoteDeleted(bodyTextRaw, pageTitle)) {
+        this.logger.warn(`[Scraper] ${platform} 笔记已失效/被删除: url=${parsed.normalizedUrl}, postId=${parsed.postId || 'null'}`);
+        throw new Error('小红书笔记已失效，可能已被删除、隐藏或下架');
+      }
+
+      // ── 抖音作品删除/失效检测 ──
+      if (platform === '抖音' && this.isDouyinPostDeleted(bodyTextRaw, pageTitle)) {
+        this.logger.warn(`[Scraper] ${platform} 作品已被删除/隐藏/下架: url=${parsed.normalizedUrl}, postId=${parsed.postId || 'null'}`);
+        throw new Error('抖音作品已被删除，页面提示"你要观看的图文不存在"');
       }
 
       // 去浮层后再取一份 bodyText 用于兜底指标提取
@@ -265,11 +281,15 @@ export class ScraperService {
             null;
           if (!root || typeof root !== 'object') return null;
 
+          const getNoteId = (note: any) =>
+            String(note?.id || note?.note_id || note?.noteId || '').trim();
+
           const shapeNote = (note: any) => {
             if (!note || typeof note !== 'object') return null;
             const interact = note.interact_info || note.interactInfo || {};
             const user = note.user || {};
             const out: any = {
+              noteId: getNoteId(note) || undefined,
               title: String(note.title || note.display_title || note.desc || '').trim(),
               authorName: String(user.nickname || '').trim() || undefined,
               authorId: String(user.user_id || user.userId || '').trim() || undefined,
@@ -293,7 +313,7 @@ export class ScraperService {
             }
             // 没 hint 或没命中：只有一条时才取（避免错笔记）
             const keys = Object.keys(map);
-            if (keys.length === 1) {
+            if (!hint && keys.length === 1) {
               const raw = map[keys[0]];
               const note = raw?.note || raw?.data?.note || raw;
               const s = shapeNote(note);
@@ -306,6 +326,7 @@ export class ScraperService {
           if (ptrId && map?.[ptrId]) {
             const raw = map[ptrId];
             const note = raw?.note || raw?.data?.note || raw;
+            if (hint && getNoteId(note) !== hint) return null;
             const s = shapeNote(note);
             if (s) return { ...s, _source: 'ssr-ptr' };
           }
@@ -314,6 +335,7 @@ export class ScraperService {
           const noteData = root.noteData?.data?.noteData || root.noteData?.noteData;
           if (noteData) {
             const note = noteData.note || noteData;
+            if (hint && getNoteId(note) !== hint) return null;
             const s = shapeNote(note);
             if (s) return { ...s, _source: 'ssr-noteData' };
           }
@@ -332,12 +354,27 @@ export class ScraperService {
       // ── 数据提取 ──
       const data = this.extractData(platform, har, ssrExtracted, parsed);
 
-      // 降级到 DOM 文本分析：按字段独立降级，如果某个指标为 0 尝试从 bodyText 获取
+      // 降级到 DOM 文本分析：仅当 HAR/SSR 未取到该指标时，才用 bodyText 补齐
       const fallback = this.extractFromBodyText(bodyText);
-      if (data.likes === 0 && fallback.likes > 0) data.likes = fallback.likes;
-      if (data.comments === 0 && fallback.comments > 0) data.comments = fallback.comments;
-      if (data.favorites === 0 && fallback.favorites > 0) data.favorites = fallback.favorites;
-      if (data.shares === 0 && fallback.shares > 0) data.shares = fallback.shares;
+      data.likes = this.mergeMetric(data.likes, fallback.likes);
+      data.comments = this.mergeMetric(data.comments, fallback.comments);
+      data.favorites = this.mergeMetric(data.favorites, fallback.favorites);
+      data.shares = this.mergeMetric(data.shares, fallback.shares);
+
+      // 补齐必填字段的默认值，保证后续流程拿到完整对象
+      const finalData: ScrapedPostData = {
+        platform: data.platform || platform,
+        title: data.title || '',
+        copywriting: data.copywriting || '',
+        authorName: data.authorName || '',
+        authorId: data.authorId || '',
+        likes: Number(data.likes) || 0,
+        comments: Number(data.comments) || 0,
+        favorites: Number(data.favorites) || 0,
+        shares: Number(data.shares) || 0,
+        publishedAt: data.publishedAt || '',
+        metricsUpdatedAt: new Date().toISOString(),
+      };
 
       // ── 截图封面 ──
       // 抖音主页弹窗链接（user/...?modal_id=...）会直接显示主页，modal 关闭后截图会截到主页。
@@ -348,17 +385,17 @@ export class ScraperService {
 
       const cover = await this.captureScreenshot(page, platform);
       if (cover) {
-        data.coverImageUrl = cover.coverImageUrl;
-        data.coverThumbUrl = cover.coverThumbUrl;
+        finalData.coverImageUrl = cover.coverImageUrl;
+        finalData.coverThumbUrl = cover.coverThumbUrl;
       }
 
-      data.metricsUpdatedAt = new Date().toISOString();
-      this.logger.log(`[Scraper] ${platform} 抓取完成: ${Date.now() - t0}ms 赞${data.likes} 评${data.comments} 藏${data.favorites} 分享${data.shares}`);
+      this.logger.log(`[Scraper] ${platform} 抓取完成: ${Date.now() - t0}ms 赞${finalData.likes} 评${finalData.comments} 藏${finalData.favorites} 分享${finalData.shares}`);
 
-      return data;
+      return finalData;
     } catch (err) {
       // 非登录墙错误：释放上下文（下次重新冷启动）
-      if (!String(err).includes('登录页')) {
+      const errMsg = String(err?.message ?? err);
+      if (!errMsg.includes('登录页')) {
         await this.browserPool.releaseContext(platform);
       }
       throw err;
@@ -381,32 +418,12 @@ export class ScraperService {
 
   // ── 数据提取 ──
 
-  /**
-   * 重定向 / 短链跳转后，从浏览器当前 URL 重新解析 postId 与 normalizedUrl，
-   * 让 extractor 能用上正确的 noteId 做精确匹配。
-   */
-  private refreshParsedFromFinalUrl(prev: UrlParseResult, finalUrl: string): UrlParseResult {
-    try {
-      const reparsed = parseUrl(finalUrl);
-      // 平台一致才接受重写；否则保留原结果（防御性）
-      if (reparsed.platform && reparsed.platform === prev.platform) {
-        return {
-          ...prev,
-          ...reparsed,
-          // 合并参数（保留原 xsec_token 等）
-          params: { ...prev.params, ...reparsed.params },
-        };
-      }
-    } catch { /* ignore */ }
-    return prev;
-  }
-
   private extractData(
     platform: string,
     har: HarSnapshot,
     ssrData: any,
     parsed: UrlParseResult,
-  ): ScrapedPostData {
+  ): Partial<ScrapedPostData> {
     if (platform === '小红书') {
       const result = this.xhsExtractor.extract(har, ssrData, parsed.postId);
       return {
@@ -415,12 +432,11 @@ export class ScraperService {
         copywriting: result.copywriting || '',
         authorName: result.authorName || '',
         authorId: result.authorId || '',
-        likes: result.likes || 0,
-        comments: result.comments || 0,
-        favorites: result.favorites || 0,
-        shares: result.shares || 0,
+        likes: result.likes,
+        comments: result.comments,
+        favorites: result.favorites,
+        shares: result.shares,
         publishedAt: result.publishedAt || '',
-        metricsUpdatedAt: new Date().toISOString(),
       };
     }
 
@@ -432,12 +448,11 @@ export class ScraperService {
       copywriting: result.copywriting || '',
       authorName: result.authorName || '',
       authorId: result.authorId || '',
-      likes: result.likes || 0,
-      comments: result.comments || 0,
-      favorites: result.favorites || 0,
-      shares: result.shares || 0,
+      likes: result.likes,
+      comments: result.comments,
+      favorites: result.favorites,
+      shares: result.shares,
       publishedAt: result.publishedAt || '',
-      metricsUpdatedAt: new Date().toISOString(),
     };
   }
 
@@ -668,6 +683,115 @@ export class ScraperService {
     return text.includes('登录后') || text.includes('扫码登录') || text.includes('验证码登录');
   }
 
+  /**
+   * 检测抖音作品是否已被删除/隐藏/下架。
+   *
+   * 特征文案：
+   *   - "你要观看的图文不存在" — 图文/笔记被删除
+   *   - "该内容已被删除" / "视频不见了" — 视频被删除
+   *   - "该用户已被封禁" / "账号已注销" — 作者账号异常
+   *   - "作品审核中" / "内容审核中" — 被平台隐藏
+   *
+   * 这些文案通常出现在页面主体区域，title 也会变成通用提示。
+   */
+  private isDouyinPostDeleted(bodyText: string, pageTitle: string): boolean {
+    const text = String(bodyText || '').trim();
+    const title = String(pageTitle || '').trim();
+
+    const DELETED_PHRASES = [
+      '你要观看的图文不存在',
+      '你要观看的视频不存在',
+      '该内容已被删除',
+      '视频不见了',
+      '作品已删除',
+      '该作品已下架',
+      '内容审核中',
+      '作品审核中',
+      '该用户已被封禁',
+      '账号已注销',
+      '该账号已封禁',
+    ];
+
+    const hasPhrase = DELETED_PHRASES.some((p) => text.includes(p));
+
+    // title 也会变成通用提示页
+    const DELETED_TITLES = [
+      '抖音',
+      '抖音 - 记录美好生活',
+    ];
+    const isGenericTitle = DELETED_TITLES.includes(title);
+
+    // 需要同时满足：有删除特征文案 + 无正常作品信号（点赞/评论/分享按钮）
+    if (!hasPhrase) return false;
+
+    const hasPostSignals =
+      /点赞/.test(text) &&
+      /评论/.test(text) &&
+      /分享/.test(text);
+
+    return !hasPostSignals || isGenericTitle;
+  }
+
+  /**
+   * 检测小红书笔记是否已被删除/隐藏/下架。
+   *
+   * 特征文案：
+   *   - "笔记暂时无法浏览" — 笔记被删除或隐藏
+   *   - "笔记不存在" — 笔记被删除
+   *   - "笔记已删除" — 明确被删除
+   *   - "该内容已下架" — 被平台下架
+   *   - "内容已删除" — 已删除
+   *   - "笔记已失效" — 链接失效
+   *
+   * 这些文案通常出现在页面主体区域，title 可能变为通用提示。
+   */
+  private isXiaohongshuNoteDeleted(bodyText: string, pageTitle: string): boolean {
+    const text = String(bodyText || '').trim();
+    const title = String(pageTitle || '').trim();
+
+    const DELETED_PHRASES = [
+      '笔记暂时无法浏览',
+      '该笔记暂时无法浏览',
+      '笔记不存在',
+      '笔记已删除',
+      '该内容已下架',
+      '内容已下架',
+      '内容不存在',
+      '笔记已失效',
+      '内容已删除',
+    ];
+
+    const hasPhrase = DELETED_PHRASES.some((p) => text.includes(p));
+
+    // title 可能变为通用提示
+    const DELETED_TITLES = [
+      '小红书 - 你的生活兴趣社区',
+      '小红书',
+    ];
+    const isGenericTitle = DELETED_TITLES.includes(title);
+
+    // 需要同时满足：有删除特征文案 + 无正常作品信号（评论/点赞/收藏）
+    if (!hasPhrase) return false;
+
+    const hasPostSignals =
+      /共\s*[\d.,wkW万千]+\s*条评论/.test(text) ||
+      /登录后评论\s*[\d.,wkW万千]+/.test(text) ||
+      /说点什么/.test(text) ||
+      /点赞/.test(text);
+
+    return !hasPostSignals || isGenericTitle;
+  }
+
+  private isMetricMissing(value: unknown): value is undefined | null {
+    return value === undefined || value === null;
+  }
+
+  private mergeMetric(primary: unknown, fallback: number): number {
+    if (typeof primary === 'number' && Number.isFinite(primary)) return primary;
+    if (typeof fallback === 'number' && Number.isFinite(fallback) && fallback > 0) return fallback;
+    return 0;
+  }
+
   // ── body text 兜底提取 ──
 
   private extractFromBodyText(text: string): { likes: number; comments: number; favorites: number; shares: number } {
@@ -682,19 +806,26 @@ export class ScraperService {
       return Math.round(v);
     };
 
-    const likes = parse(text.match(/点赞\s*([\d.,wkW万千]+)/)?.[1])
-              || parse(text.match(/([\d.,wkW万千]+)\s*(?:点赞|赞)/)?.[1]);
-    const comments = parse(text.match(/评论\s*([\d.,wkW万千]+)/)?.[1])
-              || parse(text.match(/([\d.,wkW万千]+)\s*(?:评论)/)?.[1]);
-    const favorites = parse(text.match(/收藏\s*([\d.,wkW万千]+)/)?.[1])
-              || parse(text.match(/([\d.,wkW万千]+)\s*(?:收藏)/)?.[1]);
-    const shares = parse(text.match(/分享\s*([\d.,wkW万千]+)/)?.[1])
-              || parse(text.match(/([\d.,wkW万千]+)\s*(?:分享|转发)/)?.[1]);
+    const likesMatch = parse(text.match(/点赞\s*([\d.,wkW万千]+)/)?.[1]);
+    const likesAltMatch = parse(text.match(/([\d.,wkW万千]+)\s*(?:点赞|赞)/)?.[1]);
+    const likes = this.isMetricMissing(likesMatch) ? likesAltMatch : likesMatch;
+
+    const commentsMatch = parse(text.match(/评论\s*([\d.,wkW万千]+)/)?.[1]);
+    const commentsAltMatch = parse(text.match(/([\d.,wkW万千]+)\s*(?:评论)/)?.[1]);
     const totalComments = parse(text.match(/共\s*([\d.,wkW万千]+)\s*条评论/)?.[1]);
+    const comments = this.isMetricMissing(totalComments) ? (this.isMetricMissing(commentsMatch) ? commentsAltMatch : commentsMatch) : totalComments;
+
+    const favoritesMatch = parse(text.match(/收藏\s*([\d.,wkW万千]+)/)?.[1]);
+    const favoritesAltMatch = parse(text.match(/([\d.,wkW万千]+)\s*(?:收藏)/)?.[1]);
+    const favorites = this.isMetricMissing(favoritesMatch) ? favoritesAltMatch : favoritesMatch;
+
+    const sharesMatch = parse(text.match(/分享\s*([\d.,wkW万千]+)/)?.[1]);
+    const sharesAltMatch = parse(text.match(/([\d.,wkW万千]+)\s*(?:分享|转发)/)?.[1]);
+    const shares = this.isMetricMissing(sharesMatch) ? sharesAltMatch : sharesMatch;
 
     return {
       likes,
-      comments: totalComments || comments,
+      comments,
       favorites,
       shares,
     };

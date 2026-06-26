@@ -26,6 +26,8 @@ import { OperationLog } from './entities/operation-log.entity';
 import { SupervisorSuggestion } from './entities/supervisor-suggestion.entity';
 import { AppSetting } from './entities/app-setting.entity';
 import { ScrapingAlert } from './modules/scraping/scraping-alert.entity';
+// PF-05: RevokedToken 需要在 TypeOrmModule.forRoot 中注册
+import { RevokedToken } from './modules/auth/entities/revoked-token.entity';
 // v1.3 增量（教务端表 M25）
 import { Teacher } from './entities/teacher.entity';
 import { TeacherSpecialty } from './entities/teacher-specialty.entity';
@@ -127,6 +129,7 @@ import { TokenRefreshInterceptor } from './common/token-refresh.interceptor';
           TeacherPayment,
           OtherExpense,
           PlazaConfig,
+          RevokedToken,
         ],
         synchronize: false,
         charset: 'utf8mb4',
@@ -153,7 +156,7 @@ import { TokenRefreshInterceptor } from './common/token-refresh.interceptor';
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
         secret: config.get('JWT_SECRET', 'fallback-secret'),
-        signOptions: { expiresIn: config.get('JWT_EXPIRES_IN', '1d') },
+        signOptions: { expiresIn: config.get('JWT_EXPIRES_IN', '8h') },
       }),
     }),
     PassportModule.register({ defaultStrategy: 'jwt' }),

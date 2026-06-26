@@ -377,9 +377,13 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   // 防止旧 token 触发 socket 鉴权失败循环。
   // pendingAlerts 由 hydrate effect 在 user 置空时清掉内存队列；
   // **不主动删 localStorage** —— 同一用户重新登录时还能再弹回未确认的弹窗。
+  const lastAuthExpiredHandledAt = useRef(0);
   useEffect(() => {
     if (typeof window === 'undefined') return undefined;
     const onAuthExpired = () => {
+      const now = Date.now();
+      if (now - lastAuthExpiredHandledAt.current < 5000) return;
+      lastAuthExpiredHandledAt.current = now;
       if (pollTimerRef.current) {
         window.clearInterval(pollTimerRef.current);
         pollTimerRef.current = null;

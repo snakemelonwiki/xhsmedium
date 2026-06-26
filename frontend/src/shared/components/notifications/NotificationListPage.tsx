@@ -7,10 +7,10 @@ import { useEffect, useState } from 'react';
 
 import {
   listNotifications,
-  markAllNotificationsRead,
   markNotificationRead,
   type NotificationQuery,
 } from '@/shared/api/notifications';
+import { useNotifications } from '@/shared/contexts/NotificationContext';
 import { StatusTag } from '@/shared/components/status';
 import type { NotificationItem } from '@/shared/types/notifications';
 import { formatDateTime } from '@/shared/utils/date-format';
@@ -24,6 +24,7 @@ const pageSize = 20;
 
 export function NotificationListPage({ title, description }: NotificationListPageProps) {
   const router = useRouter();
+  const { markRead, markAllRead } = useNotifications();
   const [items, setItems] = useState<NotificationItem[]>([]);
   const [total, setTotal] = useState(0);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -97,12 +98,12 @@ export function NotificationListPage({ title, description }: NotificationListPag
     if (status === 'unread') setTotal((n) => Math.max(0, n - 1));
 
     try {
-      await markNotificationRead(id);
+      // 通过 Context 标记已读，保持 Bell badge 同步
+      await markRead(id);
       await load(page, status);
-    } catch (err) {
-      // 失败回滚：重新加载列表
+    } catch {
+      // Context 已做乐观回滚；这里刷新列表对齐服务端
       await load(page, status);
-      message.error(err instanceof Error ? err.message : '标记已读失败');
     }
   }
 
@@ -112,14 +113,15 @@ export function NotificationListPage({ title, description }: NotificationListPag
     setUnreadCount(0);
 
     try {
-      await markAllNotificationsRead();
+      // 通过 Context 标记全部已读，保持 Bell badge 同步
+      await markAllRead();
       message.success('已全部标记为已读');
-      // 全部已读后自动切到「未读」筛选用户看到的就是空列表，符合预期
+      // 全部已读后自动切到「未读」筛选，用户看到的就是空列表，符合预期
       setStatus('unread');
-    } catch (err) {
-      // 失败回滚：重新加载
+    } catch {
+      // Context 已做乐观回滚；这里刷新列表对齐服务端
       await load(page, status);
-      message.error(err instanceof Error ? err.message : '标记全部已读失败');
+      message.error('标记全部已读失败');
     }
   }
 

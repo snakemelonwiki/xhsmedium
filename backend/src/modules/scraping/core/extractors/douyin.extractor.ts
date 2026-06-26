@@ -82,41 +82,11 @@ export class DouyinExtractor {
    * 2026-06 抖音笔记/图文页（/note/xxx，awemeType=68）通过 `self.__pace_f.push` 下发。
    */
   private parseRscFlightData(html: string, awemeIdHint?: string | null): any | null {
-    // 收集所有 __pace_f.push([1, "..."]) 的字符串参数
-    const payloads: string[] = [];
-    const pushRe = /self\.__pace_f\.push\(\[1,"([\s\S]*?)"\]\)/g;
-    let m: RegExpExecArray | null;
-    while ((m = pushRe.exec(html)) !== null) {
-      payloads.push(m[1]);
-    }
+    const payloads = this.extractPaceFPayloads(html);
     if (!payloads.length) return null;
 
-    const unescapeJsString = (s: string) => {
-      const escapes: Record<string, string> = {
-        '\\"': '"',
-        '\\': '\\',
-        '\\n': '\n',
-        '\\t': '\t',
-        '\\r': '\r',
-        '\\b': '\b',
-        '\\f': '\f',
-        '\\v': '\v',
-      };
-      return s.replace(/\\(?:["\\ntrbfv]|u[0-9a-fA-F]{4}|x[0-9a-fA-F]{2})/g, (match) => {
-        const mapped = escapes[match];
-        if (mapped !== undefined) return mapped;
-        // \uXXXX
-        const u = match.match(/\\u([0-9a-fA-F]{4})/);
-        if (u) return String.fromCharCode(parseInt(u[1], 16));
-        // \xXX
-        const x = match.match(/\\x([0-9a-fA-F]{2})/);
-        if (x) return String.fromCharCode(parseInt(x[1], 16));
-        return match;
-      });
-    };
-
     for (const raw of payloads) {
-      let unescaped = unescapeJsString(raw);
+      let unescaped = this.unescapeJsString(raw);
 
       // 部分 __pace_f payload 仍是 URL 编码的 JSON，需要二次解码
       if (unescaped.includes('%22') || unescaped.includes('%7B')) {
@@ -151,6 +121,66 @@ export class DouyinExtractor {
     }
 
     return null;
+  }
+
+  /**
+   * 从 HTML 中精确提取 self.__pace_f.push([1, "..."]) 的字符串参数。
+   * 使用字符级扫描而非正则，正确处理字符串中的转义引号。
+   */
+  private extractPaceFPayloads(html: string): string[] {
+    const payloads: string[] = [];
+    const prefix = 'self.__pace_f.push([1,"';
+    let pos = 0;
+    while (true) {
+      const start = html.indexOf(prefix, pos);
+      if (start === -1) break;
+      let i = start + prefix.length;
+      let escaped = false;
+      const chars: string[] = [];
+      while (i < html.length) {
+        const c = html[i];
+        if (escaped) {
+          chars.push('\\', c);
+          escaped = false;
+        } else if (c === '\\') {
+          escaped = true;
+        } else if (c === '"') {
+          break;
+        } else {
+          chars.push(c);
+        }
+        i++;
+      }
+      if (i < html.length && html[i] === '"') {
+        payloads.push(chars.join(''));
+      }
+      pos = i + 1;
+    }
+    return payloads;
+  }
+
+  private unescapeJsString(s: string): string {
+    const escapes: Record<string, string> = {
+      '\\"': '"',
+      '\\\\': '\\',
+      '\\n': '\n',
+      '\\t': '\t',
+      '\\r': '\r',
+      '\\b': '\b',
+      '\\f': '\f',
+      '\\v': '\v',
+    };
+    return s.replace(/\\(?:["\\ntrbfv]|u[0-9a-fA-F]{4}|x[0-9a-fA-F]{2})/g, (match) => {
+      const mapped = escapes[match];
+      if (mapped !== undefined) return mapped;
+      // \uXXXX
+      const u = match.match(/\\u([0-9a-fA-F]{4})/);
+      if (u) return String.fromCharCode(parseInt(u[1], 16));
+      // \xXX
+      const x = match.match(/\\x([0-9a-fA-F]{2})/);
+      if (x) return String.fromCharCode(parseInt(x[1], 16));
+      return match;
+    });
   }
 
   // ── RENDER_DATA 提取 ──
@@ -237,6 +267,26 @@ export class DouyinExtractor {
     walk(obj, 0);
     if (!candidates.length) return null;
 
+    if (awemeIdHint) {
+      const exact = candidates.filter((item) => item.awemeId === awemeIdHint);
+      if (!exact.length) return null;
+      exact.sort((a, b) => b.score - a.score || b.digg - a.digg);
+      const bestExact = exact[0];
+      if (bestExact.likes === null && bestExact.comments === null && bestExact.favorites === null && bestExact.shares === null) {
+        return null;
+      }
+      return {
+        title: bestExact.title,
+        authorName: bestExact.authorName || undefined,
+        authorId: bestExact.authorId || undefined,
+        likes: bestExact.likes ?? 0,
+        comments: bestExact.comments ?? 0,
+        favorites: bestExact.favorites ?? 0,
+        shares: bestExact.shares ?? 0,
+        publishedAt: bestExact.publishDate || undefined,
+      };
+    }
+
     // 选质量分最高的；同分时取 digg_count 最大的
     candidates.sort((a, b) => b.score - a.score || b.digg - a.digg);
     const best = candidates[0];
@@ -271,16 +321,11 @@ export class DouyinExtractor {
       // 1. 优先取 aweme_detail（老视频详情页）
       let detail = data.aweme_detail;
 
-      // 2. 兼容 aweme_list（个人主页 / 相关推荐）
-      if (!detail && Array.isArray(data.aweme_list) && data.aweme_list.length > 0) {
-        if (awemeIdHint) {
-          detail = data.aweme_list.find((a: any) =>
-            String(a.aweme_id || a.awemeId || '') === awemeIdHint,
-          );
-        }
-        if (!detail) {
-          detail = data.aweme_list[0];
-        }
+      // 2. 兼容 aweme_list（个人主页 / 相关推荐），仅按 awemeIdHint 精确匹配
+      if (!detail && awemeIdHint && Array.isArray(data.aweme_list) && data.aweme_list.length > 0) {
+        detail = data.aweme_list.find((a: any) =>
+          String(a.aweme_id || a.awemeId || '') === awemeIdHint,
+        );
       }
       if (!detail) continue;
 
@@ -314,6 +359,10 @@ export class DouyinExtractor {
 
   // ── HTML 正则兜底 ──
 
+  private escapeRegExp(s: string): string {
+    return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
   private extractFromHtml(har: HarSnapshot, awemeIdHint?: string | null): Partial<ScrapedPostData> | null {
     const htmlEntries = har.entries.filter((e) =>
       e.contentType.includes('text/html') && e.textBody,
@@ -325,7 +374,7 @@ export class DouyinExtractor {
 
       // 按 awemeId 精确匹配当前视频的 JSON 块
       if (awemeIdHint) {
-        const vidStr = String(awemeIdHint);
+        const vidStr = this.escapeRegExp(String(awemeIdHint));
         const patterns = [
           new RegExp(`"${vidStr}"\\s*:\\s*\\{[\\s\\S]{0,2000}?"statistics"\\s*:\\s*\\{([^}]+)\\}`, 'i'),
           new RegExp(`"${vidStr}"[\\s\\S]{0,3000}?"statistics"\\s*:\\s*\\{([^}]+)\\}`, 'i'),
@@ -349,6 +398,7 @@ export class DouyinExtractor {
             }
           }
         }
+        continue;
       }
 
       // 全局兜底：找第一个含 digg_count 的 statistics 块
@@ -463,11 +513,23 @@ export class DouyinExtractor {
 
   private formatTimestamp(value: unknown): string {
     if (value === null || value === undefined) return '';
+    const hmsMatch = typeof value === 'string' && /^(\d{2}):(\d{2})$/.exec(value);
+    if (hmsMatch) {
+      const hour = Number(hmsMatch[1]);
+      const minute = Number(hmsMatch[2]);
+      return `${hour}:${String(minute).padStart(2, '0')}`;
+    }
+
     const n = Number(value);
     if (!Number.isFinite(n) || n <= 0) return '';
     const ms = n > 100000000000 ? n : n * 1000;
     const d = new Date(ms);
     if (!Number.isFinite(d.getTime())) return '';
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const parts = new Intl.DateTimeFormat('zh-CN', {
+      timeZone: 'Asia/Shanghai',
+      year: 'numeric', month: '2-digit', day: '2-digit',
+    }).formatToParts(d);
+    const get = (type: string) => parts.find(p => p.type === type)?.value ?? '';
+    return `${get('year')}-${get('month')}-${get('day')}`;
   }
 }

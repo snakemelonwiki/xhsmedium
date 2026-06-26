@@ -1,6 +1,6 @@
 import { Injectable, UnauthorizedException, ForbiddenException, Inject, BadRequestException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, LessThan } from 'typeorm';
+import { Repository } from 'typeorm';
 import { JwtService } from '@nestjs/jwt';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { User } from '../../entities/user.entity';
@@ -363,18 +363,28 @@ export class AuthService {
   }
 
   /**
-   * PF-05：每小时清理过期撤销记录（expires_at < now）。
+   * PF-05：每小时清理过期/脏/超期撤销记录。
+   * 清理条件（任一满足即删）：
+   *   1) expires_at < now() — 已自然过期的 token
+   *   2) expires_at IS NULL — 无法判断过期时间的脏数据
+   *   3) revoked_at < now() - 30 天 — 超期保留的撤销记录
    * 避免 revoked_tokens 表无限增长。
    */
   @Cron(CronExpression.EVERY_HOUR)
   async cleanupRevokedTokens(): Promise<void> {
     try {
-      const result = await this.revokedTokenRepository.delete({
-        expiresAt: LessThan(new Date()),
-      } as any);
-      const affected = (result as any)?.affected ?? 0;
+      const now = new Date();
+      const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+      const result = await this.revokedTokenRepository
+        .createQueryBuilder()
+        .delete()
+        .where('expires_at < :now', { now })
+        .orWhere('expires_at IS NULL')
+        .orWhere('revoked_at < :thirtyDaysAgo', { thirtyDaysAgo })
+        .execute();
+      const affected = result.affected ?? 0;
       if (affected > 0) {
-        this.logger.log(`[PF-05] 清理 ${affected} 条过期撤销 token 记录`);
+        this.logger.log(`[PF-05] 清理 ${affected} 条过期/脏/超期撤销 token 记录`);
       }
     } catch (err: any) {
       // 清理失败不应阻塞系统

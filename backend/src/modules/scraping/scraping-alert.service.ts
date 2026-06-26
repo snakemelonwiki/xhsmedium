@@ -98,7 +98,7 @@ export class ScrapingAlertService {
    * 记录一次抓取成功：仅复位「连续失败」计数。
    * 累计失败保留，方便 owner 看历史趋势。
    */
-  recordSuccess(platform: string | null, source: string = 'parser'): void {
+  async recordSuccess(platform: string | null, source: string = 'parser'): Promise<void> {
     const key = this.keyOf(platform, source);
     const state = this.counters.get(key);
     if (state && state.failStreak > 0) {
