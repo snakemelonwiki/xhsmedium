@@ -98,26 +98,49 @@ export class RankingsService {
     // 统一主榜基础指标：账号数/作品数/平台作品数/成交数同表展示，type 只决定排序口径。
     const mergedMetricRows = () => {
       const postCountByEmployee: Record<string, { total: number; xhs: number; douyin: number }> = {};
-      const leadCountByEmployee: Record<string, number> = {};
+      const leadCountByEmployee: Record<string, { total: number; xhs: number; douyin: number }> = {};
+      const trafficByEmployee: Record<string, { total: number; xhs: number; douyin: number }> = {};
       for (const post of posts) {
         if (!postCountByEmployee[post.employeeId]) {
           postCountByEmployee[post.employeeId] = { total: 0, xhs: 0, douyin: 0 };
         }
         postCountByEmployee[post.employeeId].total++;
-        if (post.platform === '小红书') postCountByEmployee[post.employeeId].xhs++;
-        if (post.platform === '抖音') postCountByEmployee[post.employeeId].douyin++;
+        const pf = String(post.platform || '').trim().toLowerCase();
+        if (pf === '小红书' || pf === 'xiaohongshu' || pf === 'xhs') postCountByEmployee[post.employeeId].xhs++;
+        if (pf === '抖音' || pf === 'douyin') postCountByEmployee[post.employeeId].douyin++;
       }
       for (const lead of leads) {
         // 排除无效客资（无联系方式且不可跟进）
         if (!lead.contactInfo && lead.status === 'invalid') continue;
-        leadCountByEmployee[lead.employeeId] = (leadCountByEmployee[lead.employeeId] || 0) + 1;
+        if (!leadCountByEmployee[lead.employeeId]) {
+          leadCountByEmployee[lead.employeeId] = { total: 0, xhs: 0, douyin: 0 };
+        }
+        leadCountByEmployee[lead.employeeId].total++;
+        const pf = String(lead.platform || '').trim().toLowerCase();
+        if (pf === '小红书' || pf === 'xiaohongshu' || pf === 'xhs') leadCountByEmployee[lead.employeeId].xhs++;
+        if (pf === '抖音' || pf === 'douyin') leadCountByEmployee[lead.employeeId].douyin++;
+      }
+      for (const post of posts) {
+        const score = Number(post.likes || 0) + Number(post.comments || 0) + Number(post.favorites || 0);
+        if (!trafficByEmployee[post.employeeId]) {
+          trafficByEmployee[post.employeeId] = { total: 0, xhs: 0, douyin: 0 };
+        }
+        trafficByEmployee[post.employeeId].total += score;
+        const pf = String(post.platform || '').trim().toLowerCase();
+        if (pf === '小红书' || pf === 'xiaohongshu' || pf === 'xhs') trafficByEmployee[post.employeeId].xhs += score;
+        if (pf === '抖音' || pf === 'douyin') trafficByEmployee[post.employeeId].douyin += score;
       }
       return rows.map((r) => ({
         ...r,
         postCount: postCountByEmployee[r.employeeId]?.total || 0,
         xhsPostCount: postCountByEmployee[r.employeeId]?.xhs || 0,
         douyinPostCount: postCountByEmployee[r.employeeId]?.douyin || 0,
-        leadCount: leadCountByEmployee[r.employeeId] || 0,
+        leadCount: leadCountByEmployee[r.employeeId]?.total || 0,
+        xhsLeadCount: leadCountByEmployee[r.employeeId]?.xhs || 0,
+        douyinLeadCount: leadCountByEmployee[r.employeeId]?.douyin || 0,
+        traffic: trafficByEmployee[r.employeeId]?.total || 0,
+        xhsTraffic: trafficByEmployee[r.employeeId]?.xhs || 0,
+        douyinTraffic: trafficByEmployee[r.employeeId]?.douyin || 0,
       }));
     };
 
@@ -222,7 +245,10 @@ export class RankingsService {
     }
     const today = to.toISOString().slice(0, 10);
 
-    if (!p || p === 'today') return {};
+    if (!p || p === 'today') {
+      // today = 当前日期当天范围（00:00 ~ 23:59）
+      return { from: today, to: today };
+    }
 
     // 近 N 天
     if (p === '7d' || p === '7') {

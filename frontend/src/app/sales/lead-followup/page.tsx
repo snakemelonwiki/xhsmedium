@@ -261,6 +261,13 @@ export default function SalesLeadFollowupPage() {
       ),
     },
     {
+      title: '微信备注',
+      key: 'salesRemark',
+      width: 140,
+      ellipsis: true,
+      render: (_v, lead) => lead.salesRemark || '-',
+    },
+    {
       title: '意向程度',
       key: 'intentionLevel',
       render: (_v, lead) => {
@@ -270,42 +277,15 @@ export default function SalesLeadFollowupPage() {
       },
     },
     {
-      title: '学历',
-      key: 'clientDegree',
-      width: 80,
-      render: (_v, lead) => lead.clientDegree || '-',
-    },
-    {
-      title: '专业',
-      key: 'clientMajorResearch',
-      width: 120,
-      ellipsis: true,
-      render: (_v, lead) => lead.clientMajorResearch || '-',
-    },
-    {
-      title: '微信备注',
-      key: 'salesRemark',
-      width: 140,
-      ellipsis: true,
-      render: (_v, lead) => lead.salesRemark || '-',
+      title: '录用时间',
+      key: 'createdAt',
+      width: 110,
+      render: (_v, lead) => lead.createdAt ? formatDateTime(lead.createdAt) : '-',
     },
     {
       title: '处理状态',
       key: 'processStatus',
       render: (_v, lead) => <StatusTag kind="processStatus" code={lead.processStatus ?? LeadProcessStatus.NOT_CONTACTED} />,
-    },
-    {
-      title: '客户学历',
-      key: 'clientDegree',
-      width: 100,
-      render: (_v, lead) => lead.clientDegree || '-',
-    },
-    {
-      title: '专业/研究方向',
-      key: 'major',
-      width: 180,
-      ellipsis: true,
-      render: (_v, lead) => lead.clientMajorResearch || '-',
     },
     {
       title: '最近跟进',

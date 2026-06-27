@@ -102,10 +102,9 @@ export class EnumsController {
         注销: { label: '注销', color: '#8c8c8c' },
       },
       POST_TYPE: {
-        素人贴: { label: '素人贴', color: '#1890ff' },
-        话题贴: { label: '话题贴', color: '#722ed1' },
-        获客贴: { label: '获客贴', color: '#52c41a' },
-        营销贴: { label: '营销贴', color: '#faad14' },
+        获客帖: { label: '获客贴', color: '#52c41a' },
+        讨论帖: { label: '讨论贴', color: '#1890ff' },
+        人设帖: { label: '人设贴', color: '#722ed1' },
       },
       INTENTION_LEVEL: {
         pending: { label: '待定', color: '#8c8c8c' },

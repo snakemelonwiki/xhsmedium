@@ -10,7 +10,7 @@ describe('operation ranking table model', () => {
     ]);
   });
 
-  it('uses the same core metrics for post and lead sort modes', () => {
+  it('uses different metric keys for each sort mode', () => {
     expect(getOperationRankingMetricKeys('posts')).toEqual([
       'accountCount',
       'postCount',
@@ -20,9 +20,16 @@ describe('operation ranking table model', () => {
     ]);
     expect(getOperationRankingMetricKeys('leads')).toEqual([
       'accountCount',
-      'postCount',
-      'xhsPostCount',
-      'douyinPostCount',
+      'leadCount',
+      'xhsLeadCount',
+      'douyinLeadCount',
+      'todayDeals',
+    ]);
+    expect(getOperationRankingMetricKeys('traffic')).toEqual([
+      'accountCount',
+      'traffic',
+      'xhsTraffic',
+      'douyinTraffic',
       'todayDeals',
     ]);
   });

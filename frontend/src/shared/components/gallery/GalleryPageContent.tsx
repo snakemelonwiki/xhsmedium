@@ -38,10 +38,9 @@ const platformOptions = [
 
 export const GALLERY_TYPE_OPTIONS = [
   { label: '全部类型', value: '' },
-  { label: '营销贴', value: '营销贴' },
-  { label: '素人贴', value: '素人贴' },
-  { label: '话题贴', value: '话题贴' },
   { label: '获客贴', value: '获客贴' },
+  { label: '讨论贴', value: '讨论贴' },
+  { label: '人设贴', value: '人设贴' },
 ];
 
 function buildDefaultGalleryFilters(): GalleryFilters {
@@ -72,6 +71,57 @@ type GalleryPageContentProps = {
   showConfigPanel?: boolean;
   allowFavoriteActions?: boolean;
 };
+
+function NumberRangeInput({
+  minValue,
+  maxValue,
+  onBlur: onBlurProp,
+  minPlaceholder = '最低',
+  maxPlaceholder = '最高',
+}: {
+  minValue?: number;
+  maxValue?: number;
+  onBlur: (min?: number, max?: number) => void;
+  minPlaceholder?: string;
+  maxPlaceholder?: string;
+}) {
+  const [localMin, setLocalMin] = useState<number | undefined>(minValue);
+  const [localMax, setLocalMax] = useState<number | undefined>(maxValue);
+
+  useEffect(() => {
+    setLocalMin(minValue);
+  }, [minValue]);
+
+  useEffect(() => {
+    setLocalMax(maxValue);
+  }, [maxValue]);
+
+  const handleBlur = () => {
+    onBlurProp(localMin, localMax);
+  };
+
+  return (
+    <>
+      <InputNumber
+        min={0}
+        placeholder={minPlaceholder}
+        style={{ width: 100 }}
+        value={localMin}
+        onChange={(value) => setLocalMin(typeof value === 'number' ? value : undefined)}
+        onBlur={handleBlur}
+      />
+      <span style={{ color: '#999', lineHeight: '32px' }}>~</span>
+      <InputNumber
+        min={0}
+        placeholder={maxPlaceholder}
+        style={{ width: 100 }}
+        value={localMax}
+        onChange={(value) => setLocalMax(typeof value === 'number' ? value : undefined)}
+        onBlur={handleBlur}
+      />
+    </>
+  );
+}
 
 export function GalleryPageContent({
   description = '浏览全公司作品，收藏学习。客户联系方式、跟进记录、成交信息等敏感字段对运营端不展示。',
@@ -326,39 +376,31 @@ export function GalleryPageContent({
             style={{ width: 260 }}
             onChange={handleDateRangeChange}
           />
-          <InputNumber
-            aria-label="最低点赞"
-            min={0}
-            placeholder="最低点赞"
-            style={{ width: 100 }}
-            value={filters.likesMin}
-            onChange={(value) => applyFilter('likesMin', typeof value === 'number' ? value : undefined)}
+          <NumberRangeInput
+            minValue={filters.likesMin}
+            maxValue={filters.likesMax}
+            minPlaceholder="最低点赞"
+            maxPlaceholder="最高点赞"
+            onBlur={(min, max) => {
+              setFilters((prev) => {
+                const next = { ...prev, likesMin: min, likesMax: max };
+                load(1, next);
+                return next;
+              });
+            }}
           />
-          <span style={{ color: '#999', lineHeight: '32px' }}>~</span>
-          <InputNumber
-            aria-label="最高点赞"
-            min={0}
-            placeholder="最高点赞"
-            style={{ width: 100 }}
-            value={filters.likesMax}
-            onChange={(value) => applyFilter('likesMax', typeof value === 'number' ? value : undefined)}
-          />
-          <InputNumber
-            aria-label="最低客资数"
-            min={0}
-            placeholder="最低客资"
-            style={{ width: 100 }}
-            value={filters.leadsMin}
-            onChange={(value) => applyFilter('leadsMin', typeof value === 'number' ? value : undefined)}
-          />
-          <span style={{ color: '#999', lineHeight: '32px' }}>~</span>
-          <InputNumber
-            aria-label="最高客资数"
-            min={0}
-            placeholder="最高客资"
-            style={{ width: 100 }}
-            value={filters.leadsMax}
-            onChange={(value) => applyFilter('leadsMax', typeof value === 'number' ? value : undefined)}
+          <NumberRangeInput
+            minValue={filters.leadsMin}
+            maxValue={filters.leadsMax}
+            minPlaceholder="最低客资"
+            maxPlaceholder="最高客资"
+            onBlur={(min, max) => {
+              setFilters((prev) => {
+                const next = { ...prev, leadsMin: min, leadsMax: max };
+                load(1, next);
+                return next;
+              });
+            }}
           />
         </Space>
 

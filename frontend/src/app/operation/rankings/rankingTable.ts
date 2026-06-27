@@ -10,9 +10,15 @@ export type OperationRankingMetricKey =
   | 'postCount'
   | 'xhsPostCount'
   | 'douyinPostCount'
+  | 'leadCount'
+  | 'xhsLeadCount'
+  | 'douyinLeadCount'
+  | 'traffic'
+  | 'xhsTraffic'
+  | 'douyinTraffic'
   | 'todayDeals';
 
-const MERGED_RANKING_METRIC_KEYS: OperationRankingMetricKey[] = [
+const POSTS_METRIC_KEYS: OperationRankingMetricKey[] = [
   'accountCount',
   'postCount',
   'xhsPostCount',
@@ -20,10 +26,31 @@ const MERGED_RANKING_METRIC_KEYS: OperationRankingMetricKey[] = [
   'todayDeals',
 ];
 
+const LEADS_METRIC_KEYS: OperationRankingMetricKey[] = [
+  'accountCount',
+  'leadCount',
+  'xhsLeadCount',
+  'douyinLeadCount',
+  'todayDeals',
+];
+
+const TRAFFIC_METRIC_KEYS: OperationRankingMetricKey[] = [
+  'accountCount',
+  'traffic',
+  'xhsTraffic',
+  'douyinTraffic',
+  'todayDeals',
+];
+
 /**
- * 获取运营排行榜合并主榜固定指标列。
- * 排序口径只影响后端 type，不影响前端展示指标集合。
+ * 获取运营排行榜合并主榜指标列。
+ * 排序口径影响前端展示指标集合：
+ * - posts: 作品数 / 小红书作品数 / 抖音作品数
+ * - leads: 客资数 / 小红书客资数 / 抖音客资数
+ * - traffic: 总流量 / 小红书流量 / 抖音流量
  */
-export function getOperationRankingMetricKeys(_type: MainRankingType): OperationRankingMetricKey[] {
-  return [...MERGED_RANKING_METRIC_KEYS];
+export function getOperationRankingMetricKeys(type: string): OperationRankingMetricKey[] {
+  if (type === 'leads') return [...LEADS_METRIC_KEYS];
+  if (type === 'traffic') return [...TRAFFIC_METRIC_KEYS];
+  return [...POSTS_METRIC_KEYS];
 }

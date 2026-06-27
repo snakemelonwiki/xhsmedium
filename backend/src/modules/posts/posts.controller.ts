@@ -75,6 +75,11 @@ export class PostsController {
     @Query('metric') metric?: 'leadsCount' | 'traffic',
     @Query('metricOperator') metricOperator?: 'gt' | 'gte' | 'eq' | 'lte' | 'lt',
     @Query('metricThreshold') metricThreshold?: string,
+    // OP-XX: 运营端作品列表支持按点赞/客资数范围筛选
+    @Query('likesMin') likesMin?: string,
+    @Query('likesMax') likesMax?: string,
+    @Query('leadsMin') leadsMin?: string,
+    @Query('leadsMax') leadsMax?: string,
   ) {
     const session = (req as any).session;
     const wantsPaging = limit !== undefined || offset !== undefined;
@@ -109,6 +114,11 @@ export class PostsController {
           ? (metricOperator as any) : undefined,
         metricThreshold: metricThreshold !== undefined && metricThreshold !== '' && Number.isFinite(Number(metricThreshold))
           ? Number(metricThreshold) : undefined,
+        // OP-XX: 运营端作品列表支持按点赞/客资数范围筛选
+        likesMin: likesMin !== undefined && likesMin !== '' && Number.isFinite(Number(likesMin)) ? Number(likesMin) : undefined,
+        likesMax: likesMax !== undefined && likesMax !== '' && Number.isFinite(Number(likesMax)) ? Number(likesMax) : undefined,
+        leadsMin: leadsMin !== undefined && leadsMin !== '' && Number.isFinite(Number(leadsMin)) ? Number(leadsMin) : undefined,
+        leadsMax: leadsMax !== undefined && leadsMax !== '' && Number.isFinite(Number(leadsMax)) ? Number(leadsMax) : undefined,
       };
       if (forceSelf) {
         const result = await this.postsService.findPaged(
@@ -301,6 +311,10 @@ export class PostsController {
     @Query('to') to?: string,
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
+    @Query('likesMin') likesMin?: string,
+    @Query('likesMax') likesMax?: string,
+    @Query('leadsMin') leadsMin?: string,
+    @Query('leadsMax') leadsMax?: string,
   ) {
     const session = (req as any).session;
     const role = String(session?.role || '').toLowerCase();
@@ -319,6 +333,10 @@ export class PostsController {
         employeeId: employeeId || undefined,
         from: from || undefined,
         to: to || undefined,
+        likesMin: likesMin ? Number(likesMin) : undefined,
+        likesMax: likesMax ? Number(likesMax) : undefined,
+        leadsMin: leadsMin ? Number(leadsMin) : undefined,
+        leadsMax: leadsMax ? Number(leadsMax) : undefined,
         userId,
       },
       Number(page) || 1,

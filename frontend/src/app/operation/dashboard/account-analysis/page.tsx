@@ -51,8 +51,6 @@ const DAYS_OPTIONS: { label: string; value: number }[] = [
   { label: '近 7 天', value: 7 },
   { label: '近 14 天', value: 14 },
   { label: '近 30 天', value: 30 },
-  { label: '近 60 天', value: 60 },
-  { label: '近 90 天', value: 90 },
 ];
 
 type AccountAnalysisSort = 'leadCount' | 'postCount' | 'traffic';

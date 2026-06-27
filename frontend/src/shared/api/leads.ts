@@ -112,6 +112,7 @@ function mapLead(raw: RawRecord): SalesLead {
     },
     assignedAt: text(raw.assignedAt) ?? text(raw.createdAt),
     updatedAt: text(raw.updatedAt) ?? text(raw.updated_at) ?? text(raw.salesUpdatedAt),
+    createdAt: text(raw.createdAt) ?? text(raw.createAt) ?? text(raw.created_at) ?? null,
     status: text(raw.status) ?? 'new',
     addStatus: text(raw.addStatus) ?? 'not_added',
     processStatus: text(raw.processStatus) ?? 'not_contacted',

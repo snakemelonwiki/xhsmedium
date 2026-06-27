@@ -64,16 +64,22 @@ export interface SalesLead {
   // v1.3 / CROSS-1 客资分流
   isDispatched?: boolean;
   // v1.3 / SA-1 + CROSS-2 销售"写跟进"扩展字段
-  clientDegree?: string | null;
-  clientMajorResearch?: string | null;
   clientTimeRequirement?: string | null;
   objectionPoint?: string | null;
   followAction?: string | null;
   followActionAt?: string | null;
+  /** 录用时间（销售跟进时记录的客户录用/入职时间） */
+  acceptedAt?: string | null;
+  /** 客资创建时间 */
+  createdAt?: string | null;
   // v1.3 / SA-3 成交状态/金额
   dealStatus?: DealStatusCode | string | null;
   dealAmount?: string | null;
-  // T13: 无效原因（标记无效时填写）
+  /** 客户学历 */
+  clientDegree?: string | null;
+  /** 专业/研究方向 */
+  clientMajorResearch?: string | null;
+  /** 无效原因（标记无效时填写） */
   invalidReason?: string | null;
   // v1.3 意向程度（已在 schema/intention_level）
   intentionLevel?: IntentionLevelCode | string | null;

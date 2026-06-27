@@ -64,6 +64,11 @@ interface PostListFilters {
   metric?: 'leadsCount' | 'traffic';
   metricOperator?: 'gt' | 'gte' | 'eq' | 'lte' | 'lt';
   metricThreshold?: number;
+  // OP-XX: 作品列表（运营端我的作品）支持按点赞/客资数范围筛选
+  likesMin?: number;
+  likesMax?: number;
+  leadsMin?: number;
+  leadsMax?: number;
 }
 
 interface PlazaFilters {
@@ -241,6 +246,22 @@ export class PostsService {
       }
     }
 
+    // OP-XX: 运营端作品列表支持按点赞/客资数范围筛选
+    if (Number.isFinite(filters.likesMin) && filters.likesMin! > 0) {
+      qb.andWhere('p.likes >= :likesMin', { likesMin: filters.likesMin });
+    }
+    if (Number.isFinite(filters.likesMax) && filters.likesMax! > 0) {
+      qb.andWhere('p.likes <= :likesMax', { likesMax: filters.likesMax });
+    }
+    if ((Number.isFinite(filters.leadsMin) && filters.leadsMin! > 0) || (Number.isFinite(filters.leadsMax) && filters.leadsMax! > 0)) {
+      const leadsSub = `(SELECT COUNT(*) FROM leads l WHERE l.post_id = p.id AND l.post_id IS NOT NULL)`;
+      if (Number.isFinite(filters.leadsMin) && filters.leadsMin! > 0) {
+        qb.andWhere(`${leadsSub} >= :leadsMin`, { leadsMin: filters.leadsMin });
+      }
+      if (Number.isFinite(filters.leadsMax) && filters.leadsMax! > 0) {
+        qb.andWhere(`${leadsSub} <= :leadsMax`, { leadsMax: filters.leadsMax });
+      }
+    }
     if (filters.sort === 'leads') {
       qb.addSelect((subQb) => {
         return subQb
@@ -418,8 +439,9 @@ export class PostsService {
     const whereParts = ['1=1'];
 
     if (filters.platform) {
-      whereParts.push('p.platform = ?');
-      params.push(filters.platform);
+      const platformSynonyms = expandPlatformSynonyms(filters.platform);
+      whereParts.push(`p.platform IN (${platformSynonyms.map(() => '?').join(',')})`);
+      params.push(...platformSynonyms);
     }
     if (filters.postType) {
       const normalizedPostType = normalizePostType(filters.postType);
@@ -475,14 +497,14 @@ export class PostsService {
     if (this.plazaConfigService && isPlazaThresholdScopedViewer(viewer)) {
       try {
         const config = await this.plazaConfigService.getConfig();
-        // 营销帖（获客贴/营销贴）门槛
+        // 获客贴/营销贴门槛（'获客贴'/'获客帖' 为同一类型，'营销贴'/'营销帖' 为旧名称，保留兼容）
         if (config.marketingMinLeads > 0) {
-          thresholdParts.push(`(p.post_type NOT IN ('获客贴','营销贴') OR COALESCE(lc.cnt, 0) >= ?)`);
+          thresholdParts.push(`(p.post_type NOT IN ('获客贴','获客帖','营销贴','营销帖') OR COALESCE(lc.cnt, 0) >= ?)`);
           thresholdParams.push(config.marketingMinLeads);
         }
-        // 人设帖门槛
+        // 人设帖门槛（'人设贴'/'人设帖' 为新名称，'素人贴'/'素人帖' 为旧名称，保留兼容）
         if (config.personaMinTraffic > 0) {
-          thresholdParts.push(`(p.post_type NOT IN ('人设贴','素人贴') OR p.traffic >= ?)`);
+          thresholdParts.push(`(p.post_type NOT IN ('人设贴','人设帖','素人贴','素人帖') OR p.traffic >= ?)`);
           thresholdParams.push(config.personaMinTraffic);
         }
         // 通用默认门槛（全部作品）
