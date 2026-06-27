@@ -266,6 +266,23 @@ export class OrdersController {
   }
 
   /**
+   * 校验订单编号是否已存在，供前端失去焦点时实时查重。
+   * 必须放在 `@Get('orders/:id')` 之前，否则 'check-code' 被路由参数 :id 抢占。
+   */
+  @Get('orders/check-code')
+  async checkOrderCode(
+    @Query('code') code: string,
+    @Res() res: Response,
+  ) {
+    try {
+      const exists = await this.ordersService.orderCodeExists(code);
+      return res.json({ ok: true, exists });
+    } catch (err: any) {
+      return res.status(500).json({ ok: false, message: err?.message || 'check failed' });
+    }
+  }
+
+  /**
    * 教务/销售视角的"节点提醒"列表：列出自己跟进过 OR 自己名下订单
    * 中下次提醒时间已到 / 即将在 upcomingHours 小时内到的记录。
    * 必须放在 `@Get('orders/:id')` 之前，否则 'reminders' 会被路由参数 :id 抢占。

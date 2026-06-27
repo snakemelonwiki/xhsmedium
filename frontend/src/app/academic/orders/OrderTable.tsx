@@ -6,7 +6,7 @@ import type { TableColumnsType } from 'antd';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
-import { createAcademicOrder, createOrderFollowRecord, listOrders, remindSalesPayment, type AcademicCreateOrderPayload, updateOrder, deleteOrder } from '@/shared/api/orders';
+import { checkOrderCodeExists, createAcademicOrder, createOrderFollowRecord, listOrders, remindSalesPayment, type AcademicCreateOrderPayload, updateOrder, deleteOrder } from '@/shared/api/orders';
 import { updateLeadDealStatus } from '@/shared/api/leads';
 import { createExport, downloadExportUrl, getExport, type ExportFilter } from '@/shared/api/exports';
 import { readStoredUser } from '@/shared/auth/auth';
@@ -288,6 +288,14 @@ export function OrderTable({
     if (createOrderSubmitting) return;
     const values = await createOrderForm.validateFields().catch(() => null);
     if (!values) return;
+    const trimmedOrderCode = (values.orderCode || '').trim();
+    if (trimmedOrderCode) {
+      const { exists } = await checkOrderCodeExists(trimmedOrderCode);
+      if (exists) {
+        message.error('该订单编号已存在，请使用其他编号');
+        return;
+      }
+    }
     setCreateOrderSubmitting(true);
     try {
       const result = await createAcademicOrder({
@@ -299,8 +307,6 @@ export function OrderTable({
         paidStatus: values.paidStatus || null,
         paymentStage: values.paymentStage || null,
         clientPaid: values.clientPaid != null ? values.clientPaid : null,
-        customerName: values.customerName || null,
-        educationLevel: values.educationLevel || null,
         major: values.major || null,
         area: values.area || null,
         articlePurpose: values.articlePurpose || null,
@@ -433,30 +439,22 @@ export function OrderTable({
         key: 'orderStatus',
         render: renderOrderStatus,
       },
-      // v1.3 / Task 12: 跟进列表新增「稿件进度」「投稿进度」两列。
-      // 稿件进度 = 履约进度的阶段名称（由教务端 Steps onClick 写回 paper_progress 后映射）。
-      // 投稿进度 = 期刊与交付状态的阶段名称（由教务端 Steps onClick 写回 current_stage 后映射）。
-      // 仅在教务端（academic / abnormal actionMode）展示，销售/admin 视角无意义。
+      // v1.3 / Task 26: 「稿件进度」与「投稿进度」合并为一列「进度」，显示为 2 个小按钮。
       ...(actionMode === 'academic' || actionMode === 'abnormal' ? [
         {
-          title: '稿件进度',
-          key: 'paperProgress',
-          dataIndex: 'paperProgress',
-          width: 110,
-          render: (value?: string | null) => {
-            const label = value ? PROGRESS_STEP_LABEL[value] || value : '-';
-            return label !== '-' ? <Tag color="blue">{label}</Tag> : <Typography.Text type="secondary">-</Typography.Text>;
-          },
-        },
-        {
-          title: '投稿进度',
-          key: 'submissionProgress',
-          dataIndex: 'currentStage',
-          width: 240,
-          render: (value?: string | null) => {
-            const label = value || '-';
-            return label !== '-' ? <Tag color="geekblue">{label}</Tag> : <Typography.Text type="secondary">-</Typography.Text>;
-          },
+          title: '进度',
+          key: 'progress',
+          width: 220,
+          render: (_value: unknown, record: OrderItem) => (
+            <Space direction="vertical" size={4}>
+              <Button size="small" type={record.paperProgress ? 'primary' : 'default'}>
+                稿件：{record.paperProgress ? PROGRESS_STEP_LABEL[record.paperProgress] || record.paperProgress : '-'}
+              </Button>
+              <Button size="small" type={record.currentStage ? 'primary' : 'default'} style={{ background: record.currentStage ? '#2b4acb' : undefined, borderColor: record.currentStage ? '#2b4acb' : undefined }}>
+                投稿：{record.currentStage || '-'}
+              </Button>
+            </Space>
+          ),
         },
       ] as any[] : []),
       ...(actionMode === 'academic' ? [] : [
@@ -798,21 +796,8 @@ export function OrderTable({
         open={createOrderOpen}
         maskClosable={false}
         onCancel={() => {
-          const values = createOrderForm.getFieldsValue();
-          const hasValues = Object.values(values).some((v) => v !== undefined && v !== null && v !== '');
-          if (hasValues) {
-            Modal.confirm({
-              title: '确认关闭',
-              content: '已填写的内容将不会保存，确定关闭吗？',
-              onOk: () => {
-                setCreateOrderOpen(false);
-                createOrderForm.resetFields();
-              },
-            });
-          } else {
-            setCreateOrderOpen(false);
-            createOrderForm.resetFields();
-          }
+          setCreateOrderOpen(false);
+          createOrderForm.resetFields();
         }}
         onOk={submitCreateOrder}
         confirmLoading={createOrderSubmitting}
@@ -823,21 +808,11 @@ export function OrderTable({
         <Form form={createOrderForm} layout="vertical" preserve={false}>
           <Typography.Title level={5} style={{ marginTop: 0 }}>客户信息</Typography.Title>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 16px' }}>
-            <Form.Item name="customerName" label="客户姓名">
-              <Input placeholder="如：张三" />
-            </Form.Item>
-            <Form.Item name="educationLevel" label="学历">
-              <Select
-                allowClear
-                placeholder="选择学历"
-                options={[
-                  { label: '专科', value: '专科' },
-                  { label: '本科', value: '本科' },
-                  { label: '硕士', value: '硕士' },
-                  { label: '博士', value: '博士' },
-                  { label: '职称', value: '职称' },
-                ]}
-              />
+            <Form.Item
+              name="orderCode"
+              label="自定义订单编号"
+            >
+              <Input placeholder="留空则自动生成" />
             </Form.Item>
             <Form.Item name="major" label="专业方向">
               <Input placeholder="如：计算机科学与技术" />
@@ -852,9 +827,6 @@ export function OrderTable({
 
           <Typography.Title level={5}>订单信息</Typography.Title>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 16px' }}>
-            <Form.Item name="orderCode" label="订单编号">
-              <Input placeholder="留空则自动生成" />
-            </Form.Item>
             <Form.Item name="serviceType" label="服务类型">
               <Select allowClear placeholder="选择服务类型" options={serviceTypeOptions} />
             </Form.Item>

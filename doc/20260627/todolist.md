@@ -78,10 +78,10 @@
 |------|----------|------|------|
 | 21 | 教务首页：待接收 / 待客户资料 / 待老师安排，点击后跳转到对应搜索条件的订单池页面 | ✅ | `academic/page.tsx:39-67` 各指标均配置 `href`，并使用 `buildAcademicTodoHref` 构建跳转链接(含 todo 参数) |
 | 22 | 上传订单：订单号若用户填写则校验重复后入库，否则自动生成编号 | ✅ | Git `1958b5a` 已实现；`OrderTable.tsx:855` 有 `orderCode` 输入项，`[id]/page.tsx:122` 编号字段可 disabled |
-| 23 | 新建订单："客户姓名+学历"两个输入框替换为"自定义订单编号"输入框；失去焦点后自动校验重复 | 🟡 | 需确认 `academic/orders/new` 或新建弹窗表单是否已完成替换 |
-| 24 | 节点提醒：操作列的"已提醒"按钮修改为"去跟进"，要求可点击跳转 | ⬜ | `academic/reminders/page.tsx:145` 仍为"已提醒"按钮，未改为"去跟进" |
+| 23 | 新建订单："客户姓名+学历"两个输入框替换为"自定义订单编号"输入框；失去焦点后自动校验重复 | ✅ | `OrderTable.tsx:823-836` 已将 customerName/educationLevel 替换为 orderCode（自定义订单编号），并添加 async validator 调用 `checkOrderCodeExists`；后端新增 `GET /orders/check-code` 接口 |
+| 24 | 节点提醒：操作列的"已提醒"按钮修改为"去跟进"，要求可点击跳转 | ✅ | `academic/reminders/page.tsx:140` 按钮文字改为"去跟进"；点击后 `handleFollowup` 先标记提醒已处理，再跳转 `/academic/orders/${orderId}?target=progress#progress` |
 | 25 | 作者等级表上传后，文件名称显示乱码 | ✅ | Git `1958b5a` 已修复文件上传中文乱码 |
-| 26 | 订单跟进："稿件进度"与"投稿进度"两列合并为一列（暂定合并后显示为 2 个小按钮） | ⬜ | 需确认 `academic/orders/[id]` 或跟进页面布局 |
+| 26 | 订单跟进："稿件进度"与"投稿进度"两列合并为一列（暂定合并后显示为 2 个小按钮） | ✅ | `OrderTable.tsx:440-457` 已合并为「进度」列，内含两个 `Button size="small"` 分别显示稿件进度与投稿进度 |
 
 ---
 

@@ -616,6 +616,18 @@ export class OrdersService {
     return String(value).trim().replace(/[\s\-_/]+/g, '');
   }
 
+  /**
+   * 校验订单编号是否已存在。
+   */
+  async orderCodeExists(code?: string | null): Promise<boolean> {
+    if (!code || !code.trim()) return false;
+    const rows = await this.dataSource.query(
+      `SELECT id FROM orders WHERE order_code = ? LIMIT 1`,
+      [code.trim()],
+    );
+    return Array.isArray(rows) && rows.length > 0;
+  }
+
   private async getActorContext(
     actorUserId: string,
   ): Promise<{ role: string; employeeId: string | null }> {

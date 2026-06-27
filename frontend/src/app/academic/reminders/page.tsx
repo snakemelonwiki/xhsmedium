@@ -5,6 +5,7 @@ import { Alert, Button, Card, Empty, Space, Table, Tag, Typography, message } fr
 import type { ColumnsType } from 'antd/es/table';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 
 import { apiClient } from '@/shared/api/apiClient';
 import { markOrderReminderHandled } from '@/shared/api/orders';
@@ -32,6 +33,7 @@ const HORIZON = 168; // 7天，覆盖提前预警窗口
  * 后端 cron 每分钟扫描：到期→ORDER_NODE_DUE，7天预警→ORDER_NODE_EARLY_WARNING。
  */
 export default function AcademicRemindersPage() {
+  const router = useRouter();
   const [items, setItems] = useState<ReminderRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [handlingId, setHandlingId] = useState('');
@@ -60,12 +62,12 @@ export default function AcademicRemindersPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function handleReminder(id: string) {
+  async function handleFollowup(id: string, orderId: string) {
     setHandlingId(id);
     try {
       await markOrderReminderHandled(id);
-      setItems((prev) => prev.filter((item) => item.id !== id));
-      message.success('已提醒，当前列表已移除');
+      // 标记已处理后跳转订单详情跟进区域
+      router.push(`/academic/orders/${orderId}?target=progress#progress`);
     } catch (err) {
       message.error(err instanceof Error ? err.message : '操作失败');
     } finally {
@@ -140,9 +142,9 @@ export default function AcademicRemindersPage() {
         <Button
           size="small"
           loading={handlingId === record.id}
-          onClick={() => handleReminder(record.id)}
+          onClick={() => handleFollowup(record.id, record.orderId)}
         >
-          已提醒
+          去跟进
         </Button>
       ),
     },

@@ -406,6 +406,11 @@ export async function createAcademicOrder(body: AcademicCreateOrderPayload) {
   return apiClient.post<{ ok: boolean; orderId: string; orderCode: string | null }>(`/academic/orders`, body);
 }
 
+export async function checkOrderCodeExists(code: string): Promise<{ exists: boolean }> {
+  const payload = await apiClient.get<{ ok: boolean; exists: boolean }>(`/orders/check-code`, { query: { code } });
+  return { exists: payload.exists ?? false };
+}
+
 export async function updateOrder(id: string, body: Record<string, unknown>) {
   return apiClient.patch(`/orders/${id}`, body);
 }
