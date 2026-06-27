@@ -5,6 +5,7 @@ import { Alert, Button, Card, Empty, Pagination, Popconfirm, Segmented, Space, T
 import { useCallback, useEffect, useState } from 'react';
 
 import { listMyFavorites, removeFavorite, type FavoriteAccountSnapshot, type FavoriteItem, type FavoritePostSnapshot, type FavoriteTargetType } from '@/shared/api/favorites';
+import { LazyImage } from '@/shared/components/LazyImage';
 import { formatDateTime } from '@/shared/utils/date-format';
 
 type Tab = 'all' | 'post' | 'account';
@@ -137,7 +138,7 @@ function FavoriteCard({ item, onRemove }: { item: FavoriteItem; onRemove: (item:
     <div style={{ border: '1px solid #f0f0f0', borderRadius: 8, overflow: 'hidden', background: '#fff' }}>
       {/* 封面（仅作品） */}
       {isPost && (post?.coverThumbUrl || post?.coverImageUrl) ? (
-        <img
+        <LazyImage
           src={post.coverThumbUrl || post.coverImageUrl}
           alt={post?.title}
           style={{ width: '100%', height: 140, objectFit: 'cover' }}

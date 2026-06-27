@@ -29,6 +29,7 @@ import type { ContentPost } from '@/shared/types/content';
 import { todayDateString } from '@/shared/utils/default-date-range';
 import { readAuthenticatedUser } from '@/shared/auth/auth';
 import { getStatusLabel } from '@/shared/constants/lead-status';
+import { LazyImage } from '@/shared/components/LazyImage';
 
 const platformOptions = [
   { label: '全部平台', value: '' },
@@ -423,7 +424,7 @@ export function GalleryPageContent({
                 hoverable
                 cover={
                   post.coverThumbUrl || post.coverImageUrl ? (
-                    <img
+                    <LazyImage
                       src={post.coverThumbUrl || post.coverImageUrl}
                       alt={post.title}
                       style={{ height: 148, objectFit: 'cover' }}
@@ -531,7 +532,7 @@ export function GalleryPageContent({
         {detailModal.post && (
           <Space direction="vertical" size={12} style={{ width: '100%' }}>
             {(detailModal.post.coverThumbUrl || detailModal.post.coverImageUrl) && (
-              <img
+              <LazyImage
                 src={detailModal.post.coverThumbUrl || detailModal.post.coverImageUrl}
                 alt={detailModal.post.title}
                 style={{ width: '100%', maxHeight: 320, objectFit: 'cover', borderRadius: 8 }}

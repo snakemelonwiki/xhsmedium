@@ -38,6 +38,7 @@ import { QuickRangePicker, RANGE_PRESETS_FULL } from '@/shared/components/date';
 import type { DateRangeValue } from '@/shared/components/date';
 import type { ContentPost } from '@/shared/types/content';
 import { InteractionMetricsGrid } from './InteractionMetricsGrid';
+import { LazyImage } from '@/shared/components/LazyImage';
 import { formatStudyPlatform, getStudyPlatformColor } from './platformDisplay';
 
 type StudyPeriod = '7' | '14' | '30';
@@ -858,7 +859,7 @@ export default function StudyRankingsPage({ routeBase = '/operation' }: StudyRan
         ) : selectedPost ? (
           <Space direction="vertical" size={16} style={{ width: '100%' }}>
             {selectedPost.coverImageUrl && (
-              <img
+              <LazyImage
                 src={selectedPost.coverImageUrl}
                 alt={selectedPost.title}
                 style={{ width: '100%', maxHeight: 300, objectFit: 'contain', borderRadius: 8 }}
