@@ -140,7 +140,7 @@ function FavoriteCard({ item, onRemove }: { item: FavoriteItem; onRemove: (item:
       {isPost && (post?.coverThumbUrl || post?.coverImageUrl) ? (
         <LazyImage
           src={post.coverThumbUrl || post.coverImageUrl}
-          alt={post?.title}
+          alt={post?.title || '作品封面'}
           style={{ width: '100%', height: 140, objectFit: 'cover' }}
         />
       ) : isPost ? (
