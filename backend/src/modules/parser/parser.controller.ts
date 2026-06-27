@@ -25,13 +25,12 @@ const HTTP_CODE_FOR_CODE: Record<string, number> = {
   exhausted: 502,
 };
 
+/**
+ * multer 2.x 已原生按 UTF-8 解析 filename（旧版 1.x 用 latin1 才需要 latin1→utf8 修正）。
+ * 直接返回原始值即可，再做 latin1 转换反而会导致中文双重解码乱码。
+ */
 function decodeUploadFilename(raw: string): string {
-  if (!raw) return raw;
-  try {
-    return Buffer.from(raw, 'latin1').toString('utf8');
-  } catch {
-    return raw;
-  }
+  return raw;
 }
 
 /**

@@ -291,6 +291,7 @@ export function OrderTable({
     setCreateOrderSubmitting(true);
     try {
       const result = await createAcademicOrder({
+        orderCode: values.orderCode?.trim() || null,
         serviceType: values.serviceType || null,
         productType: values.productType || null,
         guaranteeType: values.guaranteeType || null,
@@ -851,6 +852,9 @@ export function OrderTable({
 
           <Typography.Title level={5}>订单信息</Typography.Title>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 16px' }}>
+            <Form.Item name="orderCode" label="订单编号">
+              <Input placeholder="留空则自动生成" />
+            </Form.Item>
             <Form.Item name="serviceType" label="服务类型">
               <Select allowClear placeholder="选择服务类型" options={serviceTypeOptions} />
             </Form.Item>

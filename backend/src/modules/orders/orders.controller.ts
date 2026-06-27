@@ -133,6 +133,7 @@ export class OrdersController {
     }
     try {
       const result = await this.ordersService.createAcademicOrder(userId, {
+        orderCode: body?.orderCode?.trim() || null,
         serviceType: body?.serviceType ?? null,
         productType: body?.productType ?? null,
         guaranteeType: body?.guaranteeType ?? null,

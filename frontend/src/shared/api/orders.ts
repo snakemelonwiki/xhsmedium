@@ -384,6 +384,7 @@ export async function listOrderFollowRecords(id: string): Promise<OrderFollowRec
 }
 
 export type AcademicCreateOrderPayload = {
+  orderCode?: string | null;
   serviceType?: string | null;
   productType?: string | null;
   guaranteeType?: string | null;

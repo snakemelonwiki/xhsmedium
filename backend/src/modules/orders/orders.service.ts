@@ -94,6 +94,7 @@ interface CloseDealDto {
 }
 
 interface AcademicCreateOrderDto {
+  orderCode?: string | null;
   serviceType?: string | null;
   productType?: string | null;
   guaranteeType?: string | null;
@@ -373,12 +374,30 @@ export class OrdersService {
     const mergedServiceType = dto.serviceType || (dto.productType ? String(dto.productType) : null) || null;
     const remark = this.composeRemark({ ...dto, clientRequirementNote: dto.deliveryRequirement }, undefined);
 
+    // 校验手动输入的订单编号
+    const manualOrderCode = dto.orderCode?.trim() || null;
+    if (manualOrderCode) {
+      // 检查是否已存在
+      const existing = await this.dataSource.query(
+        `SELECT id FROM orders WHERE order_code = ? LIMIT 1`,
+        [manualOrderCode],
+      );
+      if (existing.length > 0) {
+        throw new BadRequestException(`订单编号 ${manualOrderCode} 已存在，请使用其他编号`);
+      }
+    }
+
     await this.dataSource.transaction(async (manager) => {
-      orderCode = await this.generateOrderCode(manager, {
-        productType: dto.productType,
-        serviceType: dto.serviceType,
-        major: dto.major,
-      });
+      // 优先使用手动输入的订单编号，否则自动生成
+      if (manualOrderCode) {
+        orderCode = manualOrderCode;
+      } else {
+        orderCode = await this.generateOrderCode(manager, {
+          productType: dto.productType,
+          serviceType: dto.serviceType,
+          major: dto.major,
+        });
+      }
       await manager.query(
         `INSERT INTO orders
          (id, lead_id, sales_user_id, academic_user_id, service_type, amount,
