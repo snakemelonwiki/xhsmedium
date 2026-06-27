@@ -195,6 +195,8 @@ export interface OrderDeliveryFinance {
   teacherPrice?: string | null;
   teacherPaid?: string | null;
   teacherPending?: string | null;
+  expense?: string | null;
+  profit?: string | null;
 }
 
 export interface OrderDeliveryDetail {

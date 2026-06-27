@@ -55,6 +55,10 @@ export class OrderFinance {
   @Column({ name: 'teacher_pending', type: 'decimal', precision: 12, scale: 2, nullable: true })
   teacherPending: string | null;
 
+  /** 订单支出（利润 = 合同金额 - 订单支出）。 */
+  @Column({ name: 'expense', type: 'decimal', precision: 12, scale: 2, nullable: true })
+  expense: string | null;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 

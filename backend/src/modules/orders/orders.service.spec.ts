@@ -330,6 +330,55 @@ describe('OrdersService', () => {
     expect(financeInsert?.params).toEqual(expect.arrayContaining(['300.00', '700.00']));
   });
 
+  it('generates close-deal order code with yl prefix, 190-based sequence, type fields, date, and major', async () => {
+    const queries: Array<{ sql: string; params?: any[] }> = [];
+    const lead = {
+      id: 'lead-1',
+      contactInfo: 'wx-1',
+      nickname: '客户A',
+      clientDegree: '本科',
+      clientMajorResearch: '计算机',
+      majorContent: '人工智能',
+      ip: '广东',
+      intention: '评职称',
+      postId: null,
+      matchedPostId: null,
+    };
+    const manager = {
+      findOne: jest.fn(async (_entity, opts) => (opts.where.id === 'lead-1' ? lead : null)),
+      query: jest.fn(async (sql: string, params?: any[]) => {
+        queries.push({ sql, params });
+        if (sql.includes('SELECT current_seq')) return [{ current_seq: 0 }];
+        return [];
+      }),
+    };
+    const dataSource = {
+      transaction: jest.fn(async (cb) => cb(manager)),
+      query: jest.fn(async () => []),
+    };
+    const { service } = createService({ dataSource });
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-06-15T02:03:04.000Z'));
+
+    try {
+      const result = await service.closeDeal('lead-1', 'sales-1', {
+        amount: 1000,
+        paymentStage: '已付定金',
+        paidStatus: 'partial',
+        clientPaid: 300,
+        productType: '期刊论文',
+        serviceType: '全流程',
+      } as any);
+
+      expect(result.orderCode).toBe('YL190期刊论文全流程20260615计算机');
+
+      const orderInsert = queries.find((q) => q.sql.includes('INSERT INTO orders\n'));
+      expect(orderInsert?.params).toEqual(expect.arrayContaining(['YL190期刊论文全流程20260615计算机']));
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it('rejects academic accept until deposit stage and paid amount are present', async () => {
     const { service, orderRepository, userRepository, orderFinanceRepository } = createService();
     orderRepository.findOne.mockResolvedValue({

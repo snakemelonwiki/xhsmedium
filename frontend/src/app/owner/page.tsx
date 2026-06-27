@@ -3,6 +3,7 @@
 import {
   BarChartOutlined,
   BellOutlined,
+  FundOutlined,
   IdcardOutlined,
   LineChartOutlined,
   OrderedListOutlined,
@@ -27,6 +28,7 @@ import { ADMIN_EMPLOYEE_COPY } from '@/app/admin/employees/copy';
  */
 const entries = [
   { title: '主管总览', href: '/admin', description: '今日作品/客资/成交，运营主管全量视图', icon: <BarChartOutlined /> },
+  { title: '运营排行榜', href: '/admin/rankings', description: '查看员工作品数、客资和流量榜单', icon: <FundOutlined /> },
   { title: '客资看板', href: '/admin/leads', description: '查看全部客资、销售归属和跟进状态', icon: <UserSwitchOutlined /> },
   { title: '销售看板', href: '/admin/sales-board', description: '按销售查看客资跟进进度，可留主管建议', icon: <UsergroupAddOutlined /> },
   { title: '订单看板', href: '/admin/orders', description: '订单全量视图与教务分配', icon: <ProjectOutlined /> },

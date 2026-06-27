@@ -21,6 +21,8 @@ import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
 import { useEffect, useMemo, useState } from 'react';
 
+import { listLeadFollowRecords } from '@/shared/api/leads';
+import type { LeadTimelineItem } from '@/shared/types/leads';
 import { listAdminLeads } from '@/shared/api/admin';
 import { createSupervisorSuggestion } from '@/shared/api/supervisor-suggestions';
 import type { AdminLead } from '@/shared/types/admin';
@@ -216,6 +218,22 @@ export default function AdminSalesBoardPage() {
     }
   }
 
+  // --- 跟进详情弹窗 state ---
+  const [followModalOpen, setFollowModalOpen] = useState(false);
+  const [followRecords, setFollowRecords] = useState<LeadTimelineItem[]>([]);
+  const [followLoading, setFollowLoading] = useState(false);
+
+  function openFollowModal(lead: AdminLead) {
+    setActiveLead(lead);
+    setFollowRecords([]);
+    setFollowModalOpen(true);
+    setFollowLoading(true);
+    listLeadFollowRecords(lead.id)
+      .then((items) => setFollowRecords(items))
+      .catch((err) => messageApi.error((err as Error)?.message || '加载跟进详情失败'))
+      .finally(() => setFollowLoading(false));
+  }
+
   const columns: ColumnsType<AdminLead> = [
     {
       title: '客资',
@@ -313,12 +331,17 @@ export default function AdminSalesBoardPage() {
     {
       title: '操作',
       key: 'action',
-      width: 90,
+      width: 120,
       fixed: 'right',
       render: (_v, record) => (
-        <Button size="small" type="link" onClick={() => openSuggestModal(record)}>
-          建议
-        </Button>
+        <Space direction="horizontal" size={4}>
+          <Button size="small" type="link" onClick={() => openFollowModal(record)}>
+            跟进详情
+          </Button>
+          <Button size="small" type="link" onClick={() => openSuggestModal(record)}>
+            建议
+          </Button>
+        </Space>
       ),
     },
   ];
@@ -396,6 +419,51 @@ export default function AdminSalesBoardPage() {
           />
         )}
       </Spin>
+
+      {/* 跟进详情弹窗 */}
+      <Modal
+        title={activeLead ? `「${activeLead.customerName}」跟进详情` : '跟进详情'}
+        open={followModalOpen}
+        onCancel={() => {
+          setFollowModalOpen(false);
+          setFollowRecords([]);
+          setActiveLead(undefined);
+        }}
+        footer={null}
+        width={560}
+        destroyOnClose
+      >
+        <Spin spinning={followLoading}>
+          {followRecords.length === 0 && !followLoading ? (
+            <Empty description="暂无跟进记录" />
+          ) : (
+            <Space direction="vertical" size={16} style={{ width: '100%' }}>
+              {followRecords.map((item) => (
+                <Card key={item.id} size="small" style={{ background: '#fafafa' }}>
+                  <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                    <Space style={{ justifyContent: 'space-between', width: '100%' }}>
+                      <Text strong>{item.title}</Text>
+                      <Text type="secondary" style={{ fontSize: 12 }}>
+                        {formatDateTime(item.occurredAt)}
+                      </Text>
+                    </Space>
+                    {item.actorName && (
+                      <Text type="secondary" style={{ fontSize: 12 }}>
+                        跟进人：{item.actorName}
+                      </Text>
+                    )}
+                    {item.content && (
+                      <Paragraph style={{ margin: 0, whiteSpace: 'pre-wrap' }}>
+                        {item.content}
+                      </Paragraph>
+                    )}
+                  </Space>
+                </Card>
+              ))}
+            </Space>
+          )}
+        </Spin>
+      </Modal>
 
       {/* 主管建议弹窗 */}
       <Modal

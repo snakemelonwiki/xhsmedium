@@ -91,6 +91,14 @@ function OrderIncomeTab() {
       render: (_v, record) => <StageCell stage={record.final} />,
     },
     {
+      title: '订单支出', key: 'orderExpense', width: 130,
+      align: 'right',
+      render: (_v, record: OrderIncomeRow) => {
+        const total = (record.teacherPaid || 0) + (record.otherExpense || 0);
+        return <Text type="danger">{fmtMoney(total)}</Text>;
+      },
+    },
+    {
       title: '已支付老师', dataIndex: 'teacherPaid', key: 'teacherPaid', width: 130,
       align: 'right', render: (v: number) => <Text type="danger">{fmtMoney(v)}</Text>,
     },
@@ -107,7 +115,7 @@ function OrderIncomeTab() {
       <div className="metric-grid">
         <Card><Statistic title="订单总额" value={summary.totalAmount} precision={2} prefix="¥" /></Card>
         <Card><Statistic title="已回款" value={summary.totalClientPaid} precision={2} prefix="¥" /></Card>
-        <Card><Statistic title="已支付老师" value={summary.totalTeacherPaid} precision={2} prefix="¥" /></Card>
+        <Card><Statistic title="订单总支出" value={summary.totalTeacherPaid + summary.totalOtherExpense} precision={2} prefix="¥" /></Card>
         <Card><Statistic title="总利润" value={summary.totalProfit} precision={2} prefix="¥" valueStyle={{ color: summary.totalProfit >= 0 ? '#3f8600' : '#cf1322' }} /></Card>
       </div>
       <Space wrap>

@@ -226,7 +226,8 @@ export class FinanceService {
       const orderAmount = Number(row.orderAmount ?? 0);
       const teacherPaidNum = Number(tpTotal ?? 0);
       const otherNum = Number(otherTotal ?? 0);
-      const profit = orderAmount - teacherPaidNum - otherNum;
+      const rawProfit = orderAmount - teacherPaidNum - otherNum;
+      const profit = Math.abs(rawProfit) < 0.005 ? 0 : Math.round(rawProfit * 100) / 100;
 
       pageTeacherPaid += teacherPaidNum;
       pageOtherExpense += otherNum;
@@ -254,6 +255,9 @@ export class FinanceService {
     // F-8：summary 用 DB 全量金额 + 子表全量合计，避免 items.reduce 当页错位。
     const summaryTotals = await this.computeSummaryTotals(whereSql, params);
 
+    const rawTotalProfit = summaryTotalAmount - summaryTotals.teacherPaid - summaryTotals.otherExpense;
+    const totalProfit = Math.abs(rawTotalProfit) < 0.005 ? 0 : Math.round(rawTotalProfit * 100) / 100;
+
     return {
       items,
       total,
@@ -264,7 +268,7 @@ export class FinanceService {
         totalClientPaid: summaryTotals.clientPaid,
         totalTeacherPaid: summaryTotals.teacherPaid,
         totalOtherExpense: summaryTotals.otherExpense,
-        totalProfit: summaryTotalAmount - summaryTotals.teacherPaid - summaryTotals.otherExpense,
+        totalProfit,
       },
     };
   }

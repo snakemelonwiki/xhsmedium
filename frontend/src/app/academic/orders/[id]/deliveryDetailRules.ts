@@ -15,7 +15,7 @@ const OPERATION_METHOD_TO_COUNT: Record<string, number> = {
 };
 
 const FINANCE_FIELD_KEYS = {
-  supervisor: ['orderAmount', 'customerPaid', 'customerPending', 'teacherPrice', 'teacherPaid', 'teacherPending'],
+  supervisor: ['orderAmount', 'customerPaid', 'customerPending', 'teacherPrice', 'teacherPaid', 'teacherPending', 'expense', 'profit'],
   academic: ['teacherPrice', 'teacherPaid', 'teacherPending'],
 } as const;
 

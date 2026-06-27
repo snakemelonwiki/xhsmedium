@@ -346,6 +346,8 @@ function mapDeliveryFinance(raw: RawRecord = {}): OrderDeliveryFinance {
     teacherPrice: text(raw.teacherPrice ?? raw.teacher_price) ?? null,
     teacherPaid: text(raw.teacherPaid ?? raw.teacher_paid) ?? null,
     teacherPending: text(raw.teacherPending ?? raw.teacher_pending) ?? null,
+    expense: text(raw.expense) ?? null,
+    profit: text(raw.profit) ?? null,
   };
 }
 
@@ -416,7 +418,7 @@ export async function updateOrder(id: string, body: Record<string, unknown>) {
 }
 
 export async function deleteOrder(id: string): Promise<{ ok: true }> {
-  return apiClient.delete<{ ok: true }>(`/orders/orders/${id}`);
+  return apiClient.delete<{ ok: true }>(`/orders/${id}`);
 }
 
 export async function getOrderDelivery(id: string): Promise<OrderDeliveryDetail> {

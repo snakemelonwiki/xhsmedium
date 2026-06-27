@@ -2391,6 +2391,9 @@ export class OrdersService {
         teacherPaid,
       );
     }
+    if (input.expense !== undefined && input.expense !== null && input.expense !== '') {
+      (base as any).expense = this.normalizeMoney(input.expense);
+    }
     return base as OrderFinance;
   }
 
@@ -2423,13 +2426,21 @@ export class OrdersService {
   }
 
   private mapOrderFinance(row: OrderFinance | null): any {
+    const orderAmount = row?.orderAmount ?? null;
+    const expense = row?.expense ?? null;
+    const profit =
+      orderAmount !== null && expense !== null
+        ? (Number(orderAmount) - Number(expense)).toFixed(2)
+        : null;
     return {
-      orderAmount: row?.orderAmount ?? null,
+      orderAmount,
       customerPaid: row?.clientPaid ?? null,
       customerPending: row?.clientPending ?? null,
       teacherPrice: row?.teacherPrice ?? null,
       teacherPaid: row?.teacherPaid ?? null,
       teacherPending: row?.teacherPending ?? null,
+      expense,
+      profit,
     };
   }
 
