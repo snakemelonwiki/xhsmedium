@@ -19,6 +19,7 @@ import {
 } from 'antd';
 import { HeartOutlined, EyeOutlined, StarFilled } from '@ant-design/icons';
 import dayjs from 'dayjs';
+import Link from 'next/link';
 import { useEffect, useState } from 'react';
 
 import { listSourceAccounts, type CatalogOption } from '@/shared/api/catalog';
@@ -30,6 +31,15 @@ import { todayDateString } from '@/shared/utils/default-date-range';
 import { readAuthenticatedUser } from '@/shared/auth/auth';
 import { getStatusLabel } from '@/shared/constants/lead-status';
 import { LazyImage } from '@/shared/components/LazyImage';
+import type { IntentionLevelCode } from '@/shared/types/leads';
+
+const INTENTION_LEVEL_META: Record<IntentionLevelCode, { label: string; color: string }> = {
+  high: { label: '高', color: 'red' },
+  mid: { label: '中', color: 'orange' },
+  low: { label: '低', color: 'blue' },
+  invalid: { label: '无效', color: 'default' },
+  pending: { label: '待判断', color: 'default' },
+};
 
 const platformOptions = [
   { label: '全部平台', value: '' },
@@ -40,8 +50,8 @@ const platformOptions = [
 export const GALLERY_TYPE_OPTIONS = [
   { label: '全部类型', value: '' },
   { label: '获客贴', value: '获客贴' },
-  { label: '讨论贴', value: '讨论贴' },
   { label: '人设贴', value: '人设贴' },
+  { label: '讨论贴', value: '讨论贴' },
 ];
 
 function buildDefaultGalleryFilters(): GalleryFilters {
@@ -642,26 +652,42 @@ function SensitiveInfoSection({
           <Typography.Text strong>客户联系方式 / 销售分配</Typography.Text>
           {sensitiveInfo?.leads && sensitiveInfo.leads.length > 0 ? (
             <Space direction="vertical" size={4} style={{ marginTop: 8, width: '100%' }}>
-              {sensitiveInfo.leads.map((lead) => (
-                <Card key={lead.id} size="small" style={{ width: '100%' }}>
-                  <Space direction="vertical" size={2}>
-                    <Typography.Text>
-                      联系方式：{lead.contactInfo || '-'}
-                    </Typography.Text>
-                    {lead.wechat && (
-                      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                        微信：{lead.wechat}
+              {sensitiveInfo.leads.map((lead) => {
+                const intentionMeta =
+                  INTENTION_LEVEL_META[(lead.intentionLevel as IntentionLevelCode) ?? 'pending'] ??
+                  { label: lead.intentionLevel || '待判断', color: 'default' };
+                return (
+                  <Card key={lead.id} size="small" style={{ width: '100%' }}>
+                    <Space direction="vertical" size={2} style={{ width: '100%' }}>
+                      <Typography.Text>
+                        联系方式：{lead.contactInfo || '-'}
                       </Typography.Text>
-                    )}
-                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                      销售分配：{lead.salesUserName || lead.assignedSalesUserId || '-'}
-                    </Typography.Text>
-                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                      状态：{getStatusLabel(lead.status as any) || lead.status || '-'}
-                    </Typography.Text>
-                  </Space>
-                </Card>
-              ))}
+                      {lead.wechat && (
+                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                          微信：{lead.wechat}
+                        </Typography.Text>
+                      )}
+                      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                        销售分配：{lead.salesUserName || lead.assignedSalesUserId || '-'}
+                      </Typography.Text>
+                      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                        状态：{getStatusLabel(lead.status as any) || lead.status || '-'}
+                      </Typography.Text>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                          意向程度：
+                          <Tag color={intentionMeta.color}>{intentionMeta.label}</Tag>
+                        </Typography.Text>
+                        <Link href={`/sales/leads/${lead.id}`} target="_blank">
+                          <Button size="small" type="link" style={{ padding: 0 }}>
+                            查看客资详情
+                          </Button>
+                        </Link>
+                      </div>
+                    </Space>
+                  </Card>
+                );
+              })}
             </Space>
           ) : (
             <Typography.Paragraph type="secondary" style={{ fontSize: 12 }}>

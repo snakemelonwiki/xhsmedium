@@ -185,7 +185,28 @@ function PostStructureChart({ analysis, loading }: { analysis?: SupervisorAnalys
   const option = useMemo(() => {
     const rows = analysis?.postStructure ?? [];
     if (rows.length === 0) return undefined;
-    return buildPieOption('作品结构', rows.map((r) => ({ name: r.type, value: r.count })));
+    // 只显示"获客贴 / 人设贴 / 讨论贴"三类，归一化合并不同写法（如"获客帖"→"获客贴"）
+    const TYPE_NORMALIZE: Record<string, string | undefined> = {
+      获客贴: '获客贴',
+      获客帖: '获客贴',
+      人设贴: '人设贴',
+      人设帖: '人设贴',
+      素人贴: '人设贴',
+      讨论贴: '讨论贴',
+      讨论帖: '讨论贴',
+      话题贴: '讨论贴',
+      营销贴: '获客贴',
+      营销帖: '获客贴',
+    };
+    const merged = rows.reduce<Record<string, number>>((acc, r) => {
+      const normalized = TYPE_NORMALIZE[r.type];
+      if (!normalized) return acc;
+      acc[normalized] = (acc[normalized] || 0) + r.count;
+      return acc;
+    }, {});
+    const data = Object.entries(merged).map(([name, value]) => ({ name, value }));
+    if (data.length === 0) return undefined;
+    return buildPieOption('作品结构', data);
   }, [analysis]);
 
   return (

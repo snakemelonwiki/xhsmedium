@@ -56,8 +56,8 @@ const platformOptions = [
 const postTypeOptions = [
   { label: '全部类型', value: '' },
   { label: '获客贴', value: '获客贴' },
-  { label: '讨论贴', value: '讨论贴' },
   { label: '人设贴', value: '人设贴' },
+  { label: '讨论贴', value: '讨论贴' },
 ];
 
 export default function OperationPostsPage() {

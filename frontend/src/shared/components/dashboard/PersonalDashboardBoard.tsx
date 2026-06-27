@@ -292,7 +292,7 @@ export function PersonalDashboardBoard({ employeeId, showRefreshButton = true }:
       {/* v1.3 OP-18/19 双平台饼图 + 作品量柱状图 */}
       <Row gutter={[12, 12]}>
         <Col xs={24} md={8}>
-          <Card size="small" title={<><PieChartOutlined /> 双平台分布</>}>
+          <Card size="small" title={<><PieChartOutlined /> 双平台分布</>} className={styles.dualPlatformCard}>
             <Row justify="center" style={{ marginBottom: 8 }}>
               <Space size={16}>
                 <Space size={4} align="center">
@@ -433,7 +433,7 @@ function PlatformPieChart({ items, metric, loading }: { items: PlatformDistribut
       const title = metric === 'postCount' ? '作品占比' : metric === 'traffic' ? '流量占比' : '获客占比';
       return {
         title: { text: title, textStyle: { fontSize: 14, fontWeight: 'normal' }, left: 'center' },
-        tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
+        tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)', appendToBody: true },
         legend: { show: false },
         series: [
           {
@@ -575,7 +575,7 @@ const POST_TYPE_SHARE_COLORS: Record<string, string> = {
   获客帖: '#52c41a',
 };
 
-const POST_TYPE_DISPLAY_ORDER = ['人设帖', '讨论帖', '获客帖'] as const;
+const POST_TYPE_DISPLAY_ORDER = ['获客帖', '人设帖', '讨论帖'] as const;
 
 function PostTypeSharePieCard({
   items,
@@ -629,7 +629,7 @@ function PostTypeSharePieCard({
     emptyHTML: '<div class="' + styles.pieChartBoxEmpty + '">暂无数据</div>',
     buildOption: (d) => ({
       title: {
-        text: '三类作品占比（人设帖 / 讨论帖 / 获客帖）',
+        text: '三类作品占比（获客帖 / 人设帖 / 讨论帖）',
         subtext: scope === 'all' ? '全部平台' : scope,
         textStyle: { fontSize: 14, fontWeight: 'normal' },
         subtextStyle: { fontSize: 11 },
@@ -668,7 +668,7 @@ function PostTypeSharePieCard({
           <PieChartOutlined />
           <Typography.Text strong>三类作品占比</Typography.Text>
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            人设贴 / 讨论贴 / 获客贴（{scope === 'all' ? '全部平台' : scope}）
+            获客贴 / 人设贴 / 讨论贴（{scope === 'all' ? '全部平台' : scope}）
           </Typography.Text>
         </Space>
       }
