@@ -385,12 +385,9 @@ export class OrdersService {
     // 校验手动输入的订单编号
     const manualOrderCode = dto.orderCode?.trim() || null;
     if (manualOrderCode) {
-      // 检查是否已存在
-      const existing = await this.dataSource.query(
-        `SELECT id FROM orders WHERE order_code = ? LIMIT 1`,
-        [manualOrderCode],
-      );
-      if (existing.length > 0) {
+      // 复用 orderCodeExists 查重，消除内联重复 SQL
+      const exists = await this.orderCodeExists(manualOrderCode);
+      if (exists) {
         throw new BadRequestException(`订单编号 ${manualOrderCode} 已存在，请使用其他编号`);
       }
     }

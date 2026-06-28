@@ -403,7 +403,11 @@ function AccountCalendarGrid({ days }: { days: AccountTimeseriesDay[] }) {
 
 function pickDayColor(d: AccountTimeseriesDay): string {
   if (d.postCount === 0) return '#d9d9d9';
+  // 优先级1：有获客帖（且产生客资）→ 橙色
   if (d.posts.some((p: AccountTimeseriesPost) => p.isLead && p.leadCount > 0)) return '#fa8c16';
+  // 优先级2：有讨论帖 → 蓝色（任务15）
+  if (d.posts.some((p: AccountTimeseriesPost) => p.type === '讨论帖')) return '#1677ff';
+  // 优先级3：其余有帖子（人设帖等）→ 绿色
   return '#52c41a';
 }
 

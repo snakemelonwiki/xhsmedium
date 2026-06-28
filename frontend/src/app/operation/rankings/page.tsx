@@ -154,6 +154,25 @@ function numberValue(value: unknown): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+// v1.3 OP-7：根据当前榜单类型动态切换列标题（提升到模块级，避免每次 render 重建）
+const TITLE_MAP: Record<string, Record<string, string>> = {
+  postCount: {
+    posts: '作品数',
+    leads: '客资数',
+    traffic: '总流量',
+  },
+  xhsPostCount: {
+    posts: '小红书作品数',
+    leads: '小红书客资数',
+    traffic: '小红书流量',
+  },
+  douyinPostCount: {
+    posts: '抖音作品数',
+    leads: '抖音客资数',
+    traffic: '抖音流量',
+  },
+};
+
 export default function OperationRankingsPage({ studyRoute = '/operation/rankings/study' }: { studyRoute?: string } = {}) {
   const router = useRouter();
   const [items, setItems] = useState<RankingRow[]>([]);
@@ -368,36 +387,18 @@ export default function OperationRankingsPage({ studyRoute = '/operation/ranking
     ];
 
     const metricColumns: ColumnsType<RankingRow> = getOperationRankingMetricKeys(type).map((key) => {
-      // v1.3 OP-7：根据当前榜单类型动态切换列标题
-      const titleMap: Record<string, Record<string, string>> = {
-        postCount: {
-          posts: '作品数',
-          leads: '客资数',
-          traffic: '总流量',
-        },
-        xhsPostCount: {
-          posts: '小红书作品数',
-          leads: '小红书客资数',
-          traffic: '小红书流量',
-        },
-        douyinPostCount: {
-          posts: '抖音作品数',
-          leads: '抖音客资数',
-          traffic: '抖音流量',
-        },
-      };
       const configs: Record<string, ColumnsType<RankingRow>[number]> = {
         accountCount: { title: '账号数', dataIndex: 'accountCount', width: 90 },
         postCount: {
-          title: titleMap.postCount?.[type] ?? '作品数',
+          title: TITLE_MAP.postCount?.[type] ?? '作品数',
           dataIndex: 'postCount',
           width: 100,
           sorter: (a, b) => numberValue(a.postCount) - numberValue(b.postCount),
           render: (val: number) => <Typography.Text strong={type === 'posts'}>{numberValue(val)}</Typography.Text>,
         },
         leadCount: { title: '客资数', dataIndex: 'leadCount', width: 100, render: numberValue },
-        xhsPostCount: { title: titleMap.xhsPostCount?.[type] ?? '小红书作品数', dataIndex: 'xhsPostCount', width: 130, render: numberValue },
-        douyinPostCount: { title: titleMap.douyinPostCount?.[type] ?? '抖音作品数', dataIndex: 'douyinPostCount', width: 120, render: numberValue },
+        xhsPostCount: { title: TITLE_MAP.xhsPostCount?.[type] ?? '小红书作品数', dataIndex: 'xhsPostCount', width: 130, render: numberValue },
+        douyinPostCount: { title: TITLE_MAP.douyinPostCount?.[type] ?? '抖音作品数', dataIndex: 'douyinPostCount', width: 120, render: numberValue },
         xhsLeadCount: { title: '小红书客资数', dataIndex: 'xhsLeadCount', width: 130, render: numberValue },
         douyinLeadCount: { title: '抖音客资数', dataIndex: 'douyinLeadCount', width: 130, render: numberValue },
         traffic: { title: '总流量', dataIndex: 'traffic', width: 100, render: numberValue },

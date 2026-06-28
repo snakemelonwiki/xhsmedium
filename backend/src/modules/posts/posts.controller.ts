@@ -373,6 +373,7 @@ export class PostsController {
       likes: body.likes || 0,
       comments: body.comments || 0,
       favorites: body.favorites || 0,
+      shares: body.shares || 0,
       publishedAt: body.publishedAt || todayString(),
       note: body.note,
       supervisorSuggestion: body.supervisorSuggestion || '',

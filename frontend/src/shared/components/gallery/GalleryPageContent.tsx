@@ -7,6 +7,7 @@ import {
   DatePicker,
   Empty,
   Form,
+  Image,
   InputNumber,
   Modal,
   Pagination,
@@ -542,10 +543,11 @@ export function GalleryPageContent({
         {detailModal.post && (
           <Space direction="vertical" size={12} style={{ width: '100%' }}>
             {(detailModal.post.coverThumbUrl || detailModal.post.coverImageUrl) && (
-              <LazyImage
+              <Image
                 src={detailModal.post.coverThumbUrl || detailModal.post.coverImageUrl}
                 alt={detailModal.post.title}
-                style={{ width: '100%', maxHeight: 320, objectFit: 'cover', borderRadius: 8 }}
+                style={{ width: '100%', maxHeight: 320, objectFit: 'cover', borderRadius: 8, display: 'block' }}
+                preview={{ mask: '查看大图' }}
               />
             )}
 
