@@ -8,6 +8,6 @@ USE lan_dual_role_system;
 
 ALTER TABLE orders
   MODIFY COLUMN order_status VARCHAR(32) NOT NULL DEFAULT 'to_receive'
-         COMMENT '订单状态：pending_accept/to_receive/in_progress/awaiting_client_info/awaiting_teacher/to_deliver/completed/abnormal/closed',
+         COMMENT '订单状态：pending_accept/to_receive/in_progress/awaiting_client_info/client_info_completed/awaiting_teacher/teacher_assigned/to_deliver/completed/abnormal/closed',
   MODIFY COLUMN paid_status VARCHAR(32) NOT NULL DEFAULT 'unpaid'
          COMMENT '付款状态：unpaid/partial/paid/refunded';

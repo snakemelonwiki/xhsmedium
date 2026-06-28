@@ -13,13 +13,13 @@ export const DELIVERY_PROGRESS_STAGES: readonly DeliveryProgressStage[] = [
   {
     key: 'initial',
     label: '初始',
-    statusValues: ['销售建单', '待补资料', '待教务审核', '待补客户资料'],
+    statusValues: ['销售建单', '待补资料', '待教务审核', '待补客户资料', '已补客户资料'],
     fields: ['statusStage'],
   },
   {
     key: 'assign',
     label: '分配老师',
-    statusValues: ['待分配老师', '老师已接单', 'awaiting_teacher'],
+    statusValues: ['待分配老师', '老师已接单', 'awaiting_teacher', '已分配老师'],
     fields: ['assignedTeacher', 'teacherWechat', 'teacherPhone', 'teacherStability'],
   },
   {

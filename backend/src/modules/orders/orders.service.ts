@@ -19,7 +19,9 @@ type OrderStatus =
   | 'to_receive'
   | 'in_progress'
   | 'awaiting_client_info'
+  | 'client_info_completed'
   | 'awaiting_teacher'
+  | 'teacher_assigned'
   | 'to_deliver'
   | 'completed'
   | 'abnormal'
@@ -38,7 +40,9 @@ const ALLOWED_ORDER_STATUS: OrderStatus[] = [
   'to_receive',
   'in_progress',
   'awaiting_client_info',
+  'client_info_completed',
   'awaiting_teacher',
+  'teacher_assigned',
   'to_deliver',
   'completed',
   'abnormal',
@@ -50,8 +54,12 @@ const ACADEMIC_STAGE_TO_STATUS: Record<string, OrderStatus> = {
   待补客户资料: 'awaiting_client_info',
   待补资料: 'awaiting_client_info',
   awaiting_client_info: 'awaiting_client_info',
+  已补客户资料: 'client_info_completed',
+  client_info_completed: 'client_info_completed',
   待分配老师: 'awaiting_teacher',
   awaiting_teacher: 'awaiting_teacher',
+  已分配老师: 'teacher_assigned',
+  teacher_assigned: 'teacher_assigned',
 };
 
 // N-P1-02: ORDER_UPDATED 通知去重窗口。
@@ -696,7 +704,7 @@ export class OrdersService {
         // 即将到期：履约中类目 + updated_at 早于 5 天前（同 getAcademicHomeSummary 逻辑）
         qb.andWhere(
           'o.order_status IN (:...nearDueStatuses)',
-          { nearDueStatuses: ['in_progress', 'awaiting_client_info', 'awaiting_teacher', 'to_deliver'] },
+          { nearDueStatuses: ['in_progress', 'awaiting_client_info', 'client_info_completed', 'awaiting_teacher', 'teacher_assigned', 'to_deliver'] },
         );
         qb.andWhere('o.updated_at < DATE_SUB(NOW(), INTERVAL 5 DAY)');
       } else {
@@ -945,11 +953,11 @@ export class OrdersService {
     );
 
     const waitingMaterial = await count(
-      buildBase().andWhere('o.order_status = :s', { s: 'awaiting_client_info' }),
+      buildBase().andWhere('o.order_status IN (:...statuses)', { statuses: ['awaiting_client_info', 'client_info_completed'] }),
     );
 
     const waitingTeacher = await count(
-      buildBase().andWhere('o.order_status = :s', { s: 'awaiting_teacher' }),
+      buildBase().andWhere('o.order_status IN (:...statuses)', { statuses: ['awaiting_teacher', 'teacher_assigned'] }),
     );
 
     // 即将到期：基于 order_follow_records，与节点提醒列表口径一致。
@@ -983,8 +991,8 @@ export class OrdersService {
     const [pendingReceiveTarget, waitingMaterialTarget, waitingTeacherTarget, nearDueTargetRow] =
       await Promise.all([
         firstOrderId(buildClaimableReceive()),
-        firstOrderId(buildBase().andWhere('o.order_status = :s', { s: 'awaiting_client_info' })),
-        firstOrderId(buildBase().andWhere('o.order_status = :s', { s: 'awaiting_teacher' })),
+        firstOrderId(buildBase().andWhere('o.order_status IN (:...statuses)', { statuses: ['awaiting_client_info', 'client_info_completed'] })),
+        firstOrderId(buildBase().andWhere('o.order_status IN (:...statuses)', { statuses: ['awaiting_teacher', 'teacher_assigned'] })),
         nearDueSubQb
           .clone()
           .select('fr.order_id', 'orderId')

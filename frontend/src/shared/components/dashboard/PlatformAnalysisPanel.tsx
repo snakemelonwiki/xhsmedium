@@ -145,18 +145,6 @@ function buildRankingColumns(
       ),
     },
     {
-      // v1.3 T3.4: "客资数"列 -> "流量数"列（数据源 leadCount -> traffic）
-      title: (
-        <Tooltip title="作品关联的 likes+comments+favorites 流量">
-          <span>流量数</span>
-        </Tooltip>
-      ),
-      dataIndex: 'traffic',
-      align: 'right' as const,
-      width: 64,
-      render: (v: number) => <Typography.Text>{safeNumber(v).toLocaleString()}</Typography.Text>,
-    },
-    {
       title: (
         <Tooltip title={metricLabel}>
           <span>{metricLabel}</span>
@@ -210,8 +198,8 @@ function PlatformColumn({ bucket, rankings, dist, loading }: PlatformColumnProps
   const effRows = buildPlatformRows(rankings, 'efficiency', bucket);
   const leadEffRows = buildPlatformRows(rankings, 'leadEfficiency', bucket);
 
-  // v1.3 T3.4: "客资数"列固定展示 traffic（见 buildRankingColumns 内），"主指标"列各自展示对应榜的 metric
-  // 表头"获客数榜" → "账号流量榜"
+  // 三个榜单列定义：获客数量榜 / 获客效率榜 / 获客贴效率榜
+  // 获客数量榜使用 leadCount 字段（后端暂无独立排序桶，复用 leadEfficiency 列表）
   const leadColumns = buildRankingColumns('leadCount', '客资数', 0, '#52c41a');
   const effColumns = buildRankingColumns('efficiency', '效率 (客/作品)', 2, '#fa541c');
   const leadEffColumns = buildRankingColumns('leadEfficiency', '效率 (客/获客贴)', 2, '#722ed1');
@@ -309,9 +297,9 @@ function PlatformColumn({ bucket, rankings, dist, loading }: PlatformColumnProps
       <Row gutter={[8, 8]}>
         <Col xs={24} sm={8}>
           {/* W7 修复：标题应与排序键一致——排序键是 leadCount（客资数），标题用"获客数榜" */}
-          {/* v1.3 T3.4 修复：列已改为 traffic (likes+comments+favorites)，表头同步改"账号流量榜" */}
+          {/* v1.3 T3.4 修复："获客数量榜"标题改为获客数，列展示对应榜的 metric */}
         <Typography.Title level={5} style={{ marginTop: 0, marginBottom: 4, fontSize: 13 }}>
-          账号流量榜 Top {TOP_N}
+          获客数量榜 Top {TOP_N}
         </Typography.Title>
           <Skeleton active paragraph={{ rows: 4 }} loading={loading}>
             {leadRows.length === 0 ? (

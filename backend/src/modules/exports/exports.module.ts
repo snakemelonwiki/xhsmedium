@@ -14,6 +14,8 @@ import { ExportsService } from './exports.service';
 import { ExportsProcessor } from './exports.processor';
 import { OperationLogsModule } from '../operation-logs/operation-logs.module';
 
+import { RankingsModule } from '../rankings/rankings.module';
+
 @Module({
   imports: [
     TypeOrmModule.forFeature([
@@ -28,6 +30,7 @@ import { OperationLogsModule } from '../operation-logs/operation-logs.module';
       Employee,
     ]),
     OperationLogsModule,
+    RankingsModule,
   ],
   controllers: [ExportsController],
   // ExportsProcessor 同 module 注册：DI 拉起后由其 onModuleInit 启动 bullmq Worker。

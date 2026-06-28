@@ -6,6 +6,7 @@ import dayjs from 'dayjs';
 import { useEffect, useState } from 'react';
 
 import { listOrderIncome, listTeacherPayments, listOtherExpenses, createTeacherPayment, updateTeacherPayment, deleteTeacherPayment, createOtherExpense, updateOtherExpense, deleteOtherExpense } from '@/shared/api/finance';
+import { paidStatusMeta, orderStatusMeta } from '@/shared/api/enums';
 import type { OrderIncomeRow, TeacherPaymentRow, OtherExpenseRow, OrderIncomeSummary } from '@/shared/api/finance';
 
 const { Title, Paragraph, Text } = Typography;
@@ -79,15 +80,15 @@ function OrderIncomeTab() {
       align: 'right', render: (v: number) => fmtMoney(v),
     },
     {
-      title: '定金', key: 'deposit', width: 150,
+      title: '定金', key: 'deposit', width: 120, align: 'center',
       render: (_v, record) => <StageCell stage={record.deposit} />,
     },
     {
-      title: '中期', key: 'midterm', width: 150,
+      title: '中期', key: 'midterm', width: 120, align: 'center',
       render: (_v, record) => <StageCell stage={record.midterm} />,
     },
     {
-      title: '尾款', key: 'final', width: 150,
+      title: '尾款', key: 'final', width: 120, align: 'center',
       render: (_v, record) => <StageCell stage={record.final} />,
     },
     {
@@ -106,8 +107,21 @@ function OrderIncomeTab() {
       title: '利润', dataIndex: 'profit', key: 'profit', width: 130,
       align: 'right', render: (v: number) => <Text strong type={v >= 0 ? 'success' : 'danger'}>{fmtMoney(v)}</Text>,
     },
-    { title: '状态', dataIndex: 'paidStatus', key: 'paidStatus', width: 100, render: (v: string) => <Tag>{v}</Tag> },
-    { title: '创建时间', dataIndex: 'createdAt', key: 'createdAt', width: 160, render: (v: string) => fmtDate(v) },
+    {
+      title: '订单状态', dataIndex: 'orderStatus', key: 'orderStatus', width: 120, align: 'center',
+      render: (v: string) => {
+        const meta = orderStatusMeta(v);
+        return <Tag color={meta.color}>{meta.label}</Tag>;
+      },
+    },
+    {
+      title: '付款状态', dataIndex: 'paidStatus', key: 'paidStatus', width: 120, align: 'center',
+      render: (v: string) => {
+        const meta = paidStatusMeta(v);
+        return <Tag color={meta.color}>{meta.label}</Tag>;
+      },
+    },
+    { title: '创建时间', dataIndex: 'createdAt', key: 'createdAt', width: 160, align: 'center', render: (v: string) => fmtDate(v) },
   ];
 
   return (
@@ -133,7 +147,7 @@ function OrderIncomeTab() {
         dataSource={items}
         loading={loading}
         pagination={{ current: page, pageSize, total, onChange: (p) => void load(p) }}
-        scroll={{ x: 1800 }}
+        scroll={{ x: 'max-content' }}
       />
     </Space>
   );
@@ -143,10 +157,10 @@ function StageCell({ stage }: { stage: { amount: number; paidAt?: string | null;
   if (!stage) return <Text type="secondary">-</Text>;
   const isAuto = stage.source === 'sales_close';
   return (
-    <Space direction="vertical" size={0}>
+    <Space direction="vertical" size={0} style={{ minHeight: 48, justifyContent: 'center' }}>
       <Text strong type="success">{fmtMoney(stage.amount)}</Text>
       <Text type="secondary" style={{ fontSize: 12 }}>{fmtDate(stage.paidAt)}</Text>
-      {isAuto && <Tag color="blue">来自销售端</Tag>}
+      {isAuto ? <Tag color="blue">来自销售端</Tag> : <span style={{ height: 22 }} />}
     </Space>
   );
 }

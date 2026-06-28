@@ -151,7 +151,7 @@ const PLAGIARISM_OPTIONS = [
 
 const DELIVERY_SELECT_OPTIONS: Record<string, { label: string; value: string }[]> = {
   degreeLevel: options(['专科', '本科', '硕士', '博士', '职称']),
-  statusStage: options(['待补客户资料', '待分配老师']),
+  statusStage: options(['待补客户资料', '已补客户资料', '待分配老师', '已分配老师']),
   paperProgress: options(['待分配', '进行中', '待投稿', '已投稿', '返修中', '已录用']),
   teacherStability: options(['优秀', '一般', '差', '稳定老师', '新老师', '试合作']),
   innovationReviewStatus: options(['未提交', '待审核', '已通过', '需修改', '稳定老师跳过']),

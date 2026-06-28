@@ -6,7 +6,9 @@ export type OrderStatusCode =
   | 'to_receive'
   | 'in_progress'
   | 'awaiting_client_info'
+  | 'client_info_completed'
   | 'awaiting_teacher'
+  | 'teacher_assigned'
   | 'to_deliver'
   | 'completed'
   | 'abnormal';

@@ -357,7 +357,7 @@ export class RemindersService {
     }
 
     // 候选订单：处于活跃状态，且创建超过 7 天
-    const activeStatuses = ['in_progress', 'awaiting_client_info', 'awaiting_teacher', 'to_deliver'];
+    const activeStatuses = ['in_progress', 'awaiting_client_info', 'client_info_completed', 'awaiting_teacher', 'teacher_assigned', 'to_deliver'];
     const candidateOrders = await this.orderRepo
       .createQueryBuilder('o')
       .where('o.orderStatus IN (:...statuses)', { statuses: activeStatuses })

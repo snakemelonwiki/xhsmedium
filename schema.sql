@@ -392,7 +392,7 @@ CREATE TABLE IF NOT EXISTS orders (
   payment_stage            VARCHAR(64)  NULL COMMENT '付款阶段：定金/中期/尾款 等自由文本',
   amount                   DECIMAL(12,2) NULL COMMENT '成交金额',
   paid_status              VARCHAR(32) NOT NULL DEFAULT 'unpaid' COMMENT '付款状态：unpaid/partial/paid/refunded',
-  order_status             VARCHAR(32) NOT NULL DEFAULT 'to_receive' COMMENT '订单状态：pending_accept/to_receive/in_progress/awaiting_client_info/awaiting_teacher/to_deliver/completed/abnormal/closed',
+  order_status             VARCHAR(32) NOT NULL DEFAULT 'to_receive' COMMENT '订单状态：pending_accept/to_receive/in_progress/awaiting_client_info/client_info_completed/awaiting_teacher/teacher_assigned/to_deliver/completed/abnormal/closed',
   handover_status          VARCHAR(16) NOT NULL DEFAULT 'pending' COMMENT '交接状态: pending待交接 | handed_over已交接 | accepted已接收 | rejected已拒收(由 M14 迁移追加;销售成交时默认 handed_over,教务可 accept/reject)',
   remark                   TEXT        NULL COMMENT '备注',
   -- v1.3 增量（M26 / CROSS-4 订单编号，ORD-YYYYMMDD-XXXXX；历史数据 NULL）

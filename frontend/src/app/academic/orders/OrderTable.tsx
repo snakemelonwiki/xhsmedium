@@ -37,7 +37,9 @@ const orderStatusOptions: { label: string; value: OrderStatusCode }[] = [
   { label: '待领取', value: 'to_receive' },
   { label: '进行中', value: 'in_progress' },
   { label: '待客户资料', value: 'awaiting_client_info' },
+  { label: '已补客户资料', value: 'client_info_completed' },
   { label: '待老师', value: 'awaiting_teacher' },
+  { label: '已分配老师', value: 'teacher_assigned' },
   { label: '待交付', value: 'to_deliver' },
   { label: '已完成', value: 'completed' },
   { label: '异常', value: 'abnormal' },
@@ -388,8 +390,8 @@ export function OrderTable({
 
   // 履约进度阶段名称映射（paperProgress 值 → 步骤标题）
   const PROGRESS_STEP_LABEL: Record<string, string> = {
-    '销售建单': '初始', '待补资料': '初始', '待教务审核': '初始', '待补客户资料': '初始',
-    '待分配老师': '分配老师', '老师已接单': '分配老师', 'awaiting_teacher': '分配老师',
+    '销售建单': '初始', '待补资料': '初始', '待教务审核': '初始', '待补客户资料': '初始', '已补客户资料': '初始',
+    '待分配老师': '分配老师', '老师已接单': '分配老师', 'awaiting_teacher': '分配老师', '已分配老师': '分配老师',
     '写作中': '写作审核',
     '待投稿': '投稿准备',
     '已投稿': '投稿后', '审稿中': '投稿后', '返修中': '投稿后',

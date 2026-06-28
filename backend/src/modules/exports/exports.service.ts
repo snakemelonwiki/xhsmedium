@@ -14,6 +14,8 @@ import { Employee } from '../../entities/employee.entity';
 import { makeId } from '../../shared/utils/id-generator';
 import { StorageService } from '../../shared/storage/storage.service';
 import { OperationLogsService } from '../operation-logs/operation-logs.service';
+import { RankingsService } from '../rankings/rankings.service';
+import { todayString } from '../../shared/utils/date-utils';
 
 export type ExportType =
   | 'leads'
@@ -23,6 +25,8 @@ export type ExportType =
   | 'posts'
   | 'rankings'
   | 'accounts';
+
+const RANKING_TYPES = ['posts', 'leads', 'traffic', 'study'];
 
 interface CreateDto {
   userId: string;
@@ -67,7 +71,9 @@ const ORDER_STATUS_LABEL: Record<string, string> = {
   to_receive: '待领取',
   in_progress: '进行中',
   awaiting_client_info: '待客户资料',
+  client_info_completed: '已补客户资料',
   awaiting_teacher: '待安排老师',
+  teacher_assigned: '已分配老师',
   to_deliver: '待交付',
   completed: '已完成',
   abnormal: '异常',
@@ -144,6 +150,7 @@ export class ExportsService implements OnModuleInit, OnModuleDestroy {
     private readonly userRepo: Repository<User>,
     private readonly storage: StorageService,
     private readonly operationLogs: OperationLogsService,
+    private readonly rankingsService: RankingsService,
   ) {}
 
   /**
@@ -859,33 +866,80 @@ export class ExportsService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * 导出运营排行榜，口径与 A 端看板保持为 SQL 聚合。
+   * 导出运营排行榜，口径与 /rankings/operations 接口保持一致。
+   * 支持 filter.type（posts/leads/traffic）、filter.period、filter.from / filter.to。
+   * from/to 优先级高于 period，与 rankings.controller 行为一致。
    */
   private async buildRankingsCsv(filter: Record<string, any>): Promise<string> {
-    const platformClause = filter.platform ? ' AND p.platform = ?' : '';
-    const leadPlatformClause = filter.platform ? ' AND l.platform = ?' : '';
-    const params = filter.platform
-      ? [filter.platform, filter.platform, filter.platform]
-      : [];
-    const rows = await this.employeeRepo.query(
-      `SELECT
-         e.name AS employee_name,
-         (SELECT COUNT(*) FROM posts p WHERE p.employee_id = e.id${platformClause}) AS post_count,
-         (SELECT COUNT(*) FROM leads l WHERE l.employee_id = e.id${leadPlatformClause}) AS lead_count,
-         (SELECT COALESCE(SUM(p.likes), 0) FROM posts p WHERE p.employee_id = e.id${platformClause}) AS likes
-       FROM employees e
-       ORDER BY lead_count DESC, likes DESC, post_count DESC`,
-      params,
+    const type = RANKING_TYPES.includes(filter.type) ? filter.type : 'posts';
+    const date = filter.date || todayString();
+    const range = this.isValidDate(filter.from) || this.isValidDate(filter.to)
+      ? { from: filter.from, to: filter.to }
+      : undefined;
+    // 导出上限 10000，实际员工数通常远小于此；getRankingsPaged 内部为内存分页。
+    const result = await this.rankingsService.getRankingsPaged(
+      type,
+      date,
+      10000,
+      0,
+      { period: filter.period, range, platform: filter.platform },
     );
-    return this.toCsv(
-      ['员工', '作品数', '客资数', '点赞数'],
-      rows.map((r: any) => [
-        r.employee_name || '',
-        r.post_count || 0,
-        r.lead_count || 0,
-        r.likes || 0,
-      ]),
-    );
+
+    const headersMap: Record<string, string[]> = {
+      posts: ['员工', '账号数', '作品数', '小红书作品数', '抖音作品数', '成交数'],
+      leads: ['员工', '账号数', '客资数', '小红书客资数', '抖音客资数', '成交数'],
+      traffic: ['员工', '账号数', '总流量', '小红书流量', '抖音流量', '成交数'],
+      study: ['员工', '作品数', '客资数', '点赞数', '获客效率', '学习榜得分'],
+    };
+    const headers = headersMap[type] || headersMap.posts;
+
+    const data = (result.items || []).map((r: any) => {
+      const base = [r.name || r.employeeName || '', r.accountCount || 0];
+      if (type === 'leads') {
+        return [
+          ...base,
+          r.leadCount || 0,
+          r.xhsLeadCount || 0,
+          r.douyinLeadCount || 0,
+          r.todayDeals || 0,
+        ];
+      }
+      if (type === 'traffic') {
+        return [
+          ...base,
+          r.traffic || 0,
+          r.xhsTraffic || 0,
+          r.douyinTraffic || 0,
+          r.todayDeals || 0,
+        ];
+      }
+      if (type === 'study') {
+        return [
+          r.name || r.employeeName || '',
+          r.posts || 0,
+          r.leads || 0,
+          r.likes || 0,
+          r.efficiency || 0,
+          r.score || 0,
+        ];
+      }
+      return [
+        ...base,
+        r.postCount || 0,
+        r.xhsPostCount || 0,
+        r.douyinPostCount || 0,
+        r.todayDeals || 0,
+      ];
+    });
+
+    return this.toCsv(headers, data);
+  }
+
+  private isValidDate(s: any): s is string {
+    if (typeof s !== 'string') return false;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+    const t = new Date(s);
+    return !isNaN(t.getTime());
   }
 
   /**

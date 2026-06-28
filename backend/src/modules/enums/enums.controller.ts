@@ -41,9 +41,15 @@ export class EnumsController {
       ORDER_STATUS: {
         to_receive: { label: '待接收', color: '#1890ff' },
         in_progress: { label: '进行中', color: '#faad14' },
+        awaiting_client_info: { label: '待客户资料', color: '#faad14' },
+        client_info_completed: { label: '已补客户资料', color: '#52c41a' },
+        awaiting_teacher: { label: '待老师', color: '#faad14' },
+        teacher_assigned: { label: '已分配老师', color: '#52c41a' },
+        to_deliver: { label: '待交付', color: '#faad14' },
         completed: { label: '已完成', color: '#52c41a' },
         abnormal: { label: '异常', color: '#f5222d' },
         cancelled: { label: '已取消', color: '#8c8c8c' },
+        closed: { label: '已关闭', color: '#8c8c8c' },
       },
       PAID_STATUS: {
         unpaid: { label: '未支付', color: '#8c8c8c' },

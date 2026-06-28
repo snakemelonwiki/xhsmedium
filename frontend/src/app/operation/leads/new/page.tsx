@@ -181,7 +181,7 @@ export default function OperationLeadNewPage() {
                   style={{ resize: 'vertical' }}
                   value={pasteText}
                   onChange={(event) => setPasteText(event.target.value)}
-                  placeholder={`昵称：张三\n微信：zhangsan123\n来源：小红书（账号名）\n需求备注：论文辅导`}
+                  placeholder={`平台：小红书\n账号：屿森\n客户昵称：慧妮\n联系方式：二维码\n地区：江苏\n需求备注：sci`}
                 />
                 <div style={{ marginTop: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                   <details style={{ fontSize: 13 }}>
@@ -197,16 +197,18 @@ export default function OperationLeadNewPage() {
                       position: 'relative',
                     }}>
                       <pre style={{ margin: 0, whiteSpace: 'pre-wrap', fontFamily: 'inherit', fontSize: 13, lineHeight: 1.8 }}>
-{`昵称：张三
-微信：zhangsan123
-来源：小红书（账号名）
-需求备注：论文辅导`}
+{`平台：小红书
+账号：屿森
+客户昵称：慧妮
+联系方式：二维码
+地区：江苏
+需求备注：sci`}
                       </pre>
                       <Button
                         size="small"
                         style={{ position: 'absolute', top: 6, right: 6 }}
                         onClick={() => {
-                          navigator.clipboard.writeText('昵称：张三\n微信：zhangsan123\n来源：小红书（账号名）\n需求备注：论文辅导');
+                          navigator.clipboard.writeText('平台：小红书\n账号：屿森\n客户昵称：慧妮\n联系方式：二维码\n地区：江苏\n需求备注：sci');
                           message.success('示例已复制，粘贴到输入框后点击识别');
                         }}
                       >

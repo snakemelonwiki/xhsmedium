@@ -27,6 +27,8 @@ import { apiClient } from '@/shared/api/apiClient';
 import { QuickRangePicker, RANGE_PRESETS_FULL } from '@/shared/components/date';
 import type { DateRangeValue } from '@/shared/components/date';
 
+import { isPresetMatch } from '@/shared/utils/date-range';
+
 import { getOperationRankingMetricKeys, MAIN_RANKING_TYPE_OPTIONS, type MainRankingType } from './rankingTable';
 
 type RankingType = MainRankingType | 'traffic';
@@ -44,6 +46,11 @@ type Period = 'today' | 'week' | 'month' | 'total' | '7d' | '14d' | '30d' | '90d
  */
 function derivePeriod(range: DateRangeValue): Period | null {
   if (!range) return 'today';
+  const preset = RANGE_PRESETS_FULL.find((p) => isPresetMatch(range, p.unit, p.n, p.mode));
+  if (preset) {
+    const supported: Period[] = ['today', 'week', 'month', 'total', '7d', '14d', '30d', '90d', '1y', '3y'];
+    if (supported.includes(preset.key as Period)) return preset.key as Period;
+  }
   const days = Math.max(0, range.end.diff(range.start, 'day'));
   if (days <= 1) return 'today';
   if (days <= 7) return '7d';
@@ -147,7 +154,7 @@ function numberValue(value: unknown): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-export default function OperationRankingsPage() {
+export default function OperationRankingsPage({ studyRoute = '/operation/rankings/study' }: { studyRoute?: string } = {}) {
   const router = useRouter();
   const [items, setItems] = useState<RankingRow[]>([]);
   const [total, setTotal] = useState(0);
@@ -252,7 +259,7 @@ export default function OperationRankingsPage() {
   useEffect(() => {
     void loadTop3(rangeQuery);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [period]);
+  }, [rangeQuery]);
 
   function changeType(nextType: MainRankingType) {
     setType(nextType);
@@ -270,7 +277,11 @@ export default function OperationRankingsPage() {
     setExporting(true);
     const hide = message.loading('正在生成导出文件...', 0);
     try {
-      const result = await createExport({ exportType: 'rankings', filter: { type, period } });
+      const exportFilter: Record<string, string | number | null | undefined> = { type };
+      if (rangeQuery.period) exportFilter.period = rangeQuery.period;
+      if (rangeQuery.from) exportFilter.from = rangeQuery.from;
+      if (rangeQuery.to) exportFilter.to = rangeQuery.to;
+      const result = await createExport({ exportType: 'rankings', filter: exportFilter });
 
       if (!result?.id) {
         hide();
@@ -307,20 +318,22 @@ export default function OperationRankingsPage() {
   }
 
   function goToStudy() {
-    router.push('/operation/rankings/study');
+    router.push(studyRoute);
   }
 
   // 计算与上一名的差距
   const itemsWithGap = useMemo(() => {
     if (items.length === 0) return [];
-    const getValue = (item: RankingRow) => {
-      return type === 'leads' ? numberValue(item.leadCount) : numberValue(item.postCount);
+    const getValue = (item: RankingRow, sortType: RankingType) => {
+      if (sortType === 'leads') return numberValue(item.leadCount);
+      if (sortType === 'traffic') return numberValue(item.traffic);
+      return numberValue(item.postCount);
     };
     return items.map((item, index) => {
-      const currentValue = getValue(item);
+      const currentValue = getValue(item, type);
       let gap = 0;
       if (index > 0) {
-        const prevValue = getValue(items[index - 1]);
+        const prevValue = getValue(items[index - 1], type);
         // 与上一名差距用正数展示（差距方向已由列名"与上一名差距"隐含）。
         // 即便排序异常或同分，也保证不会出现负数或负号叠加。
         gap = Math.max(0, prevValue - currentValue);
@@ -382,8 +395,14 @@ export default function OperationRankingsPage() {
           sorter: (a, b) => numberValue(a.postCount) - numberValue(b.postCount),
           render: (val: number) => <Typography.Text strong={type === 'posts'}>{numberValue(val)}</Typography.Text>,
         },
+        leadCount: { title: '客资数', dataIndex: 'leadCount', width: 100, render: numberValue },
         xhsPostCount: { title: titleMap.xhsPostCount?.[type] ?? '小红书作品数', dataIndex: 'xhsPostCount', width: 130, render: numberValue },
         douyinPostCount: { title: titleMap.douyinPostCount?.[type] ?? '抖音作品数', dataIndex: 'douyinPostCount', width: 120, render: numberValue },
+        xhsLeadCount: { title: '小红书客资数', dataIndex: 'xhsLeadCount', width: 130, render: numberValue },
+        douyinLeadCount: { title: '抖音客资数', dataIndex: 'douyinLeadCount', width: 130, render: numberValue },
+        traffic: { title: '总流量', dataIndex: 'traffic', width: 100, render: numberValue },
+        xhsTraffic: { title: '小红书流量', dataIndex: 'xhsTraffic', width: 130, render: numberValue },
+        douyinTraffic: { title: '抖音流量', dataIndex: 'douyinTraffic', width: 130, render: numberValue },
         todayDeals: { title: '成交数', dataIndex: 'todayDeals', width: 100, render: numberValue },
       };
       return configs[key];
