@@ -25,17 +25,17 @@
 
 ## 三、运营端
 
-| 序号 | 任务描述 | 状态 | 备注 |
-|------|----------|------|------|
-| 9 | 运营排行榜：时间筛选为"今天"时，显示的是累计数据，需修正为仅今天的数据 | ✅ | `rankings.service.ts` 已修复：today 映射为 `{from: today, to: today}` 当天范围 |
-| 10 | 运营排行榜：时间筛选为非"今天"的时间段时，小红书作品数和抖音作品数均显示为 0 | ✅ | `rankings.service.ts` 已修复平台匹配逻辑：支持中英文平台值（小红书/xiaohongshu/xhs、抖音/douyin） |
-| 11 | 运营排行榜：点击"按客资"按钮后，"作品数/小红书作品数/抖音作品数"三列应变为"客资数/小红书客资数/抖音客资数" | ✅ | `page.tsx` 已修复：列标题根据 type 动态切换（posts/leads/traffic） |
-| 12 | 运营排行榜：增加"按流量"按钮，点击后三列变为"总流量/小红书流量/抖音流量" | ✅ | `TOP_CARD_TYPE_OPTIONS(97-99)` 已包含 `traffic`；顶部三卡已展示流量 Top3(135-141) |
-| 13 | 个人看板：选择单个平台后数据全部为 0，修复查询错误；选择"全部平台"时，双平台分布/趋势/占比均不显示 | ✅ | 前端 `/accounts` 已正确透传 `platform` 参数；后端 `accounts.service.ts` 的 `buildWhere` 也支持平台过滤。单平台数据为0问题需后端确认 `/accounts` 的 `platform` 参数是否和 DB 中的值完全匹配（如 '小红书' vs 'xiaohongshu'） |
-| 14 | 个人看板：双平台数据分析的"账号流量榜"改为"获客数量榜 Top8"；三个 Top8 榜单的中间数据列去除 | ✅ | `PlatformAnalysisPanel.tsx`: 标题改为"获客数量榜"；中间"流量数"列已移除，每个榜单只保留排名+账号+主指标 |
-| 15 | 账号分析：去除"近60天/近90天"选项；讨论贴→蓝色，人设贴→绿色，有获客的作品才显示橙色 | ✅ | `DAYS_OPTIONS(50-55)` 已去除 60/90 天；颜色已正确（获客帖 #fa8c16、讨论帖 #1677ff、人设帖 #52c41a）。"有获客才橙色"逻辑当前为：postCount>0 且 posts.some(isLead && leadCount>0) → 橙色，否则如果 postCount>0 → 绿色，否则灰色 |
-| 16 | 作品录入：输入示例统一更新为标准模板 | ✅ | `operation/leads/new/page.tsx` placeholder/示例/复制文本 已统一更新为标准模板（平台/账号/客户昵称/联系方式/地区/需求备注） |
-| 17 | 运营排行榜内容直接复用到总后台的运营排行榜 | ✅ | 新增 `owner/rankings/page.tsx`，复用 `OperationRankingsPage` 组件并传入 `studyRoute="/owner/rankings/study"`，避免重复维护 |
+| 序号 | 任务描述                                                       | 状态  | 备注 |
+|------|------------------------------------------------------------|-----|------|
+| 9 | 运营排行榜：时间筛选为"今天"时，显示的是累计数据，需修正为仅今天的数据                       | ✅   | `rankings.service.ts` 已修复：today 映射为 `{from: today, to: today}` 当天范围 |
+| 10 | 运营排行榜：时间筛选为非"今天"的时间段时，小红书作品数和抖音作品数均显示为 0                   | ✅   | `rankings.service.ts` 已修复平台匹配逻辑：支持中英文平台值（小红书/xiaohongshu/xhs、抖音/douyin） |
+| 11 | 运营排行榜：点击"按客资"按钮后，"作品数/小红书作品数/抖音作品数"三列应变为"客资数/小红书客资数/抖音客资数" | ✅   | `page.tsx` 已修复：列标题根据 type 动态切换（posts/leads/traffic） |
+| 12 | 运营排行榜：增加"按流量"按钮，点击后三列变为"总流量/小红书流量/抖音流量"                    | ✅   | `TOP_CARD_TYPE_OPTIONS(97-99)` 已包含 `traffic`；顶部三卡已展示流量 Top3(135-141) |
+| 13 | 个人看板：选择单个平台后数据全部为 0，修复查询错误；选择"全部平台"时，双平台分布/趋势/占比均不显示       | 未修复 | 前端 `/accounts` 已正确透传 `platform` 参数；后端 `accounts.service.ts` 的 `buildWhere` 也支持平台过滤。单平台数据为0问题需后端确认 `/accounts` 的 `platform` 参数是否和 DB 中的值完全匹配（如 '小红书' vs 'xiaohongshu'） |
+| 14 | 个人看板：双平台数据分析的"账号流量榜"改为"获客数量榜 Top8"；三个 Top8 榜单的中间数据列去除      | 未修复 | `PlatformAnalysisPanel.tsx`: 标题改为"获客数量榜"；中间"流量数"列已移除，每个榜单只保留排名+账号+主指标 |
+| 15 | 账号分析：去除"近60天/近90天"选项；讨论贴→蓝色，人设贴→绿色，有获客的作品才显示橙色,卡片颜色        | 未修复 | `DAYS_OPTIONS(50-55)` 已去除 60/90 天；颜色已正确（获客帖 #fa8c16、讨论帖 #1677ff、人设帖 #52c41a）。"有获客才橙色"逻辑当前为：postCount>0 且 posts.some(isLead && leadCount>0) → 橙色，否则如果 postCount>0 → 绿色，否则灰色 |
+| 16 | 作品录入：输入示例统一更新为标准模板                                         | ✅   | `operation/leads/new/page.tsx` placeholder/示例/复制文本 已统一更新为标准模板（平台/账号/客户昵称/联系方式/地区/需求备注） |
+| 17 | 运营排行榜内容直接复用到总后台的运营排行榜                                      | ✅   | 新增 `owner/rankings/page.tsx`，复用 `OperationRankingsPage` 组件并传入 `studyRoute="/owner/rankings/study"`，避免重复维护 |
 
 **作品录入示例（更新后）**：
 ```
@@ -74,14 +74,14 @@
 
 ## 六、教务端
 
-| 序号 | 任务描述 | 状态 | 备注 |
-|------|----------|------|------|
-| 21 | 教务首页：待接收 / 待客户资料 / 待老师安排，点击后跳转到对应搜索条件的订单池页面 | ✅ | `academic/page.tsx:39-67` 各指标均配置 `href`，并使用 `buildAcademicTodoHref` 构建跳转链接(含 todo 参数) |
-| 22 | 上传订单：订单号若用户填写则校验重复后入库，否则自动生成编号 | ✅ | Git `1958b5a` 已实现；`OrderTable.tsx:855` 有 `orderCode` 输入项，`[id]/page.tsx:122` 编号字段可 disabled |
-| 23 | 新建订单："客户姓名+学历"两个输入框替换为"自定义订单编号"输入框；失去焦点后自动校验重复 | ✅ | `OrderTable.tsx:823-836` 已将 customerName/educationLevel 替换为 orderCode（自定义订单编号），并添加 async validator 调用 `checkOrderCodeExists`；后端新增 `GET /orders/check-code` 接口 |
-| 24 | 节点提醒：操作列的"已提醒"按钮修改为"去跟进"，要求可点击跳转 | ✅ | `academic/reminders/page.tsx:140` 按钮文字改为"去跟进"；点击后 `handleFollowup` 先标记提醒已处理，再跳转 `/academic/orders/${orderId}?target=progress#progress` |
-| 25 | 作者等级表上传后，文件名称显示乱码 | ✅ | Git `1958b5a` 已修复文件上传中文乱码 |
-| 26 | 订单跟进："稿件进度"与"投稿进度"两列合并为一列（暂定合并后显示为 2 个小按钮） | ✅ | `OrderTable.tsx:440-457` 已合并为「进度」列，内含两个 `Button size="small"` 分别显示稿件进度与投稿进度 |
+| 序号 | 任务描述 | 状态  | 备注 |
+|------|----------|-----|------|
+| 21 | 教务首页：待接收 / 待客户资料 / 待老师安排，点击后跳转到对应搜索条件的订单池页面 | 未修复 | `academic/page.tsx:39-67` 各指标均配置 `href`，并使用 `buildAcademicTodoHref` 构建跳转链接(含 todo 参数) |
+| 22 | 上传订单：订单号若用户填写则校验重复后入库，否则自动生成编号 | ✅   | Git `1958b5a` 已实现；`OrderTable.tsx:855` 有 `orderCode` 输入项，`[id]/page.tsx:122` 编号字段可 disabled |
+| 23 | 新建订单："客户姓名+学历"两个输入框替换为"自定义订单编号"输入框；失去焦点后自动校验重复 | ✅   | `OrderTable.tsx:823-836` 已将 customerName/educationLevel 替换为 orderCode（自定义订单编号），并添加 async validator 调用 `checkOrderCodeExists`；后端新增 `GET /orders/check-code` 接口 |
+| 24 | 节点提醒：操作列的"已提醒"按钮修改为"去跟进"，要求可点击跳转 | ✅   | `academic/reminders/page.tsx:140` 按钮文字改为"去跟进"；点击后 `handleFollowup` 先标记提醒已处理，再跳转 `/academic/orders/${orderId}?target=progress#progress` |
+| 25 | 作者等级表上传后，文件名称显示乱码 | ✅   | Git `1958b5a` 已修复文件上传中文乱码 |
+| 26 | 订单跟进："稿件进度"与"投稿进度"两列合并为一列（暂定合并后显示为 2 个小按钮） | ✅   | `OrderTable.tsx:440-457` 已合并为「进度」列，内含两个 `Button size="small"` 分别显示稿件进度与投稿进度 |
 
 ---
 
