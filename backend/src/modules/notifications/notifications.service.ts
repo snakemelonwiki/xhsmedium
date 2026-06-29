@@ -319,6 +319,13 @@ export class NotificationsService {
   private map(row: Notification): any {
     const targetType = row.relatedType || null;
     const targetId = row.relatedId || null;
+    let routeHint = this.buildRouteHint(row.portType, targetType, targetId);
+
+    // supervisor_suggestion 通知自动打开跟进时间线
+    if (row.typeCode === 'supervisor_suggestion' && targetType === 'lead' && targetId) {
+      routeHint = `/sales/leads/${targetId}?tab=timeline`;
+    }
+
     return {
       id: row.id,
       receiverId: row.receiverId,

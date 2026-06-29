@@ -93,7 +93,7 @@ export class SupervisorSuggestionsService {
     });
     const saved = await this.suggestionRepo.save(suggestion);
 
-    // 通知对应运营
+    // 通知对应销售
     try {
       await this.notificationsService.create({
         receiverIds: [receiverId],
@@ -102,8 +102,8 @@ export class SupervisorSuggestionsService {
         typeCode: 'supervisor_suggestion',
         title: '主管建议',
         content: `您收到一条主管建议：${content.substring(0, 50)}${content.length > 50 ? '...' : ''}`,
-        relatedId: saved.id,
-        relatedType: 'supervisor_suggestion',
+        relatedId: targetId,
+        relatedType: 'lead',
       });
     } catch (notifErr) {
       // 通知失败不影响主流程

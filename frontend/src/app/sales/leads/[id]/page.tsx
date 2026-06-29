@@ -21,7 +21,7 @@ import {
   Typography,
   message,
 } from 'antd';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import dayjs, { type Dayjs } from 'dayjs';
 
@@ -127,6 +127,7 @@ type ContactFormValues = {
 export default function SalesLeadDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const leadId = String(params.id);
   const [lead, setLead] = useState<SalesLead>();
   const [timeline, setTimeline] = useState<LeadTimelineItem[]>([]);
@@ -143,6 +144,10 @@ export default function SalesLeadDetailPage() {
   const [dealStatusOpen, setDealStatusOpen] = useState(false);
   const [intentionOpen, setIntentionOpen] = useState(false);
   const { submitting, run } = useSubmitLock();
+
+  // 支持 URL ?tab=timeline 自动切换到跟进时间线
+  const defaultTab = searchParams.get('tab') || 'follow';
+  const [activeTab, setActiveTab] = useState(defaultTab);
 
   const [editingRequirement, setEditingRequirement] = useState(false);
   const [requirementValue, setRequirementValue] = useState('');
@@ -559,6 +564,8 @@ export default function SalesLeadDetailPage() {
       </Card>
 
       <Tabs
+        activeKey={activeTab}
+        onChange={setActiveTab}
         items={[
           {
             key: 'follow',

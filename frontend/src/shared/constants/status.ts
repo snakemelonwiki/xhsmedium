@@ -56,7 +56,8 @@ export type NotificationTypeCode =
   | 'order_node_overdue'
   | 'order_abnormal'
   | 'import_done'
-  | 'export_done';
+  | 'export_done'
+  | 'supervisor_suggestion';
 
 export type StatusKind =
   | 'leadStatus'
@@ -129,6 +130,7 @@ export const STATUS_META: StatusRegistry = {
     order_abnormal: { code: 'order_abnormal', label: '订单异常', color: 'red', role: 'sales', actionHint: '处理异常' },
     import_done: { code: 'import_done', label: '导入完成', color: 'green', role: 'admin', actionHint: '下载结果' },
     export_done: { code: 'export_done', label: '导出完成', color: 'green', role: 'admin', actionHint: '下载文件' },
+    supervisor_suggestion: { code: 'supervisor_suggestion', label: '主管建议', color: 'gold', role: 'sales', actionHint: '查看建议' },
   },
 };
 
