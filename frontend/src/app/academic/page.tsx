@@ -167,7 +167,10 @@ export default function AcademicHomePage() {
           {METRIC_CARDS.map((card) => {
             const value = summary ? summary[card.key] : 0;
             const targetOrderId = summary?.targets?.[card.key]?.orderId;
-            const href = buildAcademicTodoHref({ type: card.key, orderId: targetOrderId });
+            // 待接收 / 待客户资料 / 待老师安排 始终跳转到列表页（不跳详情）
+            const isDirectListCard =
+              card.key === 'pendingReceive' || card.key === 'waitingMaterial' || card.key === 'waitingTeacher';
+            const href = isDirectListCard ? card.href : buildAcademicTodoHref({ type: card.key, orderId: targetOrderId });
             return (
               <Link key={card.key} href={href || card.href}>
                 <Card hoverable styles={{ body: { padding: 20 } }}>
