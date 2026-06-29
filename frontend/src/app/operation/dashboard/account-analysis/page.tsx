@@ -123,7 +123,7 @@ export default function AccountAnalysisPage() {
         setAllAccountsData(data);
         setTimeseries(undefined);
       } else {
-        const data = await getAccountTimeseries(selectedAccountId as string, { days });
+        const data = await getAccountTimeseries(selectedAccountId as string, { days, platform: platform || undefined });
         setTimeseries(data);
         setAllAccountsData(undefined);
       }
@@ -243,6 +243,8 @@ export default function AccountAnalysisPage() {
               <Badge color={ACCOUNT_ANALYSIS_LEGEND.leadPost.color} text={ACCOUNT_ANALYSIS_LEGEND.leadPost.text} />
               <Badge color={ACCOUNT_ANALYSIS_LEGEND.discussionPost.color} text={ACCOUNT_ANALYSIS_LEGEND.discussionPost.text} />
               <Badge color={ACCOUNT_ANALYSIS_LEGEND.personaPost.color} text={ACCOUNT_ANALYSIS_LEGEND.personaPost.text} />
+              <Badge color={ACCOUNT_ANALYSIS_LEGEND.mixedPost.color} text={ACCOUNT_ANALYSIS_LEGEND.mixedPost.text} />
+              <Badge color={ACCOUNT_ANALYSIS_LEGEND.otherPost.color} text={ACCOUNT_ANALYSIS_LEGEND.otherPost.text} />
               <Badge color={ACCOUNT_ANALYSIS_LEGEND.empty.color} text={ACCOUNT_ANALYSIS_LEGEND.empty.text} />
               <span style={{ width: 1, height: 12, background: '#d9d9d9' }} />
               <Space size={4} align="center">
@@ -289,6 +291,8 @@ export default function AccountAnalysisPage() {
                       <Badge color={ACCOUNT_ANALYSIS_LEGEND.leadPost.color} text={ACCOUNT_ANALYSIS_LEGEND.leadPost.text} />
                       <Badge color={ACCOUNT_ANALYSIS_LEGEND.discussionPost.color} text={ACCOUNT_ANALYSIS_LEGEND.discussionPost.text} />
                       <Badge color={ACCOUNT_ANALYSIS_LEGEND.personaPost.color} text={ACCOUNT_ANALYSIS_LEGEND.personaPost.text} />
+                      <Badge color={ACCOUNT_ANALYSIS_LEGEND.mixedPost.color} text={ACCOUNT_ANALYSIS_LEGEND.mixedPost.text} />
+                      <Badge color={ACCOUNT_ANALYSIS_LEGEND.otherPost.color} text={ACCOUNT_ANALYSIS_LEGEND.otherPost.text} />
                       <Badge color={ACCOUNT_ANALYSIS_LEGEND.empty.color} text={ACCOUNT_ANALYSIS_LEGEND.empty.text} />
                     </Space>
                   }
@@ -315,10 +319,12 @@ export default function AccountAnalysisPage() {
 }
 
 /**
- * 账号日历视图：横轴日期，颜色按 OP-23 编码
+ * 账号日历视图：横轴日期，颜色按帖子类型编码
  * - 橙 = 获客帖
+ * - 蓝 = 讨论帖
  * - 绿 = 人设帖
- * - 灰 = 未发帖
+ * - 紫 = 讨论帖 + 人设帖
+ * - 灰 = 未发
  */
 function AccountCalendarGrid({ days }: { days: AccountTimeseriesDay[] }) {
   if (!days || days.length === 0) {
@@ -403,12 +409,15 @@ function AccountCalendarGrid({ days }: { days: AccountTimeseriesDay[] }) {
 
 function pickDayColor(d: AccountTimeseriesDay): string {
   if (d.postCount === 0) return '#d9d9d9';
-  // 优先级1：有获客帖（且产生客资）→ 橙色
-  if (d.posts.some((p: AccountTimeseriesPost) => p.isLead && p.leadCount > 0)) return '#fa8c16';
-  // 优先级2：有讨论帖 → 蓝色（任务15）
-  if (d.posts.some((p: AccountTimeseriesPost) => p.type === '讨论帖')) return '#1677ff';
-  // 优先级3：其余有帖子（人设帖等）→ 绿色
-  return '#52c41a';
+  const hasLeadPost = d.posts.some((p: AccountTimeseriesPost) => p.isLead);
+  if (hasLeadPost) return '#fa8c16';
+  const types = new Set(d.posts.map((p: AccountTimeseriesPost) => p.type));
+  const hasDiscussion = types.has('讨论帖');
+  const hasPersona = types.has('人设帖');
+  if (hasDiscussion && hasPersona) return '#722ed1';
+  if (hasPersona) return '#52c41a';
+  if (hasDiscussion) return '#1677ff';
+  return '#595959';
 }
 
 /**

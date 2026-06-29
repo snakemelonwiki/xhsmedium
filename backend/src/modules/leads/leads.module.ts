@@ -13,6 +13,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
 import { CollaborationTasksModule } from '../collaboration-tasks/collaboration-tasks.module';
 import { OperationLogsModule } from '../operation-logs/operation-logs.module';
 import { UsersModule } from '../users/users.module';
+import { DashboardModule } from '../dashboard/dashboard.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { UsersModule } from '../users/users.module';
     CollaborationTasksModule,
     OperationLogsModule,
     UsersModule,
+    DashboardModule,
   ],
   controllers: [LeadsController],
   providers: [LeadsService],

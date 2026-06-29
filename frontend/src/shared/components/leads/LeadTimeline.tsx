@@ -1,6 +1,6 @@
 'use client';
 
-import { ClockCircleOutlined, ProjectOutlined } from '@ant-design/icons';
+import { ClockCircleOutlined, MessageOutlined, ProjectOutlined } from '@ant-design/icons';
 import { Empty, Timeline, Typography } from 'antd';
 
 import { StatusTag } from '@/shared/components/status';
@@ -22,10 +22,19 @@ export function LeadTimeline({ items }: LeadTimelineProps) {
   return (
     <Timeline
       items={items.map((item) => ({
-        dot: item.kind === 'collaboration' ? <ProjectOutlined /> : <ClockCircleOutlined />,
+        color: item.kind === 'supervisor_suggestion' ? 'orange' : undefined,
+        dot: item.kind === 'collaboration'
+          ? <ProjectOutlined />
+          : item.kind === 'supervisor_suggestion'
+            ? <MessageOutlined />
+            : <ClockCircleOutlined />,
         children: (
           <div>
-            <Typography.Text strong>{item.title}</Typography.Text>
+            <Typography.Text strong>
+              {item.kind === 'supervisor_suggestion' ? (
+                <><span style={{ color: '#fa8c16' }}>[主管建议]</span>{item.title ? <> {item.title}</> : null}</>
+              ) : item.title}
+            </Typography.Text>
             {item.status ? (
               <span className="timeline-status">
                 <StatusTag kind={item.kind === 'collaboration' ? 'collaborationStatus' : 'processStatus'} code={item.status} />

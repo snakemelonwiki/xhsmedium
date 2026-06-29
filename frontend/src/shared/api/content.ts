@@ -386,7 +386,7 @@ export async function getPersonalPlatformTrend(
  */
 export async function getAccountTimeseries(
   accountId: string,
-  query: { days?: number; from?: string; to?: string } = {},
+  query: { days?: number; from?: string; to?: string; platform?: string } = {},
 ): Promise<AccountTimeseries> {
   const raw = (await apiClient.get<unknown>(
     `/dashboard/personal/account/${encodeURIComponent(accountId)}/timeseries`,

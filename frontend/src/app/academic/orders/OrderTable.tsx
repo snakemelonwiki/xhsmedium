@@ -441,21 +441,28 @@ export function OrderTable({
         key: 'orderStatus',
         render: renderOrderStatus,
       },
-      // v1.3 / Task 26: 「稿件进度」与「投稿进度」合并为一列「进度」，显示为 2 个小按钮。
+      // v1.3 / Task 26: 「稿件进度」与「投稿进度」分为两列显示
       ...(actionMode === 'academic' || actionMode === 'abnormal' ? [
         {
-          title: '进度',
-          key: 'progress',
-          width: 220,
+          title: '稿件进度',
+          key: 'paperProgress',
+          width: 120,
           render: (_value: unknown, record: OrderItem) => (
-            <Space direction="vertical" size={4}>
-              <Button size="small" type={record.paperProgress ? 'primary' : 'default'}>
-                稿件：{record.paperProgress ? PROGRESS_STEP_LABEL[record.paperProgress] || record.paperProgress : '-'}
-              </Button>
-              <Button size="small" type={record.currentStage ? 'primary' : 'default'} style={{ background: record.currentStage ? '#2b4acb' : undefined, borderColor: record.currentStage ? '#2b4acb' : undefined }}>
-                投稿：{record.currentStage || '-'}
-              </Button>
-            </Space>
+            <Button size="small" type={record.paperProgress ? 'primary' : 'default'}>
+              {record.paperProgress ? PROGRESS_STEP_LABEL[record.paperProgress] || record.paperProgress : '-'}
+            </Button>
+          ),
+        },
+      ] as any[] : []),
+      ...(actionMode === 'academic' || actionMode === 'abnormal' ? [
+        {
+          title: '投稿进度',
+          key: 'currentStage',
+          width: 120,
+          render: (_value: unknown, record: OrderItem) => (
+            <Button size="small" type={record.currentStage ? 'primary' : 'default'} style={{ background: record.currentStage ? '#2b4acb' : undefined, borderColor: record.currentStage ? '#2b4acb' : undefined }}>
+              {record.currentStage || '-'}
+            </Button>
           ),
         },
       ] as any[] : []),

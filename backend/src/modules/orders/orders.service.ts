@@ -565,8 +565,8 @@ export class OrdersService {
     const { dateKey, compactDate } = this.getOrderCodeDateParts();
     const rawSequence = await this.getNextOrderCodeSequence(manager, dateKey);
 
-    // 按文档模板拼接订单编号：YL + 顺序编号（190开始） + 产品类型 + 服务类型 + 日期 + 专业。
-    const displaySequence = rawSequence + 189;
+    // 按文档模板拼接订单编号：YL + 顺序编号（从1开始递增） + 产品类型 + 服务类型 + 日期 + 专业。
+    const displaySequence = rawSequence;
     const productType = this.normalizeOrderCodeSegment(options.productType);
     const serviceType = this.normalizeOrderCodeSegment(options.serviceType);
     const major = this.normalizeOrderCodeSegment(options.major);

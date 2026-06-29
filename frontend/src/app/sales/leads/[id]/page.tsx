@@ -18,7 +18,6 @@ import {
   Tabs,
   Tag,
   Tooltip,
-  Timeline,
   Typography,
   message,
 } from 'antd';
@@ -39,7 +38,9 @@ import {
   updateLeadIntentionLevel,
   type CloseLeadDealPayload,
 } from '@/shared/api/leads';
-import { listOrders } from '@/shared/api/orders';
+import {
+  listSupervisorSuggestions,
+} from '@/shared/api/supervisor-suggestions';
 import { apiClient } from '@/shared/api/apiClient';
 import { LeadTimeline } from '@/shared/components/leads';
 import { StatusTag } from '@/shared/components/status';
@@ -55,6 +56,7 @@ import { getStatusMeta } from '@/shared/constants/status';
 import { useSubmitLock } from '@/shared/hooks/useSubmitLock';
 import { formatDateTime } from '@/shared/utils/date-format';
 import type { DealStatusCode, IntentionLevelCode, LeadTimelineItem, SalesLead } from '@/shared/types/leads';
+import { listOrders } from '@/shared/api/orders';
 import type { OrderItem } from '@/shared/types/orders';
 import { buildOperationReminderTarget } from '../leadReminderTarget';
 
@@ -175,15 +177,24 @@ export default function SalesLeadDetailPage() {
   }
 
   async function loadDetail() {
-    const [detail, records, collaborations] = await Promise.all([
+    const [detail, records, collaborations, suggestions] = await Promise.all([
       getLeadDetail(leadId),
       listLeadFollowRecords(leadId).catch(() => []),
       listCollaborationTasks({ scope: 'requester', leadId, pageSize: 50 })
         .then((result) => result.items)
         .catch(() => []),
+      listSupervisorSuggestions('lead', leadId).catch(() => []),
     ]);
     setLead(detail);
-    setTimeline([...records, ...collaborations].sort(sortTimelineDesc));
+    const suggestionItems: LeadTimelineItem[] = suggestions.map((s) => ({
+      id: s.id,
+      kind: 'supervisor_suggestion' as const,
+      title: '',
+      content: s.content,
+      actorName: s.createdByName,
+      occurredAt: s.createdAt,
+    }));
+    setTimeline([...records, ...collaborations, ...suggestionItems].sort(sortTimelineDesc));
     try {
       const result = await listOrders({ scope: 'sales', pageSize: 20 });
       const matched = result.items.filter((o) => String(o.leadId) === leadId);
@@ -639,25 +650,10 @@ export default function SalesLeadDetailPage() {
             children: (
               <Card>
                 {timeline.length > 0 ? (
-                  <Timeline
-                    items={timeline.map((item) => ({
-                      dot: item.kind === 'collaboration' ? undefined : undefined,
-                      children: (
-                        <div>
-                          <Typography.Text strong>{item.title}</Typography.Text>
-                          <div className="timeline-meta">
-                            {item.actorName ? `${item.actorName} · ` : ''}
-                            {formatDateTime(item.occurredAt)}
-                          </div>
-                          {item.content ? <Typography.Paragraph className="timeline-content">{item.content}</Typography.Paragraph> : null}
-                        </div>
-                      ),
-                    }))}
-                  />
-                ) : (
                   <LeadTimeline items={timeline} />
+                ) : (
+                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无跟进记录" />
                 )}
-                {timeline.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无跟进记录" /> : null}
               </Card>
             ),
           },

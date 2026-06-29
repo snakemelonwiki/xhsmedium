@@ -322,12 +322,14 @@ export class DashboardController {
     @Query('days') days?: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
+    @Query('platform') platform?: string,
   ) {
     if (!accountId) return res.status(400).json({ message: 'accountId 必填' });
     const data = await this.dashboardService.getAccountTimeSeries(accountId, {
       days: days ? Number(days) : undefined,
       from,
       to,
+      platform: platform || undefined,
     });
     return res.json(data);
   }

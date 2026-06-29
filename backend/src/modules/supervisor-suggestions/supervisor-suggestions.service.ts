@@ -19,6 +19,8 @@ interface CreateSuggestionDto {
 
 interface SuggestionQuery {
   targetType?: string;
+  targetId?: string;
+  targetIds?: string[];
   employeeId?: string;
   receiverId?: string;
   readStatus?: number;
@@ -121,6 +123,12 @@ export class SupervisorSuggestionsService {
 
     if (query.targetType) {
       qb.andWhere('s.target_type = :targetType', { targetType: query.targetType });
+    }
+    if (query.targetId) {
+      qb.andWhere('s.target_id = :targetId', { targetId: query.targetId });
+    }
+    if (query.targetIds && query.targetIds.length > 0) {
+      qb.andWhere('s.target_id IN (:...targetIds)', { targetIds: query.targetIds });
     }
     if (query.employeeId) {
       qb.andWhere('s.employee_id = :employeeId', { employeeId: query.employeeId });

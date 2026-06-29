@@ -10,6 +10,7 @@ import { CollaborationTask } from '../../entities/collaboration-task.entity';
 import { Employee } from '../../entities/employee.entity';
 import { makeId } from '../../shared/utils/id-generator';
 import { NotificationsService } from '../notifications/notifications.service';
+import { DashboardService } from '../dashboard/dashboard.service';
 import { NOTIFICATION_TYPES } from '../../shared/notifications';
 import { OperationLogsService } from '../operation-logs/operation-logs.service';
 import { UsersService } from '../users/users.service';
@@ -145,6 +146,7 @@ export class LeadsService {
     private readonly notificationsService: NotificationsService,
     private readonly operationLogsService: OperationLogsService,
     private readonly usersService: UsersService,
+    private readonly dashboardService: DashboardService,
   ) {}
 
   /**
@@ -645,6 +647,7 @@ export class LeadsService {
 
     try {
       await this.leadRepository.save(lead);
+      this.dashboardService.invalidateAll();
     } catch (err: any) {
       // 外键约束失败 (如 account_id 不存在)
       if (err.code === 'ER_NO_REFERENCED_ROW_2' || err.code === 'ER_ROW_IS_REFERENCED_2') {
@@ -702,6 +705,7 @@ export class LeadsService {
       }
     }
     await this.leadRepository.update(id, patch);
+    this.dashboardService.invalidateAll();
   }
 
   /**

@@ -1,93 +1,216 @@
 'use client';
 
-import { DownloadOutlined } from '@ant-design/icons';
-import { Alert, Button, Card, Empty, Form, InputNumber, message, Pagination, Radio, Space, Table, Typography } from 'antd';
+import { DownloadOutlined, StarOutlined, TrophyOutlined } from '@ant-design/icons';
+import {
+  Alert,
+  Avatar,
+  Button,
+  Card,
+  Col,
+  Empty,
+  Form,
+  InputNumber,
+  List,
+  message,
+  Pagination,
+  Row,
+  Segmented,
+  Space,
+  Table,
+  Tag,
+  Typography,
+} from 'antd';
 import type { ColumnsType } from 'antd/es/table';
-import dayjs from 'dayjs';
-import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { QuickRangePicker } from '@/shared/components/date';
-import type { DateRangeValue } from '@/shared/components/date';
-import { isPresetMatch } from '@/shared/utils/date-range';
-import type { DateRangePreset } from '@/shared/utils/date-range';
-import { apiClient } from '@/shared/api/apiClient';
 import { createExport, downloadExportUrl, getExport } from '@/shared/api/exports';
+import { apiClient } from '@/shared/api/apiClient';
 import {
   getLearningBoardThresholds,
   updateLearningBoardThresholds,
   type LearningBoardThresholds,
 } from '@/shared/api/learning-board';
+import { QuickRangePicker, RANGE_PRESETS_FULL } from '@/shared/components/date';
+import type { DateRangeValue } from '@/shared/components/date';
+import { isPresetMatch } from '@/shared/utils/date-range';
+import {
+  getOperationRankingMetricKeys,
+  MAIN_RANKING_TYPE_OPTIONS,
+  type MainRankingType,
+} from '@/app/operation/rankings/rankingTable';
 
-import { buildRankingExportFilter } from './exportFilter';
+type RankingType = MainRankingType | 'traffic';
 
-type RankingRow = {
-  employeeId: string;
+type Period = 'today' | 'week' | 'month' | 'total' | '7d' | '14d' | '30d' | '90d' | '1y' | '3y';
+
+function derivePeriod(range: DateRangeValue): Period | null {
+  if (!range) return 'today';
+  const preset = RANGE_PRESETS_FULL.find((p) => isPresetMatch(range, p.unit, p.n, p.mode));
+  if (preset) {
+    const supported: Period[] = ['today', 'week', 'month', 'total', '7d', '14d', '30d', '90d', '1y', '3y'];
+    if (supported.includes(preset.key as Period)) return preset.key as Period;
+  }
+  const days = Math.max(0, range.end.diff(range.start, 'day'));
+  if (days === 0) return 'today';
+  if (days <= 7) return '7d';
+  if (days <= 14) return '14d';
+  if (days <= 30) return '30d';
+  if (days <= 90) return '90d';
+  if (days <= 366) return '1y';
+  if (days <= 365 * 3 + 1) return '3y';
+  return null;
+}
+
+function buildRangeQuery(range: DateRangeValue): { period: Period | null; from?: string; to?: string } {
+  const period = derivePeriod(range);
+  if (period) return { period };
+  if (!range) return { period: 'today' };
+  return {
+    period: null,
+    from: range.start.format('YYYY-MM-DD'),
+    to: range.end.format('YYYY-MM-DD'),
+  };
+}
+
+interface RankingRow {
+  id: string;
+  employeeId?: string;
   name: string;
   accountCount?: number;
-  postCount?: number;
+  postCount: number;
+  leadCount: number;
   xhsPostCount?: number;
   douyinPostCount?: number;
+  sourcePostCount?: number;
+  validRate?: number;
+  likes?: number;
+  traffic?: number;
+  xhsLeadCount?: number;
+  douyinLeadCount?: number;
+  xhsTraffic?: number;
+  douyinTraffic?: number;
+  avatar?: string;
+  employeeNo?: string;
   todayPosts?: number;
   todayLeads?: number;
   todayTraffic?: number;
   todayDeals?: number;
-  leadCount?: number;
+}
+
+const TOP_CARD_TYPE_OPTIONS: Array<{ label: string; value: RankingType }> = [
+  ...MAIN_RANKING_TYPE_OPTIONS,
+  { label: '流量榜', value: 'traffic' },
+];
+
+const TOP_CARDS: Array<{
+  key: RankingType;
+  title: string;
+  description: string;
+  color: string;
+  bg: string;
+  getValue: (row: RankingRow) => number;
+  suffix: string;
+}> = [
+  {
+    key: 'posts',
+    title: '作品数 · Top 3',
+    description: '本期作品数前三名',
+    color: '#1677ff',
+    bg: '#e6f4ff',
+    getValue: (row) => numberValue(row.postCount),
+    suffix: '条',
+  },
+  {
+    key: 'leads',
+    title: '客资数 · Top 3',
+    description: '本期客资数前三名',
+    color: '#52c41a',
+    bg: '#f6ffed',
+    getValue: (row) => numberValue(row.leadCount),
+    suffix: '条',
+  },
+  {
+    key: 'traffic',
+    title: '流量 · Top 3',
+    description: '本期流量（点赞+评论+收藏）前三名',
+    color: '#fa8c16',
+    bg: '#fff7e6',
+    getValue: (row) => numberValue(row.traffic ?? row.likes),
+    suffix: '',
+  },
+];
+
+function numberValue(value: unknown): number {
+  const parsed = Number(value ?? 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+const TITLE_MAP: Record<string, Record<string, string>> = {
+  postCount: {
+    posts: '作品数',
+    leads: '客资数',
+    traffic: '总流量',
+  },
+  xhsPostCount: {
+    posts: '小红书作品数',
+    leads: '小红书客资数',
+    traffic: '小红书流量',
+  },
+  douyinPostCount: {
+    posts: '抖音作品数',
+    leads: '抖音客资数',
+    traffic: '抖音流量',
+  },
 };
 
-type RankingType = 'posts' | 'leads';
-type Platform = '' | 'xhs' | 'douyin';
-
-const RANKING_PRESETS: readonly DateRangePreset[] = [
-  { key: 'today', label: '今日', unit: 'day', n: 1, mode: 'calendar' },
-  { key: 'thisWeek', label: '本周', unit: 'week', n: 1, mode: 'calendar' },
-  { key: 'thisMonth', label: '本月', unit: 'month', n: 1, mode: 'calendar' },
-] as const;
-
-/**
- * 主管运营排行榜：支持 type / platform / period 三档筛选，平铺所有员工聚合数据。
- * 后端接口在 1.2 P1-2 之后已支持这三个参数；旧版仅按单日聚合，主管端看到的几乎都是 0。
- */
 export default function AdminRankingsPage() {
+  const router = useRouter();
   const [items, setItems] = useState<RankingRow[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
-  const [type, setType] = useState<RankingType>('posts');
-  const [dateRange, setDateRange] = useState<DateRangeValue>({ start: dayjs().startOf('day'), end: dayjs() });
-  const [platform, setPlatform] = useState<Platform>('');
+  const [type, setType] = useState<MainRankingType>('posts');
+  const [range, setRange] = useState<DateRangeValue>(null);
+  const rangeQuery = useMemo(() => buildRangeQuery(range), [range]);
+  const period: Period = rangeQuery.period ?? 'today';
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string>();
+  const [top3ByType, setTop3ByType] = useState<Record<RankingType, RankingRow[]>>({
+    posts: [],
+    leads: [],
+    traffic: [],
+  });
+  const [topLoading, setTopLoading] = useState(false);
+  const pageSize = 20;
+
+  // Admin-specific: learning board threshold form
   const [thresholdForm] = Form.useForm<LearningBoardThresholds>();
   const [thresholdLoading, setThresholdLoading] = useState(false);
   const [thresholdSaving, setThresholdSaving] = useState(false);
-  const pageSize = 20;
 
-  /** 根据当前 dateRange 生成请求参数：预设命中则发 period，否则发 from/to */
-  function buildPeriodQuery(): Record<string, string> {
-    if (!dateRange) return { period: 'today' };
-    for (const p of RANKING_PRESETS) {
-      if (isPresetMatch(dateRange, p.unit, p.n, p.mode)) {
-        return { period: p.key };
-      }
-    }
-    return { from: dateRange.start.format('YYYY-MM-DD'), to: dateRange.end.format('YYYY-MM-DD') };
-  }
-
-  async function load(nextPage = page, nextType = type, nextPlatform = platform) {
+  const load = useCallback(async (nextPage = page, nextType: MainRankingType = type, nextRangeQuery = rangeQuery) => {
     setLoading(true);
     setError(undefined);
     try {
+      const limit = pageSize;
+      const offset = (nextPage - 1) * limit;
       const query: Record<string, string | number> = {
         type: nextType,
-        limit: pageSize,
-        offset: (nextPage - 1) * pageSize,
-        ...buildPeriodQuery(),
+        limit,
+        offset,
       };
-      if (nextPlatform) query.platform = nextPlatform;
-      const payload = await apiClient.get<any>('/rankings', { query });
-      const data = payload?.items ?? payload ?? [];
-      const totalCount = payload?.total ?? data.length;
-      setItems(Array.isArray(data) ? data : []);
+      if (nextRangeQuery.period) query.period = nextRangeQuery.period;
+      else {
+        if (nextRangeQuery.from) query.from = nextRangeQuery.from;
+        if (nextRangeQuery.to) query.to = nextRangeQuery.to;
+      }
+      const payload = await apiClient.get<{ items?: RankingRow[]; total?: number }>('/rankings/operations', {
+        query,
+      });
+      const rows = payload?.items ?? [];
+      const totalCount = payload?.total ?? rows.length;
+      setItems(Array.isArray(rows) ? rows : []);
       setTotal(totalCount);
       setPage(nextPage);
     } catch (err) {
@@ -97,42 +220,95 @@ export default function AdminRankingsPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [page, type, rangeQuery]);
+
+  const loadTop3 = useCallback(async (nextRangeQuery = rangeQuery) => {
+    setTopLoading(true);
+    try {
+      const results = await Promise.all(
+        TOP_CARD_TYPE_OPTIONS.map(async (opt) => {
+          try {
+            const query: Record<string, string | number> = {
+              type: opt.value,
+              limit: 3,
+              offset: 0,
+            };
+            if (nextRangeQuery.period) query.period = nextRangeQuery.period;
+            else {
+              if (nextRangeQuery.from) query.from = nextRangeQuery.from;
+              if (nextRangeQuery.to) query.to = nextRangeQuery.to;
+            }
+            const payload = await apiClient.get<{ items?: RankingRow[] }>('/rankings/operations', {
+              query,
+            });
+            return { key: opt.value, rows: payload?.items ?? [] };
+          } catch {
+            return { key: opt.value, rows: [] };
+          }
+        }),
+      );
+      setTop3ByType((prev) => {
+        const next: Record<RankingType, RankingRow[]> = { ...prev };
+        for (const r of results) {
+          const key = r.key as RankingType;
+          next[key] = Array.isArray(r.rows) ? (r.rows as RankingRow[]) : [];
+        }
+        return next;
+      });
+    } finally {
+      setTopLoading(false);
+    }
+  }, [rangeQuery]);
 
   useEffect(() => {
-    void load(1);
+    void load(1, type, rangeQuery);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dateRange]);
+  }, []);
+
+  useEffect(() => {
+    void loadTop3(rangeQuery);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rangeQuery]);
 
   useEffect(() => {
     void loadThresholds();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const columns: ColumnsType<RankingRow> = [
-    { title: '排名', width: 80, render: (_, __, index) => (page - 1) * pageSize + index + 1 },
-    { title: '员工', dataIndex: 'name', render: (name: string) => <Typography.Text strong>{name}</Typography.Text> },
-    { title: '账号数', dataIndex: 'accountCount', width: 90 },
-    { title: type === 'posts' ? '累计作品' : '累计客资', dataIndex: type === 'posts' ? 'postCount' : 'leadCount', width: 110 },
-    { title: '小红书作品', dataIndex: 'xhsPostCount', width: 110 },
-    { title: '抖音作品', dataIndex: 'douyinPostCount', width: 100 },
-    { title: '区间作品', dataIndex: 'todayPosts', width: 100 },
-    { title: '区间客资', dataIndex: 'todayLeads', width: 100 },
-    { title: '区间流量', dataIndex: 'todayTraffic', width: 100 },
-    { title: '成交数', dataIndex: 'todayDeals', width: 100 },
-  ];
+  function changeType(nextType: MainRankingType) {
+    setType(nextType);
+    void load(1, nextType, rangeQuery);
+  }
+
+  function changeRange(next: DateRangeValue) {
+    setRange(next);
+    const nextRangeQuery = buildRangeQuery(next);
+    void load(1, type, nextRangeQuery);
+    void loadTop3(nextRangeQuery);
+  }
 
   async function handleExport() {
     setExporting(true);
     const hide = message.loading('正在生成导出文件...', 0);
     try {
-      const result = await createExport({ exportType: 'rankings', filter: buildRankingExportFilter({ type, ...buildPeriodQuery(), platform }) });
+      const exportFilter: Record<string, string | number | null | undefined> = { type };
+      if (rangeQuery.period) exportFilter.period = rangeQuery.period;
+      if (rangeQuery.from) exportFilter.from = rangeQuery.from;
+      if (rangeQuery.to) exportFilter.to = rangeQuery.to;
+      const result = await createExport({ exportType: 'rankings', filter: exportFilter });
+
+      if (!result?.id) {
+        hide();
+        message.warning('导出任务已创建，请在导出中心查看进度');
+        return;
+      }
+
       let attempts = 0;
       const maxAttempts = 30;
       while (attempts < maxAttempts) {
         await new Promise((resolve) => setTimeout(resolve, 1000));
         const exportTask = await getExport(result.id);
-        if (exportTask.status === 'completed') {
+        if (exportTask.status === 'completed' || exportTask.status === 'success') {
           hide();
           window.open(downloadExportUrl(result.id), '_blank');
           message.success('导出成功，文件开始下载');
@@ -148,10 +324,14 @@ export default function AdminRankingsPage() {
       message.warning('导出超时，请到导出中心查看');
     } catch (err) {
       hide();
-      message.error(err instanceof Error ? err.message : '排行榜导出失败');
+      message.error(err instanceof Error ? err.message : '排行榜导出创建失败');
     } finally {
       setExporting(false);
     }
+  }
+
+  function goToStudy() {
+    router.push('/admin/rankings/study');
   }
 
   async function loadThresholds() {
@@ -182,14 +362,113 @@ export default function AdminRankingsPage() {
     }
   }
 
+  const itemsWithGap = useMemo(() => {
+    if (items.length === 0) return [];
+    const getValue = (item: RankingRow, sortType: RankingType) => {
+      if (sortType === 'leads') return numberValue(item.leadCount);
+      if (sortType === 'traffic') return numberValue(item.traffic);
+      return numberValue(item.postCount);
+    };
+    return items.map((item, index) => {
+      const currentValue = getValue(item, type);
+      let gap = 0;
+      if (index > 0) {
+        const prevValue = getValue(items[index - 1], type);
+        gap = Math.max(0, prevValue - currentValue);
+      }
+      return { ...item, gap };
+    });
+  }, [items, type]);
+
+  const columns: ColumnsType<RankingRow> = useMemo(() => {
+    const baseColumns: ColumnsType<RankingRow> = [
+      {
+        title: '排名',
+        width: 80,
+        render: (_, __, index) => (page - 1) * pageSize + index + 1,
+      },
+      {
+        title: '运营员工',
+        dataIndex: 'name',
+        width: 150,
+        render: (name: string, record) => (
+          <Space direction="vertical" size={0}>
+            <Typography.Text strong>{name}</Typography.Text>
+            {record.employeeNo && (
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                工号: {record.employeeNo}
+              </Typography.Text>
+            )}
+          </Space>
+        ),
+      },
+    ];
+
+    const metricColumns: ColumnsType<RankingRow> = getOperationRankingMetricKeys(type).map((key) => {
+      const configs: Record<string, ColumnsType<RankingRow>[number]> = {
+        accountCount: { title: '账号数', dataIndex: 'accountCount', width: 90 },
+        postCount: {
+          title: TITLE_MAP.postCount?.[type] ?? '作品数',
+          dataIndex: 'postCount',
+          width: 100,
+          sorter: (a, b) => numberValue(a.postCount) - numberValue(b.postCount),
+          render: (val: number) => <Typography.Text strong={type === 'posts'}>{numberValue(val)}</Typography.Text>,
+        },
+        leadCount: { title: '客资数', dataIndex: 'leadCount', width: 100, render: numberValue },
+        xhsPostCount: { title: TITLE_MAP.xhsPostCount?.[type] ?? '小红书作品数', dataIndex: 'xhsPostCount', width: 130, render: numberValue },
+        douyinPostCount: { title: TITLE_MAP.douyinPostCount?.[type] ?? '抖音作品数', dataIndex: 'douyinPostCount', width: 120, render: numberValue },
+        xhsLeadCount: { title: '小红书客资数', dataIndex: 'xhsLeadCount', width: 130, render: numberValue },
+        douyinLeadCount: { title: '抖音客资数', dataIndex: 'douyinLeadCount', width: 130, render: numberValue },
+        traffic: { title: '总流量', dataIndex: 'traffic', width: 100, render: numberValue },
+        xhsTraffic: { title: '小红书流量', dataIndex: 'xhsTraffic', width: 130, render: numberValue },
+        douyinTraffic: { title: '抖音流量', dataIndex: 'douyinTraffic', width: 130, render: numberValue },
+        todayDeals: { title: '成交数', dataIndex: 'todayDeals', width: 100, render: numberValue },
+      };
+      return configs[key];
+    });
+
+    return [
+      ...baseColumns,
+      ...metricColumns,
+      {
+        title: '与上一名差距',
+        dataIndex: 'gap',
+        render: (gap: number) => {
+          if (gap === 0) return '-';
+          return <Tag color="orange">{gap}</Tag>;
+        },
+      },
+    ];
+  }, [type, page, pageSize]);
+
   return (
     <Space direction="vertical" size={16} className="page-stack">
-      <div>
-        <Typography.Title level={2}>运营排行榜</Typography.Title>
-        <Typography.Paragraph type="secondary">
-          按员工聚合的作品、客资、流量和成交榜单，支持按平台 / 周期筛选。
-        </Typography.Paragraph>
+      <div className="toolbar-row">
+        <div>
+          <Typography.Title level={2}>运营排行榜</Typography.Title>
+          <Typography.Paragraph type="secondary">
+            按员工聚合的作品、客资、流量和成交榜单，支持按周期筛选。
+          </Typography.Paragraph>
+        </div>
+        <Space wrap>
+          <QuickRangePicker
+            value={range}
+            onChange={changeRange}
+            variant="select"
+            presets={RANGE_PRESETS_FULL}
+            selectWidth={140}
+          />
+          <Button
+            type="link"
+            icon={<StarOutlined />}
+            onClick={goToStudy}
+          >
+            学习榜单
+          </Button>
+        </Space>
       </div>
+
+      {/* Admin-specific: learning board threshold form */}
       <Card>
         <Form
           form={thresholdForm}
@@ -197,7 +476,6 @@ export default function AdminRankingsPage() {
           disabled={thresholdLoading}
           initialValues={{ minLeads: 10, minTraffic: 10000 }}
           onFinish={saveThresholds}
-          style={{ marginBottom: 16 }}
         >
           <Form.Item label="学习榜单门槛" style={{ marginRight: 8 }}>
             <Typography.Text type="secondary">客资或流量任一达标才展示</Typography.Text>
@@ -214,34 +492,99 @@ export default function AdminRankingsPage() {
             </Button>
           </Form.Item>
         </Form>
-        <Space size={16} wrap style={{ marginBottom: 16 }}>
-          <Radio.Group value={type} onChange={(e) => { setType(e.target.value); void load(1, e.target.value, platform); }}>
-            <Radio.Button value="posts">作品榜</Radio.Button>
-            <Radio.Button value="leads">客资榜</Radio.Button>
-          </Radio.Group>
-          <QuickRangePicker
-            value={dateRange}
-            onChange={setDateRange}
-            presets={RANKING_PRESETS}
-            variant="buttons"
-            presetSize="middle"
-            selectPlaceholder="快捷周期"
+      </Card>
+
+      {/* Top 3 cards - works / leads / traffic */}
+      <Row gutter={16}>
+        {TOP_CARDS.map((card) => {
+          const rows = top3ByType[card.key] ?? [];
+          return (
+            <Col key={card.key} xs={24} md={8}>
+              <Card
+                size="small"
+                loading={topLoading}
+                title={
+                  <Space>
+                    <TrophyOutlined style={{ color: card.color }} />
+                    <Typography.Text strong>{card.title}</Typography.Text>
+                  </Space>
+                }
+                extra={
+                  <Button
+                    type="link"
+                    size="small"
+                    onClick={() => {
+                      if (card.key !== 'traffic') changeType(card.key);
+                    }}
+                    disabled={card.key === 'traffic'}
+                  >
+                    {card.key === 'traffic' ? '仅展示 Top 3' : '按此排序'}
+                  </Button>
+                }
+                style={{ background: card.bg, borderColor: card.color }}
+              >
+                {rows.length === 0 ? (
+                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无数据" />
+                ) : (
+                  <List
+                    size="small"
+                    dataSource={rows}
+                    renderItem={(row, idx) => (
+                      <List.Item style={{ padding: '8px 0' }}>
+                        <Space>
+                          <Avatar
+                            size="small"
+                            style={{
+                              backgroundColor: idx === 0 ? '#fa8c16' : idx === 1 ? '#1677ff' : '#52c41a',
+                            }}
+                          >
+                            {idx + 1}
+                          </Avatar>
+                          <Space direction="vertical" size={0}>
+                            <Typography.Text strong>{row.name || row.employeeId || '—'}</Typography.Text>
+                            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                              {card.description}
+                            </Typography.Text>
+                          </Space>
+                        </Space>
+                        <Typography.Text strong style={{ color: card.color, fontSize: 18 }}>
+                          {card.getValue(row)}{card.suffix}
+                        </Typography.Text>
+                      </List.Item>
+                    )}
+                  />
+                )}
+              </Card>
+            </Col>
+          );
+        })}
+      </Row>
+
+      {error ? (
+        <Alert type="warning" showIcon message="排行榜暂不可用" description={error} />
+      ) : null}
+      <Card>
+        <div className="toolbar-row" style={{ marginBottom: 16 }}>
+          <Segmented
+            options={MAIN_RANKING_TYPE_OPTIONS}
+            value={type}
+            onChange={(val) => changeType(val as MainRankingType)}
           />
-          <Radio.Group value={platform} onChange={(e) => { setPlatform(e.target.value); void load(1, type, e.target.value); }}>
-            <Radio.Button value="">全部平台</Radio.Button>
-            <Radio.Button value="xhs">小红书</Radio.Button>
-            <Radio.Button value="douyin">抖音</Radio.Button>
-          </Radio.Group>
-          <Button icon={<DownloadOutlined />} loading={exporting} onClick={handleExport}>
-            当前筛选导出
-          </Button>
-        </Space>
-        {error ? <Alert type="warning" showIcon message="排行榜暂不可用" description={error} style={{ marginBottom: 16 }} /> : null}
+          <Space>
+            <Button
+              icon={<DownloadOutlined />}
+              loading={exporting}
+              onClick={handleExport}
+            >
+              导出
+            </Button>
+          </Space>
+        </div>
         <Table
-          rowKey="employeeId"
+          rowKey={(row) => row.id || row.employeeId || Math.random()}
           loading={loading}
           columns={columns}
-          dataSource={items}
+          dataSource={itemsWithGap}
           pagination={false}
           scroll={{ x: 'max-content' }}
           locale={{ emptyText: <Empty description="暂无榜单数据" /> }}

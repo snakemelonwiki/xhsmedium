@@ -50,6 +50,8 @@ export class SupervisorSuggestionsController {
     @Req() req: any,
     @Res() res: Response,
     @Query('targetType') targetType?: string,
+    @Query('targetId') targetId?: string,
+    @Query('targetIds') targetIds?: string,
     @Query('employeeId') employeeId?: string,
     @Query('readStatus') readStatus?: string,
   ) {
@@ -67,6 +69,16 @@ export class SupervisorSuggestionsController {
     }
     if (readStatus !== undefined && readStatus !== '') {
       query.readStatus = readStatus === 'true' || readStatus === '1' ? 1 : 0;
+    }
+
+    // 支持单查或批量查
+    if (targetIds) {
+      const ids = targetIds.split(',').map((s) => s.trim()).filter(Boolean);
+      if (ids.length > 0) {
+        query.targetIds = ids;
+      }
+    } else if (targetId) {
+      query.targetId = targetId;
     }
 
     const items = await this.service.list(query);

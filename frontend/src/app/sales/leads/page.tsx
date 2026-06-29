@@ -7,6 +7,7 @@ import {
   PauseCircleOutlined,
   ReloadOutlined,
   SearchOutlined,
+  StarOutlined,
   SwapOutlined,
   TagOutlined,
 } from '@ant-design/icons';
@@ -58,6 +59,7 @@ import {
 import type { IntentionLevelCode, SalesLead } from '@/shared/types/leads';
 import { readAuthenticatedUser } from '@/shared/auth/auth';
 import { useNotificationSocket } from '@/shared/hooks/useNotificationSocket';
+import { listSupervisorSuggestions } from '@/shared/api/supervisor-suggestions';
 
 const statusOptions = [
   { label: '全部状态', value: '' },
@@ -169,6 +171,9 @@ export default function SalesLeadsPage() {
   const [capacityLoading, setCapacityLoading] = useState(false);
   const [remainSeconds, setRemainSeconds] = useState(0);
 
+  // 主管建议标记
+  const [suggestionLeadIds, setSuggestionLeadIds] = useState<Set<string | number>>(new Set());
+
   async function loadLeads(nextPage = page, nextPageSize = pageSize, nextFilters: Filters = filters) {
     setLoading(true);
     setError('');
@@ -182,6 +187,26 @@ export default function SalesLeadsPage() {
       setTotal(result.total);
       setPage(result.page);
       setPageSize(result.pageSize);
+
+      // 重置主管建议标记，避免上一页残留
+      setSuggestionLeadIds(new Set());
+
+      // 批量检查主管建议：单次请求所有客资的建议
+      const ids = result.items.map((lead) => String(lead.id));
+      if (ids.length > 0) {
+        try {
+          const suggestions = await listSupervisorSuggestions('lead', undefined, ids.join(','));
+          const suggestionSet = new Set<string | number>();
+          suggestions.forEach((s) => {
+            if (s.targetId !== undefined) {
+              suggestionSet.add(String(s.targetId));
+            }
+          });
+          setSuggestionLeadIds(suggestionSet);
+        } catch {
+          // 静默失败
+        }
+      }
     } catch (err) {
       const text = err instanceof Error ? err.message : '客资列表加载失败';
       setError(text);
@@ -488,6 +513,9 @@ export default function SalesLeadsPage() {
             </Typography.Text>
             {isTodayNotAdded(lead) ? (
               <Tag color="red" icon={<FireOutlined />}>今日未添加</Tag>
+            ) : null}
+            {suggestionLeadIds.has(String(lead.id)) ? (
+              <Tag color="orange" icon={<StarOutlined />}>主管建议</Tag>
             ) : null}
           </Space>
           {(lead.contact || '').trim() ? (

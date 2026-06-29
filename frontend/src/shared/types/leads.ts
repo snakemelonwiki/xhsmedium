@@ -89,7 +89,7 @@ export interface SalesLead {
   leadPriceMultiplier?: number;
 }
 
-export type LeadTimelineKind = 'follow' | 'collaboration';
+export type LeadTimelineKind = 'follow' | 'collaboration' | 'supervisor_suggestion';
 
 export interface LeadTimelineItem {
   id: string | number;

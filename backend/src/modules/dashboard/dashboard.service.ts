@@ -953,7 +953,7 @@ export class DashboardService {
    */
   async getAccountTimeSeries(
     accountId: string,
-    options: { days?: number; from?: string; to?: string } = {},
+    options: { days?: number; from?: string; to?: string; platform?: string } = {},
   ): Promise<any> {
     const days = Math.max(1, Math.min(Number(options.days) || 30, 90));
     const today = todayString();
@@ -963,10 +963,12 @@ export class DashboardService {
     const from = options.from || fromDate.toISOString().slice(0, 10);
     const to = options.to || today;
 
-    const cacheKey = `dashboard:account-timeseries:${accountId}:${from}:${to}`;
+    const platform = this.normalizePlatform(options.platform) || undefined;
+
+    const cacheKey = `dashboard:account-timeseries:${accountId}:${from}:${to}:${platform || ''}`;
     const cached = this.cache.get<any>(cacheKey);
     if (cached !== undefined) return cached;
-    const result = await this.computeAccountTimeSeries(accountId, from, to);
+    const result = await this.computeAccountTimeSeries(accountId, from, to, platform);
     this.cache.set(cacheKey, result, CACHE_TTL_MS);
     return result;
   }
@@ -1008,10 +1010,15 @@ export class DashboardService {
     platform?: string,
     sort?: string,
   ): Promise<any> {
-    const accountWhere = platform ? 'AND a.platform = ?' : '';
-    const accountParams: any[] = platform
-      ? [from, to, from, to, employeeId, platform]
-      : [from, to, from, to, employeeId];
+    // DATETIME 字段的 BETWEEN 问题修复：to 为纯日期时补到当天最后一秒
+    const resolvedTo = /^\d{4}-\d{2}-\d{2}$/.test(to) ? `${to} 23:59:59` : to;
+    const aliases = this.getPlatformAliases(platform || null);
+    let accountWhere = '';
+    const accountParams: any[] = [from, resolvedTo, from, resolvedTo, employeeId];
+    if (aliases) {
+      accountWhere = `AND a.platform IN (${aliases.map(() => '?').join(',')})`;
+      accountParams.push(...aliases);
+    }
     const accountRows: any = await this.accountRepo.query(
       `SELECT a.id, a.account_name AS accountName, a.platform, a.posting_plan AS postingPlan,
               a.persona, a.positioning,
@@ -1047,7 +1054,7 @@ export class DashboardService {
 
     // 对每个账号单独计算时间序列
     const items = await Promise.all(
-      accounts.map((a) => this.computeAccountTimeSeries(a.id, from, to)),
+      accounts.map((a) => this.computeAccountTimeSeries(a.id, from, to, platform)),
     );
 
     return { accounts, items, from, to };
@@ -1088,7 +1095,36 @@ export class DashboardService {
     });
   }
 
-  private async computeAccountTimeSeries(accountId: string, from: string, to: string): Promise<any> {
+  private async computeAccountTimeSeries(accountId: string, from: string, to: string, platform?: string): Promise<any> {
+    // DATETIME 字段的 BETWEEN 问题修复：to 为纯日期时补到当天最后一秒
+    const resolvedTo = /^\d{4}-\d{2}-\d{2}$/.test(to) ? `${to} 23:59:59` : to;
+
+    // 构建 posts 查询条件：account_id + published_at 范围 + 可选 platform
+    const postWhereClauses: string[] = ['p.account_id = ?', 'p.published_at BETWEEN ? AND ?'];
+    const postParams: any[] = [accountId, from, resolvedTo];
+    if (platform) {
+      const aliases = this.getPlatformAliases(platform);
+      if (aliases && aliases.length > 0) {
+        const inClause = aliases.map(() => '?').join(',');
+        postWhereClauses.push(`p.platform IN (${inClause})`);
+        postParams.push(...aliases);
+      }
+    }
+    const postWhereSql = postWhereClauses.join(' AND ');
+
+    // 构建 leads 查询条件：account_id + created_at 范围 + 可选 platform
+    const leadWhereClauses: string[] = ['l.account_id = ?', 'l.created_at BETWEEN ? AND ?'];
+    const leadParams: any[] = [accountId, from, resolvedTo];
+    if (platform) {
+      const aliases = this.getPlatformAliases(platform);
+      if (aliases && aliases.length > 0) {
+        const inClause = aliases.map(() => '?').join(',');
+        leadWhereClauses.push(`l.platform IN (${inClause})`);
+        leadParams.push(...aliases);
+      }
+    }
+    const leadWhereSql = leadWhereClauses.join(' AND ');
+
     const [account, postRows, leadRows] = await Promise.all([
       this.accountRepo.findOne({ where: { id: accountId } as any }),
       this.postRepo.query(
@@ -1099,17 +1135,17 @@ export class DashboardService {
                 p.post_type AS post_type, p.likes AS likes, p.comments AS comments, p.favorites AS favorites, p.traffic AS traffic,
                 (SELECT COUNT(*) FROM leads l WHERE l.post_id = p.id) AS lead_count
          FROM posts p
-         WHERE p.account_id = ? AND p.published_at BETWEEN ? AND ?
+         WHERE ${postWhereSql}
          ORDER BY p.published_at ASC`,
-        [accountId, from, to],
+        postParams,
       ),
       this.leadRepo.query(
         `SELECT DATE_FORMAT(l.created_at, '%Y-%m-%d') AS date,
-                l.post_id AS post_id, COUNT(*) AS lead_count
+                COUNT(*) AS lead_count
          FROM leads l
-         WHERE l.account_id = ? AND l.created_at BETWEEN ? AND ?
-         GROUP BY DATE_FORMAT(l.created_at, '%Y-%m-%d'), l.post_id`,
-        [accountId, from, to],
+         WHERE ${leadWhereSql} AND l.post_id IS NULL
+         GROUP BY DATE_FORMAT(l.created_at, '%Y-%m-%d')`,
+        leadParams,
       ),
     ]);
 
@@ -1126,8 +1162,8 @@ export class DashboardService {
       const bucket = daysMap.get(day)!;
       const leadCount = Number(r.lead_count || 0);
       const traffic = Number(r.likes || 0) + Number(r.comments || 0) + Number(r.favorites || 0);
-      // 兼容旧数据「贴」与新规范化后的「帖」两种写法；'营销贴' 历史值仍计入获客。
-      const isLeadPost = ['获客贴', '获客帖', '营销贴'].includes(r.post_type);
+      // 兼容旧数据「贴」与新规范化后的「帖」两种写法；'营销贴'/'营销帖' 历史值仍计入获客。
+      const isLeadPost = ['获客贴', '获客帖', '营销贴', '营销帖'].includes(r.post_type);
       bucket.postCount += 1;
       bucket.leadCount += leadCount;
       bucket.traffic += traffic;
@@ -1141,14 +1177,11 @@ export class DashboardService {
         traffic,
       });
     }
-    // leads 没有 post_id 时按日累加（无对应 post 的客资也归到当日 leadCount）
+    // 未关联 post 的客资按日累加（有 post 的客资已在 post 子查询中计入）
     for (const r of leadRows as any[]) {
       const day = String(r.date || '').slice(0, 10);
       if (!day || !daysMap.has(day)) continue;
-      const postId = r.post_id;
       const slot = daysMap.get(day)!;
-      // 若 lead 已经有对应 post 计入过 leadCount, 这里跳过避免重复
-      if (postId) continue;
       slot.leadCount += Number(r.lead_count || 0);
     }
 

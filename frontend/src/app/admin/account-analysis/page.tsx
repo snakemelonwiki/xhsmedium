@@ -162,7 +162,7 @@ export default function AdminAccountAnalysisPage() {
         setAllAccountsData(data);
         setTimeseries(undefined);
       } else {
-        const data = await getAccountTimeseries(selectedAccountId as string, { days });
+        const data = await getAccountTimeseries(selectedAccountId as string, { days, platform: platform || undefined });
         setTimeseries(data);
         setAllAccountsData(undefined);
       }
@@ -310,6 +310,8 @@ export default function AdminAccountAnalysisPage() {
                   <Badge color={ACCOUNT_ANALYSIS_LEGEND.leadPost.color} text={ACCOUNT_ANALYSIS_LEGEND.leadPost.text} />
                   <Badge color={ACCOUNT_ANALYSIS_LEGEND.discussionPost.color} text={ACCOUNT_ANALYSIS_LEGEND.discussionPost.text} />
                   <Badge color={ACCOUNT_ANALYSIS_LEGEND.personaPost.color} text={ACCOUNT_ANALYSIS_LEGEND.personaPost.text} />
+                  <Badge color={ACCOUNT_ANALYSIS_LEGEND.mixedPost.color} text={ACCOUNT_ANALYSIS_LEGEND.mixedPost.text} />
+                  <Badge color={ACCOUNT_ANALYSIS_LEGEND.otherPost.color} text={ACCOUNT_ANALYSIS_LEGEND.otherPost.text} />
                   <Badge color={ACCOUNT_ANALYSIS_LEGEND.empty.color} text={ACCOUNT_ANALYSIS_LEGEND.empty.text} />
                   <span style={{ width: 1, height: 12, background: '#d9d9d9' }} />
                   <Space size={4} align="center">
@@ -356,6 +358,8 @@ export default function AdminAccountAnalysisPage() {
                           <Badge color={ACCOUNT_ANALYSIS_LEGEND.leadPost.color} text={ACCOUNT_ANALYSIS_LEGEND.leadPost.text} />
                           <Badge color={ACCOUNT_ANALYSIS_LEGEND.discussionPost.color} text={ACCOUNT_ANALYSIS_LEGEND.discussionPost.text} />
                           <Badge color={ACCOUNT_ANALYSIS_LEGEND.personaPost.color} text={ACCOUNT_ANALYSIS_LEGEND.personaPost.text} />
+                          <Badge color={ACCOUNT_ANALYSIS_LEGEND.mixedPost.color} text={ACCOUNT_ANALYSIS_LEGEND.mixedPost.text} />
+                          <Badge color={ACCOUNT_ANALYSIS_LEGEND.otherPost.color} text={ACCOUNT_ANALYSIS_LEGEND.otherPost.text} />
                           <Badge color={ACCOUNT_ANALYSIS_LEGEND.empty.color} text={ACCOUNT_ANALYSIS_LEGEND.empty.text} />
                         </Space>
                       }
@@ -469,8 +473,15 @@ function AccountCalendarGrid({ days }: { days: AccountTimeseriesDay[] }) {
 
 function pickDayColor(d: AccountTimeseriesDay): string {
   if (d.postCount === 0) return '#d9d9d9';
-  if (d.posts.some((p: AccountTimeseriesPost) => p.isLead && p.leadCount > 0)) return '#fa8c16';
-  return '#52c41a';
+  const hasLeadPost = d.posts.some((p: AccountTimeseriesPost) => p.isLead);
+  if (hasLeadPost) return '#fa8c16';
+  const types = new Set(d.posts.map((p: AccountTimeseriesPost) => p.type));
+  const hasDiscussion = types.has('讨论帖');
+  const hasPersona = types.has('人设帖');
+  if (hasDiscussion && hasPersona) return '#722ed1';
+  if (hasPersona) return '#52c41a';
+  if (hasDiscussion) return '#1677ff';
+  return '#595959';
 }
 
 const MAX_VISIBLE_DOTS = 8;
