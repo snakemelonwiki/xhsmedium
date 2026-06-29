@@ -22,7 +22,7 @@ import {
   message,
 } from 'antd';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import dayjs, { type Dayjs } from 'dayjs';
 
 import {
@@ -148,6 +148,26 @@ export default function SalesLeadDetailPage() {
   // 支持 URL ?tab=timeline 自动切换到跟进时间线
   const defaultTab = searchParams.get('tab') || 'follow';
   const [activeTab, setActiveTab] = useState(defaultTab);
+
+  // 当 URL ?tab=timeline 时，自动滚动到 Tabs 并定位到底部时间线
+  const tabsRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const tabFromUrl = searchParams.get('tab');
+    if (tabFromUrl && ['follow', 'timeline'].includes(tabFromUrl)) {
+      setActiveTab(tabFromUrl);
+      // Tab 切换完成后滚动到 Tabs 区域并定位到底部
+      setTimeout(() => {
+        if (tabsRef.current) {
+          tabsRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          // 滚动到底部时间线内容
+          const timelineBottom = tabsRef.current.querySelector('.ant-timeline');
+          if (timelineBottom) {
+            timelineBottom.scrollIntoView({ behavior: 'smooth', block: 'end' });
+          }
+        }
+      }, 300);
+    }
+  }, [searchParams]);
 
   const [editingRequirement, setEditingRequirement] = useState(false);
   const [requirementValue, setRequirementValue] = useState('');
@@ -563,10 +583,11 @@ export default function SalesLeadDetailPage() {
         />
       </Card>
 
-      <Tabs
-        activeKey={activeTab}
-        onChange={setActiveTab}
-        items={[
+      <div ref={tabsRef}>
+        <Tabs
+          activeKey={activeTab}
+          onChange={setActiveTab}
+          items={[
           {
             key: 'follow',
             label: '写跟进',
@@ -666,6 +687,7 @@ export default function SalesLeadDetailPage() {
           },
         ]}
       />
+      </div>
       <Modal
         title="申请运营协同"
         open={collaborationOpen}
