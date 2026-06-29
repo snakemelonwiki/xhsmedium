@@ -739,11 +739,24 @@ export default function AcademicOrderDetailPage() {
     });
   }
 
+  // 根据履约进度步骤获取对应的订单状态
+  function getOrderStatusByProgressStep(step: number): string | null {
+    switch (step) {
+      case 0: return 'in_progress';        // 初始 → 进行中
+      case 1: return 'teacher_assigned';   // 分配老师 → 已分配老师
+      case 2: return 'teacher_assigned';   // 写作审核 → 保持已分配老师状态
+      case 3: return 'to_deliver';         // 投稿准备 → 待交付
+      case 4: return 'completed';         // 投稿后 → 已完成
+      default: return null;
+    }
+  }
+
   // v1.3 / Task 12: 用户点击「履约进度」步骤时，把对应 paperProgress 写回 orders.paper_progress。
   // 列表端会读取该字段展示「稿件进度」列；DELIVERY_PROGRESS_STAGES 的 statusValues 与
   // paperProgress 的下拉选项一致（待分配/进行中/待投稿/已投稿/返修中/已录用），所以直接把
   // statusValues[0] 作为兜底写回值。允许覆盖（前进/回退都接受），但同一值不写。
   // 写失败不弹错误 toast —— 不影响本地 UI 步进。
+  // Bug #8: 点击不同步骤时，自动将订单状态更新为该步骤对应的业务状态。
   function handleProgressStepClick(step: number) {
     const stage = DELIVERY_PROGRESS_STAGES[step];
     if (!stage) return;
@@ -757,8 +770,23 @@ export default function AcademicOrderDetailPage() {
       ...prev,
       order: { ...(prev.order || {}), paperProgress: next },
     }));
+
+    const updateBody: Record<string, unknown> = { paper_progress: next };
+
+    // 根据点击的步骤自动更新订单状态为对应业务阶段
+    const nextOrderStatus = getOrderStatusByProgressStep(step);
+    if (nextOrderStatus) {
+      updateBody.order_status = nextOrderStatus;
+      // 乐观同步本地订单状态缓存
+      setOrder((prev) => (prev ? { ...prev, orderStatus: nextOrderStatus } : prev));
+      setDelivery((prev) => ({
+        ...prev,
+        order: { ...(prev.order || {}), orderStatus: nextOrderStatus },
+      }));
+    }
+
     // 异步保存到后端，不阻塞页面切换
-    updateOrder(orderId, { paper_progress: next }).catch((err) => {
+    updateOrder(orderId, updateBody).catch((err) => {
       // eslint-disable-next-line no-console
       console.error('[order] update paperProgress failed', err);
     });
