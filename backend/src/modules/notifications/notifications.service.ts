@@ -342,7 +342,7 @@ export class NotificationsService {
       relatedType: row.relatedType,
       targetType,
       targetId,
-      routeHint: this.buildRouteHint(row.portType, targetType, targetId),
+      routeHint,
       readStatus: row.readStatus,
       unread: !row.readStatus,
       createdAt: row.createdAt,

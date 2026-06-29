@@ -149,25 +149,36 @@ export default function SalesLeadDetailPage() {
   const defaultTab = searchParams.get('tab') || 'follow';
   const [activeTab, setActiveTab] = useState(defaultTab);
 
-  // 当 URL ?tab=timeline 时，自动滚动到 Tabs 并定位到底部时间线
+  // 当 URL ?tab=timeline 时，自动切换到跟进时间线 Tab
   const tabsRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const tabFromUrl = searchParams.get('tab');
     if (tabFromUrl && ['follow', 'timeline'].includes(tabFromUrl)) {
       setActiveTab(tabFromUrl);
-      // Tab 切换完成后滚动到 Tabs 区域并定位到底部
-      setTimeout(() => {
-        if (tabsRef.current) {
-          tabsRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
-          // 滚动到底部时间线内容
-          const timelineBottom = tabsRef.current.querySelector('.ant-timeline');
-          if (timelineBottom) {
-            timelineBottom.scrollIntoView({ behavior: 'smooth', block: 'end' });
-          }
-        }
-      }, 300);
     }
   }, [searchParams]);
+
+  // 当切换到 timeline Tab 且时间线数据加载完成后，滚动到底部
+  useEffect(() => {
+    if (activeTab !== 'timeline' || timeline.length === 0) return;
+    const timer1 = setTimeout(() => {
+      if (tabsRef.current) {
+        tabsRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+      const timer2 = setTimeout(() => {
+        // 定位到最后一个时间线条目（最新记录）
+        const lastItem = tabsRef.current?.querySelector('.ant-timeline-item:last-child');
+        if (lastItem) {
+          lastItem.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        } else {
+          // 兜底：滚动到页面底部
+          window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+        }
+      }, 400);
+      return () => clearTimeout(timer2);
+    }, 300);
+    return () => clearTimeout(timer1);
+  }, [activeTab, timeline.length]);
 
   const [editingRequirement, setEditingRequirement] = useState(false);
   const [requirementValue, setRequirementValue] = useState('');
