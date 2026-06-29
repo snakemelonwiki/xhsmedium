@@ -290,10 +290,13 @@ export class DashboardService {
     const postWhereAll = ['p.employee_id = ?', 'p.published_at BETWEEN ? AND ?'];
     const leadWhereAll = ['l.employee_id = ?', 'DATE(l.created_at) BETWEEN ? AND ?'];
     if (platform) {
-      postWhereAll.push('p.platform = ?');
-      paramsAll.push(platform);
-      leadWhereAll.push('l.platform = ?');
-      paramsAll.push(platform);
+      const aliases = this.getPlatformAliases(platform);
+      if (aliases && aliases.length > 0) {
+        postWhereAll.push(`p.platform IN (${aliases.map(() => '?').join(',')})`);
+        paramsAll.push(...aliases);
+        leadWhereAll.push(`l.platform IN (${aliases.map(() => '?').join(',')})`);
+        paramsAll.push(...aliases);
+      }
     }
     const postWhereAllSql = postWhereAll.join(' AND ');
     const leadWhereAllSql = leadWhereAll.join(' AND ');
@@ -328,14 +331,20 @@ export class DashboardService {
         const monthPostParams: any[] = [employeeId, from, to];
         const monthPostWhere = ['p.employee_id = ?', 'p.published_at BETWEEN ? AND ?'];
         if (platform) {
-          monthPostWhere.push('p.platform = ?');
-          monthPostParams.push(platform);
+          const aliases = this.getPlatformAliases(platform);
+          if (aliases && aliases.length > 0) {
+            monthPostWhere.push(`p.platform IN (${aliases.map(() => '?').join(',')})`);
+            monthPostParams.push(...aliases);
+          }
         }
         const monthLeadParams: any[] = [employeeId, from, to];
         const monthLeadWhere = ['l.employee_id = ?', 'DATE(l.created_at) BETWEEN ? AND ?'];
         if (platform) {
-          monthLeadWhere.push('l.platform = ?');
-          monthLeadParams.push(platform);
+          const aliases = this.getPlatformAliases(platform);
+          if (aliases && aliases.length > 0) {
+            monthLeadWhere.push(`l.platform IN (${aliases.map(() => '?').join(',')})`);
+            monthLeadParams.push(...aliases);
+          }
         }
         const [postRows, leadRows] = await Promise.all([
           this.postRepo.query(
@@ -368,14 +377,20 @@ export class DashboardService {
         const empPostParams: any[] = [from, to];
         const empPostWhere = ['p.published_at BETWEEN ? AND ?'];
         if (platform) {
-          empPostWhere.push('p.platform = ?');
-          empPostParams.push(platform);
+          const aliases = this.getPlatformAliases(platform);
+          if (aliases && aliases.length > 0) {
+            empPostWhere.push(`p.platform IN (${aliases.map(() => '?').join(',')})`);
+            empPostParams.push(...aliases);
+          }
         }
         const empLeadParams: any[] = [from, to];
         const empLeadWhere = ['DATE(l.created_at) BETWEEN ? AND ?'];
         if (platform) {
-          empLeadWhere.push('l.platform = ?');
-          empLeadParams.push(platform);
+          const aliases = this.getPlatformAliases(platform);
+          if (aliases && aliases.length > 0) {
+            empLeadWhere.push(`l.platform IN (${aliases.map(() => '?').join(',')})`);
+            empLeadParams.push(...aliases);
+          }
         }
         const [rows] = await Promise.all([
           this.postRepo.query(
@@ -518,14 +533,20 @@ export class DashboardService {
     const selfParams: any[] = [employeeId, from, to];
     const selfPostWhere = ['p.employee_id = ?', 'p.published_at BETWEEN ? AND ?'];
     if (platform) {
-      selfPostWhere.push('p.platform = ?');
-      selfParams.push(platform);
+      const aliases = this.getPlatformAliases(platform);
+      if (aliases && aliases.length > 0) {
+        selfPostWhere.push(`p.platform IN (${aliases.map(() => '?').join(',')})`);
+        selfParams.push(...aliases);
+      }
     }
     const selfLeadParams: any[] = [employeeId, from, to];
     const selfLeadWhere = ['l.employee_id = ?', 'DATE(l.created_at) BETWEEN ? AND ?'];
     if (platform) {
-      selfLeadWhere.push('l.platform = ?');
-      selfLeadParams.push(platform);
+      const aliases = this.getPlatformAliases(platform);
+      if (aliases && aliases.length > 0) {
+        selfLeadWhere.push(`l.platform IN (${aliases.map(() => '?').join(',')})`);
+        selfLeadParams.push(...aliases);
+      }
     }
 
     const [accountRows] = await Promise.all([
@@ -570,8 +591,11 @@ export class DashboardService {
     const trendParams: any[] = [employeeId, start7, today];
     const trendWhere = ['p.employee_id = ?', 'p.published_at BETWEEN ? AND ?'];
     if (platform) {
-      trendWhere.push('p.platform = ?');
-      trendParams.push(platform);
+      const aliases = this.getPlatformAliases(platform);
+      if (aliases && aliases.length > 0) {
+        trendWhere.push(`p.platform IN (${aliases.map(() => '?').join(',')})`);
+        trendParams.push(...aliases);
+      }
     }
     const trendRows = await this.postRepo.query(
       `SELECT p.account_id AS account_id,
@@ -674,14 +698,20 @@ export class DashboardService {
     const postParams: any[] = [employeeId, date];
     const postWhere = ['p.employee_id = ?', 'p.published_at = ?'];
     if (platform) {
-      postWhere.push('p.platform = ?');
-      postParams.push(platform);
+      const aliases = this.getPlatformAliases(platform);
+      if (aliases && aliases.length > 0) {
+        postWhere.push(`p.platform IN (${aliases.map(() => '?').join(',')})`);
+        postParams.push(...aliases);
+      }
     }
     const leadParams: any[] = [employeeId, date];
     const leadWhere = ['l.employee_id = ?', 'DATE(l.created_at) = ?'];
     if (platform) {
-      leadWhere.push('l.platform = ?');
-      leadParams.push(platform);
+      const aliases = this.getPlatformAliases(platform);
+      if (aliases && aliases.length > 0) {
+        leadWhere.push(`l.platform IN (${aliases.map(() => '?').join(',')})`);
+        leadParams.push(...aliases);
+      }
     }
 
     const [postRow, leadRow] = await Promise.all([
@@ -779,7 +809,11 @@ export class DashboardService {
     }[] = [];
     for (const p of platformList) {
       // T3.1: 一次性取 3 类作品分类 + 获客贴总数；原 SQL 保留兼容性（leadPostCount 仍用 IN 列表口径）
-      const postBaseWhere = 'p.employee_id = ? AND p.platform = ? AND p.published_at BETWEEN ? AND ?';
+      const aliases = this.getPlatformAliases(p);
+      const platformPlaceholders = aliases && aliases.length > 0 ? aliases.map(() => '?').join(',') : '?';
+      const postBaseWhere = `p.employee_id = ? AND p.platform IN (${platformPlaceholders}) AND p.published_at BETWEEN ? AND ?`;
+      const postParams = [employeeId, ...(aliases || [p]), from, to];
+      const leadParams = [employeeId, ...(aliases || [p]), from, to];
       const [postAgg, leadCount, postTypeRows] = await Promise.all([
         this.postRepo.query(
           `SELECT
@@ -789,12 +823,12 @@ export class DashboardService {
              COALESCE(SUM(p.favorites), 0) AS favorites,
              COALESCE(SUM(CASE WHEN p.post_type IN ('获客贴','获客帖','营销贴') THEN 1 ELSE 0 END), 0) AS lead_post_count
            FROM posts p WHERE ${postBaseWhere}`,
-          [employeeId, p, from, to],
+          postParams,
         ),
         this.leadRepo.query(
           `SELECT COUNT(*) AS cnt FROM leads l
-           WHERE l.employee_id = ? AND l.platform = ? AND DATE(l.created_at) BETWEEN ? AND ?`,
-          [employeeId, p, from, to],
+           WHERE l.employee_id = ? AND l.platform IN (${platformPlaceholders}) AND DATE(l.created_at) BETWEEN ? AND ?`,
+          leadParams,
         ),
         // T3.1: 三类作品分类（人设帖/讨论贴/获客帖）。历史值映射：
         //   人设帖 ↔ 素人贴/人设贴；讨论贴 ↔ 话题贴/讨论帖；获客帖（含历史 营销贴）
@@ -809,7 +843,7 @@ export class DashboardService {
              COUNT(*) AS cnt
            FROM posts p WHERE ${postBaseWhere}
            GROUP BY type_alias`,
-          [employeeId, p, from, to],
+          postParams,
         ),
       ]);
       const r = (postAgg as any[])[0] || {};
@@ -914,10 +948,11 @@ export class DashboardService {
       const comments = Number(r.comments || 0);
       const favorites = Number(r.favorites || 0);
       const traffic = likes + comments + favorites;
-      if (r.platform === '小红书') {
+      const pf = this.normalizePlatform(r.platform);
+      if (pf === '小红书') {
         slot.xiaohongshuCount += Number(r.post_count || 0);
         slot.xiaohongshuTraffic += traffic;
-      } else if (r.platform === '抖音') {
+      } else if (pf === '抖音') {
         slot.douyinCount += Number(r.post_count || 0);
         slot.douyinTraffic += traffic;
       }
@@ -928,9 +963,10 @@ export class DashboardService {
       if (!b) continue;
       buckets.add(b);
       const slot = map.get(b) || { xiaohongshuCount: 0, douyinCount: 0, xiaohongshuTraffic: 0, douyinTraffic: 0, xiaohongshuLeads: 0, douyinLeads: 0 };
-      if (r.platform === '小红书') {
+      const pf = this.normalizePlatform(r.platform);
+      if (pf === '小红书') {
         slot.xiaohongshuLeads += Number(r.lead_count || 0);
-      } else if (r.platform === '抖音') {
+      } else if (pf === '抖音') {
         slot.douyinLeads += Number(r.lead_count || 0);
       }
       map.set(b, slot);
@@ -1958,22 +1994,35 @@ export class DashboardService {
     const leadDateClause = useRange
       ? 'DATE(l.created_at) BETWEEN ? AND ?'
       : 'DATE(l.created_at) = ?';
-    const platformClause = platform ? ' AND p.platform = ?' : '';
-    const leadPlatformClause = platform ? ' AND l.platform = ?' : '';
 
     const dateParams = (cl: string) =>
       cl.includes('BETWEEN') ? [from, to] : [today];
-    const platformParam = platform ? [platform] : [];
 
-    const accountPlatformClause = platform ? ' AND a.platform = ?' : '';
-    const accountParams = platform ? [platform] : [];
+    // 构建 platform IN 子句
+    const buildPlatformIn = (tableAlias: string, aliases?: string[] | null) => {
+      if (!platform || !aliases || aliases.length === 0) return '';
+      return ` AND ${tableAlias}.platform IN (${aliases.map(() => '?').join(',')})`;
+    };
+    const platformAliases = platform ? this.getPlatformAliases(platform) : null;
+    const accountAliases = platformAliases || [];
+
+    // accounts 子查询参数
+    const accountParams = platform ? [...accountAliases] : [];
+    // posts 子查询参数（4 次）
+    const postParams = [...dateParams(dateClause), ...accountParams];
+    // leads 子查询参数（2 次）
+    const leadParams = [...dateParams(leadDateClause), ...accountParams];
+
+    const platformClause = buildPlatformIn('p', platformAliases);
+    const leadPlatformClause = buildPlatformIn('l', platformAliases);
+    const accountPlatformClause = buildPlatformIn('a', platformAliases);
 
     const params: any[] = [
       ...accountParams,
-      ...dateParams(dateClause), ...platformParam,
-      ...dateParams(leadDateClause), ...platformParam,
-      ...dateParams(dateClause), ...platformParam,
-      ...dateParams(leadDateClause), ...platformParam,
+      ...postParams,
+      ...leadParams,
+      ...postParams,
+      ...leadParams,
     ];
 
     const raw = await this.employeeRepo.query(
