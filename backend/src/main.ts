@@ -103,6 +103,11 @@ async function bootstrap() {
 
   // 全局字符集设置 - 确保 JSON 响应使用 UTF-8
   app.use((req: any, res: any, next: any) => {
+    // 跳过静态文件请求（/uploads/*），避免覆盖 express.static 的 Content-Type
+    if (req.path?.startsWith('/uploads')) {
+      next();
+      return;
+    }
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
     next();
   });
