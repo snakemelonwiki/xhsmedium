@@ -590,26 +590,32 @@ export class OrdersService {
   }
 
   /**
-   * 获取下一个订单顺序号，沿用 orders_order_code_seq 的按日递增来源。
+   * 获取下一个订单顺序号，改用数据库原子递增（UPDATE + LAST_INSERT_ID），
+   * 消除 SELECT-FOR-UPDATE + 应用层计算 + UPDATE 两步之间的并发窗口。
    */
   private async getNextOrderCodeSequence(manager: EntityManager, dateKey: string): Promise<number> {
+    // 确保当天行存在（幂等，并发也安全）
     await manager.query(
       `INSERT INTO orders_order_code_seq (seq_date, current_seq)
        VALUES (?, 0)
        ON DUPLICATE KEY UPDATE seq_date = seq_date`,
       [dateKey],
     );
-    const rows: Array<{ current_seq: number | string }> = await manager.query(
-      `SELECT current_seq FROM orders_order_code_seq WHERE seq_date = ? FOR UPDATE`,
+
+    // 原子递增：让数据库在单条 UPDATE 内完成读+加1+写，彻底消除并发窗口。
+    // LAST_INSERT_ID(current_seq + 1) 在 UPDATE 后会将新值设为会话级 LAST_INSERT_ID，
+    // 后续 SELECT LAST_INSERT_ID() 即可读取，无需再次回表。
+    await manager.query(
+      `UPDATE orders_order_code_seq
+       SET current_seq = LAST_INSERT_ID(current_seq + 1)
+       WHERE seq_date = ?`,
       [dateKey],
     );
-    const raw = rows[0]?.current_seq;
-    const currentSeq = Number(raw ?? 0) || 0;
-    const nextSeq = currentSeq + 1;
-    await manager.query(
-      `UPDATE orders_order_code_seq SET current_seq = ? WHERE seq_date = ?`,
-      [nextSeq, dateKey],
+
+    const rows: Array<{ 'LAST_INSERT_ID()': number | string }> = await manager.query(
+      `SELECT LAST_INSERT_ID() as next_seq`,
     );
+    const nextSeq = Number(rows[0]?.['next_seq'] ?? 0);
     return nextSeq;
   }
 
