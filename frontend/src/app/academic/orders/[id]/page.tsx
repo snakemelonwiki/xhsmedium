@@ -1379,20 +1379,6 @@ export default function AcademicOrderDetailPage() {
                     </Form.Item>
                   </Col>
                 ) : null}
-                {visibleFinanceFieldKeys.has('expense') ? (
-                  <Col xs={24} md={4}>
-                    <Form.Item name={['finance', 'expense']} label="订单支出">
-                      <InputNumber min={0} precision={2} style={{ width: '100%' }} />
-                    </Form.Item>
-                  </Col>
-                ) : null}
-                {visibleFinanceFieldKeys.has('profit') ? (
-                  <Col xs={24} md={4}>
-                    <Form.Item label="利润">
-                      <Input value={delivery.finance.profit ?? '-'} disabled />
-                    </Form.Item>
-                  </Col>
-                ) : null}
                 <Col xs={24} md={4}>
                   <Form.Item name={['finance', 'teacherPrice']} label="老师接单价格">
                     <InputNumber min={0} precision={0} style={{ width: '100%' }} />

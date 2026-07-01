@@ -1111,7 +1111,6 @@ CREATE TABLE IF NOT EXISTS order_finance (
   teacher_price   DECIMAL(12,2) NULL COMMENT '老师接单价格',
   teacher_paid    DECIMAL(12,2) NULL COMMENT '已付给老师',
   teacher_pending DECIMAL(12,2) NULL COMMENT '待付给老师',
-  expense         DECIMAL(12,2) NULL COMMENT '订单支出',
   created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='订单财务扩展';

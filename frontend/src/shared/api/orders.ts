@@ -348,8 +348,6 @@ function mapDeliveryFinance(raw: RawRecord = {}): OrderDeliveryFinance {
     teacherPrice: text(raw.teacherPrice ?? raw.teacher_price) ?? null,
     teacherPaid: text(raw.teacherPaid ?? raw.teacher_paid) ?? null,
     teacherPending: text(raw.teacherPending ?? raw.teacher_pending) ?? null,
-    expense: text(raw.expense) ?? null,
-    profit: text(raw.profit) ?? null,
   };
 }
 
