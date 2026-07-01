@@ -23,6 +23,8 @@ interface PooledContext {
 export class BrowserPoolService implements OnModuleDestroy {
   private readonly logger = new Logger(BrowserPoolService.name);
   private readonly pools = new Map<string, PooledContext>();
+  /** 防止同一 poolKey 并发创建浏览器上下文 */
+  private readonly creating = new Map<string, Promise<BrowserContext>>();
 
   constructor(private readonly profileConfig: ProfileConfigService) {}
 
@@ -43,63 +45,23 @@ export class BrowserPoolService implements OnModuleDestroy {
         return existing.ctx;
       }
       this.logger.warn(`[BrowserPool] ${poolKey} 上下文已失效，重新创建`);
-      await this.closeContext(platform, account.id);
+      await this.closeContextByKey(poolKey);
     }
 
-    this.ensureProfileDir(account.profileDir);
-    this.clearSingletonLocks(account.profileDir);
-
-    // 抖音/小红书暂时使用有头模式便于调试，其余平台保持无头
-    const isHeadless = platform !== '小红书' && platform !== '抖音';
-    const baseArgs: string[] = [];
-    if (platform === '抖音') {
-      baseArgs.push('--disable-gpu');
-    }
-    if (process.platform === 'linux') {
-      baseArgs.push('--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage');
+    // 检查是否已有正在创建的请求
+    const creatingPromise = this.creating.get(poolKey);
+    if (creatingPromise) {
+      this.logger.debug(`[BrowserPool] 等待 ${poolKey} 上下文创建中`);
+      return creatingPromise;
     }
 
-    for (let attempt = 0; attempt < 2; attempt++) {
-      try {
-        if (attempt > 0) {
-          this.logger.warn(`[BrowserPool] ${poolKey} 浏览器启动失败，额外清理后重试`);
-          this.clearSingletonLocks(account.profileDir);
-          for (const name of ['SingletonLock', 'SingletonCookie', 'SingletonSocket', 'Default/Cookies-journal', 'Default/Network/Cookies-journal']) {
-            try { fs.rmSync(path.join(account.profileDir, name), { force: true, recursive: true }); } catch { /* ignore */ }
-          }
-        }
-
-        this.logger.log(`[BrowserPool] 创建 ${poolKey} 上下文（冷启动，attempt=${attempt + 1}）`);
-        const attemptArgs = [...baseArgs];
-        if (attempt > 0 && platform === '抖音' && process.platform === 'win32') {
-          // Windows 下抖音偶发 GPU/沙箱崩溃，追加 --no-sandbox 兜底
-          attemptArgs.push('--no-sandbox');
-        }
-
-        const ctx = await chromium.launchPersistentContext(account.profileDir, {
-          headless: isHeadless,
-          viewport: { width: 1440, height: 1100 },
-          args: [
-            ...(isHeadless ? ['--disable-remote-fonts'] : []),
-            ...(platform === '抖音' ? [
-              '--disable-blink-features=AutomationControlled',
-              '--disable-features=IsolateOrigins,site-per-process',
-            ] : []),
-            ...attemptArgs,
-          ],
-          userAgent:
-            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        });
-
-        this.pools.set(poolKey, { ctx, platform, accountId: account.id, createdAt: Date.now() });
-        return ctx;
-      } catch (err: any) {
-        this.logger.warn(`[BrowserPool] ${poolKey} 浏览器上下文启动失败 (attempt=${attempt + 1}): ${err?.message || err}`);
-        if (attempt === 1) throw err;
-      }
+    const createPromise = this.doCreateContext(account, poolKey, platform);
+    this.creating.set(poolKey, createPromise);
+    try {
+      return await createPromise;
+    } finally {
+      this.creating.delete(poolKey);
     }
-
-    throw new Error(`${poolKey} 浏览器上下文启动失败`);
   }
 
   /**
@@ -144,6 +106,69 @@ export class BrowserPoolService implements OnModuleDestroy {
 
   private poolKey(platform: string, accountId: string): string {
     return `${platform}:${accountId}`;
+  }
+
+  private async doCreateContext(account: ScrapingAccount, poolKey: string, platform: string): Promise<BrowserContext> {
+    this.ensureProfileDir(account.profileDir);
+    this.clearSingletonLocks(account.profileDir);
+
+    // 抖音/小红书暂时使用有头模式便于调试，其余平台保持无头
+    const isHeadless = platform !== '小红书' && platform !== '抖音';
+    const baseArgs: string[] = [];
+    if (platform === '抖音') {
+      baseArgs.push('--disable-gpu');
+    }
+    if (process.platform === 'linux') {
+      baseArgs.push('--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage');
+    }
+
+    let ctx: BrowserContext | null = null;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        if (attempt > 0) {
+          this.logger.warn(`[BrowserPool] ${poolKey} 浏览器启动失败，额外清理后重试`);
+          this.clearSingletonLocks(account.profileDir);
+          for (const name of ['SingletonLock', 'SingletonCookie', 'SingletonSocket', 'Default/Cookies-journal', 'Default/Network/Cookies-journal']) {
+            try { fs.rmSync(path.join(account.profileDir, name), { force: true, recursive: true }); } catch { /* ignore */ }
+          }
+        }
+
+        this.logger.log(`[BrowserPool] 创建 ${poolKey} 上下文（冷启动，attempt=${attempt + 1}）`);
+        const attemptArgs = [...baseArgs];
+        if (attempt > 0 && platform === '抖音' && process.platform === 'win32') {
+          // Windows 下抖音偶发 GPU/沙箱崩溃，追加 --no-sandbox 兜底
+          attemptArgs.push('--no-sandbox');
+        }
+
+        ctx = await chromium.launchPersistentContext(account.profileDir, {
+          headless: isHeadless,
+          viewport: { width: 1440, height: 1100 },
+          args: [
+            ...(isHeadless ? ['--disable-remote-fonts'] : []),
+            ...(platform === '抖音' ? [
+              '--disable-blink-features=AutomationControlled',
+              '--disable-features=IsolateOrigins,site-per-process',
+            ] : []),
+            ...attemptArgs,
+          ],
+          userAgent:
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        });
+
+        this.pools.set(poolKey, { ctx, platform, accountId: account.id, createdAt: Date.now() });
+        return ctx;
+      } catch (err: any) {
+        this.logger.warn(`[BrowserPool] ${poolKey} 浏览器上下文启动失败 (attempt=${attempt + 1}): ${err?.message || err}`);
+        // 若已创建 ctx 但后续失败，确保关闭以避免僵尸进程
+        if (ctx) {
+          try { await ctx.close(); } catch { /* ignore */ }
+          ctx = null;
+        }
+        if (attempt === 1) throw err;
+      }
+    }
+
+    throw new Error(`${poolKey} 浏览器上下文启动失败`);
   }
 
   private safeGetAccount(platform: string, accountId?: string): ScrapingAccount {

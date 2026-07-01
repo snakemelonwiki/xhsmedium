@@ -167,25 +167,56 @@ export class ScraperService {
   /**
    * 按平台串行锁：保证同一平台同时只有一个抓取任务在执行，
    * 避免多个请求共享 persistent context 时被互相关闭。
+   *
+   * 实现：使用双重 Map 消除竞态窗口。
+   *   - platformLocks: 存储当前持有锁的 Promise
+   *   - lockAcquires: 存储正在获取锁的请求，防止多个请求同时通过检查并 set 锁
    */
+  private readonly lockAcquires = new Map<string, Promise<void>>();
+
   private async withPlatformLock<T>(platform: string, fn: () => Promise<T>): Promise<T> {
-    while (this.platformLocks.has(platform)) {
+    // 1. 等待所有正在获取该锁的请求完成
+    while (this.lockAcquires.has(platform)) {
       try {
-        await this.platformLocks.get(platform);
+        await this.lockAcquires.get(platform)!;
       } catch {
         // 前一个任务失败也不影响当前任务
       }
     }
-    let release: () => void;
-    const lock = new Promise<void>((resolve) => {
-      release = resolve;
+
+    // 2. 标记自己正在获取锁
+    let resolveAcquire: () => void;
+    const acquirePromise = new Promise<void>((resolve) => {
+      resolveAcquire = resolve;
     });
-    this.platformLocks.set(platform, lock);
+    this.lockAcquires.set(platform, acquirePromise);
+
     try {
-      return await fn();
+      // 3. 再次检查是否有当前锁（等待期间可能被其他请求设置了）
+      while (this.platformLocks.has(platform)) {
+        try {
+          await this.platformLocks.get(platform)!;
+        } catch {
+          // 忽略前一个任务的失败
+        }
+      }
+
+      // 4. 获取锁
+      let release: () => void;
+      const lock = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      this.platformLocks.set(platform, lock);
+
+      try {
+        return await fn();
+      } finally {
+        this.platformLocks.delete(platform);
+        release!();
+      }
     } finally {
-      this.platformLocks.delete(platform);
-      release!();
+      this.lockAcquires.delete(platform);
+      resolveAcquire!();
     }
   }
 

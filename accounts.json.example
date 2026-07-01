@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "accounts": [
+    {
+      "id": "default",
+      "platform": "douyin",
+      "label": "默认主账号",
+      "profileDir": ".playwright-profiles/douyin",
+      "enabled": true,
+      "isDefault": true
+    },
+    {
+      "id": "default",
+      "platform": "xiaohongshu",
+      "label": "默认主账号",
+      "profileDir": ".playwright-profiles/xiaohongshu",
+      "enabled": true,
+      "isDefault": true
+    },
+    {
+      "id": "acc_douyin_01",
+      "platform": "douyin",
+      "label": "抖音备用号1",
+      "profileDir": ".playwright-profiles/accounts/douyin/acc_douyin_01",
+      "enabled": true,
+      "isDefault": false
+    },
+    {
+      "id": "acc_xhs_01",
+      "platform": "xiaohongshu",
+      "label": "小红书备用号1",
+      "profileDir": ".playwright-profiles/accounts/xiaohongshu/acc_xhs_01",
+      "enabled": true,
+      "isDefault": false
+    }
+  ]
+}

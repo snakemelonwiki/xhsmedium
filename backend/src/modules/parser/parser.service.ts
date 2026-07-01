@@ -99,7 +99,7 @@ export class ParserService {
     const log = (msg: string) => this.logger.debug?.(msg) ?? this.logger.log(msg);
 
     const result = await this.lockService.run(() =>
-      this.scraperService.scrape(url, { retry, timeout, log, account: opts.account }),
+      this.scraperService.scrape(url, { retry, timeout, log, account: opts.account, autoSwitch: false }),
     );
 
     if (isScrapingFailure(result)) {

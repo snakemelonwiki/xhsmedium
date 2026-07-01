@@ -186,16 +186,20 @@ export class ParserController {
     @Res() res: Response,
     @Query('account') account?: string,
   ) {
-    if (platform) {
-      try {
-        const item = account
-          ? this.parserService.getLoginStatus(platform, account)
-          : this.parserService.getLoginStatus(platform);
-        return res.json({ ok: true, item });
-      } catch (err: any) {
-        return res.status(400).json({ ok: false, error: { code: 'usage', message: err?.message } });
+    try {
+      if (platform) {
+        try {
+          const item = account
+            ? this.parserService.getLoginStatus(platform, account)
+            : this.parserService.getLoginStatus(platform);
+          return res.json({ ok: true, item });
+        } catch (err: any) {
+          return res.status(400).json({ ok: false, error: { code: 'usage', message: err?.message } });
+        }
       }
+      return res.json({ ok: true, items: this.parserService.getAllLoginStatus() });
+    } catch (err: any) {
+      return res.status(500).json({ ok: false, error: { code: 'internal', message: err?.message } });
     }
-    return res.json({ ok: true, items: this.parserService.getAllLoginStatus() });
   }
 }
