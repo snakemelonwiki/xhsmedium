@@ -6,6 +6,8 @@ import { ScrapingLockService } from './scraping-lock.service';
 import { ScrapingAlertsController } from './scraping.controller';
 import { BrowserPoolService } from './core/browser-pool.service';
 import { ScraperService } from './core/scraper.service';
+import { ProfileConfigService } from './core/profile-config.service';
+import { AccountRotationService } from './core/account-rotation.service';
 
 /**
  * Scraping V2 模块
@@ -13,8 +15,10 @@ import { ScraperService } from './core/scraper.service';
  * 重构后暴露的核心服务：
  *   - ScrapingLockService:  抓取串行化锁（内存级，单进程互斥）
  *   - ScrapingAlertService:  失败告警计数与写库
- *   - BrowserPoolService:    Playwright 浏览器上下文池
- *   - ScraperService:        统一抓取入口（URL → HAR → 数据提取 → 封面截图）
+ *   - BrowserPoolService:    Playwright 浏览器上下文池（按 platform:accountId 隔离）
+ *   - ScraperService:        统一抓取入口（URL → 账号选择 → HAR → 数据提取 → 封面截图）
+ *   - ProfileConfigService:  读取 .playwright-profiles/accounts.json 的账号配置
+ *   - AccountRotationService: 账号轮询与失败切换策略
  *
  * 旧版依赖（scripts/parser-core.js → metricsFetcher.js）被完全替代，
  * 不再通过 require('../../../scripts/parser-core') 跨模块调用。
@@ -27,6 +31,8 @@ import { ScraperService } from './core/scraper.service';
     ScrapingAlertService,
     ScrapingLockService,
     // V2 服务（新架构）
+    ProfileConfigService,
+    AccountRotationService,
     BrowserPoolService,
     ScraperService,
   ],
@@ -34,7 +40,9 @@ import { ScraperService } from './core/scraper.service';
     // V1 兼容导出（ParserService 仍依赖这些）
     ScrapingAlertService,
     ScrapingLockService,
-    // V2 核心导出（供 ParserService 使用）
+    // V2 核心导出（供 ParserService / posts-metrics.service 使用）
+    ProfileConfigService,
+    AccountRotationService,
     BrowserPoolService,
     ScraperService,
   ],

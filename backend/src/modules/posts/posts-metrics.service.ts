@@ -55,7 +55,7 @@ export class PostsMetricsService {
    */
   async fetchMetricsFromUrl(
     url: string,
-    opts: { source?: string; postId?: string } = {},
+    opts: { source?: string; postId?: string; account?: string } = {},
   ): Promise<ScrapedMetrics> {
     const normalizedUrl = String(url || '').trim();
     if (!normalizedUrl) throw new Error('作品链接不能为空');
@@ -74,6 +74,7 @@ export class PostsMetricsService {
       timeout: isInteractive ? 20_000 : 15_000,
       source: opts.source || 'fetch-metrics',
       postId: opts.postId,
+      account: opts.account,
     });
     if (isParserFailure(result)) {
       // 透传错误信息，让 controller 用对应 HTTP 状态码返回
@@ -103,10 +104,10 @@ export class PostsMetricsService {
   /**
    * 启动有头登录浏览器。GUI 环境（Windows / macOS 桌面）。
    */
-  async openLoginBrowser(platform: string): Promise<any> {
+  async openLoginBrowser(platform: string, accountId?: string): Promise<any> {
     if (!platform || !['小红书', '抖音'].includes(platform)) {
       throw new Error('请选择要登录的平台');
     }
-    return this.parserService.openLogin(platform);
+    return this.parserService.openLogin(platform, accountId);
   }
 }

@@ -4,6 +4,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { resolveRepoRoot } from '../../../shared/utils/project-paths';
 import { BrowserPoolService } from './browser-pool.service';
+import { AccountRotationService } from './account-rotation.service';
+import { ProfileConfigService, ScrapingAccount } from './profile-config.service';
 import { HarListener } from './har-listener';
 import { XiaohongshuExtractor } from './extractors/xiaohongshu.extractor';
 import { DouyinExtractor } from './extractors/douyin.extractor';
@@ -28,17 +30,18 @@ const BLOCKED_RESOURCE_TYPES = new Set([
 ]);
 
 /**
- * 统一抓取服务
+ * 统一抓取服务（多账号版）
  *
  * 核心职责：
  *   1. URL 分类（parseUrl）
- *   2. 获取浏览器上下文（BrowserPoolService）
- *   3. 挂载 HAR 监听器
- *   4. 页面导航 + 去浮层
- *   5. 数据提取（XiaohongshuExtractor / DouyinExtractor）
- *   6. 截图封面
- *   7. 登录墙检测
- *   8. 错误分类与重试
+ *   2. 账号选择（AccountRotationService / 显式指定）
+ *   3. 获取浏览器上下文（BrowserPoolService，按 platform:accountId 隔离）
+ *   4. 挂载 HAR 监听器
+ *   5. 页面导航 + 去浮层
+ *   6. 数据提取（XiaohongshuExtractor / DouyinExtractor）
+ *   7. 截图封面
+ *   8. 登录墙检测
+ *   9. 错误分类、账号内重试、账号间切换
  */
 @Injectable()
 export class ScraperService {
@@ -48,15 +51,26 @@ export class ScraperService {
   /** 按平台串行化抓取，避免多个请求共享同一个 persistent context 导致 newPage 时上下文被关闭。 */
   private readonly platformLocks = new Map<string, Promise<void>>();
 
-  constructor(private readonly browserPool: BrowserPoolService) {}
+  constructor(
+    private readonly browserPool: BrowserPoolService,
+    private readonly rotationService: AccountRotationService,
+    private readonly profileConfig: ProfileConfigService,
+  ) {}
 
   /**
    * 主入口：抓取单个 URL
+   *
+   * 多账号逻辑：
+   *   1. 如果 opts.account 指定了账号，优先使用该账号。
+   *   2. 否则用 AccountRotationService 选择下一个可用账号。
+   *   3. 抓取过程中若遇到「可切换错误」（登录墙/风控/频繁），在账号间轮转，
+   *      直到成功或所有账号都尝试过。
    */
   async scrape(url: string, opts: ScrapingOptions = {}): Promise<ScrapingResult> {
     const log = opts.log || ((msg: string) => this.logger.log(msg));
     const retry = Math.max(0, Number(opts.retry ?? 3));
     const timeout = Math.max(1000, Number(opts.timeout ?? 20000));
+    const autoSwitch = opts.autoSwitch !== false;
 
     // 1. URL 分类
     const parsed = parseUrl(url);
@@ -76,42 +90,78 @@ export class ScraperService {
     log(`URL 分类: platform=${parsed.platform}, linkType=${parsed.linkType}, postId=${parsed.postId || 'null'}`);
 
     return this.withPlatformLock(platform, async () => {
+      const triedAccounts: string[] = [];
       let lastErr: Error | null = null;
-      for (let attempt = 0; attempt <= retry; attempt++) {
-        if (attempt > 0) {
-          const backoff = Math.min(1000 * 2 ** (attempt - 1), 8000);
-          log(`重试 ${attempt}/${retry}，等待 ${backoff}ms 后重试`);
-          await sleep(backoff);
+
+      while (true) {
+        // 选取账号
+        const account = this.selectAccount(platform, {
+          prefer: opts.account,
+          exclude: triedAccounts,
+          autoSwitch,
+        });
+
+        if (!account) {
+          // 无可用账号
+          const lastMessage = lastErr ? lastErr.message : '所有账号均不可用';
+          return {
+            ok: false,
+            error: {
+              code: 'exhausted',
+              retryable: false,
+              message: lastMessage,
+              platform,
+            },
+          };
         }
 
+        triedAccounts.push(account.id);
+
         try {
-          log(`第 ${attempt + 1} 次抓取 ${platform}: ${parsed.normalizedUrl}`);
-          const data = await this.doScrape(parsed, { timeout, log });
+          log(`使用账号 ${account.label}（${account.id}）抓取 ${platform}`);
+          const data = await this.doScrapeWithAccount(parsed, account, { retry, timeout, log });
+          this.rotationService.recordSuccess(platform, account.id);
           log(`抓取结果 ${platform}: title=${(data.title || '').slice(0, 60)}, publishedAt=${data.publishedAt || ''}`);
           return { ok: true, data };
         } catch (err: any) {
           lastErr = err;
-          const cls = this.classifyError(err);
-          log(`第 ${attempt + 1} 次失败 [${cls.code}]: ${cls.message}`);
-          if (!cls.retryable || attempt === retry) {
+          const isSwitchable = this.rotationService.isAccountSwitchableError(err);
+          if (isSwitchable) {
+            this.rotationService.recordFailure(platform, account.id);
+            log(`账号 ${account.id} 失败且可切换: ${err?.message}`);
+            // 继续循环，尝试下一个账号
+          } else {
+            // 不可切换错误（作品删除、平台不支持等），直接返回
+            const cls = this.classifyError(err);
             return {
               ok: false,
-              error: { ...cls, platform },
+              error: { ...cls, platform, accountId: account.id },
             };
           }
         }
       }
-
-      return {
-        ok: false,
-        error: {
-          code: 'exhausted',
-          retryable: false,
-          message: lastErr?.message || '重试用尽',
-          platform,
-        },
-      };
     });
+  }
+
+  // ── 账号选择 ──
+
+  private selectAccount(
+    platform: string,
+    options: { prefer?: string; exclude: string[]; autoSwitch: boolean },
+  ): ScrapingAccount | null {
+    if (options.prefer) {
+      const explicit = this.profileConfig.getAccount(platform, options.prefer);
+      if (explicit && explicit.enabled) return explicit;
+      // 显式指定但找不到/禁用时，继续走自动逻辑
+    }
+    if (options.autoSwitch) {
+      return this.rotationService.nextAccount(platform, { exclude: options.exclude });
+    }
+    // 不自动切换时，只尝试一次默认账号
+    if (options.exclude.length === 0) {
+      return this.profileConfig.getDefaultAccount(platform);
+    }
+    return null;
   }
 
   /**
@@ -140,14 +190,50 @@ export class ScraperService {
   }
 
   /**
-   * 核心抓取逻辑（单次，无重试）
+   * 核心抓取逻辑（单账号单次，内部支持重试）
+   */
+  private async doScrapeWithAccount(
+    parsed: UrlParseResult,
+    account: ScrapingAccount,
+    opts: { retry: number; timeout: number; log: (msg: string) => void },
+  ): Promise<ScrapedPostData> {
+    const platform = parsed.platform === 'xiaohongshu' ? '小红书' : '抖音';
+    let lastErr: Error | null = null;
+
+    for (let attempt = 0; attempt <= opts.retry; attempt++) {
+      if (attempt > 0) {
+        const backoff = Math.min(1000 * 2 ** (attempt - 1), 8000);
+        opts.log(`账号 ${account.id} 重试 ${attempt}/${opts.retry}，等待 ${backoff}ms`);
+        await sleep(backoff);
+      }
+
+      try {
+        opts.log(`第 ${attempt + 1} 次抓取 ${platform}: ${parsed.normalizedUrl}`);
+        const data = await this.doScrape(parsed, account, { timeout: opts.timeout, log: opts.log });
+        return data;
+      } catch (err: any) {
+        lastErr = err;
+        const cls = this.classifyError(err);
+        opts.log(`第 ${attempt + 1} 次失败 [${cls.code}]: ${cls.message}`);
+        if (!cls.retryable || attempt === opts.retry) {
+          throw err; // 重试耗尽，抛给外层做账号切换判断
+        }
+      }
+    }
+
+    throw lastErr || new Error('重试用尽');
+  }
+
+  /**
+   * 单次抓取（无重试）
    */
   private async doScrape(
     parsed: UrlParseResult,
+    account: ScrapingAccount,
     opts: { timeout: number; log: (msg: string) => void },
   ): Promise<ScrapedPostData> {
     const platform = parsed.platform === 'xiaohongshu' ? '小红书' : '抖音';
-    let ctx = await this.browserPool.acquireContext(platform);
+    let ctx = await this.browserPool.acquireContext(platform, account.id);
     let page: Page | null = null;
     const t0 = Date.now();
 
@@ -155,29 +241,15 @@ export class ScraperService {
       try {
         page = await ctx.newPage();
       } catch (err: any) {
-        // 并发/崩溃可能导致池里上下文已被关闭，立即重建一次
         if (!err?.message?.includes('closed')) throw err;
         this.logger.warn(`[Scraper] ${platform} 上下文在 newPage 时已被关闭，尝试重建`);
-        await this.browserPool.releaseContext(platform);
-        ctx = await this.browserPool.acquireContext(platform);
+        await this.browserPool.releaseContext(platform, account.id);
+        ctx = await this.browserPool.acquireContext(platform, account.id);
         page = await ctx.newPage();
       }
 
-      // ── 资源拦截：仅抖音启用（小红书需要完整 JS/CSS 执行以触发 API 请求） ──
-      // 临时调试：有头模式下拦截 image 会导致抖音图文/笔记页内容异常，先关闭观察效果
-      // if (platform === '抖音') {
-      //   await page.route('**/*', (route) => {
-      //     const type = route.request().resourceType();
-      //     if (BLOCKED_RESOURCE_TYPES.has(type)) {
-      //       route.abort();
-      //     } else {
-      //       route.continue();
-      //     }
-      //   });
-      // }
-
+      // 抖音：拦截 websocket/eventsource，其余放行
       if (platform === '抖音') {
-        // 仅拦截明确不影响内容渲染的资源类型
         await page.route('**/*', (route) => {
           const type = route.request().resourceType();
           if (type === 'websocket' || type === 'eventsource') {
@@ -190,8 +262,6 @@ export class ScraperService {
 
       // ── 挂载 HAR 监听器 ──
       const harListener = new HarListener(page, {
-        // 小红书：关注 feed API、note API
-        // 抖音：关注 RENDER_DATA、RSC flight、aweme/detail API
         urlFilter: [
           /\/api\/sns\/web\/v[12]\/feed/i,
           /\/api\/sns\/web\/v\d+\/note\b/i,
@@ -248,7 +318,6 @@ export class ScraperService {
       await this.dismissObstacles(page, platform).catch(() => {});
 
       if (this.isLoginWall(platform, bodyTextRaw, pageTitle)) {
-        // 登录墙不释放 context：用户登录态可能完好，只是当前页被弹窗拦截
         throw new Error(
           `当前打开的是${platform}登录页/登录弹窗，请先在"链接测试"里点"打开${platform}登录浏览器"完成一次登录。`,
         );
@@ -270,81 +339,7 @@ export class ScraperService {
       const bodyText = await page.locator('body').innerText().catch(() => bodyTextRaw);
 
       // ── 读取 SSR 数据 ──
-      // Vue 3 reactive 对象不能整体 JSON.stringify（每次读属性会生成新 Proxy，
-      // WeakSet 去重失效，必报 "circular structure"）。所以必须在浏览器里
-      // 沿已知路径直接读 *标量* 字段返回 Node 端。
-      const ssrExtracted = await page.evaluate((hint: string | null) => {
-        try {
-          const root =
-            (window as any).__INITIAL_STATE__ ||
-            (window as any).__initialState__ ||
-            null;
-          if (!root || typeof root !== 'object') return null;
-
-          const getNoteId = (note: any) =>
-            String(note?.id || note?.note_id || note?.noteId || '').trim();
-
-          const shapeNote = (note: any) => {
-            if (!note || typeof note !== 'object') return null;
-            const interact = note.interact_info || note.interactInfo || {};
-            const user = note.user || {};
-            const out: any = {
-              noteId: getNoteId(note) || undefined,
-              title: String(note.title || note.display_title || note.desc || '').trim(),
-              authorName: String(user.nickname || '').trim() || undefined,
-              authorId: String(user.user_id || user.userId || '').trim() || undefined,
-              likes: Number(interact.liked_count ?? interact.likedCount ?? 0),
-              comments: Number(interact.comment_count ?? interact.commentCount ?? 0),
-              favorites: Number(interact.collected_count ?? interact.collectedCount ?? 0),
-              shares: Number(interact.share_count ?? interact.shareCount ?? 0),
-              time: Number(note.time ?? note.time_ms ?? 0),
-            };
-            return out;
-          };
-
-          // 1. noteDetailMap：用 hint 精确匹配
-          const map = root.note?.noteDetailMap;
-          if (map && typeof map === 'object') {
-            if (hint && map[hint]) {
-              const raw = map[hint];
-              const note = raw?.note || raw?.data?.note || raw;
-              const s = shapeNote(note);
-              if (s) return { ...s, _source: 'ssr-map-hint' };
-            }
-            // 没 hint 或没命中：只有一条时才取（避免错笔记）
-            const keys = Object.keys(map);
-            if (!hint && keys.length === 1) {
-              const raw = map[keys[0]];
-              const note = raw?.note || raw?.data?.note || raw;
-              const s = shapeNote(note);
-              if (s) return { ...s, _source: 'ssr-map-only' };
-            }
-          }
-
-          // 2. firstNoteId/currentNoteId 指针
-          const ptrId = root.note?.firstNoteId || root.note?.currentNoteId;
-          if (ptrId && map?.[ptrId]) {
-            const raw = map[ptrId];
-            const note = raw?.note || raw?.data?.note || raw;
-            if (hint && getNoteId(note) !== hint) return null;
-            const s = shapeNote(note);
-            if (s) return { ...s, _source: 'ssr-ptr' };
-          }
-
-          // 3. 旧版 noteData 路径
-          const noteData = root.noteData?.data?.noteData || root.noteData?.noteData;
-          if (noteData) {
-            const note = noteData.note || noteData;
-            if (hint && getNoteId(note) !== hint) return null;
-            const s = shapeNote(note);
-            if (s) return { ...s, _source: 'ssr-noteData' };
-          }
-
-          return null;
-        } catch {
-          return null;
-        }
-      }, parsed.postId).catch(() => null);
+      const ssrExtracted = await this.extractSsrData(page, parsed.postId);
 
       opts.log(`SSR ${ssrExtracted ? `OK (${(ssrExtracted as any)._source}): 赞${(ssrExtracted as any).likes} 评${(ssrExtracted as any).comments}` : '空'}`);
 
@@ -354,14 +349,14 @@ export class ScraperService {
       // ── 数据提取 ──
       const data = this.extractData(platform, har, ssrExtracted, parsed);
 
-      // 降级到 DOM 文本分析：仅当 HAR/SSR 未取到该指标时，才用 bodyText 补齐
+      // 降级到 DOM 文本分析
       const fallback = this.extractFromBodyText(bodyText);
       data.likes = this.mergeMetric(data.likes, fallback.likes);
       data.comments = this.mergeMetric(data.comments, fallback.comments);
       data.favorites = this.mergeMetric(data.favorites, fallback.favorites);
       data.shares = this.mergeMetric(data.shares, fallback.shares);
 
-      // 补齐必填字段的默认值，保证后续流程拿到完整对象
+      // 补齐必填字段
       const finalData: ScrapedPostData = {
         platform: data.platform || platform,
         title: data.title || '',
@@ -377,8 +372,6 @@ export class ScraperService {
       };
 
       // ── 截图封面 ──
-      // 抖音主页弹窗链接（user/...?modal_id=...）会直接显示主页，modal 关闭后截图会截到主页。
-      // 数据已经从 HAR 中提取完毕，截图前单独导航到标准详情页，保证封面是帖子本身。
       if (platform === '抖音' && parsed.linkType === 'douyin-modal' && parsed.postId) {
         await this.navigateToDouyinDetailForScreenshot(page, parsed.postId, opts.log).catch(() => {});
       }
@@ -396,7 +389,7 @@ export class ScraperService {
       // 非登录墙错误：释放上下文（下次重新冷启动）
       const errMsg = String(err?.message ?? err);
       if (!errMsg.includes('登录页')) {
-        await this.browserPool.releaseContext(platform);
+        await this.browserPool.releaseContext(platform, account.id);
       }
       throw err;
     } finally {
@@ -414,6 +407,82 @@ export class ScraperService {
         /* ignore */
       }
     }
+  }
+
+  // ── SSR 提取 ──
+
+  private async extractSsrData(page: Page, postId: string | null): Promise<any> {
+    return page.evaluate((hint: string | null) => {
+      try {
+        const root =
+          (window as any).__INITIAL_STATE__ ||
+          (window as any).__initialState__ ||
+          null;
+        if (!root || typeof root !== 'object') return null;
+
+        const getNoteId = (note: any) =>
+          String(note?.id || note?.note_id || note?.noteId || '').trim();
+
+        const shapeNote = (note: any) => {
+          if (!note || typeof note !== 'object') return null;
+          const interact = note.interact_info || note.interactInfo || {};
+          const user = note.user || {};
+          const out: any = {
+            noteId: getNoteId(note) || undefined,
+            title: String(note.title || note.display_title || note.desc || '').trim(),
+            authorName: String(user.nickname || '').trim() || undefined,
+            authorId: String(user.user_id || user.userId || '').trim() || undefined,
+            likes: Number(interact.liked_count ?? interact.likedCount ?? 0),
+            comments: Number(interact.comment_count ?? interact.commentCount ?? 0),
+            favorites: Number(interact.collected_count ?? interact.collectedCount ?? 0),
+            shares: Number(interact.share_count ?? interact.shareCount ?? 0),
+            time: Number(note.time ?? note.time_ms ?? 0),
+          };
+          return out;
+        };
+
+        // 1. noteDetailMap
+        const map = root.note?.noteDetailMap;
+        if (map && typeof map === 'object') {
+          if (hint && map[hint]) {
+            const raw = map[hint];
+            const note = raw?.note || raw?.data?.note || raw;
+            const s = shapeNote(note);
+            if (s) return { ...s, _source: 'ssr-map-hint' };
+          }
+          const keys = Object.keys(map);
+          if (!hint && keys.length === 1) {
+            const raw = map[keys[0]];
+            const note = raw?.note || raw?.data?.note || raw;
+            const s = shapeNote(note);
+            if (s) return { ...s, _source: 'ssr-map-only' };
+          }
+        }
+
+        // 2. firstNoteId/currentNoteId
+        const ptrId = root.note?.firstNoteId || root.note?.currentNoteId;
+        if (ptrId && map?.[ptrId]) {
+          const raw = map[ptrId];
+          const note = raw?.note || raw?.data?.note || raw;
+          if (hint && getNoteId(note) !== hint) return null;
+          const s = shapeNote(note);
+          if (s) return { ...s, _source: 'ssr-ptr' };
+        }
+
+        // 3. 旧版 noteData
+        const noteData = root.noteData?.data?.noteData || root.noteData?.noteData;
+        if (noteData) {
+          const note = noteData.note || noteData;
+          if (hint && getNoteId(note) !== hint) return null;
+          const s = shapeNote(note);
+          if (s) return { ...s, _source: 'ssr-noteData' };
+        }
+
+        return null;
+      } catch {
+        return null;
+      }
+    }, postId).catch(() => null);
   }
 
   // ── 数据提取 ──
@@ -591,11 +660,9 @@ export class ScraperService {
     }
 
     // 3) 仅移除"明确是浮层"的节点（白名单类名），不再向上 bubble 父节点
-    //    旧逻辑会 parent.parent → remove，常把笔记主容器一起删掉，导致登录墙误判。
     await page.evaluate((words) => {
       const hasWord = (el: Element) => words.some((w) => el.textContent?.includes(w));
 
-      // 已知的浮层容器选择器（小红书 / 抖音）
       const OVERLAY_SELECTORS = [
         '[role="dialog"]',
         '.login-container',
@@ -615,7 +682,6 @@ export class ScraperService {
 
       for (const sel of OVERLAY_SELECTORS) {
         document.querySelectorAll(sel).forEach((el) => {
-          // 只移除"包含登录/扫码关键词"或"明确是 mask"的元素，避免误删
           const isMask =
             sel.includes('mask') || sel.includes('backdrop') || sel.includes('overlay');
           if (isMask || hasWord(el)) {
@@ -685,14 +751,6 @@ export class ScraperService {
 
   /**
    * 检测抖音作品是否已被删除/隐藏/下架。
-   *
-   * 特征文案：
-   *   - "你要观看的图文不存在" — 图文/笔记被删除
-   *   - "该内容已被删除" / "视频不见了" — 视频被删除
-   *   - "该用户已被封禁" / "账号已注销" — 作者账号异常
-   *   - "作品审核中" / "内容审核中" — 被平台隐藏
-   *
-   * 这些文案通常出现在页面主体区域，title 也会变成通用提示。
    */
   private isDouyinPostDeleted(bodyText: string, pageTitle: string): boolean {
     const text = String(bodyText || '').trim();
@@ -714,14 +772,12 @@ export class ScraperService {
 
     const hasPhrase = DELETED_PHRASES.some((p) => text.includes(p));
 
-    // title 也会变成通用提示页
     const DELETED_TITLES = [
       '抖音',
       '抖音 - 记录美好生活',
     ];
     const isGenericTitle = DELETED_TITLES.includes(title);
 
-    // 需要同时满足：有删除特征文案 + 无正常作品信号（点赞/评论/分享按钮）
     if (!hasPhrase) return false;
 
     const hasPostSignals =
@@ -734,16 +790,6 @@ export class ScraperService {
 
   /**
    * 检测小红书笔记是否已被删除/隐藏/下架。
-   *
-   * 特征文案：
-   *   - "笔记暂时无法浏览" — 笔记被删除或隐藏
-   *   - "笔记不存在" — 笔记被删除
-   *   - "笔记已删除" — 明确被删除
-   *   - "该内容已下架" — 被平台下架
-   *   - "内容已删除" — 已删除
-   *   - "笔记已失效" — 链接失效
-   *
-   * 这些文案通常出现在页面主体区域，title 可能变为通用提示。
    */
   private isXiaohongshuNoteDeleted(bodyText: string, pageTitle: string): boolean {
     const text = String(bodyText || '').trim();
@@ -763,14 +809,12 @@ export class ScraperService {
 
     const hasPhrase = DELETED_PHRASES.some((p) => text.includes(p));
 
-    // title 可能变为通用提示
     const DELETED_TITLES = [
       '小红书 - 你的生活兴趣社区',
       '小红书',
     ];
     const isGenericTitle = DELETED_TITLES.includes(title);
 
-    // 需要同时满足：有删除特征文案 + 无正常作品信号（评论/点赞/收藏）
     if (!hasPhrase) return false;
 
     const hasPostSignals =

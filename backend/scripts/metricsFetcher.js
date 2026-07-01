@@ -2083,26 +2083,47 @@ function isDouyinVideoUnavailable(bodyText, pageTitle = "") {
   return unavailablePhrases.some((p) => text.includes(p) || title.includes(p));
 }
 
-async function openLoginBrowser(platform) {
+/**
+ * 解析登录浏览器要使用的 profile 目录。
+ * 传入 profileDir 时优先使用（多账号：指向 .playwright-profiles/accounts/<code>/<id>），
+ * 未传时回退到平台默认目录（.playwright-profiles/{douyin|xiaohongshu}）。
+ */
+function resolveLoginProfileDir(platform, profileDir) {
+  const dir = profileDir && String(profileDir).trim();
+  return dir ? path.resolve(dir) : getProfileDir(platform);
+}
+
+/**
+ * 登录上下文 Map 的 key：platform + profileDir 组合。
+ * 保证同一平台的不同子账号各自持有独立登录浏览器，互不覆盖。
+ */
+function loginContextKey(platform, dir) {
+  return `${platform}::${dir}`;
+}
+
+async function openLoginBrowser(platform, profileDir) {
   if (!platform || !["小红书", "抖音"].includes(platform)) {
     throw new Error("请选择要登录的平台");
   }
 
-  if (loginContexts.has(platform)) {
-    const context = loginContexts.get(platform);
+  const dir = resolveLoginProfileDir(platform, profileDir);
+  const key = loginContextKey(platform, dir);
+
+  if (loginContexts.has(key)) {
+    const { context } = loginContexts.get(key);
     const existing = context.pages()[0] || (await context.newPage());
     await existing.bringToFront().catch(() => {});
     await existing.goto(getPlatformHome(platform), { waitUntil: "domcontentloaded", timeout: DEFAULT_TIMEOUT }).catch(() => {});
-    return { ok: true, platform };
+    return { ok: true, platform, profileDir: dir };
   }
 
-  const profileDir = getProfileDir(platform);
-  clearSingletonLocks(profileDir);
+  fs.mkdirSync(dir, { recursive: true });
+  clearSingletonLocks(dir);
 
   const linuxArgs = process.platform === "linux"
     ? ["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"]
     : [];
-  const context = await chromium.launchPersistentContext(profileDir, {
+  const context = await chromium.launchPersistentContext(dir, {
     headless: false,
     viewport: { width: 1440, height: 980 },
     args: linuxArgs,
@@ -2111,32 +2132,49 @@ async function openLoginBrowser(platform) {
   });
 
   context.on("close", () => {
-    if (loginContexts.get(platform) === context) {
-      loginContexts.delete(platform);
+    const entry = loginContexts.get(key);
+    if (entry && entry.context === context) {
+      loginContexts.delete(key);
     }
   });
 
-  loginContexts.set(platform, context);
+  loginContexts.set(key, { context, platform, profileDir: dir });
   const page = context.pages()[0] || (await context.newPage());
   await page.goto(getPlatformHome(platform), { waitUntil: "domcontentloaded", timeout: DEFAULT_TIMEOUT }).catch(() => {});
-  return { ok: true, platform };
+  return { ok: true, platform, profileDir: dir };
 }
 
 /**
  * 关闭已打开的登录浏览器（释放 GUI 资源 + context）。
+ * 传入 profileDir 时只关闭该账号的登录浏览器；未传时关闭该平台下所有登录浏览器。
  * 没有打开的 context 时返回 ok=false（不算错误）。
  */
-async function closeLoginBrowser(platform) {
+async function closeLoginBrowser(platform, profileDir) {
   if (!platform || !["小红书", "抖音"].includes(platform)) {
     throw new Error("请选择要登录的平台");
   }
-  const context = loginContexts.get(platform);
-  if (!context) {
+
+  // 指定账号：只关闭该 profileDir 的登录浏览器
+  if (profileDir && String(profileDir).trim()) {
+    const dir = resolveLoginProfileDir(platform, profileDir);
+    const entry = loginContexts.get(loginContextKey(platform, dir));
+    if (!entry) {
+      return { ok: false, platform, profileDir: dir, message: "该账号未打开登录浏览器" };
+    }
+    await entry.context.close().catch(() => {});
+    return { ok: true, platform, profileDir: dir };
+  }
+
+  // 未指定账号：关闭该平台下所有登录浏览器
+  const entries = [...loginContexts.values()].filter((e) => e.platform === platform);
+  if (entries.length === 0) {
     return { ok: false, platform, message: "该平台未打开登录浏览器" };
   }
-  await context.close().catch(() => {});
+  for (const entry of entries) {
+    await entry.context.close().catch(() => {});
+  }
   // context.on("close") 已删除 loginContexts 里的引用
-  return { ok: true, platform };
+  return { ok: true, platform, closed: entries.length };
 }
 
 /**
@@ -2146,13 +2184,13 @@ async function closeLoginBrowser(platform) {
  * 注：Chromium 124+ 把 Cookies 从 Default/Cookies 移到了 Default/Network/Cookies，
  *     两路径都得查，否则新 profile 会误判为未登录。
  */
-function getLoginStatus(platform) {
+function getLoginStatus(platform, profileDir) {
   if (!platform || !["小红书", "抖音"].includes(platform)) {
     throw new Error("请选择要登录的平台");
   }
-  const profileDir = getProfileDir(platform);
+  const dir = resolveLoginProfileDir(platform, profileDir);
   const home = getPlatformHome(platform);
-  const exists = fs.existsSync(profileDir);
+  const exists = fs.existsSync(dir);
   let hasSession = false;
   let cookieSize = 0;
   let cookiePath = null;
@@ -2161,8 +2199,8 @@ function getLoginStatus(platform) {
   if (exists) {
     // 新旧 Chromium profile 路径兼容
     const candidateCookiePaths = [
-      path.join(profileDir, "Default", "Network", "Cookies"),  // Chromium 124+
-      path.join(profileDir, "Default", "Cookies"),              // Chromium < 124
+      path.join(dir, "Default", "Network", "Cookies"),  // Chromium 124+
+      path.join(dir, "Default", "Cookies"),              // Chromium < 124
     ];
     for (const p of candidateCookiePaths) {
       try {
@@ -2176,13 +2214,13 @@ function getLoginStatus(platform) {
         }
       } catch {}
     }
-    localStorageExists = fs.existsSync(path.join(profileDir, "Default", "Local Storage"));
+    localStorageExists = fs.existsSync(path.join(dir, "Default", "Local Storage"));
   }
   return {
     platform,
-    profileDir,
+    profileDir: dir,
     home,
-    isOpen: loginContexts.has(platform),
+    isOpen: loginContexts.has(loginContextKey(platform, dir)),
     hasSession,
     cookieSize,
     cookiePath,

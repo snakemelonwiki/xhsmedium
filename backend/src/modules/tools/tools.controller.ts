@@ -46,7 +46,7 @@ export class ToolsController {
         error: { code: 'usage', retryable: false, message: '请先输入作品链接', platform: '' },
       });
     }
-    const result = await this.parserService.parse(url);
+    const result = await this.parserService.parse(url, { account: body?.account });
     if (isParserFailure(result)) {
       const status = this.statusForCode(result.error.code);
       this.logger.warn(
@@ -76,7 +76,7 @@ export class ToolsController {
       retry: body?.retry !== undefined ? Number(body.retry) : undefined,
       timeout: body?.timeout !== undefined ? Number(body.timeout) : undefined,
     };
-    const result = await this.parserService.parse(url, opts);
+    const result = await this.parserService.parse(url, { ...opts, account: body?.account });
     if (isParserFailure(result)) {
       const status = this.statusForCode(result.error.code);
       this.logger.warn(
@@ -101,6 +101,7 @@ export class ToolsController {
   @Post('open-login-browser')
   async openLoginBrowser(@Req() req: Request, @Body() body: any, @Res() res: Response) {
     const platform = String(body?.platform || req.query?.platform || '').trim();
+    const account = String(body?.account || req.query?.account || '').trim() || undefined;
     if (!platform) {
       return res.status(400).json({
         ok: false,
@@ -108,8 +109,8 @@ export class ToolsController {
       });
     }
     try {
-      const result = await this.parserService.openLogin(platform);
-      this.logger.log(`openLoginBrowser ${platform} ok`);
+      const result = await this.parserService.openLogin(platform, account);
+      this.logger.log(`openLoginBrowser ${platform}${account ? `/${account}` : ''} ok`);
       return res.json({ ok: true, ...result });
     } catch (err: any) {
       this.logger.warn(`openLoginBrowser ${platform} failed: ${err?.message}`);
@@ -133,11 +134,14 @@ export class ToolsController {
   @Post('close-login-browser')
   async closeLoginBrowser(@Req() req: Request, @Body() body: any, @Res() res: Response) {
     const platform = String(body?.platform || req.query?.platform || '').trim();
+    const account = String(body?.account || req.query?.account || '').trim() || undefined;
     if (!platform) {
       return res.status(400).json({ ok: false, error: { code: 'usage', message: 'platform 必填' } });
     }
     try {
-      const result = await this.parserService.closeLogin(platform);
+      const result = account
+        ? await this.parserService.closeLogin(platform, account)
+        : await this.parserService.closeLogin(platform);
       return res.json({ ok: true, ...result });
     } catch (err: any) {
       return res.status(500).json({ ok: false, error: { code: 'close_failed', message: err?.message } });
@@ -145,15 +149,23 @@ export class ToolsController {
   }
 
   /**
-   * 查询 2 平台 Profile 登录态（基于 Cookies 文件存在性）。
+   * 查询平台 Profile 登录态（基于 Cookies 文件存在性）。
    *   GET /api/tools/login-status
    *   GET /api/tools/login-status?platform=小红书
+   *   GET /api/tools/login-status?platform=小红书&account=acc_174002
    */
   @Get('login-status')
-  async getLoginStatus(@Query('platform') platform: string | undefined, @Res() res: Response) {
+  async getLoginStatus(
+    @Query('platform') platform: string | undefined,
+    @Res() res: Response,
+    @Query('account') account?: string,
+  ) {
     if (platform) {
       try {
-        return res.json({ ok: true, item: this.parserService.getLoginStatus(platform) });
+        const item = account
+          ? this.parserService.getLoginStatus(platform, account)
+          : this.parserService.getLoginStatus(platform);
+        return res.json({ ok: true, item });
       } catch (err: any) {
         return res.status(400).json({ ok: false, error: { code: 'usage', message: err?.message } });
       }

@@ -164,7 +164,7 @@ export class PostsController {
     //   抛错时仍会冒泡到 500。这里再包一层，任何 5xx 都降级为 200 + warning 响应，
     //   前端能识别 `parsed:false + warning` 走兜底，而不是直接看到 500。
     try {
-      const data = await this.postsService.parsePostLink(postUrl, { fetch: body?.fetch !== false });
+      const data = await this.postsService.parsePostLink(postUrl, { fetch: body?.fetch !== false, account: body?.account });
       return res.json({ ok: true, data });
     } catch (err: any) {
       // eslint-disable-next-line no-console
@@ -238,7 +238,7 @@ export class PostsController {
       shares: number;
     };
     try {
-      const data = await this.postsService.parsePostLink(postUrl, { fetch: true });
+      const data = await this.postsService.parsePostLink(postUrl, { fetch: true, account: body?.account });
       parsed = {
         platform: data.platform,
         postUrl: data.postUrl,
@@ -715,7 +715,7 @@ export class PostsController {
     if (!body.postUrl) return res.status(400).json({ message: '请先填写作品链接' });
 
     try {
-      const metrics = await this.postsMetricsService.fetchMetricsFromUrl(body.postUrl);
+      const metrics = await this.postsMetricsService.fetchMetricsFromUrl(body.postUrl, { account: body?.account });
       assertMetricsNotAllZero(metrics);
       await this.postsService.updatePostFromScraped(id, metrics);
       await this.postsService.recordMetricsHistory(id, metrics);
@@ -744,7 +744,7 @@ export class PostsController {
     const targetUrl = body?.postUrl || post.postUrl;
     if (!targetUrl) return res.status(400).json({ message: '请先填写作品链接' });
     try {
-      const metrics = await this.postsMetricsService.fetchMetricsFromUrl(targetUrl);
+      const metrics = await this.postsMetricsService.fetchMetricsFromUrl(targetUrl, { account: body?.account });
       assertMetricsNotAllZero(metrics);
       await this.postsService.updatePostFromScraped(id, metrics);
       await this.postsService.recordMetricsHistory(id, metrics);
@@ -798,7 +798,7 @@ export class PostsController {
     const targetUrl = body?.postUrl || post.postUrl;
     if (!targetUrl) return res.status(400).json({ ok: false, message: '请先填写作品链接' });
     try {
-      const metrics = await this.postsMetricsService.fetchMetricsFromUrl(targetUrl);
+      const metrics = await this.postsMetricsService.fetchMetricsFromUrl(targetUrl, { account: body?.account });
       assertMetricsNotAllZero(metrics);
       await this.postsService.updatePostFromScraped(id, metrics);
       await this.postsService.recordMetricsHistory(id, metrics);
@@ -829,7 +829,7 @@ export class PostsController {
     const results: any[] = [];
     for (const post of eligible) {
       try {
-        const metrics = await this.postsMetricsService.fetchMetricsFromUrl(post.postUrl);
+        const metrics = await this.postsMetricsService.fetchMetricsFromUrl(post.postUrl, { account: body?.account });
         assertMetricsNotAllZero(metrics);
         await this.postsService.updatePostFromScraped(post.id, metrics);
         await this.postsService.recordMetricsHistory(post.id, metrics);

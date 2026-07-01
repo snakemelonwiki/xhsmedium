@@ -1,7 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
+import * as fs from 'fs';
+import * as path from 'path';
 import { ScrapingLockService } from '../scraping/scraping-lock.service';
 import { ScrapingAlertService } from '../scraping/scraping-alert.service';
-import { ScraperService } from '../scraping/core';
+import { ScraperService, ProfileConfigService, ScrapingAccount } from '../scraping/core';
 // V1 legacy: openLogin / closeLogin / getLoginStatus 仍走旧链路
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const parserCore = require('../../../scripts/parser-core');
@@ -19,6 +21,8 @@ export interface ParserOptions {
   source?: string;
   /** 关联作品 id（fetch-metrics / refresh-metrics 时回传，便于告警定位）。 */
   postId?: string;
+  /** 显式指定抓取账号 ID；不传时由 AccountRotationService 自动选择 */
+  account?: string;
 }
 
 export interface ParserSuccess {
@@ -52,6 +56,8 @@ export interface ParserFailure {
     retryable: boolean;
     message: string;
     platform: string;
+    /** 实际使用过的账号 ID（多账号调试） */
+    accountId?: string;
   };
 }
 
@@ -65,11 +71,12 @@ export function isParserFailure(r: ParserResult): r is ParserFailure {
 }
 
 /**
- * 通用帖子解析服务：复用 scripts/parser-core.js 的 fetchWithRetry，
- * 给 NestJS 路由暴露为同步 Promise。
+ * 通用帖子解析服务（V2 多账号版）。
  *
- * 注意：通过 parserCore.fetchWithRetry 间接调用（而非 destructure），
- * 这样 jest.spyOn(parserCore, 'fetchWithRetry') 才能在测试中拦截。
+ * 链路：
+ *   1. 先用 ScrapingLockService.run() 把抓取串行化。
+ *   2. 内部走 ScraperService.scrape（支持按 account 指定或自动轮询）。
+ *   3. 成功/失败分别由 ScrapingAlertService 记录。
  */
 @Injectable()
 export class ParserService {
@@ -79,18 +86,11 @@ export class ParserService {
     private readonly lockService: ScrapingLockService,
     private readonly alertService: ScrapingAlertService,
     private readonly scraperService: ScraperService,
+    private readonly profileConfig: ProfileConfigService,
   ) {}
 
   /**
-   * 通用帖子解析服务（V2 重构版）。
-   *
-   * 链路：
-   *   1. 先用 ScrapingLockService.run() 把抓取串行化（单进程同时只 1 个 + 间隔 + 队列上限 20），
-   *      队列满时抛 ServiceUnavailableException（controller 转 429）。
-   *   2. 内部走 ScraperService.scrape（新架构：URL分类 → HAR驱动 → 数据提取）。
-   *   3. 成功 → ScrapingAlertService.recordSuccess(platform)，复位连续失败计数。
-   *   4. 失败 → ScrapingAlertService.recordFailure({...})，
-   *      触发「连续失败 3 次」或「累计 10/30/50/100 次」告警写库。
+   * 通用帖子解析。
    */
   async parse(url: string, opts: ParserOptions = {}): Promise<ParserResult> {
     const retry = Math.max(0, Number(opts.retry ?? 3));
@@ -99,11 +99,10 @@ export class ParserService {
     const log = (msg: string) => this.logger.debug?.(msg) ?? this.logger.log(msg);
 
     const result = await this.lockService.run(() =>
-      this.scraperService.scrape(url, { retry, timeout, log }),
+      this.scraperService.scrape(url, { retry, timeout, log, account: opts.account }),
     );
 
     if (isScrapingFailure(result)) {
-      // 失败：记一次到告警服务（写库失败不影响主流程）
       const platform = result.error.platform || null;
       await this.alertService.recordFailure({
         platform,
@@ -112,10 +111,9 @@ export class ParserService {
         errorMessage: result.error.message || null,
         postId: opts.postId || null,
         postUrl: url,
-        context: { retry, timeout, retryable: result.error.retryable },
+        context: { retry, timeout, retryable: result.error.retryable, account: opts.account },
       }).catch((err) => this.logger.warn(`recordFailure swallow: ${(err as any)?.message || err}`));
     } else {
-      // 成功：复位连续失败（totalFailed 保留，YAGNI）
       this.alertService.recordSuccess(result.data?.platform || null, source)
         .catch((err) => this.logger.warn(`recordSuccess swallow: ${(err as any)?.message || err}`));
     }
@@ -127,7 +125,6 @@ export class ParserService {
    * 错误分类（暴露给 controller 用于 HTTP 状态码映射）
    */
   classifyError(err: any) {
-    // V2: ScraperService 内部已实现错误分类，这里透传
     const msg = String(err?.message || err);
     const TRANSIENT_PATTERNS = [/ECONNRESET/i, /ETIMEDOUT/i, /ERR_NETWORK_CHANGED/i, /net::ERR_/i, /TimeoutError/i, /Navigation timeout/i];
     const LOGIN_WALL_PATTERNS = [/登录页/, /登录后/, /未登录/];
@@ -140,15 +137,41 @@ export class ParserService {
     return { code: 'unknown', retryable: false, message: msg };
   }
 
+  // ---- 账号状态查询 ----
+
+  /**
+   * 列出某个平台或所有抓取账号。
+   */
+  listScrapingAccounts(platform?: string): ScrapingAccount[] {
+    return this.profileConfig.listAccounts(platform);
+  }
+
+  /**
+   * 查询某个平台或所有抓取账号的登录态（基于 Cookies 文件存在性）。
+   */
+  getScrapingAccountStatus(platform?: string): any {
+    const accounts = this.listScrapingAccounts(platform);
+    return accounts.map((a) => {
+      const cookiesPath = this.locateCookies(a.profileDir);
+      const hasSession = cookiesPath !== null;
+      return {
+        id: a.id,
+        platform: a.platform,
+        label: a.label,
+        profileDir: a.profileDir,
+        enabled: a.enabled,
+        isDefault: a.isDefault,
+        hasSession,
+        cookieSize: hasSession ? this.getFileSize(cookiesPath!) : 0,
+        cookiePath: hasSession ? cookiesPath : null,
+      };
+    });
+  }
+
   // ---- 登录态管理 ----
 
   /**
    * T10.2 占位实现：图片 OCR 识别。
-   * 当前 backend 不内置 OCR 引擎（tesseract / 阿里云 OCR / 百度 OCR 都未引入），
-   * 也不允许新增重型依赖；本方法只做"图片合法性 + 文件大小 + 元数据提取"，并返回
-   * 显式 ocr='placeholder' 标识，让前端走 manual-correct 路径，识别字段可编辑。
-   *
-   * 后续接真 OCR 时，只替换该方法实现即可，controller 与前端无需改动。
    */
   async parseImage(file: {
     buffer: Buffer;
@@ -183,32 +206,44 @@ export class ParserService {
   }
 
   /**
-   * 启动 headful 登录浏览器（带 UI，让用户扫码）
-   * 注意：需要 GUI 环境（桌面系统）。服务器跑会失败。
+   * 启动 headful 登录浏览器（带 UI，让用户扫码）。
+   * 按 accountId 解析出对应 profile 目录后传给底层，保证登录态落到正确账号目录：
+   *   - 默认账号 → .playwright-profiles/{douyin|xiaohongshu}
+   *   - 子账号   → .playwright-profiles/accounts/<code>/<id>
    */
-  async openLogin(platform: string) {
+  async openLogin(platform: string, accountId?: string) {
     this.assertPlatform(platform);
-    return parserCore.openLoginBrowser(platform);
+    const account = this.resolveAccountOrThrow(platform, accountId);
+    return parserCore.openLoginBrowser(platform, account.profileDir);
   }
 
   /**
-   * 关闭已打开的登录浏览器
+   * 关闭已打开的登录浏览器。
+   * 传入 accountId 时只关闭该账号的登录浏览器；否则关闭该平台下所有登录浏览器。
    */
-  async closeLogin(platform: string) {
+  async closeLogin(platform: string, accountId?: string) {
     this.assertPlatform(platform);
-    return parserCore.closeLoginBrowser(platform);
+    if (!accountId) {
+      return parserCore.closeLoginBrowser(platform);
+    }
+    const account = this.resolveAccountOrThrow(platform, accountId);
+    return parserCore.closeLoginBrowser(platform, account.profileDir);
   }
 
   /**
-   * 查询某平台 profile 登录态（基于 Cookies 文件存在性）
+   * 查询某平台指定账号（缺省为默认账号）的 profile 登录态。
    */
-  getLoginStatus(platform: string) {
+  getLoginStatus(platform: string, accountId?: string) {
     this.assertPlatform(platform);
-    return parserCore.getLoginStatus(platform);
+    if (!accountId) {
+      return parserCore.getLoginStatus(platform);
+    }
+    const account = this.resolveAccountOrThrow(platform, accountId);
+    return parserCore.getLoginStatus(platform, account.profileDir);
   }
 
   /**
-   * 同时查询 2 平台的登录态
+   * 同时查询 2 平台默认账号的登录态
    */
   getAllLoginStatus() {
     return ['小红书', '抖音'].map((p) => parserCore.getLoginStatus(p));
@@ -217,6 +252,47 @@ export class ParserService {
   private assertPlatform(platform: string) {
     if (!['小红书', '抖音'].includes(platform)) {
       throw new Error(`不支持的平台: ${platform}，仅支持 小红书 / 抖音`);
+    }
+  }
+
+  /**
+   * 解析账号配置：accountId 缺省时取默认账号；显式指定但找不到/已禁用时抛错，
+   * 避免静默回退到默认账号目录导致登录态写错位置。
+   */
+  private resolveAccountOrThrow(platform: string, accountId?: string): ScrapingAccount {
+    if (accountId) {
+      const account = this.profileConfig.getAccount(platform, accountId);
+      if (!account || account.id !== accountId || !account.enabled) {
+        throw new Error(`抓取账号 ${accountId}（${platform}）不存在或已禁用`);
+      }
+      return account;
+    }
+    const fallback = this.profileConfig.getDefaultAccount(platform);
+    if (!fallback) {
+      throw new Error(`平台 ${platform} 无可用抓取账号`);
+    }
+    return fallback;
+  }
+
+  private locateCookies(profileDir: string): string | null {
+    const candidates = [
+      path.join(profileDir, 'Default', 'Network', 'Cookies'),
+      path.join(profileDir, 'Default', 'Cookies'),
+      path.join(profileDir, 'Cookies'),
+    ];
+    for (const p of candidates) {
+      if (fs.existsSync(p) && fs.statSync(p).size > 0) {
+        return p;
+      }
+    }
+    return null;
+  }
+
+  private getFileSize(p: string): number {
+    try {
+      return fs.statSync(p).size;
+    } catch {
+      return 0;
     }
   }
 }

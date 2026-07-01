@@ -325,7 +325,7 @@ export class PostsService {
    */
   async parsePostLink(
     postUrl: string,
-    options: { fetch?: boolean } = {},
+    options: { fetch?: boolean; account?: string } = {},
   ): Promise<{
     platform: string;
     postUrl: string;
@@ -383,6 +383,7 @@ export class PostsService {
       //   避免 3 次重试 45s+ 撞 nginx 60s 上限。
       const scraped = await this.postsMetricsService.fetchMetricsFromUrl(normalizedUrl, {
         source: 'parse-link',
+        account: options.account,
       });
       return {
         platform: scraped.platform || platform,

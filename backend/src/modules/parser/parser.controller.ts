@@ -36,7 +36,7 @@ function decodeUploadFilename(raw: string): string {
 /**
  * 通用帖子解析端点
  *   POST /api/parser/parse
- *   body: { url: string, retry?: number, timeout?: number }
+ *   body: { url: string, retry?: number, timeout?: number, account?: string }
  *   resp: { ok: true, data: {...} } | { ok: false, error: { code, retryable, message, platform } }
  */
 @Controller('parser')
@@ -58,6 +58,7 @@ export class ParserController {
     const opts = {
       retry: body?.retry !== undefined ? Number(body.retry) : undefined,
       timeout: body?.timeout !== undefined ? Number(body.timeout) : undefined,
+      account: body?.account, // 新增：指定抓取账号
     };
 
     const result = await this.parserService.parse(url, opts);
@@ -73,9 +74,7 @@ export class ParserController {
 
   /**
    * 启动 headful 登录浏览器（带 UI，扫码登录）
-   * 适用环境：本地有 GUI 的桌面系统
-   *   POST /api/parser/open-login { platform: '小红书'|'抖音' }
-   *   resp: { ok: true, platform }
+   *   POST /api/parser/open-login { platform: '小红书'|'抖音', account?: string }
    */
   @Post('open-login')
   async openLogin(@Body() body: any, @Res() res: Response) {
@@ -84,7 +83,7 @@ export class ParserController {
       return res.status(400).json({ ok: false, error: { code: 'usage', message: 'platform 必填' } });
     }
     try {
-      const result = await this.parserService.openLogin(platform);
+      const result = await this.parserService.openLogin(platform, body?.account);
       this.logger.log(`openLogin ${platform} ok`);
       return res.json(result);
     } catch (err: any) {
@@ -102,7 +101,7 @@ export class ParserController {
 
   /**
    * 关闭已打开的登录浏览器
-   *   POST /api/parser/close-login { platform: '小红书'|'抖音' }
+   *   POST /api/parser/close-login { platform: '小红书'|'抖音', account?: string }
    */
   @Post('close-login')
   async closeLogin(@Body() body: any, @Res() res: Response) {
@@ -110,15 +109,15 @@ export class ParserController {
     if (!platform) {
       return res.status(400).json({ ok: false, error: { code: 'usage', message: 'platform 必填' } });
     }
-    const result = await this.parserService.closeLogin(platform);
+    const account = body?.account ? String(body.account) : undefined;
+    const result = account
+      ? await this.parserService.closeLogin(platform, account)
+      : await this.parserService.closeLogin(platform);
     return res.json(result);
   }
 
   /**
-   * T10.2 截图 OCR 占位端点：当前不返回真实识别结果，固定 ocr='placeholder'。
-   * 真实 OCR 引擎接入时只需要替换 parser.service.parseImage 实现，路由/响应字段不变。
-   *   POST /api/parser/parse-image  multipart/form-data  field=image
-   *   resp: { ok: true, data: { title, accountName, platform, text, ocr, warning? } }
+   * T10.2 截图 OCR 占位端点
    */
   @Post('parse-image')
   @HttpCode(200)
@@ -155,15 +154,44 @@ export class ParserController {
   }
 
   /**
-   * 查询 2 平台的 profile 登录态
+   * 查询某个平台或所有抓取账号的登录态
+   *   GET /api/parser/account-status?platform=小红书
+   *   GET /api/parser/account-status
+   */
+  @Get('account-status')
+  async getAccountStatus(@Query('platform') platform: string | undefined, @Res() res: Response) {
+    const items = this.parserService.getScrapingAccountStatus(platform);
+    return res.json({ ok: true, items });
+  }
+
+  /**
+   * 列出抓取账号
+   *   GET /api/parser/accounts?platform=小红书
+   */
+  @Get('accounts')
+  async listAccounts(@Query('platform') platform: string | undefined, @Res() res: Response) {
+    const accounts = this.parserService.listScrapingAccounts(platform);
+    return res.json({ ok: true, accounts });
+  }
+
+  /**
+   * 查询某平台 profile 登录态（旧版兼容）
    *   GET /api/parser/login-status
    *   GET /api/parser/login-status?platform=小红书
+   *   GET /api/parser/login-status?platform=小红书&account=acc_174002
    */
   @Get('login-status')
-  async getLoginStatus(@Query('platform') platform: string | undefined, @Res() res: Response) {
+  async getLoginStatus(
+    @Query('platform') platform: string | undefined,
+    @Res() res: Response,
+    @Query('account') account?: string,
+  ) {
     if (platform) {
       try {
-        return res.json({ ok: true, item: this.parserService.getLoginStatus(platform) });
+        const item = account
+          ? this.parserService.getLoginStatus(platform, account)
+          : this.parserService.getLoginStatus(platform);
+        return res.json({ ok: true, item });
       } catch (err: any) {
         return res.status(400).json({ ok: false, error: { code: 'usage', message: err?.message } });
       }

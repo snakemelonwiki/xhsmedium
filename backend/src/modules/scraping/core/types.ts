@@ -28,6 +28,8 @@ export interface ScrapingFailure {
   retryable: boolean;
   message: string;
   platform: string;
+  /** 实际使用过的账号 ID，便于调试与告警定位 */
+  accountId?: string;
 }
 
 export type ScrapingResult =
@@ -85,4 +87,8 @@ export interface ScrapingOptions {
   log?: (msg: string) => void;
   /** 是否记录完整 HAR（调试用，默认 false） */
   recordHar?: boolean;
+  /** 显式指定抓取账号；不传时由 AccountRotationService 自动选择 */
+  account?: string;
+  /** 当单个账号失败后，是否允许自动切换其他账号（默认 true） */
+  autoSwitch?: boolean;
 }

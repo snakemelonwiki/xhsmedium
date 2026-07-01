@@ -2,56 +2,52 @@ import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { chromium, BrowserContext } from 'playwright';
 import * as fs from 'fs';
 import * as path from 'path';
-import { resolveRepoRoot } from '../../../shared/utils/project-paths';
+import { ProfileConfigService, ScrapingAccount } from './profile-config.service';
 
 interface PooledContext {
   ctx: BrowserContext;
   platform: string;
+  accountId: string;
   createdAt: number;
 }
 
 /**
- * 浏览器池管理器
+ * 浏览器池管理器（多账号版）
  *
- * 职责：
- *   1. 为每个平台复用 persistent context（冷启动 1-3s → 复用 0s）
- *   2. 自动清理崩溃残留的 SingletonLock / SingletonCookie / SingletonSocket
- *   3. 检测上下文健康状态（pages() 能否正常调用）
- *   4. 进程退出时统一关闭所有浏览器（避免僵尸进程）
- *
- * 与旧版 metricsFetcher.js 的区别：
- *   - 旧版：全局 `Map<string, BrowserContext>` + 裸函数管理
- *   - 新版：NestJS 单例服务，依赖注入，有生命周期管理
+ * 与旧版的区别：
+ *   1. 每个 platform:accountId 组合拥有独立的 persistent context 与 profile 目录。
+ *   2. 无配置时 fallback 到默认目录（.playwright-profiles/douyin 和 xiaohongshu），完全兼容旧业务。
+ *   3. 上下文健康检测、崩溃残留清理与旧版保持一致。
  */
 @Injectable()
 export class BrowserPoolService implements OnModuleDestroy {
   private readonly logger = new Logger(BrowserPoolService.name);
   private readonly pools = new Map<string, PooledContext>();
-  private readonly profileRoot: string;
 
-  constructor() {
-    this.profileRoot = this.resolveProfileRoot();
-    fs.mkdirSync(this.profileRoot, { recursive: true });
-    this.logger.log(`[BrowserPool] profileRoot=${this.profileRoot}`);
-  }
+  constructor(private readonly profileConfig: ProfileConfigService) {}
 
   /**
-   * 获取或创建指定平台的浏览器上下文
+   * 获取或创建指定平台+账号的浏览器上下文。
+   * @param platform '抖音' | '小红书'
+   * @param accountId 可选；不传使用默认账号
    */
-  async acquireContext(platform: string): Promise<BrowserContext> {
-    const existing = this.pools.get(platform);
+  async acquireContext(platform: string, accountId?: string): Promise<BrowserContext> {
+    const account = this.safeGetAccount(platform, accountId);
+    const poolKey = this.poolKey(platform, account.id);
+
+    const existing = this.pools.get(poolKey);
     if (existing) {
       const healthy = await this.isHealthy(existing.ctx);
       if (healthy) {
-        this.logger.debug(`[BrowserPool] 复用 ${platform} 上下文（池命中）`);
+        this.logger.debug(`[BrowserPool] 复用 ${poolKey} 上下文（池命中）`);
         return existing.ctx;
       }
-      this.logger.warn(`[BrowserPool] ${platform} 上下文已失效，重新创建`);
-      await this.closeContext(platform);
+      this.logger.warn(`[BrowserPool] ${poolKey} 上下文已失效，重新创建`);
+      await this.closeContext(platform, account.id);
     }
 
-    const profileDir = this.getProfileDir(platform);
-    this.clearSingletonLocks(profileDir);
+    this.ensureProfileDir(account.profileDir);
+    this.clearSingletonLocks(account.profileDir);
 
     // 抖音/小红书暂时使用有头模式便于调试，其余平台保持无头
     const isHeadless = platform !== '小红书' && platform !== '抖音';
@@ -66,22 +62,21 @@ export class BrowserPoolService implements OnModuleDestroy {
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
         if (attempt > 0) {
-          this.logger.warn(`[BrowserPool] ${platform} 浏览器启动失败，额外清理后重试`);
-          this.clearSingletonLocks(profileDir);
-          // 更激进地清理可能导致锁定的文件
+          this.logger.warn(`[BrowserPool] ${poolKey} 浏览器启动失败，额外清理后重试`);
+          this.clearSingletonLocks(account.profileDir);
           for (const name of ['SingletonLock', 'SingletonCookie', 'SingletonSocket', 'Default/Cookies-journal', 'Default/Network/Cookies-journal']) {
-            try { fs.rmSync(path.join(profileDir, name), { force: true, recursive: true }); } catch { /* ignore */ }
+            try { fs.rmSync(path.join(account.profileDir, name), { force: true, recursive: true }); } catch { /* ignore */ }
           }
         }
 
-        this.logger.log(`[BrowserPool] 创建 ${platform} 上下文（冷启动，attempt=${attempt + 1}）`);
+        this.logger.log(`[BrowserPool] 创建 ${poolKey} 上下文（冷启动，attempt=${attempt + 1}）`);
         const attemptArgs = [...baseArgs];
         if (attempt > 0 && platform === '抖音' && process.platform === 'win32') {
           // Windows 下抖音偶发 GPU/沙箱崩溃，追加 --no-sandbox 兜底
           attemptArgs.push('--no-sandbox');
         }
 
-        const ctx = await chromium.launchPersistentContext(profileDir, {
+        const ctx = await chromium.launchPersistentContext(account.profileDir, {
           headless: isHeadless,
           viewport: { width: 1440, height: 1100 },
           args: [
@@ -96,22 +91,24 @@ export class BrowserPoolService implements OnModuleDestroy {
             'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
         });
 
-        this.pools.set(platform, { ctx, platform, createdAt: Date.now() });
+        this.pools.set(poolKey, { ctx, platform, accountId: account.id, createdAt: Date.now() });
         return ctx;
       } catch (err: any) {
-        this.logger.warn(`[BrowserPool] ${platform} 浏览器上下文启动失败 (attempt=${attempt + 1}): ${err?.message || err}`);
+        this.logger.warn(`[BrowserPool] ${poolKey} 浏览器上下文启动失败 (attempt=${attempt + 1}): ${err?.message || err}`);
         if (attempt === 1) throw err;
       }
     }
 
-    throw new Error(`${platform} 浏览器上下文启动失败`);
+    throw new Error(`${poolKey} 浏览器上下文启动失败`);
   }
 
   /**
-   * 释放并关闭指定平台的上下文
+   * 释放并关闭指定平台+账号的上下文。
    */
-  async releaseContext(platform: string): Promise<void> {
-    await this.closeContext(platform);
+  async releaseContext(platform: string, accountId?: string): Promise<void> {
+    const account = this.profileConfig.getAccount(platform, accountId);
+    const id = account?.id || accountId || platform;
+    await this.closeContext(platform, id);
   }
 
   /**
@@ -126,17 +123,18 @@ export class BrowserPoolService implements OnModuleDestroy {
    * 关闭所有上下文
    */
   async cleanupAll(): Promise<void> {
-    for (const [platform] of this.pools) {
-      await this.closeContext(platform);
+    for (const [poolKey] of this.pools) {
+      await this.closeContextByKey(poolKey);
     }
   }
 
   /**
    * 获取当前池状态（调试用）
    */
-  getStatus(): { platform: string; healthy: boolean; ageMs: number }[] {
+  getStatus(): { platform: string; accountId: string; healthy: boolean; ageMs: number }[] {
     return Array.from(this.pools.values()).map((item) => ({
       platform: item.platform,
+      accountId: item.accountId,
       healthy: true, // 不主动检测，避免副作用
       ageMs: Date.now() - item.createdAt,
     }));
@@ -144,10 +142,39 @@ export class BrowserPoolService implements OnModuleDestroy {
 
   // ── 私有方法 ──
 
-  private async closeContext(platform: string): Promise<void> {
-    const item = this.pools.get(platform);
+  private poolKey(platform: string, accountId: string): string {
+    return `${platform}:${accountId}`;
+  }
+
+  private safeGetAccount(platform: string, accountId?: string): ScrapingAccount {
+    try {
+      const account = this.profileConfig.getAccount(platform, accountId);
+      if (account) return account;
+    } catch (err: any) {
+      this.logger.warn(`[BrowserPool] 获取账号配置失败: ${err?.message || err}`);
+    }
+    // 兜底：仍然用一个合理的默认 profile 目录，避免进程完全不可用
+    const profileRoot = path.dirname(this.profileConfig.getConfigPath());
+    const dir = path.join(profileRoot, platform === '抖音' ? 'douyin' : 'xiaohongshu');
+    return {
+      id: accountId || 'default',
+      platform: platform === '抖音' ? 'douyin' : 'xiaohongshu',
+      label: '兜底默认账号',
+      profileDir: dir,
+      enabled: true,
+      isDefault: true,
+    };
+  }
+
+  private async closeContext(platform: string, accountId: string): Promise<void> {
+    const poolKey = this.poolKey(platform, accountId);
+    await this.closeContextByKey(poolKey);
+  }
+
+  private async closeContextByKey(poolKey: string): Promise<void> {
+    const item = this.pools.get(poolKey);
     if (!item) return;
-    this.pools.delete(platform);
+    this.pools.delete(poolKey);
     try {
       await item.ctx.close();
     } catch {
@@ -157,8 +184,6 @@ export class BrowserPoolService implements OnModuleDestroy {
 
   private async isHealthy(ctx: BrowserContext): Promise<boolean> {
     try {
-      // 仅 pages() 不够：进程崩溃时 pages() 可能仍返回旧数组。
-      // 与任一页面做一次 evaluate 通信，能真正确认上下文/浏览器是否还活着。
       const pages = ctx.pages();
       if (pages.length > 0) {
         await pages[0].evaluate(() => true);
@@ -169,8 +194,10 @@ export class BrowserPoolService implements OnModuleDestroy {
     }
   }
 
-  private getProfileDir(platform: string): string {
-    return path.join(this.profileRoot, platform === '抖音' ? 'douyin' : 'xiaohongshu');
+  private ensureProfileDir(profileDir: string): void {
+    fs.mkdirSync(profileDir, { recursive: true });
+    // 浏览器需要 Default 子目录，若不存在则创建
+    fs.mkdirSync(path.join(profileDir, 'Default'), { recursive: true });
   }
 
   private clearSingletonLocks(profileDir: string): void {
@@ -178,12 +205,5 @@ export class BrowserPoolService implements OnModuleDestroy {
       const file = path.join(profileDir, name);
       try { fs.rmSync(file, { force: true, recursive: true }); } catch { /* ignore */ }
     }
-  }
-
-  private resolveProfileRoot(): string {
-    const root = resolveRepoRoot(__dirname);
-    const profileRoot = path.join(root, '.playwright-profiles');
-    fs.mkdirSync(profileRoot, { recursive: true });
-    return profileRoot;
   }
 }
