@@ -201,16 +201,28 @@ export class OrderAbnormalFeedbackService {
     }
     const nextStatus: FeedbackStatus = dto.status === 'handling' ? 'handling' : 'closed';
 
-    // 修复「点完处理后状态仍是未处理」：原实现用 `feedbackRepository.update({id}, partial)`
-    // 在 TypeORM 1.0.x 下偶发不写库（where 简写与 partialEntity 类型断言的边界场景），
-    // 而 `feedback.status === 'closed'` 的前置检查在内存中是 'open' 通过，于是 update
-    // 静默返回 affected=0，反馈表的 status 仍是 'open'。
-    // 改用 findOne + save：直接持久化内存中的 entity，行为可预测，save 也会写 updated_at。
-    feedback.status = nextStatus;
-    feedback.closedAt = nextStatus === 'closed' ? new Date() : null;
-    feedback.closedBy = nextStatus === 'closed' ? actor.userId : null;
-    feedback.closeNote = dto.closeNote ? String(dto.closeNote).trim() : null;
-    await this.feedbackRepository.save(feedback);
+    // 修复「点完处理后状态仍是未处理」：
+    // 原实现用 `feedbackRepository.update({id}, partial)` 在 TypeORM 1.0.x 下偶发不写库；
+    // 后改为 findOne + save 仍有偶发 detection 失败导致 save 静默不写库。
+    // 改用 createQueryBuilder().update() 直接执行 UPDATE SQL，完全绕过 entity change detection，
+    // 并显式 set updated_at = now() 确保时间戳同步刷新。
+    const updateSet: Record<string, unknown> = {
+      status: nextStatus,
+      updated_at: new Date(),
+    };
+    if (nextStatus === 'closed') {
+      updateSet.closed_at = new Date();
+      updateSet.closed_by = actor.userId;
+    }
+    if (dto.closeNote != null) {
+      updateSet.close_note = String(dto.closeNote).trim();
+    }
+    await this.feedbackRepository
+      .createQueryBuilder()
+      .update(OrderAbnormalFeedback)
+      .set(updateSet)
+      .where('id = :id', { id: feedbackId })
+      .execute();
 
     // 关闭即视为"异常已处理"，把订单拉回 in_progress
     if (nextStatus === 'closed' && order.orderStatus === 'abnormal') {
