@@ -20,40 +20,73 @@ export class DouyinExtractor {
    * @param awemeIdHint 可选的 awemeId，用于精确匹配当前视频的数据
    */
   extract(har: HarSnapshot, awemeIdHint?: string | null): Partial<ScrapedPostData> {
-    const result: Partial<ScrapedPostData> = {};
+    // 收集所有数据源的结果，按指标完整度择优
+    const candidates: Array<{ source: string; data: Partial<ScrapedPostData> }> = [];
 
-    // ── 尝试从 RSC flight data 提取（图文/笔记页优先） ──
+    // ── 尝试从 RSC flight data 提取 ──
     const rscData = this.extractFromRscFlight(har, awemeIdHint);
-    if (rscData) {
-      Object.assign(result, rscData);
-      result.platform = '抖音';
-      return result;
+    if (rscData && this.hasRealMetrics(rscData)) {
+      candidates.push({ source: 'rsc-flight', data: rscData });
     }
 
-    // ── 尝试从 RENDER_DATA 提取（视频页优先） ──
+    // ── 尝试从 RENDER_DATA 提取 ──
     const renderData = this.extractFromRenderData(har, awemeIdHint);
-    if (renderData) {
-      Object.assign(result, renderData);
-      result.platform = '抖音';
-      return result;
+    if (renderData && this.hasRealMetrics(renderData)) {
+      candidates.push({ source: 'render-data', data: renderData });
     }
 
     // ── 尝试从 API 拦截提取 ──
     const apiData = this.extractFromApi(har, awemeIdHint);
-    if (apiData) {
-      Object.assign(result, apiData);
-      result.platform = '抖音';
-      return result;
+    if (apiData && this.hasRealMetrics(apiData)) {
+      candidates.push({ source: 'api', data: apiData });
     }
 
     // ── HTML 正则兜底 ──
     const htmlFallback = this.extractFromHtml(har, awemeIdHint);
-    if (htmlFallback) {
-      Object.assign(result, htmlFallback);
-      result.platform = '抖音';
+    if (htmlFallback && this.hasRealMetrics(htmlFallback)) {
+      candidates.push({ source: 'html-fallback', data: htmlFallback });
     }
 
-    return result;
+    // 按指标完整度排序：优先选有非零指标的，再选有标题的
+    candidates.sort((a, b) => {
+      const scoreA = this.scoreData(a.data);
+      const scoreB = this.scoreData(b.data);
+      return scoreB - scoreA;
+    });
+
+    if (candidates.length > 0) {
+      const best = candidates[0];
+      // 返回新对象，避免副作用（mutation）
+      return { ...best.data, platform: '抖音' };
+    }
+
+    // 所有数据源都无有效指标，返回空结果
+    return { platform: '抖音' };
+  }
+
+  /**
+   * 检查数据是否包含真实指标（至少有一个指标字段是数字，包括 0）
+   * 注意：0 是合法指标值（如  赞），不应被过滤掉
+   */
+  private hasRealMetrics(data: Partial<ScrapedPostData>): boolean {
+    const metrics = [data.likes, data.comments, data.favorites, data.shares];
+    return metrics.some((v) => typeof v === 'number');
+  }
+
+  /**
+   * 为数据打分，用于择优。
+   * 有指标 > 0 的数据源获得高分，有标题/作者名的也有加分。
+   */
+  private scoreData(data: Partial<ScrapedPostData>): number {
+    let score = 0;
+    if ((data.likes ?? 0) > 0) score += 10;
+    if ((data.comments ?? 0) > 0) score += 10;
+    if ((data.favorites ?? 0) > 0) score += 10;
+    if ((data.shares ?? 0) > 0) score += 10;
+    if (data.title?.trim()) score += 5;
+    if (data.authorName?.trim()) score += 3;
+    if (data.authorId?.trim()) score += 2;
+    return score;
   }
 
   // ── RSC flight data 提取 ──
