@@ -31,7 +31,7 @@ export class AnalyticsService {
       this.postRepo.query(
         `SELECT DATE_FORMAT(published_at, '%Y-%m-%d') AS d,
                 COUNT(*) AS posts,
-                COALESCE(SUM(CASE WHEN post_type IN ('获客贴','营销贴') THEN traffic ELSE 0 END), 0) AS traffic
+                COALESCE(SUM(traffic), 0) AS traffic
          FROM posts
          WHERE published_at BETWEEN ? AND ?
          GROUP BY d`,

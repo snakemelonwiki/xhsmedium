@@ -44,13 +44,13 @@ export class DashboardService {
         .select('COALESCE(SUM(p.likes), 0)', 'likes')
         .addSelect('COALESCE(SUM(p.comments), 0)', 'comments')
         .addSelect('COALESCE(SUM(p.favorites), 0)', 'favorites')
-        .addSelect(`COALESCE(SUM(CASE WHEN p.post_type IN ('获客贴','获客帖', '营销贴') THEN p.traffic ELSE 0 END), 0)`, 'traffic')
+        .addSelect('COALESCE(SUM(p.traffic), 0)', 'traffic')
         .where('p.publishedAt = :today AND p.platform = :platform', { today, platform: '小红书' }).getRawOne(),
       this.postRepo.createQueryBuilder('p')
         .select('COALESCE(SUM(p.likes), 0)', 'likes')
         .addSelect('COALESCE(SUM(p.comments), 0)', 'comments')
         .addSelect('COALESCE(SUM(p.favorites), 0)', 'favorites')
-        .addSelect(`COALESCE(SUM(CASE WHEN p.post_type IN ('获客贴','获客帖', '营销贴') THEN p.traffic ELSE 0 END), 0)`, 'traffic')
+        .addSelect('COALESCE(SUM(p.traffic), 0)', 'traffic')
         .where('p.publishedAt = :today AND p.platform = :platform', { today, platform: '抖音' }).getRawOne(),
       this.leadRepo.createQueryBuilder('l').select('COUNT(*)', 'count').where('DATE(l.createdAt) = :today', { today }).getRawOne(),
       this.leadRepo.createQueryBuilder('l').select('COUNT(*)', 'count').where("DATE(l.createdAt) = :today AND l.status = '已成交'", { today }).getRawOne(),
@@ -308,6 +308,7 @@ export class DashboardService {
            COALESCE(SUM(p.likes), 0) AS likes,
            COALESCE(SUM(p.comments), 0) AS comments,
            COALESCE(SUM(p.favorites), 0) AS favorites,
+           COALESCE(SUM(p.traffic), 0) AS traffic,
            COALESCE(SUM(CASE WHEN p.post_type IN ('获客贴','获客帖','营销贴') THEN 1 ELSE 0 END), 0) AS lead_post_count
          FROM posts p WHERE ${postWhereAllSql}`,
         paramsAll,
@@ -322,6 +323,7 @@ export class DashboardService {
           likes: Number(r.likes || 0),
           comments: Number(r.comments || 0),
           favorites: Number(r.favorites || 0),
+          traffic: Number(r.traffic || 0),
           leadPostCount: Number(r.lead_post_count || 0),
           leadCount: Number(leadCountRows[0]?.cnt || 0),
         };
@@ -353,6 +355,7 @@ export class DashboardService {
                COALESCE(SUM(p.likes), 0) AS likes,
                COALESCE(SUM(p.comments), 0) AS comments,
                COALESCE(SUM(p.favorites), 0) AS favorites,
+               COALESCE(SUM(p.traffic), 0) AS traffic,
                COALESCE(SUM(CASE WHEN p.post_type IN ('获客贴','获客帖','营销贴') THEN 1 ELSE 0 END), 0) AS lead_post_count
              FROM posts p WHERE ${monthPostWhere.join(' AND ')}`,
             monthPostParams,
@@ -368,6 +371,7 @@ export class DashboardService {
           likes: Number(r.likes || 0),
           comments: Number(r.comments || 0),
           favorites: Number(r.favorites || 0),
+          traffic: Number(r.traffic || 0),
           leadPostCount: Number(r.lead_post_count || 0),
           leadCount: Number(leadRows[0]?.cnt || 0),
         };
@@ -401,6 +405,7 @@ export class DashboardService {
                COALESCE(SUM(p.likes), 0) AS likes,
                COALESCE(SUM(p.comments), 0) AS comments,
                COALESCE(SUM(p.favorites), 0) AS favorites,
+               COALESCE(SUM(p.traffic), 0) AS traffic,
                COALESCE(SUM(CASE WHEN p.post_type IN ('获客贴','获客帖','营销贴') THEN 1 ELSE 0 END), 0) AS lead_post_count
              FROM posts p
              LEFT JOIN employees e ON e.id = p.employee_id
@@ -426,7 +431,7 @@ export class DashboardService {
           const postCount = Number(r.post_count || 0);
           const leadPostCount = Number(r.lead_post_count || 0);
           const leadCount = leadMap.get(r.employee_id) || 0;
-          const totalTraffic = Number(r.likes || 0) + Number(r.comments || 0) + Number(r.favorites || 0);
+          const totalTraffic = Number(r.traffic || 0);
           const efficiency = postCount > 0 ? leadCount / postCount : 0;
           const leadEfficiency = leadPostCount > 0 ? leadCount / leadPostCount : 0;
           return {
@@ -450,8 +455,8 @@ export class DashboardService {
     const total = ranked.length;
     const gapToPrev = selfIndex > 0 ? ranked[selfIndex - 1].metricValue - ranked[selfIndex].metricValue : 0;
 
-    const totalTraffic = selfStats.likes + selfStats.comments + selfStats.favorites;
-    const monthTraffic = monthStats.likes + monthStats.comments + monthStats.favorites;
+    const totalTraffic = selfStats.traffic;
+    const monthTraffic = monthStats.traffic;
 
     return {
       period: { from, to, code: filters.period, monthStart: from },
@@ -1067,7 +1072,7 @@ export class DashboardService {
            SELECT account_id,
                   COUNT(*) AS post_count,
                   (CASE WHEN COUNT(*) > 0 THEN 1 ELSE 0 END) AS has_recent_posts,
-                  COALESCE(SUM(likes + comments + favorites), 0) AS total_traffic
+                  COALESCE(SUM(traffic), 0) AS total_traffic
              FROM posts
             WHERE published_at BETWEEN ? AND ?
             GROUP BY account_id
@@ -1760,10 +1765,10 @@ export class DashboardService {
            ORDER BY date ASC`,
           leadParams,
         ),
-        // 4. T6.3 流量趋势：每平台每日流量 = likes + comments + favorites
+        // 4. T6.3 流量趋势：每平台每日流量 = traffic 字段
         this.postRepo.query(
           `SELECT DATE_FORMAT(p.published_at, '%Y-%m-%d') AS date, p.platform AS platform,
-                  COALESCE(SUM(p.likes), 0) + COALESCE(SUM(p.comments), 0) + COALESCE(SUM(p.favorites), 0) AS traffic
+                  COALESCE(SUM(p.traffic), 0) AS traffic
            FROM posts p
            WHERE ${postWhereSql}
            GROUP BY date, p.platform
@@ -2033,7 +2038,7 @@ export class DashboardService {
          (SELECT COUNT(*) FROM accounts a WHERE a.employee_id = e.id${accountPlatformClause}) AS account_count,
          (SELECT COUNT(*) FROM posts p WHERE p.employee_id = e.id AND ${dateClause}${platformClause}) AS today_posts,
          (SELECT COUNT(*) FROM leads l WHERE l.employee_id = e.id AND ${leadDateClause}${leadPlatformClause}) AS today_leads,
-         (SELECT COALESCE(SUM(CASE WHEN p.post_type IN ('获客贴', '营销贴') THEN p.traffic ELSE 0 END), 0)
+         (SELECT COALESCE(SUM(p.traffic), 0)
             FROM posts p WHERE p.employee_id = e.id AND ${dateClause}${platformClause}) AS today_traffic,
          (SELECT COUNT(*) FROM leads l WHERE l.employee_id = e.id AND ${leadDateClause}${leadPlatformClause} AND l.status = '已成交') AS today_deals
        FROM employees e
