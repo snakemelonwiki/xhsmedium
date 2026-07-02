@@ -65,6 +65,74 @@ export class DouyinExtractor {
   }
 
   /**
+   * 检测抖音作品是否已失效/被删除。
+   *
+   * 失效作品（如 /note/<id> 指向已删除内容）的服务端会在 RSC flight data 中
+   * 下发一个"SEO 包装对象"而非真实作品详情，其特征为：
+   *   { awemeId: "<请求的 id>", aweme: null, statusCode: -404, accountInfo: { statusCode: 5 }, redirect, ... }
+   *
+   * 页面随后往往客户端跳转到 /jingxuan?previous_page=web_video_404_link&modal_id=<无关 id>，
+   * 但该跳转存在时序竞态：若抓取在跳转前读取 URL，仅靠 url-parser 的 mismatch 检测会漏判，
+   * 最终把死链伪造成"0 赞 0 评"的正常作品。此方法直接从 HAR 里的失效包装对象判定，
+   * 不依赖跳转时序，作为可靠的兜底。
+   *
+   * @param awemeIdHint 请求的 awemeId，用于确认失效包装对象对应的是当前请求的作品
+   * @returns 命中失效特征时返回 { reason }，否则返回 null
+   */
+  detectDeletedPost(har: HarSnapshot, awemeIdHint?: string | null): { reason: string } | null {
+    const htmlEntries = har.entries.filter((e) =>
+      e.contentType.includes('text/html') && e.textBody,
+    );
+
+    for (const entry of htmlEntries) {
+      const html = entry.textBody || '';
+      if (!html.includes('__pace_f')) continue;
+
+      const payloads = this.extractPaceFPayloads(html);
+      for (const raw of payloads) {
+        let unescaped = this.unescapeJsString(raw);
+        if (unescaped.includes('%22') || unescaped.includes('%7B')) {
+          try {
+            unescaped = decodeURIComponent(unescaped);
+          } catch {
+            /* 解码失败则继续使用原字符串 */
+          }
+        }
+
+        let idx = unescaped.indexOf('"awemeId"');
+        while (idx !== -1) {
+          const obj = this.findJsonObject(unescaped, idx);
+          if (obj) {
+            try {
+              const data = JSON.parse(obj);
+              const wrap = data?.detail || data;
+              // 失效包装对象：显式带 aweme 字段且为 null（真实详情对象不含 aweme=null）
+              if (wrap && typeof wrap === 'object' && 'aweme' in wrap && wrap.aweme === null) {
+                const id = String(wrap.awemeId || wrap.aweme_id || '');
+                const idMatches = !awemeIdHint || id === awemeIdHint;
+                if (idMatches) {
+                  const statusCode = Number(wrap.statusCode);
+                  const acctStatus = Number(wrap?.accountInfo?.statusCode);
+                  if ((Number.isFinite(statusCode) && statusCode < 0) || acctStatus === 5) {
+                    const parts = [`statusCode=${wrap.statusCode}`];
+                    if (Number.isFinite(acctStatus)) parts.push(`accountInfo.statusCode=${wrap.accountInfo.statusCode}`);
+                    return { reason: parts.join(', ') };
+                  }
+                }
+              }
+            } catch {
+              /* 解析失败跳过该对象 */
+            }
+          }
+          idx = unescaped.indexOf('"awemeId"', idx + 1);
+        }
+      }
+    }
+
+    return null;
+  }
+
+  /**
    * 检查数据是否包含真实指标（至少有一个指标字段是数字，包括 0）
    * 注意：0 是合法指标值（如  赞），不应被过滤掉
    */
@@ -466,13 +534,18 @@ export class DouyinExtractor {
   private extractMetricsFromDetail(detail: any): Partial<ScrapedPostData> | null {
     if (!detail || typeof detail !== 'object') return null;
 
-    const apiStats = detail.statistics || {};
-    const rscStats = detail.stats || {};
+    const apiStats = detail.statistics && typeof detail.statistics === 'object' ? detail.statistics : null;
+    const rscStats = detail.stats && typeof detail.stats === 'object' ? detail.stats : null;
+
+    // 失效/被删除作品的 SEO 包装对象（aweme=null, statusCode<0）没有任何指标容器，
+    // 若继续走下面的 `?? 0` 会把死链伪造成"0 赞 0 评"的正常作品。此处直接判空返回。
+    if (!apiStats && !rscStats) return null;
+
     const stats = {
-      digg_count: apiStats.digg_count ?? rscStats.diggCount,
-      comment_count: apiStats.comment_count ?? rscStats.commentCount,
-      collect_count: apiStats.collect_count ?? rscStats.collectCount,
-      share_count: apiStats.share_count ?? rscStats.shareCount,
+      digg_count: (apiStats?.digg_count) ?? (rscStats?.diggCount),
+      comment_count: (apiStats?.comment_count) ?? (rscStats?.commentCount),
+      collect_count: (apiStats?.collect_count) ?? (rscStats?.collectCount),
+      share_count: (apiStats?.share_count) ?? (rscStats?.shareCount),
     };
 
     const author = detail.author || detail.authorInfo || {};

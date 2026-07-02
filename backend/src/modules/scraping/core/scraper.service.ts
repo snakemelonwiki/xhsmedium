@@ -331,6 +331,15 @@ export class ScraperService {
 
       // ── 短链/重定向后回写真实 URL + postId ──
       const finalUrl = page.url();
+
+      // ── 小红书失效作品：跳转到 /404 错误页（query 携带 errorCode，如 -510000）──
+      // 该跳转不会被 resolveParsedAfterNavigation 的 mismatch 捕获（/404 解析出的 postId 为 null），
+      // 且 404 页无 "笔记不存在" 等文案，故需专门按 URL 判定，避免把死链录成空标题 0 指标的正常笔记。
+      if (platform === '小红书' && this.isXiaohongshu404Url(finalUrl)) {
+        this.logger.warn(`[Scraper] 小红书笔记已失效（跳转到 404 页）: requested=${parsed.normalizedUrl}, final=${finalUrl}`);
+        throw new Error('小红书笔记已失效，可能已被删除、隐藏或下架（页面跳转至 404）');
+      }
+
       if (finalUrl && finalUrl !== parsed.normalizedUrl) {
         const resolution = resolveParsedAfterNavigation(parsed, finalUrl);
         if (resolution.mismatch) {
@@ -377,6 +386,15 @@ export class ScraperService {
 
       // ── 停止 HAR 收集 ──
       const har = harListener.stop();
+
+      // ── 抖音失效作品兜底检测（基于 RSC 失效包装对象，不依赖客户端跳转时序）──
+      if (platform === '抖音') {
+        const deleted = this.douyinExtractor.detectDeletedPost(har, parsed.postId);
+        if (deleted) {
+          this.logger.warn(`[Scraper] ${platform} 作品已失效/被删除: url=${parsed.normalizedUrl}, postId=${parsed.postId || 'null'}, ${deleted.reason}`);
+          throw new Error(`抖音作品已失效或已被删除（${deleted.reason}）`);
+        }
+      }
 
       // ── 数据提取 ──
       const data = this.extractData(platform, har, ssrExtracted, parsed);
@@ -817,6 +835,28 @@ export class ScraperService {
   }
 
   /**
+   * 检测最终 URL 是否为小红书失效笔记的 404 错误页。
+   *
+   * 小红书笔记被删除/隐藏/下架后，访问 /explore/<noteId> 会跳转到
+   *   https://www.xiaohongshu.com/404?source=note&noteId=<id>&errorCode=<码>&...
+   * 该页 <title> 为「小红书 - 你访问的页面不见了」，页面内无 "笔记不存在" 等文案，
+   * 因此按 URL（/404 路径或 errorCode 参数）判定最可靠。
+   */
+  private isXiaohongshu404Url(url: string): boolean {
+    if (!url) return false;
+    try {
+      const u = new URL(url);
+      const host = u.hostname.toLowerCase();
+      if (host !== 'xiaohongshu.com' && !host.endsWith('.xiaohongshu.com')) return false;
+      if (u.pathname === '/404' || u.pathname.startsWith('/404/')) return true;
+      if (u.searchParams.has('errorCode')) return true;
+      return false;
+    } catch {
+      return /xiaohongshu\.com\/404\b/i.test(url);
+    }
+  }
+
+  /**
    * 检测小红书笔记是否已被删除/隐藏/下架。
    */
   private isXiaohongshuNoteDeleted(bodyText: string, pageTitle: string): boolean {
@@ -833,6 +873,8 @@ export class ScraperService {
       '内容不存在',
       '笔记已失效',
       '内容已删除',
+      '你访问的页面不见了',
+      '页面不见了',
     ];
 
     const hasPhrase = DELETED_PHRASES.some((p) => text.includes(p));
@@ -840,6 +882,7 @@ export class ScraperService {
     const DELETED_TITLES = [
       '小红书 - 你的生活兴趣社区',
       '小红书',
+      '小红书 - 你访问的页面不见了',
     ];
     const isGenericTitle = DELETED_TITLES.includes(title);
 
