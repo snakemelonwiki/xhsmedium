@@ -186,14 +186,29 @@ process.on("SIGTERM", () => { cleanupAllContexts(); process.exit(0); });
 
 fs.mkdirSync(PROFILE_ROOT, { recursive: true });
 fs.mkdirSync(COVERS_DIR, { recursive: true });
+// 限制 profile 目录权限：仅所有者可读写（避免同系统其他用户读取 cookies）
+try { fs.chmodSync(PROFILE_ROOT, 0o700); } catch {}
 
 function detectPlatform(url) {
-  const value = String(url || "").toLowerCase();
-  // 小红书:长链 + 短链
-  if (value.includes("xiaohongshu.com") || value.includes("xhslink.com")) return "小红书";
-  // 抖音:长链(douyin.com / iesdouyin.com 老短链 / v.douyin.com 新短链)
-  // 短链在抓取时会被 302 到长链,这里只做平台识别,真实 URL 在 page.goto 时由浏览器解析
-  if (value.includes("douyin.com") || value.includes("iesdouyin.com") || value.includes("v.douyin.com")) return "抖音";
+  const value = String(url || "").trim();
+  if (!value) return "";
+  let parsed;
+  try {
+    parsed = new URL(value);
+  } catch {
+    // 非法 URL，回退到宽松匹配（仅限已知短链域名）
+    const lower = value.toLowerCase();
+    if (lower.includes("xhslink.com")) return "小红书";
+    if (lower.includes("v.douyin.com") || lower.includes("iesdouyin.com")) return "抖音";
+    return "";
+  }
+  const hostname = parsed.hostname.toLowerCase();
+  // 精确 hostname 匹配，避免 SSRF（evil.com/xiaohongshu.com/path 不会误匹配）
+  if (hostname === "xiaohongshu.com" || hostname.endsWith(".xiaohongshu.com")) return "小红书";
+  if (hostname === "xhslink.com" || hostname.endsWith(".xhslink.com")) return "小红书";
+  if (hostname === "douyin.com" || hostname.endsWith(".douyin.com")) return "抖音";
+  if (hostname === "iesdouyin.com" || hostname.endsWith(".iesdouyin.com")) return "抖音";
+  if (hostname === "v.douyin.com" || hostname.endsWith(".v.douyin.com")) return "抖音";
   return "";
 }
 

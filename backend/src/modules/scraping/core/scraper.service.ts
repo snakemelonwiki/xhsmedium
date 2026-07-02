@@ -168,9 +168,10 @@ export class ScraperService {
    * 按平台串行锁：保证同一平台同时只有一个抓取任务在执行，
    * 避免多个请求共享 persistent context 时被互相关闭。
    *
-   * 实现：使用双重 Map 消除竞态窗口。
+   * 实现：使用双重 Map 序列化获取锁（非并行获取）。
+   *   - lockAcquires: 存储正在获取锁的请求，先到的先拿
    *   - platformLocks: 存储当前持有锁的 Promise
-   *   - lockAcquires: 存储正在获取锁的请求，防止多个请求同时通过检查并 set 锁
+   * 先等 lockAcquires 清空，再等 platformLocks 清空，最后拿到锁。
    */
   private readonly lockAcquires = new Map<string, Promise<void>>();
 
@@ -417,11 +418,8 @@ export class ScraperService {
 
       return finalData;
     } catch (err) {
-      // 非登录墙错误：释放上下文（下次重新冷启动）
-      const errMsg = String(err?.message ?? err);
-      if (!errMsg.includes('登录页')) {
-        await this.browserPool.releaseContext(platform, account.id);
-      }
+      // 释放上下文：登录墙意味着 cookie 已过期，复用无意义
+      await this.browserPool.releaseContext(platform, account.id).catch(() => {});
       throw err;
     } finally {
       // 关闭本次抓取打开的标签页
@@ -752,14 +750,13 @@ export class ScraperService {
     const title = String(pageTitle || '').trim();
 
     if (platform === '小红书') {
+      // 登录墙判断：必须有"明确的登录墙信号"且"没有帖子内容信号"。
+      // 注意：不加入 /点赞/、/评论/、/收藏/、/\d{2}-\d{2}/ 等过于宽松的模式——
+      // 这些正则几乎必然命中任何正常页面，导致登录墙判断永远返回 false。
       const hasPostSignals =
         /共\s*[\d.,wkW万千]+\s*条评论/.test(text) ||
         /登录后评论\s*[\d.,wkW万千]+\s*[\d.,wkW万千]+\s*[\d.,wkW万千]+\s*发送/.test(text) ||
-        /说点什么\.\.\.\s*[\d.,wkW万千]+\s*[\d.,wkW万千]+\s*[\d.,wkW万千]+\s*发送/.test(text) ||
-        /点赞/.test(text) ||
-        /评论/.test(text) ||
-        /收藏/.test(text) ||
-        /\d{2}-\d{2}/.test(text);
+        /说点什么\.\.\.\s*[\d.,wkW万千]+\s*[\d.,wkW万千]+\s*[\d.,wkW万千]+\s*发送/.test(text);
 
       const genericTitle =
         title === '小红书 - 你的生活兴趣社区' ||
@@ -938,7 +935,6 @@ export class ScraperService {
       /net::ERR_/i,
       /TimeoutError/i,
       /Navigation timeout/i,
-      /waitForTimeout/i,
       /抓取失败/,
     ];
 

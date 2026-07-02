@@ -10,6 +10,54 @@ const parserCore = require('../../../scripts/parser-core');
 
 import { isScrapingFailure } from '../scraping/core/types';
 
+/** 结果缓存条目 */
+interface CacheEntry {
+  data: ParserResult;
+  /** 过期时间（ms epoch） */
+  expiresAt: number;
+}
+
+/** 简单 LRU 缓存（基于 Map 的顺序语义） */
+class SimpleCache {
+  private readonly map = new Map<string, CacheEntry>();
+
+  constructor(
+    private readonly defaultTtlMs = 30000,
+    private readonly maxSize = 1000,
+  ) {}
+
+  private getCacheKey(url: string, account?: string): string {
+    return account ? `${url}::${account}` : url;
+  }
+
+  get(url: string, account?: string): ParserResult | null {
+    const key = this.getCacheKey(url, account);
+    const entry = this.map.get(key);
+    if (!entry) return null;
+    if (Date.now() > entry.expiresAt) {
+      this.map.delete(key);
+      return null;
+    }
+    // LRU: 命中后移到末尾（最新）
+    this.map.delete(key);
+    this.map.set(key, entry);
+    return entry.data;
+  }
+
+  set(url: string, data: ParserResult, account?: string) {
+    const key = this.getCacheKey(url, account);
+    if (this.map.size >= this.maxSize) {
+      const first = this.map.keys().next().value;
+      if (first !== undefined) this.map.delete(first);
+    }
+    this.map.set(key, { data, expiresAt: Date.now() + this.defaultTtlMs });
+  }
+
+  clear() {
+    this.map.clear();
+  }
+}
+
 export interface ParserOptions {
   retry?: number;
   timeout?: number;
@@ -77,10 +125,19 @@ export function isParserFailure(r: ParserResult): r is ParserFailure {
  *   1. 先用 ScrapingLockService.run() 把抓取串行化。
  *   2. 内部走 ScraperService.scrape（支持按 account 指定或自动轮询）。
  *   3. 成功/失败分别由 ScrapingAlertService 记录。
+ *
+ * 优化（紧急修复队列满）：
+ *   - 增加进程级结果缓存（30s TTL），同一 URL 短时间内复用结果，
+ *     避免大量并发请求全部进入抓取队列。
  */
 @Injectable()
 export class ParserService {
   private readonly logger = new Logger(ParserService.name);
+  /** 结果缓存：同一 URL 30s 内复用，减少队列压力 */
+  private readonly resultCache = new SimpleCache(
+    Number(process.env.PARSER_CACHE_TTL_MS || 30000),
+    2000,
+  );
 
   constructor(
     private readonly lockService: ScrapingLockService,
@@ -98,9 +155,25 @@ export class ParserService {
     const source = String(opts.source || 'parser');
     const log = (msg: string) => this.logger.debug?.(msg) ?? this.logger.log(msg);
 
+    // 紧急修复：优先读缓存，避免重复请求全部压入抓取队列
+    const cached = this.resultCache.get(url, opts.account);
+    if (cached) {
+      this.logger.debug(`[Parser] 缓存命中: ${url.slice(0, 80)}`);
+      return cached;
+    }
+
     const result = await this.lockService.run(() =>
       this.scraperService.scrape(url, { retry, timeout, log, account: opts.account, autoSwitch: false }),
     );
+
+    // 写入缓存：只缓存成功结果和不可重试的失败结果（如笔记已删除），
+    // 可重试的失败结果（如网络超时、登录墙）不缓存，让下次请求重新尝试。
+    const parserResult = result as ParserResult;
+    if (!isScrapingFailure(result)) {
+      this.resultCache.set(url, parserResult, opts.account);
+    } else if (!result.error.retryable) {
+      this.resultCache.set(url, parserResult, opts.account);
+    }
 
     if (isScrapingFailure(result)) {
       const platform = result.error.platform || null;
@@ -118,7 +191,7 @@ export class ParserService {
         .catch((err) => this.logger.warn(`recordSuccess swallow: ${(err as any)?.message || err}`));
     }
 
-    return result as ParserResult;
+    return parserResult;
   }
 
   /**

@@ -29,7 +29,7 @@ export class ScrapingLockService {
     return Number.isFinite(raw) && raw >= 0 ? raw : 3000;
   })();
   /** 队列上限 */
-  private readonly maxQueue = 20;
+  private readonly maxQueue = 50;
 
   /**
    * 把 fn 包进锁内执行。队列满 → 立即抛 ServiceUnavailableException。
