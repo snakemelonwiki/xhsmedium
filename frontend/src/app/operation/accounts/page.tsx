@@ -82,8 +82,6 @@ const STATUS_OPTIONS = [
 const PLATFORM_OPTIONS = [
   { label: '小红书', value: '小红书' },
   { label: '抖音', value: '抖音' },
-  { label: 'xiaohongshu', value: 'xiaohongshu' },
-  { label: 'douyin', value: 'douyin' },
 ];
 
 /**

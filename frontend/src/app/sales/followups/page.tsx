@@ -162,10 +162,10 @@ export default function SalesFollowupsPage() {
               allowClear
               options={[
                 { label: '高意向', value: 'high' },
-                { label: '中意向', value: 'medium' },
+                { label: '中意向', value: 'mid' },
                 { label: '低意向', value: 'low' },
                 { label: '无效', value: 'invalid' },
-                { label: '待判断', value: 'unknown' },
+                { label: '待判断', value: 'pending' },
               ]}
             />
           </Form.Item>

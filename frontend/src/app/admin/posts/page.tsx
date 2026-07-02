@@ -224,7 +224,7 @@ export default function AdminPostsPage() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
-  const [sort, setSort] = useState<SortState>({ field: 'publishedAt', order: 'descend' });
+  const [sort, setSort] = useState<SortState>({ field: 'leadsCount', order: 'descend' });
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
   const [suggestionDraft, setSuggestionDraft] = useState('');
   // A-② 修复（2026-06-23）：主管端帖子详情需要显示客户联系方式、销售分配、成交信息（不再脱敏）。
@@ -320,10 +320,11 @@ export default function AdminPostsPage() {
       query.metricOperator = filters.leadPostOperator;
       query.metricThreshold = filters.leadPostThreshold;
     }
-    // 排序：后端 sort 参数支持 'leads'（按关联 lead 数量降序）；
-    // 其它字段（traffic / published_at）由后端默认行为处理，前端在拿到数据后兜底做客户端排序。
+    // 排序：后端 sort 参数支持 'leads'（按关联 lead 数量降序）和 'traffic'（按流量降序）。
     if (sort.field === 'leadsCount') {
       query.sort = 'leads';
+    } else if (sort.field === 'traffic') {
+      query.sort = 'traffic';
     }
     return query;
   }
@@ -369,8 +370,8 @@ export default function AdminPostsPage() {
         },
       }));
 
-      // 客户端兜底排序（除 leads 走后端 sort=leads 外）
-      if (sort.field !== 'leadsCount') {
+      // 客户端兜底排序
+      {
         const sortKey = sort.field;
         const dir = sort.order === 'ascend' ? 1 : -1;
         mapped = [...mapped].sort((a, b) => {
@@ -646,19 +647,11 @@ export default function AdminPostsPage() {
     return m;
   }, [accounts]);
 
-  // 列排序 sorter：点击切换升降序，二次点击反向
+  // 列排序 sorter：点击默认降序（从高到低），再次点击切换升序
   const sortColumn = (field: SortField) => ({
-    sorter: true,
+    sorter: true as const,
     sortOrder: sort.field === field ? sort.order : undefined,
-    onHeaderCell: () => ({
-      onClick: () => {
-        setSort((prev) => {
-          if (prev.field !== field) return { field, order: 'descend' };
-          if (prev.order === 'descend') return { field, order: 'ascend' };
-          return { field, order: 'descend' };
-        });
-      },
-    }),
+    sortDirections: ['descend', 'ascend'] as ('descend' | 'ascend')[],
   });
 
   const columns: ColumnsType<Post> = [
@@ -693,7 +686,7 @@ export default function AdminPostsPage() {
               </Tooltip>
             )}
             <Typography.Text type="secondary" ellipsis style={{ maxWidth: 120, fontSize: 12 }}>
-              {r.copywriting || r.note || '暂无文案'}
+              {r.copywriting || '暂无文案'}
             </Typography.Text>
             {(() => {
               const quality = r.supervisorQualityStatus || (Number(r.isSupervisorPicked || 0) === 1 ? 'excellent' : 'normal');
@@ -809,7 +802,16 @@ export default function AdminPostsPage() {
     },
   ];
 
-  const handleTableChange: TableProps<Post>['onChange'] = (next: TablePaginationConfig) => {
+  const handleTableChange: TableProps<Post>['onChange'] = (next: TablePaginationConfig, _filters, sorter) => {
+    // 处理列头排序变化
+    if (sorter && typeof sorter === 'object' && !Array.isArray(sorter)) {
+      const info = sorter as { columnKey?: string; order?: 'ascend' | 'descend' | null };
+      if (info.columnKey && (info.order === 'ascend' || info.order === 'descend')) {
+        setSort({ field: info.columnKey as SortField, order: info.order });
+      } else if (info.columnKey && !info.order) {
+        setSort({ field: 'publishedAt', order: 'descend' });
+      }
+    }
     void load(next.current ?? 1, next.pageSize ?? DEFAULT_PAGE_SIZE);
   };
 
@@ -887,7 +889,16 @@ export default function AdminPostsPage() {
           <Space size={8} wrap>
             <Radio.Group
               value={filters.leadPostMetric}
-              onChange={(e) => setFilters((prev) => ({ ...prev, leadPostMetric: e.target.value }))}
+              onChange={(e) => {
+                const metric = e.target.value as LeadPostMetric;
+                setFilters((prev) => ({ ...prev, leadPostMetric: metric }));
+                // 联动排序：选中"客资数"时按客资数降序，选中"流量数"时按流量降序
+                if (metric === 'leadsCount') {
+                  setSort({ field: 'leadsCount', order: 'descend' });
+                } else if (metric === 'traffic') {
+                  setSort({ field: 'traffic', order: 'descend' });
+                }
+              }}
               optionType="button"
               size="small"
               options={leadPostMetricOptions}
