@@ -722,6 +722,7 @@ export class PostsController {
       // metricsUpdatedAt 是 Date，JSON 序列化时序列化为 ISO 字符串（Date.prototype.toJSON）
       return res.json({ ok: true, metrics });
     } catch (error: any) {
+      console.error('[posts][fetch-metrics]', error?.message || error);
       return res.status(400).json({ message: error.message || '抓取失败' });
     }
   }
@@ -766,6 +767,7 @@ export class PostsController {
       }
       return res.json({ ok: true, metrics });
     } catch (error: any) {
+      console.error('[posts][refresh-single]', error?.message || error);
       return res.status(400).json({ ok: false, message: error.message || '刷新失败' });
     }
   }
@@ -804,6 +806,7 @@ export class PostsController {
       await this.postsService.recordMetricsHistory(id, metrics);
       return res.json({ ok: true, metrics });
     } catch (error: any) {
+      console.error('[posts][internal-refresh]', error?.message || error);
       return res.status(400).json({ ok: false, message: error.message || '刷新失败' });
     }
   }
