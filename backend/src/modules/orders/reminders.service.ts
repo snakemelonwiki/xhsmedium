@@ -268,6 +268,7 @@ export class RemindersService {
         'fr.content AS content',
         'fr.next_remind_at AS nextRemindAt',
         'fr.reminder_sent_at AS reminderSentAt',
+        'o.order_code AS orderCode',
         'o.service_type AS serviceType',
         'o.order_status AS orderStatus',
       ])
@@ -276,6 +277,7 @@ export class RemindersService {
     return rows.map((r) => ({
       id: r.id,
       orderId: r.orderId,
+      orderCode: r.orderCode || null,
       userId: r.userId,
       nodeType: r.nodeType,
       content: r.content,

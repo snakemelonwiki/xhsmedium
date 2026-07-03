@@ -370,16 +370,17 @@ export default function AdminPostsPage() {
         },
       }));
 
-      // 客户端兜底排序
-      {
-        const sortKey = sort.field;
+      // 客户端兜底排序（仅后端不支持排序的字段）
+      const sortKey = sort.field;
+      const backendSortFields = new Set(['leadsCount', 'traffic']);
+      if (!backendSortFields.has(sortKey)) {
         const dir = sort.order === 'ascend' ? 1 : -1;
         mapped = [...mapped].sort((a, b) => {
           const av = sortKey === 'publishedAt'
-            ? String(a.publishedAt || '')
+            ? new Date(a.publishedAt || 0).getTime()
             : Number(a.metrics[sortKey as keyof Post['metrics']] ?? 0);
           const bv = sortKey === 'publishedAt'
-            ? String(b.publishedAt || '')
+            ? new Date(b.publishedAt || 0).getTime()
             : Number(b.metrics[sortKey as keyof Post['metrics']] ?? 0);
           if (av < bv) return -1 * dir;
           if (av > bv) return 1 * dir;
@@ -647,11 +648,12 @@ export default function AdminPostsPage() {
     return m;
   }, [accounts]);
 
-  // 列排序 sorter：点击默认降序（从高到低），再次点击切换升序
+  // 列排序 sorter：点击默认降序（从高到低），再次点击切换升序，第三次点击取消排序回到默认
   const sortColumn = (field: SortField) => ({
+    key: field,
     sorter: true as const,
     sortOrder: sort.field === field ? sort.order : undefined,
-    sortDirections: ['descend', 'ascend'] as ('descend' | 'ascend')[],
+    sortDirections: ['descend', 'ascend', null] as ('descend' | 'ascend' | null)[],
   });
 
   const columns: ColumnsType<Post> = [

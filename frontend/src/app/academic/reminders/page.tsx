@@ -15,6 +15,7 @@ import { formatDateTime, formatRemindTimeTag } from '@/shared/utils/date-format'
 type ReminderRow = {
   id: string;
   orderId: string;
+  orderCode?: string | null;
   userId: string;
   nodeType: string;
   content?: string | null;
@@ -77,13 +78,13 @@ export default function AcademicRemindersPage() {
 
   const columns: ColumnsType<ReminderRow> = [
     {
-      title: '订单',
-      dataIndex: 'orderId',
+      title: '订单编号',
+      dataIndex: 'orderCode',
       width: 200,
       render: (value: string, record) => (
         <Space direction="vertical" size={0}>
-          <Link href={`/academic/orders/${value}?target=progress#progress`}>
-            <Typography.Text strong>{value}</Typography.Text>
+          <Link href={`/academic/orders/${record.orderId}?target=progress#progress`}>
+            <Typography.Text strong>{value || record.orderId}</Typography.Text>
           </Link>
           <Typography.Text type="secondary">{record.serviceType || '未填写服务类型'}</Typography.Text>
         </Space>
