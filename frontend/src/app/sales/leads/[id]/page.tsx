@@ -490,6 +490,8 @@ export default function SalesLeadDetailPage() {
         <Descriptions
           bordered
           column={{ xs: 1, md: 2 }}
+          labelStyle={{ width: 120 }}
+          contentStyle={{ minWidth: 0, overflow: 'hidden' }}
           items={[
             { key: 'id', label: '客资 ID', children: leadId },
             { key: 'name', label: '客户', children: lead?.customerName ?? '详情接口待补齐' },
@@ -589,6 +591,24 @@ export default function SalesLeadDetailPage() {
               children: lead?.latestFollowAt
                 ? `${formatDateTime(lead.latestFollowAt)}${lead.latestFollowNote ? ` · ${lead.latestFollowNote}` : ''}`
                 : lead?.latestFollowNote ?? '-',
+            },
+            {
+              key: 'sourcePostUrl',
+              label: '作品链接',
+              children: lead?.source?.postUrl ? (
+                <Tooltip title="点击查看原帖">
+                  <Typography.Text
+                    style={{ color: '#1890ff', cursor: 'pointer', wordBreak: 'break-all', display: 'inline-block', maxWidth: '100%' }}
+                    onClick={() => {
+                      if (lead?.source?.postUrl) {
+                        window.open(lead.source.postUrl, '_blank');
+                      }
+                    }}
+                  >
+                    {lead.source.postUrl}
+                  </Typography.Text>
+                </Tooltip>
+              ) : '-',
             },
           ]}
         />

@@ -743,8 +743,21 @@ export class LeadsService {
     if (!isAdminLike && role !== 'sales' && actor?.actorEmployeeId && row.employeeId !== actor.actorEmployeeId) {
       return null;
     }
+    // 关联查询 post、account、employee 以填充 sourcePostUrl 等字段
+    let post: Post | undefined;
+    let account: Account | undefined;
+    let employee: Employee | undefined;
+    if (row.postId || row.matchedPostId) {
+      post = await this.postRepository.findOne({ where: { id: row.postId || row.matchedPostId } });
+    }
+    if (row.accountId) {
+      account = await this.accountRepository.findOne({ where: { id: row.accountId } });
+    }
+    if (row.employeeId) {
+      employee = await this.employeeRepository.findOne({ where: { id: row.employeeId } });
+    }
     const latestCollaboration = await this.latestCollaborationByLeadIds([row.id]);
-    return this.mapLead(row, undefined, latestCollaboration.get(row.id));
+    return this.mapLead(row, undefined, latestCollaboration.get(row.id), account, post, employee);
   }
 
   async updateBoard(id: string, dto: BoardPatchDto, actorUserId: string, expectedUpdatedAt?: Date): Promise<void> {

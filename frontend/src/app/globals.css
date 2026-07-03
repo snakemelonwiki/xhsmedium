@@ -639,3 +639,14 @@ body {
   animation: notification-bell-pulse 1.5s ease-in-out infinite,
              notification-bell-ripple 1.5s ease-in-out infinite;
 }
+
+/* 销售客资详情页：Descriptions 两列等宽 + 长文本自动换行 */
+.page-stack .ant-descriptions-bordered .ant-descriptions-view > table {
+  table-layout: fixed;
+  width: 100%;
+}
+
+.page-stack .ant-descriptions-bordered .ant-descriptions-item-content {
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
