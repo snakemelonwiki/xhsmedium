@@ -26,6 +26,7 @@ import { LeadTimeline } from '@/shared/components/leads';
 import { StatusTag } from '@/shared/components/status';
 import { useSubmitLock } from '@/shared/hooks/useSubmitLock';
 import { formatDateTime } from '@/shared/utils/date-format';
+import { platformKeyToDisplay } from '@/shared/utils/platform-key';
 import type { LeadTimelineItem, SalesLead } from '@/shared/types/leads';
 
 type Period = 'today' | 'week' | 'month' | 'all';
@@ -332,7 +333,7 @@ export default function OperationCollaborationPage() {
                       {detailLead.customerName || detailLead.nickname || '-'}
                     </Descriptions.Item>
                     <Descriptions.Item label="分配销售">{detailLead.sales?.name || '-'}</Descriptions.Item>
-                    <Descriptions.Item label="来源平台">{detailLead.source?.platform || '-'}</Descriptions.Item>
+                    <Descriptions.Item label="来源平台">{platformKeyToDisplay(detailLead.source?.platform) || detailLead.source?.platform || '-'}</Descriptions.Item>
                     <Descriptions.Item label="来源作品">
                       {detailLead.source?.postTitle || detailLead.source?.postId || '-'}
                     </Descriptions.Item>

@@ -37,6 +37,8 @@ const PLATFORM_OPTIONS = [
   { label: '抖音', value: '抖音' },
 ];
 
+import { platformKeyToDisplay } from '@/shared/utils/platform-key';
+
 const STATUS_OPTIONS = [
   { label: '正常', value: '正常' },
   { label: '停用', value: '停用' },
@@ -44,9 +46,7 @@ const STATUS_OPTIONS = [
 ];
 
 function getPlatformLabel(value?: string): string {
-  if (value === 'xiaohongshu') return '小红书';
-  if (value === 'douyin') return '抖音';
-  return value || '-';
+  return platformKeyToDisplay(value) || value || '-';
 }
 
 function getPlatformTagColor(value?: string): string {

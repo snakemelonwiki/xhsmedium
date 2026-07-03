@@ -23,7 +23,7 @@ import type { AccountInfo } from '@/shared/api/content';
 import { readAuthenticatedUser } from '@/shared/auth/auth';
 import { ACCOUNT_ANALYSIS_LEGEND } from '@/shared/constants/account-analysis';
 import type { AccountTimeseries, AccountTimeseriesDay, AccountTimeseriesPost } from '@/shared/types/content';
-import { mapPlatformToKey } from '@/shared/utils/platform-key';
+import { mapPlatformToKey, platformKeyToDisplay } from '@/shared/utils/platform-key';
 
 type Account = {
   id: string;
@@ -147,7 +147,7 @@ export default function AccountAnalysisPage() {
   const accountOptions = useMemo(
     () =>
       accounts.map((a) => ({
-        label: `${a.accountName}${a.platform ? `（${a.platform}）` : ''}`,
+        label: `${a.accountName}${a.platform ? `（${platformKeyToDisplay(a.platform) || a.platform}）` : ''}`,
         value: a.id,
       })),
     [accounts],
@@ -228,7 +228,7 @@ export default function AccountAnalysisPage() {
               <Typography.Text strong>
                 {currentAccount?.accountName ?? '请选择账号'}
               </Typography.Text>
-              {currentAccount?.platform ? <Tag color="blue">{currentAccount.platform}</Tag> : null}
+              {currentAccount?.platform ? <Tag color="blue">{platformKeyToDisplay(currentAccount.platform) || currentAccount.platform}</Tag> : null}
               {currentAccount?.postingPlan ? <Tag color="orange">发帖规划</Tag> : null}
               {timeseries?.account?.positioning ? <Tag color="default">{timeseries.account.positioning}</Tag> : null}
               {timeseries ? (
@@ -278,7 +278,7 @@ export default function AccountAnalysisPage() {
                     <Space size={8} align="center">
                       <CalendarOutlined />
                       <Typography.Text strong>{item.account.accountName}</Typography.Text>
-                      {item.account.platform ? <Tag color="blue">{item.account.platform}</Tag> : null}
+                      {item.account.platform ? <Tag color="blue">{platformKeyToDisplay(item.account.platform) || item.account.platform}</Tag> : null}
                       {item.account.postingPlan ? <Tag color="orange">发帖规划</Tag> : null}
                       {item.account.positioning ? <Tag color="default">{item.account.positioning}</Tag> : null}
                       <Tag color="cyan">
@@ -444,7 +444,7 @@ function PlatformDots({ posts }: { posts: AccountTimeseriesPost[] }) {
       {visible.map((p) => (
         <span
           key={p.postId}
-          title={p.platform || '未知平台'}
+          title={platformKeyToDisplay(p.platform) || p.platform || '未知平台'}
           style={{
             display: 'inline-block',
             width: 6,
@@ -527,7 +527,7 @@ function PostGroupedTooltip({
               {g.posts.map((p) => (
                 <div key={p.postId} style={{ fontSize: 11, paddingLeft: 12 }}>
                   · {p.title || p.postId}
-                  {p.platform ? `（${p.platform}）` : ''}
+                  {p.platform ? `（${platformKeyToDisplay(p.platform) || p.platform}）` : ''}
                   {`（${p.leadCount}客 / ${p.traffic}流量）`}
                   {p.isLead ? ' ⭐' : ''}
                 </div>

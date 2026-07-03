@@ -43,6 +43,7 @@ import type { AdminLeadsStats } from '@/shared/api/admin';
 import type { LeadTimelineItem } from '@/shared/types/leads';
 import { todayDateString } from '@/shared/utils/default-date-range';
 
+import { platformKeyToDisplay } from '@/shared/utils/platform-key';
 import { buildLeadReassignPayload } from './leadActions';
 
 const { RangePicker } = DatePicker;
@@ -572,7 +573,7 @@ export default function AdminLeadsPage() {
     { title: '客户昵称', dataIndex: 'customerName', width: 120, render: (v: string) => v || '未命名客户' },
     { title: '联系方式', dataIndex: 'contact', width: 130, render: (v?: string) => v || '-' },
     { title: '微信', dataIndex: 'wechat', width: 120, render: (v?: string) => v || '-' },
-    { title: '平台', dataIndex: 'platform', width: 80 },
+    { title: '平台', dataIndex: 'platform', width: 80, render: (v?: string) => platformKeyToDisplay(v) || v || '-' },
     {
       title: '来源作品',
       dataIndex: 'sourcePostTitle',
@@ -677,7 +678,7 @@ export default function AdminLeadsPage() {
       title: '平台',
       dataIndex: 'platform',
       width: 80,
-      render: (v?: string) => (v ? <Tag>{v}</Tag> : '-'),
+      render: (v?: string) => (v ? <Tag>{platformKeyToDisplay(v) || v}</Tag> : '-'),
     },
     {
       title: '来源账号',

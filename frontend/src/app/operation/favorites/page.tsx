@@ -7,6 +7,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { listMyFavorites, removeFavorite, type FavoriteAccountSnapshot, type FavoriteItem, type FavoritePostSnapshot, type FavoriteTargetType } from '@/shared/api/favorites';
 import { LazyImage } from '@/shared/components/LazyImage';
 import { formatDateTime } from '@/shared/utils/date-format';
+import { platformKeyToDisplay } from '@/shared/utils/platform-key';
 
 type Tab = 'all' | 'post' | 'account';
 
@@ -152,8 +153,8 @@ function FavoriteCard({ item, onRemove }: { item: FavoriteItem; onRemove: (item:
       {/* 内容 */}
       <div style={{ padding: 12 }}>
         <Space wrap style={{ marginBottom: 6 }}>
-          <Tag color={platform?.includes('抖') ? 'blue' : 'red'}>
-            {isPost ? (post?.platform || '未识别平台') : <><ShopOutlined /> {account?.platform || '未识别平台'}</>}
+          <Tag color={platformKeyToDisplay(platform) === '抖音' ? 'blue' : 'red'}>
+            {isPost ? (platformKeyToDisplay(post?.platform) || post?.platform || '未识别平台') : <><ShopOutlined /> {platformKeyToDisplay(account?.platform) || account?.platform || '未识别平台'}</>}
           </Tag>
           {isPost && post?.postType ? <Tag>{post.postType}</Tag> : null}
           {!isPost ? <Tag color="purple"><UserOutlined /> 账号</Tag> : null}

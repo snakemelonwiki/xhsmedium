@@ -699,7 +699,7 @@ export default function AdminPostsPage() {
         </Space>
       ),
     },
-    { title: '平台', dataIndex: 'platform', width: 80 },
+    { title: '平台', dataIndex: 'platform', width: 80, render: (v?: string) => platformKeyToDisplay(v) || v || '-' },
     {
       title: '账号',
       dataIndex: 'accountName',
@@ -994,7 +994,7 @@ export default function AdminPostsPage() {
                 <Typography.Text type="secondary">
                   账号：{selectedPost.accountName || selectedPost.accountId || '-'}
                 </Typography.Text>
-                <Typography.Text type="secondary">平台：{selectedPost.platform || '-'}</Typography.Text>
+                <Typography.Text type="secondary">平台：{platformKeyToDisplay(selectedPost.platform) || selectedPost.platform || '-'}</Typography.Text>
                 <Typography.Text type="secondary">类型：{selectedPost.postType || '-'}</Typography.Text>
               </Space>
 

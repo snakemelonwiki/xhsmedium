@@ -25,6 +25,7 @@ import { listLeadFollowRecords } from '@/shared/api/leads';
 import type { LeadTimelineItem } from '@/shared/types/leads';
 import { listAdminLeads } from '@/shared/api/admin';
 import { createSupervisorSuggestion } from '@/shared/api/supervisor-suggestions';
+import { platformKeyToDisplay } from '@/shared/utils/platform-key';
 import type { AdminLead } from '@/shared/types/admin';
 import {
   ADD_STATUS_CONFIG,
@@ -254,7 +255,7 @@ export default function AdminSalesBoardPage() {
         <Space direction="vertical" size={2}>
           <Text style={{ fontSize: 12 }}>{record.sourcePostTitle ?? '-'}</Text>
           <Text type="secondary" style={{ fontSize: 12 }}>
-            {record.platform ?? '-'} · {record.sourceAccountName ?? '-'}
+            {platformKeyToDisplay(record.platform) || record.platform || '-'} · {record.sourceAccountName ?? '-'}
           </Text>
         </Space>
       ),

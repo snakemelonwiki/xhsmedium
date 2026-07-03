@@ -20,6 +20,7 @@ import {
 import type { AdminAccount } from '@/shared/types/admin';
 import { QuickRangePicker, type DateRangeValue } from '@/shared/components/date';
 import { isPresetMatch, type DateRangePreset } from '@/shared/utils/date-range';
+import { platformKeyToDisplay } from '@/shared/utils/platform-key';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 declare const echarts: any;
@@ -526,7 +527,7 @@ export default function AdminAnalyticsPage() {
     for (const a of accounts) {
       const name = a.accountName.trim() || '未命名账号';
       const emp = a.employeeName ? `（${a.employeeName}）` : '';
-      const platformTag = a.platform ? ` [${a.platform}]` : '';
+      const platformTag = a.platform ? ` [${platformKeyToDisplay(a.platform) || a.platform}]` : '';
       items.push({ label: `${name}${platformTag}${emp}`, value: a.id });
     }
     return items;

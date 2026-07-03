@@ -29,7 +29,7 @@ import type {
   PersonalRankingsResponse,
 } from '@/shared/api/content';
 import type { PlatformDistributionItem } from '@/shared/types/content';
-import { mapPlatformToKey } from '@/shared/utils/platform-key';
+import { mapPlatformToKey, platformKeyToDisplay } from '@/shared/utils/platform-key';
 
 export interface PlatformAnalysisPanelProps {
   rankings?: PersonalRankingsResponse;
@@ -137,7 +137,7 @@ function buildRankingColumns(
       dataIndex: 'accountName',
       ellipsis: true,
       render: (v: string, r: AccountMetricRow) => (
-        <Tooltip title={r.platform || ''}>
+        <Tooltip title={platformKeyToDisplay(r.platform) || r.platform || ''}>
           <Typography.Text strong style={{ fontSize: 12 }}>
             {v || r.accountId}
           </Typography.Text>

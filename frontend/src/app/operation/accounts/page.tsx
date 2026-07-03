@@ -34,6 +34,7 @@ import { apiClient } from '@/shared/api/apiClient';
 import { readAuthenticatedUser } from '@/shared/auth/auth';
 import { useNotifications } from '@/shared/contexts/NotificationContext';
 import { formatDateTime } from '@/shared/utils/date-format';
+import { platformKeyToDisplay } from '@/shared/utils/platform-key';
 
 type Account = {
   id: string;
@@ -285,7 +286,7 @@ export default function OperationAccountsPage() {
 
   const columns: ColumnsType<Account> = [
     { title: '账号名', dataIndex: 'accountName', width: 140, render: (v, r) => r.profileUrl ? <a href={r.profileUrl} target="_blank" rel="noreferrer">{v}</a> : v },
-    { title: '平台', dataIndex: 'platform', width: 90, render: (v) => <Tag>{v || '-'}</Tag> },
+    { title: '平台', dataIndex: 'platform', width: 90, render: (v) => <Tag>{platformKeyToDisplay(v) || v || '-'}</Tag> },
     { title: 'UID', dataIndex: 'accountUid', width: 140, ellipsis: true, render: (v) => v || '-' },
     { title: '所属员工', dataIndex: 'employeeName', width: 100, render: (v) => v || '-' },
     { title: '人设', dataIndex: 'persona', ellipsis: true, render: (v) => v || '-' },

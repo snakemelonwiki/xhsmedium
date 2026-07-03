@@ -33,6 +33,7 @@ import { readAuthenticatedUser } from '@/shared/auth/auth';
 import { getStatusLabel } from '@/shared/constants/lead-status';
 import { LazyImage } from '@/shared/components/LazyImage';
 import type { IntentionLevelCode } from '@/shared/types/leads';
+import { platformKeyToDisplay } from '@/shared/utils/platform-key';
 
 const INTENTION_LEVEL_META: Record<IntentionLevelCode, { label: string; color: string }> = {
   high: { label: '高', color: 'red' },
@@ -447,7 +448,7 @@ export function GalleryPageContent({
               >
                 <Space direction="vertical" size={6} style={{ width: '100%' }}>
                   <Space wrap>
-                    <Tag color={post.platform?.includes('抖') ? 'blue' : 'red'}>{post.platform}</Tag>
+                    <Tag color={platformKeyToDisplay(post.platform) === '抖音' ? 'blue' : 'red'}>{platformKeyToDisplay(post.platform) || post.platform || '未知'}</Tag>
                     <Tag>{post.postType || '未分类'}</Tag>
                     {post.metrics.leadsCount > 0 && (
                       <Tag color="green">获客</Tag>
@@ -555,8 +556,8 @@ export function GalleryPageContent({
 
             <Space direction="vertical" size={6} style={{ width: '100%' }}>
               <Space wrap>
-                <Tag color={detailModal.post.platform?.includes('抖') ? 'blue' : 'red'}>
-                  {detailModal.post.platform}
+                <Tag color={platformKeyToDisplay(detailModal.post.platform) === '抖音' ? 'blue' : 'red'}>
+                  {platformKeyToDisplay(detailModal.post.platform) || detailModal.post.platform || '未知'}
                 </Tag>
                 <Tag>{detailModal.post.postType || '未分类'}</Tag>
                 {detailModal.post.metrics.leadsCount > 0 && (

@@ -32,6 +32,7 @@ import { QuickRangePicker, RANGE_PRESETS_FULL } from '@/shared/components/date';
 import type { DateRangeValue } from '@/shared/components/date';
 import type { ContentPost } from '@/shared/types/content';
 import { useResponsiveBreakpoint } from '@/shared/hooks/useResponsiveBreakpoint';
+import { platformKeyToDisplay } from '@/shared/utils/platform-key';
 import { buildTodayDateRange } from '@/shared/utils/default-date-range';
 import { normalizePostMetric } from '@/shared/utils/post-metrics';
 
@@ -293,7 +294,9 @@ export default function OperationPostsPage() {
       dataIndex: 'platform',
       width: 90,
       render: (platform: string) => (
-        <Tag color={platform?.includes('抖') ? 'blue' : 'red'}>{platform}</Tag>
+        <Tag color={platformKeyToDisplay(platform) === '抖音' ? 'blue' : 'red'}>
+          {platformKeyToDisplay(platform) || platform || '未知平台'}
+        </Tag>
       ),
     },
     {

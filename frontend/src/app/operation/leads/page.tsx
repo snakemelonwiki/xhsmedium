@@ -20,6 +20,7 @@ import { LeadTimeline } from '@/shared/components/leads';
 import { StatusTag } from '@/shared/components/status';
 import { CollaborationStatus } from '@/shared/constants/lead-status-enums';
 import { formatDateTime } from '@/shared/utils/date-format';
+import { platformKeyToDisplay } from '@/shared/utils/platform-key';
 import type { LeadTimelineItem, SalesLead } from '@/shared/types/leads';
 
 import { buildOperationLeadsExportFilter } from './exportFilter';
@@ -627,7 +628,7 @@ export default function OperationLeadsPage() {
                     意向程度：{detailLead.intentionLevel ? (INTENTION_LEVEL_LABELS[detailLead.intentionLevel] || detailLead.intentionLevel) : '-'}
                   </Typography.Text>
                   <Typography.Text>无效原因：{detailLead.invalidReason || '-'}</Typography.Text>
-                  <Typography.Text>来源平台：{detailLead.source?.platform || '-'}</Typography.Text>
+                  <Typography.Text>来源平台：{platformKeyToDisplay(detailLead.source?.platform) || detailLead.source?.platform || '-'}</Typography.Text>
                   <Typography.Text>
                     来源账号：{detailLead.source?.accountName || detailLead.source?.accountId || '-'}
                   </Typography.Text>
