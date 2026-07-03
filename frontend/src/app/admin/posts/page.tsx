@@ -630,7 +630,7 @@ export default function AdminPostsPage() {
       ...accounts.map((a) => {
         const name = getAccountName(a);
         const isDuplicate = (counts.get(name) || 0) > 1;
-        const label = isDuplicate && a.platform ? `${name}（${a.platform}）` : name;
+        const label = isDuplicate && a.platform ? `${name}（${platformKeyToDisplay(a.platform) || a.platform}）` : name;
         return { label, value: a.id };
       }),
     ];

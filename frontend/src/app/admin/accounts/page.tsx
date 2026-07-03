@@ -50,9 +50,7 @@ function getPlatformLabel(value?: string): string {
 }
 
 function getPlatformTagColor(value?: string): string {
-  if (value === 'xiaohongshu') return 'red';
-  if (value === 'douyin') return 'blue';
-  return 'default';
+  return platformKeyToDisplay(value) === '抖音' ? 'blue' : 'red';
 }
 
 function getStatusTagColor(value?: string): string {

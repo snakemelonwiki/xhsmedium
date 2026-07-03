@@ -435,7 +435,7 @@ export default function OperationPostsPage() {
             style={{ width: 180 }}
             value={filters.accountId || undefined}
             options={accounts.map((item) => ({
-              label: item.platform ? `${item.name}（${item.platform}）` : item.name,
+              label: item.platform ? `${item.name}（${platformKeyToDisplay(item.platform) || item.platform}）` : item.name,
               value: item.id,
             }))}
             onChange={(value) => applyFilter('accountId', value || undefined)}
@@ -544,7 +544,7 @@ export default function OperationPostsPage() {
               style={{ width: '100%' }}
               value={filters.accountId || undefined}
               options={accounts.map((item) => ({
-                label: item.platform ? `${item.name}（${item.platform}）` : item.name,
+                label: item.platform ? `${item.name}（${platformKeyToDisplay(item.platform) || item.platform}）` : item.name,
                 value: item.id,
               }))}
               onChange={(value) => applyFilter('accountId', value || undefined)}

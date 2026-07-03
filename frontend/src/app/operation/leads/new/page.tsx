@@ -8,7 +8,7 @@ import { apiClient } from '@/shared/api/apiClient';
 import { listAssignableSalesUsers, listSourceAccounts, listSourcePosts, type CatalogOption } from '@/shared/api/catalog';
 import { DraftFormShell, ImageUploadField, clearDraft, saveDraft } from '@/shared/components/forms';
 import { useSubmitLock } from '@/shared/hooks/useSubmitLock';
-import { mapPlatformToKey } from '@/shared/utils/platform-key';
+import { mapPlatformToKey, platformKeyToDisplay } from '@/shared/utils/platform-key';
 
 const DRAFT_KEY = 'operation.leads.new';
 
@@ -234,7 +234,7 @@ export default function OperationLeadNewPage() {
                   optionFilterProp="label"
                   placeholder="选择来源账号"
                   options={accounts.map((item) => ({
-                    label: item.platform ? `${item.name}（${item.platform}）` : item.name,
+                    label: item.platform ? `${item.name}（${platformKeyToDisplay(item.platform) || item.platform}）` : item.name,
                     value: item.id,
                   }))}
                 />

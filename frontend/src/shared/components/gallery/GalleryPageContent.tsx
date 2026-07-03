@@ -367,7 +367,7 @@ export function GalleryPageContent({
             style={{ width: 180 }}
             value={filters.accountId || undefined}
             options={accounts.map((a) => ({
-              label: a.platform ? `${a.name}（${a.platform}）` : a.name,
+              label: a.platform ? `${a.name}（${platformKeyToDisplay(a.platform) || a.platform}）` : a.name,
               value: a.id,
             }))}
             onChange={(value) => applyFilter('accountId', value || undefined)}
