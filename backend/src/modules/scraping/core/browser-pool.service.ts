@@ -207,6 +207,62 @@ export class BrowserPoolService implements OnModuleDestroy {
     }
   }
 
+  /**
+   * 刷新指定平台的登录态并重建上下文。
+   * 流程：关闭现有上下文 → 打开临时浏览器访问首页刷新 cookie → 关闭 → 重新创建正常上下文
+   */
+  async refreshAndRecreateContext(platform: string, accountId?: string): Promise<BrowserContext> {
+    const account = this.safeGetAccount(platform, accountId);
+    const poolKey = this.poolKey(platform, account.id);
+
+    // 1. 关闭现有上下文
+    await this.closeContextByKey(poolKey);
+
+    // 2. 打开临时浏览器刷新 cookie
+    this.logger.log(`[BrowserPool] 刷新 ${poolKey} 登录态...`);
+
+    const isHeadless = platform !== '小红书' && platform !== '抖音';
+    const profileDir = account.profileDir;
+
+    this.clearSingletonLocks(profileDir);
+
+    let tempCtx: BrowserContext | null = null;
+    try {
+      tempCtx = await chromium.launchPersistentContext(profileDir, {
+        headless: isHeadless,
+        viewport: { width: 1440, height: 1100 },
+        args: [
+          ...(isHeadless ? ['--disable-remote-fonts'] : []),
+          ...(platform === '抖音' ? [
+            '--disable-blink-features=AutomationControlled',
+            '--disable-features=IsolateOrigins,site-per-process',
+          ] : []),
+        ],
+        userAgent:
+          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      });
+
+      // 访问首页，触发 cookie 刷新
+      const homeUrl = platform === '抖音' ? 'https://www.douyin.com/' : 'https://www.xiaohongshu.com/';
+      const page = tempCtx.pages()[0] || (await tempCtx.newPage());
+      await page.goto(homeUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
+
+      // 停留几秒模拟真实浏览
+      await page.waitForTimeout(5000 + Math.floor(Math.random() * 3000));
+
+      this.logger.log(`[BrowserPool] ${poolKey} 登录态刷新完成`);
+    } catch (err: any) {
+      this.logger.warn(`[BrowserPool] ${poolKey} 刷新登录态失败: ${err?.message || err}`);
+    } finally {
+      if (tempCtx) {
+        try { await tempCtx.close(); } catch {}
+      }
+    }
+
+    // 3. 重新创建正常上下文
+    return this.acquireContext(platform, accountId);
+  }
+
   private async isHealthy(ctx: BrowserContext): Promise<boolean> {
     try {
       const pages = ctx.pages();

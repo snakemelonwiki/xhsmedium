@@ -102,7 +102,7 @@ async function getPostsToRefresh(conn, minIntervalHours) {
 // ── 更新单个作品的指标 ──────────────────────────────────────────
 async function updatePostMetrics(conn, post, idx, total) {
   const { post_url, id, title } = post;
-  log("INFO", `[${idx + 1}/${total}] 开始刷新: ${id} | ${title?.slice(0, 40) || "无标题"}`);
+  log("INFO", `[${idx + 1}/${total}] 开始刷新: ${id} | ${title?.slice(0, 40) || "无标题"} | ${post_url || "无链接"}`);
 
   try {
     const controller = new AbortController();
@@ -125,7 +125,7 @@ async function updatePostMetrics(conn, post, idx, total) {
 
     if (!response.ok || !payload?.ok) {
       const errMsg = payload?.message || payload?.error?.message || `HTTP ${response.status}`;
-      log("WARN", `[${idx + 1}/${total}] 刷新失败: ${id} — ${errMsg}`);
+      log("WARN", `[${idx + 1}/${total}] 刷新失败: ${id} | ${post_url || "无链接"} — ${errMsg}`);
       return { success: false, id, reason: errMsg };
     }
 
@@ -138,7 +138,7 @@ async function updatePostMetrics(conn, post, idx, total) {
     const sharesVal = Number(d.shares || 0);
 
     if (likesVal === 0 && commentsVal === 0 && favoritesVal === 0 && sharesVal === 0) {
-      log("WARN", `[${idx + 1}/${total}] 抓取结果为空（全 0），跳过更新: ${id}`);
+      log("WARN", `[${idx + 1}/${total}] 抓取结果为空（全 0），跳过更新: ${id} | ${post_url || "无链接"}`);
       return { success: false, id, reason: "抓取结果为空（全 0）" };
     }
 
@@ -148,7 +148,7 @@ async function updatePostMetrics(conn, post, idx, total) {
     const errMsg = err?.name === "AbortError"
       ? `请求超时（>${REQUEST_TIMEOUT_MS}ms）`
       : (err?.message || String(err));
-    log("ERROR", `[${idx + 1}/${total}] 刷新异常: ${id} — ${errMsg}`);
+    log("ERROR", `[${idx + 1}/${total}] 刷新异常: ${id} | ${post_url || "无链接"} — ${errMsg}`);
     return { success: false, id, reason: errMsg };
   }
 }

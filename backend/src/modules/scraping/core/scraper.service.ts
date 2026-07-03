@@ -231,6 +231,7 @@ export class ScraperService {
   ): Promise<ScrapedPostData> {
     const platform = parsed.platform === 'xiaohongshu' ? '小红书' : '抖音';
     let lastErr: Error | null = null;
+    let cookieRefreshed = false;
 
     for (let attempt = 0; attempt <= opts.retry; attempt++) {
       if (attempt > 0) {
@@ -247,6 +248,23 @@ export class ScraperService {
         lastErr = err;
         const cls = this.classifyError(err);
         opts.log(`第 ${attempt + 1} 次失败 [${cls.code}]: ${cls.message}`);
+
+        // 登录墙 → 自动刷新 cookie 后重试（只刷新一次）
+        if (cls.code === 'login_required' && !cookieRefreshed) {
+          cookieRefreshed = true;
+          opts.log(`账号 ${account.id} 登录态失效，尝试自动刷新 cookies...`);
+          try {
+            await this.browserPool.refreshAndRecreateContext(platform, account.id);
+            opts.log(`账号 ${account.id} cookies 刷新完成，继续重试`);
+            // 刷新成功，继续下一轮重试（不增加 attempt，因为刷新本身不是抓取失败）
+            attempt--;
+            continue;
+          } catch (refreshErr: any) {
+            opts.log(`账号 ${account.id} cookies 刷新失败: ${refreshErr?.message || refreshErr}`);
+            // 刷新失败，继续正常重试逻辑
+          }
+        }
+
         if (!cls.retryable || attempt === opts.retry) {
           throw err; // 重试耗尽，抛给外层做账号切换判断
         }
@@ -271,7 +289,21 @@ export class ScraperService {
 
     try {
       try {
-        page = await ctx.newPage();
+        // 优先复用 context 中已有的空白页，避免每次 newPage 都残留一个空标签
+        const existingPages = ctx.pages();
+        if (existingPages.length > 0) {
+          const first = existingPages[0];
+          const url = first.url();
+          if (url === 'about:blank') {
+            page = first;
+          } else {
+            // 关闭旧页面，避免残留标签堆积
+            await first.close().catch(() => {});
+          }
+        }
+        if (!page) {
+          page = await ctx.newPage();
+        }
       } catch (err: any) {
         if (!err?.message?.includes('closed')) throw err;
         this.logger.warn(`[Scraper] ${platform} 上下文在 newPage 时已被关闭，尝试重建`);

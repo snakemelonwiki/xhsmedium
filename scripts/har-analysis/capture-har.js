@@ -17,6 +17,26 @@ const HAR_PATH = path.join(OUTPUT_DIR, "captured-har.json");
 const HTML_PATH = path.join(OUTPUT_DIR, "page-html.html");
 const SCREENSHOT_PATH = path.join(OUTPUT_DIR, "page-screenshot.png");
 
+// ── 平台检测 & Profile 目录 ──────────────────────────────────────
+function detectPlatform(url) {
+  const u = String(url || "");
+  if (u.includes("xiaohongshu.com") || u.includes("xhslink.com")) return "小红书";
+  if (u.includes("douyin.com") || u.includes("iesdouyin.com")) return "抖音";
+  return "小红书";
+}
+
+function getProfileDir(platform) {
+  return path.join(__dirname, "../..", ".playwright-profiles", platform === "抖音" ? "douyin" : "xiaohongshu");
+}
+
+function clearSingletonLocks(profileDir) {
+  for (const name of ["SingletonLock", "SingletonCookie", "SingletonSocket"]) {
+    try {
+      fs.rmSync(path.join(profileDir, name), { force: true, recursive: true });
+    } catch {}
+  }
+}
+
 // 拦截白名单：记录这些响应（其余排除静态资源）
 const RECORD_RESOURCE_TYPES = new Set([
   "document",
@@ -154,10 +174,17 @@ async function main() {
 
   console.log(`[capture-har] 启动浏览器，准备抓取: ${TARGET_URL}`);
 
-  let browser;
+  const platform = detectPlatform(TARGET_URL);
+  const profileDir = getProfileDir(platform);
+  console.log(`[capture-har] 平台: ${platform}, profile 目录: ${profileDir}`);
+
+  clearSingletonLocks(profileDir);
+
+  let context;
   try {
-    browser = await chromium.launch({
+    context = await chromium.launchPersistentContext(profileDir, {
       headless: false,
+      viewport: { width: 1440, height: 1100 },
       args: [
         "--disable-gpu",
         "--no-sandbox",
@@ -165,15 +192,11 @@ async function main() {
         "--disable-web-security",
         "--disable-features=IsolateOrigins,site-per-process",
       ],
-    });
-
-    const context = await browser.newContext({
-      viewport: { width: 1440, height: 1100 },
       userAgent:
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     });
 
-    const page = await context.newPage();
+    const page = context.pages()[0] || (await context.newPage());
 
     // 拦截 websocket/eventsource
     await page.route("**/*", (route) => {
@@ -246,9 +269,9 @@ async function main() {
       console.log(`  - ${type}: ${count}`);
     }
   } finally {
-    if (browser) {
-      await browser.close();
-      console.log("[capture-har] 浏览器已关闭");
+    if (context) {
+      await context.close();
+      console.log("[capture-har] 浏览器上下文已关闭");
     }
   }
 }

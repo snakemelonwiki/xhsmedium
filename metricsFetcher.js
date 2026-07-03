@@ -69,6 +69,45 @@ const BLOCKED_RESOURCE_TYPES = new Set(["stylesheet", "font", "media", "websocke
 // 全局锁保证同一时刻只有一个抓取任务，所以单 context 够用。
 const pooledContexts = new Map(); // platform -> BrowserContext
 
+// ── 并发锁：同一平台串行化抓取，避免多个请求共用 persistent context 时
+//     同时启动浏览器导致 profile 目录锁冲突（Chromium 一个 profile 只能被一个实例独占）
+const platformLocks = new Map(); // platform -> Promise<void>
+const lockAcquires = new Map();  // platform -> Promise<void>
+
+async function withPlatformLock(platform, fn) {
+  // 1. 等待所有正在获取该锁的请求完成
+  while (lockAcquires.has(platform)) {
+    try { await lockAcquires.get(platform); } catch {}
+  }
+
+  // 2. 标记自己正在获取锁
+  let resolveAcquire;
+  const acquirePromise = new Promise((resolve) => { resolveAcquire = resolve; });
+  lockAcquires.set(platform, acquirePromise);
+
+  try {
+    // 3. 再次检查是否有当前锁（等待期间可能被其他请求设置了）
+    while (platformLocks.has(platform)) {
+      try { await platformLocks.get(platform); } catch {}
+    }
+
+    // 4. 获取锁
+    let release;
+    const lock = new Promise((resolve) => { release = resolve; });
+    platformLocks.set(platform, lock);
+
+    try {
+      return await fn();
+    } finally {
+      platformLocks.delete(platform);
+      release();
+    }
+  } finally {
+    lockAcquires.delete(platform);
+    resolveAcquire();
+  }
+}
+
 async function getContext(platform) {
   const existing = pooledContexts.get(platform);
   if (existing) {
@@ -1046,6 +1085,10 @@ async function scrapeXiaohongshu(page, providedNoteId = null, apiDetail = null) 
   const domAuthorName = await readXiaohongshuAuthorNameFromDom(page);
   const domAuthorUrl = await readXiaohongshuAuthorUrlFromDom(page);
   const domAuthorId = extractXiaohongshuUserIdFromProfileUrl(domAuthorUrl);
+
+  // Body 文本兜底（用于登录墙检测和 DOM 文本提取）
+  const fallback = await inferCountsFromBody(page);
+
   const likes = parseCount(apiMetrics?.likes) ?? parseCount(initialState?.likes) ?? parseCount(precise?.likes) ?? await readCountBySelectors(page, [
     ".interactions.engage-bar .interact-container .like-wrapper .count",
     ".engage-bar .interact-container .like-wrapper .count",
@@ -1615,25 +1658,35 @@ async function fetchMetricsFromUrl(url, options = {}) {
     return { ...cached, fromCache: true };
   }
 
-  // 3. 重试：网络/超时类错误重试；登录墙错误（LoginWallError）直接抛
-  const retries = Math.max(0, Number(options.retries ?? 0));
-  const maxAttempts = retries + 1;
-  let lastErr;
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    try {
-      const result = await _fetchMetricsOnce(workingUrl, platform);
-      setCachedResult(cacheKey, result);
-      return result;
-    } catch (err) {
-      lastErr = err;
-      if (err instanceof LoginWallError) throw err;
-      if (attempt < maxAttempts) {
-        console.warn(`[metricsFetcher] 第 ${attempt}/${maxAttempts} 次抓取失败，准备重试: ${err?.message || err}`);
-        await new Promise((r) => setTimeout(r, 500 * attempt));
+  // 3. 在平台锁内执行抓取和重试
+  //    同一平台串行化，避免多个请求同时启动浏览器导致 profile 目录锁冲突
+  return withPlatformLock(platform, async () => {
+    // 双重检查缓存（可能其他任务在等锁时已经写入了）
+    const doubleCheck = getCachedResult(cacheKey);
+    if (doubleCheck) {
+      console.log(`[metricsFetcher] 缓存命中(双重检查): key=${cacheKey}`);
+      return { ...doubleCheck, fromCache: true };
+    }
+
+    const retries = Math.max(0, Number(options.retries ?? 0));
+    const maxAttempts = retries + 1;
+    let lastErr;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const result = await _fetchMetricsOnce(workingUrl, platform);
+        setCachedResult(cacheKey, result);
+        return result;
+      } catch (err) {
+        lastErr = err;
+        if (err instanceof LoginWallError) throw err;
+        if (attempt < maxAttempts) {
+          console.warn(`[metricsFetcher] 第 ${attempt}/${maxAttempts} 次抓取失败，准备重试: ${err?.message || err}`);
+          await new Promise((r) => setTimeout(r, 500 * attempt));
+        }
       }
     }
-  }
-  throw lastErr;
+    throw lastErr;
+  });
 }
 
 async function _fetchMetricsOnce(targetUrl, platform) {
