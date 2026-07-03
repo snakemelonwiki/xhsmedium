@@ -18,6 +18,7 @@ const EARLY_WARNING_MS = EARLY_WARNING_DAYS * 24 * 3600 * 1000;
 /** 扫描单轮上限 */
 const SCAN_BATCH = 200;
 const FIXED_REMIND_HOURS = [10, 15, 18] as const;
+type ReminderListMode = 'future' | 'today';
 
 /**
  * 节点提醒扫描器：
@@ -242,21 +243,34 @@ export class RemindersService {
    */
   async listPending(
     userId: string,
-    opts: { upcomingHours?: number; limit?: number } = {},
+    opts: { upcomingHours?: number; limit?: number; mode?: ReminderListMode } = {},
   ): Promise<any[]> {
     if (!userId) return [];
+    const mode: ReminderListMode = opts.mode === 'today' ? 'today' : 'future';
     const upcomingHours = Math.max(0, Math.min(opts.upcomingHours ?? 168, 24 * 14));
     const limit = Math.max(1, Math.min(opts.limit ?? 100, 500));
     const horizon = new Date(Date.now() + upcomingHours * 3600 * 1000);
-    // 未启用提前预警的老记录只看 24h；启用提前预警的才看完整 7 天窗口
+    const tomorrowStart = new Date();
+    tomorrowStart.setHours(24, 0, 0, 0);
+    // 未启用提前预警的老记录只看 24h；启用提前预警的才看完整 7 天窗口。
     const dayHorizon = new Date(Date.now() + 24 * 3600 * 1000);
 
-    const rows = await this.followRepo
+    const qb = this.followRepo
       .createQueryBuilder('fr')
       .leftJoin(Order, 'o', 'o.id = fr.order_id')
-      .where('fr.next_remind_at IS NOT NULL')
-      .andWhere('fr.next_remind_at <= :horizon', { horizon })
-      .andWhere('(fr.enable_early_warning = true OR fr.next_remind_at <= :dayHorizon)', { dayHorizon })
+      .where('fr.next_remind_at IS NOT NULL');
+
+    if (mode === 'today') {
+      // 今日待提醒：今天及以前未确认的提醒一直保留，直到用户点击处理。
+      qb.andWhere('fr.next_remind_at < :tomorrowStart', { tomorrowStart });
+    } else {
+      // 节点提醒：只做未来记事簿，不展示今天或已过期的任务。
+      qb.andWhere('fr.next_remind_at >= :tomorrowStart', { tomorrowStart });
+      qb.andWhere('fr.next_remind_at <= :horizon', { horizon });
+      qb.andWhere('(fr.enable_early_warning = true OR fr.next_remind_at <= :dayHorizon)', { dayHorizon });
+    }
+
+    const rows = await qb
       .andWhere('(fr.user_id = :uid OR o.academic_user_id = :uid)', { uid: userId })
       .orderBy('fr.next_remind_at', 'ASC')
       .limit(limit)

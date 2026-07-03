@@ -263,6 +263,13 @@ export const APP_MENU_ITEMS: AppMenuItem[] = [
     roles: ACADEMIC_ROLE_SCOPE,
   },
   {
+    key: 'academic-today-reminders',
+    label: '今日待提醒',
+    path: '/academic/today-reminders',
+    icon: <ScheduleOutlined />,
+    roles: ACADEMIC_ROLE_SCOPE,
+  },
+  {
     key: 'academic-reminders',
     label: '节点提醒',
     path: '/academic/reminders',

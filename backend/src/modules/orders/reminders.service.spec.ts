@@ -60,6 +60,66 @@ describe('RemindersService', () => {
 
     expect(andWhere).not.toHaveBeenCalledWith('fr.reminder_sent_at IS NULL');
   });
+  it('节点提醒只查询明天起未来窗口内的提醒', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-07-03T09:00:00+08:00'));
+    const andWhere = jest.fn().mockReturnThis();
+    const followRepo = {
+      createQueryBuilder: jest.fn(() => ({
+        leftJoin: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere,
+        orderBy: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([]),
+      })),
+    } as any;
+    const service = new RemindersService(
+      followRepo,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+
+    await service.listPending('user-1', { mode: 'future', upcomingHours: 168 });
+
+    expect(andWhere).toHaveBeenCalledWith('fr.next_remind_at >= :tomorrowStart', expect.any(Object));
+    expect(andWhere).toHaveBeenCalledWith('fr.next_remind_at <= :horizon', expect.any(Object));
+    jest.useRealTimers();
+  });
+
+  it('今日待提醒查询今天及以前未确认的提醒', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-07-03T09:00:00+08:00'));
+    const andWhere = jest.fn().mockReturnThis();
+    const followRepo = {
+      createQueryBuilder: jest.fn(() => ({
+        leftJoin: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere,
+        orderBy: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([]),
+      })),
+    } as any;
+    const service = new RemindersService(
+      followRepo,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+
+    await service.listPending('user-1', { mode: 'today', limit: 100 });
+
+    expect(andWhere).toHaveBeenCalledWith('fr.next_remind_at < :tomorrowStart', expect.any(Object));
+    expect(andWhere).not.toHaveBeenCalledWith(
+      '(fr.enable_early_warning = true OR fr.next_remind_at <= :dayHorizon)',
+      expect.any(Object),
+    );
+    jest.useRealTimers();
+  });
 
   it('点击已提醒后清空下次提醒时间以移出当前列表', async () => {
     const followRepo = {

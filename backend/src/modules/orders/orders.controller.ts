@@ -293,6 +293,7 @@ export class OrdersController {
     @Res() res: Response,
     @Query('upcomingHours') upcomingHours?: string,
     @Query('limit') limit?: string,
+    @Query('mode') mode?: string,
   ) {
     const session = (req as any).session;
     const userId = getSessionUserId(req) || '';
@@ -302,6 +303,7 @@ export class OrdersController {
     const items = await this.remindersService.listPending(userId, {
       upcomingHours: upcomingHours !== undefined ? Number(upcomingHours) : undefined,
       limit: limit !== undefined ? Number(limit) : undefined,
+      mode: mode === 'today' ? 'today' : 'future',
     });
     return res.json({ items, total: items.length });
   }
