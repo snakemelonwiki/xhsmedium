@@ -26,7 +26,7 @@ class SimpleCache {
     private readonly maxSize = 1000,
   ) {}
 
-  private getCacheKey(url: string, account?: string): string {
+  getCacheKey(url: string, account?: string): string {
     return account ? `${url}::${account}` : url;
   }
 
@@ -138,6 +138,11 @@ export class ParserService {
     Number(process.env.PARSER_CACHE_TTL_MS || 30000),
     2000,
   );
+  /**
+   * In-flight Promise 去重：同一 URL+account 正在抓取时，后续并发请求复用该 Promise，
+   * 避免穿透 resultCache 瞬间填满抓取队列。
+   */
+  private readonly inflight = new Map<string, Promise<ParserResult>>();
 
   constructor(
     private readonly lockService: ScrapingLockService,
@@ -162,36 +167,51 @@ export class ParserService {
       return cached;
     }
 
-    const result = await this.lockService.run(() =>
-      this.scraperService.scrape(url, { retry, timeout, log, account: opts.account, autoSwitch: false }),
-    );
-
-    // 写入缓存：只缓存成功结果和不可重试的失败结果（如笔记已删除），
-    // 可重试的失败结果（如网络超时、登录墙）不缓存，让下次请求重新尝试。
-    const parserResult = result as ParserResult;
-    if (!isScrapingFailure(result)) {
-      this.resultCache.set(url, parserResult, opts.account);
-    } else if (!result.error.retryable) {
-      this.resultCache.set(url, parserResult, opts.account);
+    // P0 修复：in-flight Promise 去重，避免并发请求同一 URL 穿透缓存瞬间填满队列
+    const cacheKey = this.resultCache.getCacheKey(url, opts.account);
+    const existing = this.inflight.get(cacheKey);
+    if (existing) {
+      this.logger.debug(`[Parser] 复用进行中的请求: ${url.slice(0, 80)}`);
+      return existing;
     }
 
-    if (isScrapingFailure(result)) {
-      const platform = result.error.platform || null;
-      await this.alertService.recordFailure({
-        platform,
-        source,
-        errorCode: result.error.code || null,
-        errorMessage: result.error.message || null,
-        postId: opts.postId || null,
-        postUrl: url,
-        context: { retry, timeout, retryable: result.error.retryable, account: opts.account },
-      }).catch((err) => this.logger.warn(`recordFailure swallow: ${(err as any)?.message || err}`));
-    } else {
-      this.alertService.recordSuccess(result.data?.platform || null, source)
-        .catch((err) => this.logger.warn(`recordSuccess swallow: ${(err as any)?.message || err}`));
-    }
+    const promise = (async (): Promise<ParserResult> => {
+      const result = await this.lockService.run(() =>
+        this.scraperService.scrape(url, { retry, timeout, log, account: opts.account, autoSwitch: false }),
+      );
 
-    return parserResult;
+      // 写入缓存：只缓存成功结果；失败结果（无论是否可重试）一律不缓存，
+      // 让下次请求重新尝试，避免风控/临时错误被长期缓存。
+      const parserResult = result as ParserResult;
+      if (!isScrapingFailure(result)) {
+        this.resultCache.set(url, parserResult, opts.account);
+      }
+
+      if (isScrapingFailure(result)) {
+        const platform = result.error.platform || null;
+        await this.alertService.recordFailure({
+          platform,
+          source,
+          errorCode: result.error.code || null,
+          errorMessage: result.error.message || null,
+          postId: opts.postId || null,
+          postUrl: url,
+          context: { retry, timeout, retryable: result.error.retryable, account: opts.account },
+        }).catch((err) => this.logger.warn(`recordFailure swallow: ${(err as any)?.message || err}`));
+      } else {
+        this.alertService.recordSuccess(result.data?.platform || null, source)
+          .catch((err) => this.logger.warn(`recordSuccess swallow: ${(err as any)?.message || err}`));
+      }
+
+      return parserResult;
+    })();
+
+    this.inflight.set(cacheKey, promise);
+    promise.finally(() => {
+      this.inflight.delete(cacheKey);
+    }).catch(() => {});
+
+    return promise;
   }
 
   /**

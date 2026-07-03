@@ -274,7 +274,17 @@ export default function OperationPostNewPage() {
         );
       } else if (data?.warning) {
         hideLoading();
-        message.warning(`已识别平台，但未抓取到指标：${data.warning}`);
+        const platformKey = mapPlatformToKey(data?.platform);
+        const isXhsRetryable =
+          platformKey === 'xiaohongshu' &&
+          (data.warning?.includes('失效') || data.warning?.includes('404') || data.warning?.includes('访问受限'));
+        if (isXhsRetryable) {
+          message.warning(
+            '小红书链接解析出现偶发性受限，请稍等 10~30 秒后重试。若持续失败，可能是笔记已被删除或账号需要重新登录。',
+          );
+        } else {
+          message.warning(`已识别平台，但未抓取到指标：${data.warning}`);
+        }
       } else {
         hideLoading();
         message.success('已根据链接回填平台和标题');
@@ -561,6 +571,11 @@ export default function OperationPostNewPage() {
                         https://v.douyin.com/ghF491o8e6w/
                       </Typography.Text>
                       <Typography.Text type="secondary">（移动端链接可能含 <code>hbn:/ 04/28 ...</code> 等短链片段，取 https:// 开头至第一个空格的 URL）</Typography.Text>
+                    </div>
+                    <div style={{ marginTop: 4, color: '#faad14' }}>
+                      <Typography.Text type="warning" style={{ fontSize: 11 }}>
+                        小红书链接偶发访问受限，如遇"笔记失效"提示，请等待 10~30 秒后重试。短链接（xhslink.com）请确保完整复制。
+                      </Typography.Text>
                     </div>
                   </div>
                 }

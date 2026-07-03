@@ -1,4 +1,4 @@
-import { Injectable, Optional } from '@nestjs/common';
+import { Injectable, Optional, ServiceUnavailableException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Post } from '../../entities/post.entity';
@@ -402,10 +402,15 @@ export class PostsService {
         parsed: true,
       };
     } catch (err: any) {
-      // 抓取失败时降级返回基础识别 + 警告，前端不抛错
+      // P0 修复：队列满时直接抛错，阻止前端保存 0 指标的错误数据
+      const message = String(err?.message || err);
+      if (message.includes('队列已满') || message.includes('SCRAPING_QUEUE_FULL')) {
+        throw new ServiceUnavailableException('抓取服务繁忙，请稍后重试');
+      }
+      // 其他抓取失败时降级返回基础识别 + 警告，前端不抛错
       return {
         ...fallback,
-        warning: err?.message || '链接抓取失败',
+        warning: message || '链接抓取失败',
       };
     }
   }

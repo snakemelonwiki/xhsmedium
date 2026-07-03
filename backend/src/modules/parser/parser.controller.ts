@@ -20,9 +20,9 @@ const HTTP_CODE_FOR_CODE: Record<string, number> = {
   login_required: 401,
   playwright_missing: 500,
   uncaught: 500,
-  transient: 502,
+  transient: 503,
   unknown: 500,
-  exhausted: 502,
+  exhausted: 503,
 };
 
 /**
@@ -61,7 +61,27 @@ export class ParserController {
       account: body?.account, // 新增：指定抓取账号
     };
 
-    const result = await this.parserService.parse(url, opts);
+    // P0 修复：队列满/锁超时等 ServiceUnavailableException 透传 503，
+    // 让前端提示"请稍后重试"，阻止保存 0 指标
+    let result;
+    try {
+      result = await this.parserService.parse(url, opts);
+    } catch (err: any) {
+      if (err?.status === 503 || err?.response?.code === 'SCRAPING_QUEUE_FULL') {
+        return res.status(503).json({
+          ok: false,
+          code: 'SCRAPING_QUEUE_FULL',
+          message: err?.message || '抓取服务繁忙，请稍后重试',
+          retryAfterMs: 5000,
+        });
+      }
+      this.logger.warn(`parse fatal: ${err?.message || err}`);
+      return res.status(500).json({
+        ok: false,
+        error: { code: 'uncaught', message: err?.message || String(err), platform: '' },
+      });
+    }
+
     if (isParserFailure(result)) {
       const status = HTTP_CODE_FOR_CODE[result.error.code] ?? 500;
       this.logger.warn(

@@ -215,7 +215,8 @@ export class XiaohongshuExtractor {
     const user = note.user || {};
 
     return {
-      title: String(note.title || note.display_title || note.desc || '').trim(),
+      title: String(note.title || note.display_title || '').trim(),
+      copywriting: String(note.desc || '').trim() || undefined,
       authorName: String(user.nickname || '').trim() || undefined,
       authorId: String(user.user_id || user.userId || '').trim() || undefined,
       likes: this.parseCount(interact.liked_count ?? interact.likedCount),
@@ -250,13 +251,15 @@ export class XiaohongshuExtractor {
     if (typeof value === 'number' && Number.isFinite(value)) return value;
     const text = String(value).trim().toLowerCase().replace(/,/g, '');
     if (!text) return 0;
-    const match = text.match(/(\d+(?:\.\d+)?)\s*([wk万千]?)/);
+    const match = text.match(/(\d+(?:\.\d+)?)\s*([wk万千亿m]?)/);
     if (!match) return Number(text) || 0;
     const amount = Number(match[1]);
     const unit = match[2].trim();
     if (Number.isNaN(amount)) return 0;
     if (unit === 'w' || unit === '万') return Math.round(amount * 10000);
     if (unit === 'k' || unit === '千') return Math.round(amount * 1000);
+    if (unit === 'm' || unit === '百万') return Math.round(amount * 1000000);
+    if (unit === '亿') return Math.round(amount * 100000000);
     return Math.round(amount);
   }
 

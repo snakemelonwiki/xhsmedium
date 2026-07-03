@@ -301,7 +301,6 @@ export class ScraperService {
           /\/aweme\/v1\/web\/aweme\/post\//i,
           /\/aweme\/v1\/web\/aweme\/related\//i,
           /\/aweme\/v2\/web\/aweme\/stats\//i,
-          /RENDER_DATA/i,
         ],
         excludeResourceTypes: new Set([
           'image',
@@ -335,7 +334,15 @@ export class ScraperService {
       // ── 小红书失效作品：跳转到 /404 错误页（query 携带 errorCode，如 -510000）──
       // 该跳转不会被 resolveParsedAfterNavigation 的 mismatch 捕获（/404 解析出的 postId 为 null），
       // 且 404 页无 "笔记不存在" 等文案，故需专门按 URL 判定，避免把死链录成空标题 0 指标的正常笔记。
+      //
+      // 注意：error_code=300031 是风控/速率限制导致的临时 404，并非真正删除，应重试。
       if (platform === '小红书' && this.isXiaohongshu404Url(finalUrl)) {
+        const errorCode = this.extractXhsErrorCode(finalUrl);
+        // 300031 = "当前笔记暂时无法浏览"，是风控/临时限制，应重试
+        if (errorCode === '300031') {
+          this.logger.warn(`[Scraper] 小红书笔记被临时限制访问（errorCode=300031），将重试: requested=${parsed.normalizedUrl}`);
+          throw new Error('小红书笔记访问受限，请稍后重试（errorCode=300031）');
+        }
         this.logger.warn(`[Scraper] 小红书笔记已失效（跳转到 404 页）: requested=${parsed.normalizedUrl}, final=${finalUrl}`);
         throw new Error('小红书笔记已失效，可能已被删除、隐藏或下架（页面跳转至 404）');
       }
@@ -362,6 +369,15 @@ export class ScraperService {
         throw new Error(
           `当前打开的是${platform}登录页/登录弹窗，请先在"链接测试"里点"打开${platform}登录浏览器"完成一次登录。`,
         );
+      }
+
+      // ── 小红书页面异常检测（mcp 借鉴：笔记已删除/隐藏/违规/私密等）──
+      if (platform === '小红书') {
+        const xhsError = this.checkXiaohongshuPageError(bodyTextRaw, pageTitle);
+        if (xhsError) {
+          this.logger.warn(`[Scraper] ${platform} 页面异常: ${xhsError}: url=${parsed.normalizedUrl}, postId=${parsed.postId || 'null'}`);
+          throw new Error(xhsError);
+        }
       }
 
       // ── 小红书笔记删除/失效检测 ──
@@ -476,7 +492,8 @@ export class ScraperService {
           const user = note.user || {};
           const out: any = {
             noteId: getNoteId(note) || undefined,
-            title: String(note.title || note.display_title || note.desc || '').trim(),
+            title: String(note.title || note.display_title || '').trim(),
+            copywriting: String(note.desc || '').trim() || undefined,
             authorName: String(user.nickname || '').trim() || undefined,
             authorId: String(user.user_id || user.userId || '').trim() || undefined,
             likes: Number(interact.liked_count ?? interact.likedCount ?? 0),
@@ -759,6 +776,23 @@ export class ScraperService {
         });
       }).catch(() => {});
     }
+
+    // 5) 小红书：使用 WheelEvent 触发虚拟滚动懒加载（mcp 借鉴）
+    if (platform === '小红书') {
+      await page.evaluate(() => {
+        const target = document.querySelector('.note-scroller')
+          || document.querySelector('.interaction-container')
+          || document.documentElement;
+        const wheelEvent = new WheelEvent('wheel', {
+          deltaY: 300,
+          deltaMode: 0,
+          bubbles: true,
+          cancelable: true,
+          view: window,
+        });
+        target.dispatchEvent(wheelEvent);
+      }).catch(() => {});
+    }
   }
 
   // ── 登录墙检测 ──
@@ -857,8 +891,51 @@ export class ScraperService {
   }
 
   /**
-   * 检测小红书笔记是否已被删除/隐藏/下架。
+   * 从小红书 404 URL 的 query 参数中提取 errorCode。
+   * 常见 code: 300031 = "当前笔记暂时无法浏览"（风控/速率限制，非真正删除，应重试）
    */
+  private extractXhsErrorCode(url: string): string | null {
+    try {
+      const u = new URL(url);
+      return u.searchParams.get('error_code') || u.searchParams.get('errorCode') || null;
+    } catch {
+      // fallback: 正则提取
+      const match = url.match(/[?&](?:error[_-]?)code=(\d+)/i);
+      return match ? match[1] : null;
+    }
+  }
+
+  /**
+   * 小红书综合页面异常检测：笔记已删除/隐藏/违规/私密等。
+   * 覆盖 mcp 项目中定义的 10+ 种异常状态。
+   */
+  private checkXiaohongshuPageError(bodyText: string, pageTitle: string): string | null {
+    const text = String(bodyText || '').trim();
+    const title = String(pageTitle || '').trim();
+
+    const ERROR_KEYWORDS: { patterns: string[]; message: string }[] = [
+      { patterns: ['笔记暂时无法浏览', '该笔记暂时无法浏览'], message: '小红书笔记暂时无法浏览' },
+      { patterns: ['该内容因违规已被删除', '内容因违规已被删除'], message: '小红书笔记因违规已被删除' },
+      { patterns: ['该笔记已被删除', '笔记已被删除'], message: '小红书笔记已被删除' },
+      { patterns: ['内容不存在', '笔记不存在'], message: '小红书笔记不存在' },
+      { patterns: ['笔记已失效', '已失效'], message: '小红书笔记已失效' },
+      { patterns: ['私密笔记', '仅作者可见'], message: '小红书笔记为私密笔记' },
+      { patterns: ['因用户设置，你无法查看'], message: '小红书笔记因用户设置无法查看' },
+      { patterns: ['因违规无法查看', '该内容因违规无法查看'], message: '小红书笔记因违规无法查看' },
+      { patterns: ['内容已下架', '该内容已下架'], message: '小红书笔记已下架' },
+      { patterns: ['内容审核中', '笔记审核中'], message: '小红书笔记审核中' },
+      { patterns: ['账号已被封禁', '该账号已被封禁'], message: '小红书笔记作者账号已被封禁' },
+      { patterns: ['账号已注销', '该账号已注销'], message: '小红书笔记作者账号已注销' },
+    ];
+
+    for (const { patterns, message } of ERROR_KEYWORDS) {
+      if (patterns.some((p) => text.includes(p))) {
+        return message;
+      }
+    }
+
+    return null;
+  }
   private isXiaohongshuNoteDeleted(bodyText: string, pageTitle: string): boolean {
     const text = String(bodyText || '').trim();
     const title = String(pageTitle || '').trim();
@@ -979,6 +1056,8 @@ export class ScraperService {
       /TimeoutError/i,
       /Navigation timeout/i,
       /抓取失败/,
+      /errorCode=300031/i,         // 小红书风控/速率限制临时 404
+      /访问受限/,
     ];
 
     const LOGIN_WALL_PATTERNS = [/登录页/, /登录后/, /未登录/, /login_required/i];

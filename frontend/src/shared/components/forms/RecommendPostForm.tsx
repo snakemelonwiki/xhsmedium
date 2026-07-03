@@ -231,7 +231,17 @@ export function RecommendPostForm({
         message.success(data.coverImageUrl ? '已根据链接回填标题、指标与封面' : '已根据链接回填标题与指标');
       } else if (data?.warning) {
         hideLoading();
-        message.warning(`已识别平台，但未抓取到指标：${data.warning}`);
+        const platformKey = mapPlatformToKey(data?.platform);
+        const isXhsRetryable =
+          platformKey === 'xiaohongshu' &&
+          (data.warning?.includes('失效') || data.warning?.includes('404') || data.warning?.includes('访问受限'));
+        if (isXhsRetryable) {
+          message.warning(
+            '小红书链接解析出现偶发性受限，请稍等 10~30 秒后重试。若持续失败，可能是笔记已被删除或账号需要重新登录。',
+          );
+        } else {
+          message.warning(`已识别平台，但未抓取到指标：${data.warning}`);
+        }
       } else {
         hideLoading();
         message.success('已根据链接回填平台和标题');
@@ -374,6 +384,11 @@ export function RecommendPostForm({
                     <Typography.Text type="secondary">抖音 移动端：</Typography.Text>
                     <Typography.Text code style={{ wordBreak: 'break-all' }}>
                       https://v.douyin.com/ghF491o8e6w/
+                    </Typography.Text>
+                  </div>
+                  <div style={{ marginTop: 4, color: '#faad14' }}>
+                    <Typography.Text type="warning" style={{ fontSize: 11 }}>
+                      小红书链接偶发访问受限，如遇"笔记失效"提示，请等待 10~30 秒后重试。短链接（xhslink.com）请确保完整复制。
                     </Typography.Text>
                   </div>
                 </div>

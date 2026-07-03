@@ -167,6 +167,15 @@ export class PostsController {
       const data = await this.postsService.parsePostLink(postUrl, { fetch: body?.fetch !== false, account: body?.account });
       return res.json({ ok: true, data });
     } catch (err: any) {
+      // P0 修复：队列满时透传 503，让前端提示"请稍后重试"，阻止保存 0 指标
+      if (err?.status === 503 || err?.response?.code === 'SCRAPING_QUEUE_FULL') {
+        return res.status(503).json({
+          ok: false,
+          code: 'SCRAPING_QUEUE_FULL',
+          message: '抓取服务繁忙，请稍后重试',
+          retryAfter: 5,
+        });
+      }
       // eslint-disable-next-line no-console
       console.warn(`[posts] parse-link fatal: ${err?.message || err}`);
       return res.json({
