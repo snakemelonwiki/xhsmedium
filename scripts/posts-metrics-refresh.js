@@ -12,7 +12,9 @@
  *   - 单线程逐个刷新，间隔 5-15s 随机
  *   - 每 5 个作品后休息 60-120s
  *   - 仅刷新有 post_url 的作品
- *   - 失败作品自动重试 1 次
+ *   - 后端抓取内部已自带 2 次指数退避重试，脚本层不再额外重试
+ *   - 优先刷新指标全为 0 的作品，其次按更新时间升序（最久未更新优先）
+ *   - 每轮最多刷新 MAX_POSTS_PER_BATCH 条，防止数据量过大时耗时过长
  *
  * 数据库：直接连接 MySQL（复用 .env 配置）
  * 抓取：调用后端 /api/posts/:id/internal-refresh-metrics（内部端点，仅本机可访问），复用新版解析逻辑
@@ -28,6 +30,10 @@ const PID_FILE = path.join(PROJECT_ROOT, ".playwright-profiles", "posts-refresh.
 const DEFAULT_MIN_INTERVAL_HOURS = 48; // 2 天
 const BACKEND_URL = String(process.env.BACKEND_URL || "http://127.0.0.1:8089").replace(/\/+$/, "");
 const REQUEST_TIMEOUT_MS = Number(process.env.POSTS_REFRESH_TIMEOUT_MS || 30000);
+// 日志文件大小上限（bytes），超过则自动轮转
+const LOG_MAX_SIZE = Number(process.env.LOG_MAX_SIZE || 10 * 1024 * 1024); // 默认 10MB
+// 每轮最大刷新条数，防止数据量过大时一轮耗时过长
+const MAX_POSTS_PER_BATCH = Number(process.env.MAX_POSTS_PER_BATCH || 500);
 
 // ── 随机数工具 ────────────────────────────────────────────────────
 function randomInt(min, max) {
@@ -39,11 +45,26 @@ function randomDelay(minMs, maxMs) {
 }
 
 // ── 日志 ──────────────────────────────────────────────────────────
+function rotateLogIfNeeded() {
+  try {
+    if (fs.existsSync(LOG_FILE)) {
+      const stats = fs.statSync(LOG_FILE);
+      if (stats.size > LOG_MAX_SIZE) {
+        const rotated = `${LOG_FILE}.${Date.now()}.old`;
+        fs.renameSync(LOG_FILE, rotated);
+      }
+    }
+  } catch {
+    // 轮转失败不影响主流程
+  }
+}
+
 function log(level, message) {
   const timestamp = new Date().toISOString();
   const line = `[${timestamp}] [${level}] ${message}`;
   console.log(line);
   try {
+    rotateLogIfNeeded();
     fs.appendFileSync(LOG_FILE, line + "\n");
   } catch {}
 }
@@ -70,37 +91,47 @@ function loadEnv() {
 }
 
 // ── MySQL 连接 ────────────────────────────────────────────────────
-async function getDbConnection(env) {
-  return mysql.createConnection({
+async function getDbPool(env) {
+  return mysql.createPool({
     host: env.MYSQL_HOST || "localhost",
     port: Number(env.MYSQL_PORT || 3306),
     user: env.MYSQL_USER || "root",
     password: env.MYSQL_PASSWORD || "",
     database: env.MYSQL_DATABASE || "lan_dual_role_system",
+    waitForConnections: true,
+    connectionLimit: 2, // 仅后台刷新脚本用，不需要太多连接
+    queueLimit: 0,
   });
 }
 
 // ── 查询需要刷新的作品 ────────────────────────────────────────────
-async function getPostsToRefresh(conn, minIntervalHours) {
+async function getPostsToRefresh(pool, minIntervalHours, maxPosts = 500) {
   const cutoff = new Date(Date.now() - minIntervalHours * 60 * 60 * 1000);
   const cutoffStr = cutoff.toISOString().slice(0, 19).replace("T", " ");
 
-  const [rows] = await conn.execute(
+  const [rows] = await pool.execute(
     `
     SELECT id, post_url, title, metrics_updated_at, platform
     FROM posts
     WHERE post_url IS NOT NULL
       AND post_url != ''
       AND (metrics_updated_at IS NULL OR metrics_updated_at < ?)
-    ORDER BY RAND()
+    ORDER BY
+      -- 优先刷新指标全部为 0 的帖子（从未抓取到有效数据或已失效）
+      (likes = 0 AND comments = 0 AND favorites = 0 AND shares = 0) DESC,
+      -- 然后按更新时间升序（最久未更新的优先）
+      metrics_updated_at ASC,
+      -- 最后以 ID 兜底，避免 NULL 导致非确定性排序
+      id ASC
+    LIMIT ?
     `,
-    [cutoffStr]
+    [cutoffStr, maxPosts]
   );
   return rows;
 }
 
 // ── 更新单个作品的指标 ──────────────────────────────────────────
-async function updatePostMetrics(conn, post, idx, total) {
+async function updatePostMetrics(post, idx, total) {
   const { post_url, id, title } = post;
   log("INFO", `[${idx + 1}/${total}] 开始刷新: ${id} | ${title?.slice(0, 40) || "无标题"} | ${post_url || "无链接"}`);
 
@@ -186,9 +217,9 @@ async function refreshAll() {
   }
 
   const env = loadEnv();
-  let conn;
+  let pool;
   try {
-    conn = await getDbConnection(env);
+    pool = await getDbPool(env);
   } catch (err) {
     log("ERROR", `数据库连接失败: ${err?.message || err}`);
     return { total: 0, success: 0, failed: 0 };
@@ -196,17 +227,17 @@ async function refreshAll() {
 
   let posts;
   try {
-    posts = await getPostsToRefresh(conn, DEFAULT_MIN_INTERVAL_HOURS);
+    posts = await getPostsToRefresh(pool, DEFAULT_MIN_INTERVAL_HOURS, MAX_POSTS_PER_BATCH);
   } catch (err) {
     log("ERROR", `查询作品失败: ${err?.message || err}`);
-    await conn.end();
+    await pool.end();
     return { total: 0, success: 0, failed: 0 };
   }
 
   log("INFO", `需要刷新的作品数: ${posts.length}`);
   if (posts.length === 0) {
     log("INFO", "没有需要刷新的作品，本轮结束");
-    await conn.end();
+    await pool.end();
     return { total: 0, success: 0, failed: 0 };
   }
 
@@ -215,7 +246,7 @@ async function refreshAll() {
   let failCount = 0;
 
   for (let i = 0; i < posts.length; i++) {
-    const result = await updatePostMetrics(conn, posts[i], i, posts.length);
+    const result = await updatePostMetrics(posts[i], i, posts.length);
     results.push(result);
     if (result.success) successCount++;
     else failCount++;
@@ -232,7 +263,7 @@ async function refreshAll() {
     }
   }
 
-  await conn.end();
+  await pool.end();
   log("INFO", `=== 刷新完成: 成功 ${successCount}/${posts.length}，失败 ${failCount} ===`);
   return { total: posts.length, success: successCount, failed: failCount };
 }
