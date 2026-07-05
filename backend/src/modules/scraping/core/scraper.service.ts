@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Page } from 'playwright';
+import { Mutex } from 'async-mutex';
 import * as fs from 'fs';
+import { promises as fsPromises } from 'fs';
 import * as path from 'path';
 import { resolveRepoRoot } from '../../../shared/utils/project-paths';
 import { BrowserPoolService } from './browser-pool.service';
@@ -49,7 +51,10 @@ export class ScraperService {
   private readonly xhsExtractor = new XiaohongshuExtractor();
   private readonly douyinExtractor = new DouyinExtractor();
   /** 按平台串行化抓取，避免多个请求共享同一个 persistent context 导致 newPage 时上下文被关闭。 */
-  private readonly platformLocks = new Map<string, Promise<void>>();
+  private readonly platformLocks = new Map<string, Mutex>();
+
+  /** 锁超时时间（ms），防止 Playwright 操作挂起导致锁永久阻塞 */
+  private readonly LOCK_TIMEOUT_MS = 60000;
 
   constructor(
     private readonly browserPool: BrowserPoolService,
@@ -168,57 +173,28 @@ export class ScraperService {
    * 按平台串行锁：保证同一平台同时只有一个抓取任务在执行，
    * 避免多个请求共享 persistent context 时被互相关闭。
    *
-   * 实现：使用双重 Map 序列化获取锁（非并行获取）。
-   *   - lockAcquires: 存储正在获取锁的请求，先到的先拿
-   *   - platformLocks: 存储当前持有锁的 Promise
-   * 先等 lockAcquires 清空，再等 platformLocks 清空，最后拿到锁。
+   * 使用 async-mutex 的 Mutex，自动保证互斥且按 FIFO 排队。
+   * 同时添加超时保护（LOCK_TIMEOUT_MS），防止 Playwright 操作挂起导致锁永久阻塞。
    */
-  private readonly lockAcquires = new Map<string, Promise<void>>();
-
   private async withPlatformLock<T>(platform: string, fn: () => Promise<T>): Promise<T> {
-    // 1. 等待所有正在获取该锁的请求完成
-    while (this.lockAcquires.has(platform)) {
-      try {
-        await this.lockAcquires.get(platform)!;
-      } catch {
-        // 前一个任务失败也不影响当前任务
-      }
+    let mutex = this.platformLocks.get(platform);
+    if (!mutex) {
+      mutex = new Mutex();
+      this.platformLocks.set(platform, mutex);
     }
 
-    // 2. 标记自己正在获取锁
-    let resolveAcquire: () => void;
-    const acquirePromise = new Promise<void>((resolve) => {
-      resolveAcquire = resolve;
+    // 使用 withTimeout 防止锁永久阻塞
+    return mutex.runExclusive(async () => {
+      // 设置一个全局超时（race 条件：fn 先完成或超时 reject）
+      return Promise.race([
+        fn(),
+        new Promise<never>((_, reject) => {
+          setTimeout(() => {
+            reject(new Error(`平台 ${platform} 抓取锁超时（${this.LOCK_TIMEOUT_MS}ms），Playwright 操作可能已挂起`));
+          }, this.LOCK_TIMEOUT_MS);
+        }),
+      ]);
     });
-    this.lockAcquires.set(platform, acquirePromise);
-
-    try {
-      // 3. 再次检查是否有当前锁（等待期间可能被其他请求设置了）
-      while (this.platformLocks.has(platform)) {
-        try {
-          await this.platformLocks.get(platform)!;
-        } catch {
-          // 忽略前一个任务的失败
-        }
-      }
-
-      // 4. 获取锁
-      let release: () => void;
-      const lock = new Promise<void>((resolve) => {
-        release = resolve;
-      });
-      this.platformLocks.set(platform, lock);
-
-      try {
-        return await fn();
-      } finally {
-        this.platformLocks.delete(platform);
-        release!();
-      }
-    } finally {
-      this.lockAcquires.delete(platform);
-      resolveAcquire!();
-    }
   }
 
   /**
@@ -285,6 +261,8 @@ export class ScraperService {
     const platform = parsed.platform === 'xiaohongshu' ? '小红书' : '抖音';
     let ctx = await this.browserPool.acquireContext(platform, account.id);
     let page: Page | null = null;
+    let harListener: HarListener | null = null;
+    let har: HarSnapshot | null = null;
     const t0 = Date.now();
 
     try {
@@ -325,7 +303,7 @@ export class ScraperService {
       }
 
       // ── 挂载 HAR 监听器 ──
-      const harListener = new HarListener(page, {
+      harListener = new HarListener(page, {
         urlFilter: [
           /\/api\/sns\/web\/v[12]\/feed/i,
           /\/api\/sns\/web\/v\d+\/note\b/i,
@@ -433,7 +411,7 @@ export class ScraperService {
       opts.log(`SSR ${ssrExtracted ? `OK (${(ssrExtracted as any)._source}): 赞${(ssrExtracted as any).likes} 评${(ssrExtracted as any).comments}` : '空'}`);
 
       // ── 停止 HAR 收集 ──
-      const har = harListener.stop();
+      har = harListener.stop();
 
       // ── 抖音失效作品兜底检测（基于 RSC 失效包装对象，不依赖客户端跳转时序）──
       if (platform === '抖音') {
@@ -482,8 +460,17 @@ export class ScraperService {
 
       this.logger.log(`[Scraper] ${platform} 抓取完成: ${Date.now() - t0}ms 赞${finalData.likes} 评${finalData.comments} 藏${finalData.favorites} 分享${finalData.shares}`);
 
+      // 释放上下文，避免浏览器资源持续泄漏
+      await this.browserPool.releaseContext(platform, account.id).catch((e) => {
+        this.logger.warn(`[Scraper] ${platform} 释放上下文失败: ${e?.message || e}`);
+      });
+
       return finalData;
     } catch (err) {
+      // 确保 HAR 监听器停止，避免事件监听器泄漏
+      if (harListener) {
+        try { harListener.stop(); } catch { /* ignore */ }
+      }
       // 释放上下文：登录墙意味着 cookie 已过期，复用无意义
       await this.browserPool.releaseContext(platform, account.id).catch(() => {});
       throw err;
@@ -498,8 +485,8 @@ export class ScraperService {
         for (let i = 1; i < pages.length; i++) {
           await pages[i].close().catch(() => {});
         }
-      } catch {
-        /* ignore */
+      } catch (err: any) {
+        this.logger.warn(`[Scraper] ${platform} 关闭残留标签页失败: ${err?.message || err}`);
       }
     }
   }
@@ -710,12 +697,11 @@ export class ScraperService {
       }
 
       // 4. 保存到 uploads/post-covers/
-      const coversDir = this.resolveCoversDir();
-      fs.mkdirSync(coversDir, { recursive: true });
+      const coversDir = await this.resolveCoversDirAsync();
       const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
       const filename = `${stamp}.png`;
       const filepath = path.join(coversDir, filename);
-      fs.writeFileSync(filepath, buf);
+      await fsPromises.writeFile(filepath, buf);
 
       const url = `/uploads/post-covers/${filename}`;
       this.logger.log(`[Scraper] 截图封面写入: ${url}`);
@@ -834,28 +820,30 @@ export class ScraperService {
     const title = String(pageTitle || '').trim();
 
     if (platform === '小红书') {
-      // 登录墙判断：必须有"明确的登录墙信号"且"没有帖子内容信号"。
-      // 注意：不加入 /点赞/、/评论/、/收藏/、/\d{2}-\d{2}/ 等过于宽松的模式——
-      // 这些正则几乎必然命中任何正常页面，导致登录墙判断永远返回 false。
+      // 登录墙判断：必须有"强登录墙信号"且"没有帖子内容信号"。
+      //
+      // 帖子内容信号（放宽判定，只要有基本的内容关键词就说明不是登录墙）：
       const hasPostSignals =
-        /共\s*[\d.,wkW万千]+\s*条评论/.test(text) ||
-        /登录后评论\s*[\d.,wkW万千]+\s*[\d.,wkW万千]+\s*[\d.,wkW万千]+\s*发送/.test(text) ||
-        /说点什么\.\.\.\s*[\d.,wkW万千]+\s*[\d.,wkW万千]+\s*[\d.,wkW万千]+\s*发送/.test(text);
+        /评论|点赞|收藏/.test(text) ||
+        /共\s*[\d.,wkW万千]+\s*条/.test(text);
 
+      // 强登录墙信号（需要同时满足多个才判定为登录墙，减少误报）：
+      const hasStrongLoginSignal =
+        text.includes('登录后推荐更懂你的笔记') ||
+        text.includes('手机号登录') ||
+        text.includes('立即登录') ||
+        text.includes('打开小红书App查看');
+
+      // 如果页面有明确的内容信号，肯定不是登录墙
+      if (hasPostSignals) return false;
+
+      // 只有同时满足：强登录信号 + 无内容信号 + 是登录页标题
       const genericTitle =
         title === '小红书 - 你的生活兴趣社区' ||
         title === '小红书' ||
         title.includes('你的生活兴趣社区');
 
-      return (
-        !hasPostSignals &&
-        (text.includes('登录后推荐更懂你的笔记') ||
-          text.includes('手机号登录') ||
-          text.includes('扫码') ||
-          text.includes('立即登录') ||
-          text.includes('打开小红书App查看') ||
-          genericTitle)
-      );
+      return hasStrongLoginSignal && genericTitle;
     }
 
     return text.includes('登录后') || text.includes('扫码登录') || text.includes('验证码登录');
@@ -1018,12 +1006,12 @@ export class ScraperService {
 
   // ── body text 兜底提取 ──
 
-  private extractFromBodyText(text: string): { likes: number; comments: number; favorites: number; shares: number } {
-    const parse = (raw: string | undefined): number => {
-      if (!raw) return 0;
+  private extractFromBodyText(text: string): { likes: number | undefined; comments: number | undefined; favorites: number | undefined; shares: number | undefined } {
+    const parse = (raw: string | undefined): number | undefined => {
+      if (!raw) return undefined;
       const m = raw.trim().match(/(\d+(?:\.\d+)?)\s*([wkW万千K]?)/i);
-      if (!m) return Number(raw) || 0;
-      let v = parseFloat(m[1]);
+      if (!m) return undefined;
+      let v = parseFloat(m[1].replace(/,/g, ''));
       const u = m[2].toLowerCase();
       if (u === 'w' || u === '万') v *= 10000;
       else if (u === 'k' || u === '千') v *= 1000;
@@ -1115,10 +1103,10 @@ export class ScraperService {
 
   // ── 目录解析 ──
 
-  private resolveCoversDir(): string {
+  private async resolveCoversDirAsync(): Promise<string> {
     const root = resolveRepoRoot(__dirname);
     const dir = path.join(root, 'uploads', 'post-covers');
-    fs.mkdirSync(dir, { recursive: true });
+    await fsPromises.mkdir(dir, { recursive: true });
     return dir;
   }
 }

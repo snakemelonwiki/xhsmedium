@@ -3,6 +3,7 @@ import { chromium, BrowserContext } from 'playwright';
 import * as fs from 'fs';
 import * as path from 'path';
 import { ProfileConfigService, ScrapingAccount } from './profile-config.service';
+import { resolveRepoRoot } from '../../../shared/utils/project-paths';
 
 interface PooledContext {
   ctx: BrowserContext;
@@ -93,23 +94,68 @@ export class BrowserPoolService implements OnModuleDestroy {
   /**
    * 获取当前池状态（调试用）
    */
-  getStatus(): { platform: string; accountId: string; healthy: boolean; ageMs: number }[] {
-    return Array.from(this.pools.values()).map((item) => ({
-      platform: item.platform,
-      accountId: item.accountId,
-      healthy: true, // 不主动检测，避免副作用
-      ageMs: Date.now() - item.createdAt,
-    }));
+  async getStatus(): Promise<{ platform: string; accountId: string; healthy: boolean; ageMs: number }[]> {
+    const items = Array.from(this.pools.values());
+    const results = await Promise.all(
+      items.map(async (item) => {
+        const healthy = await this.isHealthy(item.ctx);
+        return {
+          platform: item.platform,
+          accountId: item.accountId,
+          healthy,
+          ageMs: Date.now() - item.createdAt,
+        };
+      }),
+    );
+    return results;
   }
 
   // ── 私有方法 ──
 
   private poolKey(platform: string, accountId: string): string {
-    return `${platform}:${accountId}`;
+    const normalized = this.normalizePlatform(platform);
+    return `${normalized}:${accountId}`;
+  }
+
+  /**
+   * 规范化 platform 字符串，确保 '抖音' 和 'douyin' 生成相同的 poolKey。
+   * 优先使用 ProfileConfigService 的规范化方法，失败时 fallback 到本地映射。
+   */
+  private normalizePlatform(platform: string): string {
+    try {
+      return this.profileConfig.normalizePlatform(platform);
+    } catch {
+      // fallback: 手动映射，避免依赖 ProfileConfigService 抛异常
+      const map: Record<string, string> = {
+        douyin: 'douyin',
+        xiaohongshu: 'xiaohongshu',
+        抖音: 'douyin',
+        小红书: 'xiaohongshu',
+      };
+      return map[platform?.trim()] || platform;
+    }
+  }
+
+  /**
+   * 验证 profileDir 是否合法，防止路径穿越攻击。
+   * 合法的 profileDir 必须位于 .playwright-profiles/ 或其子目录下。
+   */
+  private validateProfileDir(profileDir: string): void {
+    const profileRoot = path.dirname(this.profileConfig.getConfigPath());
+    const resolvedProfileDir = path.resolve(profileDir);
+    const resolvedProfileRoot = path.resolve(profileRoot);
+    if (!resolvedProfileDir.startsWith(resolvedProfileRoot)) {
+      throw new Error(
+        `不合法的 profileDir: ${profileDir}，不在允许的目录 ${resolvedProfileRoot} 下`,
+      );
+    }
   }
 
   private async doCreateContext(account: ScrapingAccount, poolKey: string, platform: string): Promise<BrowserContext> {
-    this.ensureProfileDir(account.profileDir);
+    // 安全校验：防止路径穿越
+    this.validateProfileDir(account.profileDir);
+
+    await this.ensureProfileDir(account.profileDir);
     this.clearSingletonLocks(account.profileDir);
 
     // 抖音/小红书暂时使用有头模式便于调试，其余平台保持无头
@@ -127,8 +173,8 @@ export class BrowserPoolService implements OnModuleDestroy {
       try {
         if (attempt > 0) {
           this.logger.warn(`[BrowserPool] ${poolKey} 浏览器启动失败，额外清理后重试`);
-          this.clearSingletonLocks(account.profileDir);
-          for (const name of ['SingletonLock', 'SingletonCookie', 'SingletonSocket', 'Default/Cookies-journal', 'Default/Network/Cookies-journal']) {
+          // 主清理已在上面完成，这里只清理重试时才需要额外清理的 Cookies-journal
+          for (const name of ['Default/Cookies-journal', 'Default/Network/Cookies-journal']) {
             try { fs.rmSync(path.join(account.profileDir, name), { force: true, recursive: true }); } catch { /* ignore */ }
           }
         }
@@ -202,8 +248,8 @@ export class BrowserPoolService implements OnModuleDestroy {
     this.pools.delete(poolKey);
     try {
       await item.ctx.close();
-    } catch {
-      // 忽略关闭错误
+    } catch (err: any) {
+      this.logger.warn(`[BrowserPool] 关闭上下文失败: ${err?.message || err}`);
     }
   }
 
@@ -218,11 +264,17 @@ export class BrowserPoolService implements OnModuleDestroy {
     // 1. 关闭现有上下文
     await this.closeContextByKey(poolKey);
 
-    // 2. 打开临时浏览器刷新 cookie
+    // 2. 等待 Chromium 进程完全退出（给 profile 锁释放留出时间）
+    await this.waitForProfileRelease(account.profileDir, 3000);
+
+    // 3. 打开临时浏览器刷新 cookie
     this.logger.log(`[BrowserPool] 刷新 ${poolKey} 登录态...`);
 
     const isHeadless = platform !== '小红书' && platform !== '抖音';
     const profileDir = account.profileDir;
+
+    // 安全校验：防止路径穿越
+    this.validateProfileDir(profileDir);
 
     this.clearSingletonLocks(profileDir);
 
@@ -255,7 +307,9 @@ export class BrowserPoolService implements OnModuleDestroy {
       this.logger.warn(`[BrowserPool] ${poolKey} 刷新登录态失败: ${err?.message || err}`);
     } finally {
       if (tempCtx) {
-        try { await tempCtx.close(); } catch {}
+        try { await tempCtx.close(); } catch (err: any) {
+          this.logger.warn(`[BrowserPool] 关闭临时浏览器上下文失败: ${err?.message || err}`);
+        }
       }
     }
 
@@ -263,11 +317,23 @@ export class BrowserPoolService implements OnModuleDestroy {
     return this.acquireContext(platform, accountId);
   }
 
+  /** 健康检查超时时间（ms） */
+  private readonly HEALTH_CHECK_TIMEOUT_MS = 5000;
+
   private async isHealthy(ctx: BrowserContext): Promise<boolean> {
     try {
       const pages = ctx.pages();
       if (pages.length > 0) {
-        await pages[0].evaluate(() => true);
+        const page = pages[0];
+        await Promise.race([
+          page.evaluate(() => true),
+          new Promise<never>((_, reject) =>
+            setTimeout(
+              () => reject(new Error('health check timeout')),
+              this.HEALTH_CHECK_TIMEOUT_MS,
+            ),
+          ),
+        ]);
       }
       return true;
     } catch {
@@ -275,16 +341,32 @@ export class BrowserPoolService implements OnModuleDestroy {
     }
   }
 
-  private ensureProfileDir(profileDir: string): void {
-    fs.mkdirSync(profileDir, { recursive: true });
+  private async ensureProfileDir(profileDir: string): Promise<void> {
+    await fs.promises.mkdir(profileDir, { recursive: true });
     // 浏览器需要 Default 子目录，若不存在则创建
-    fs.mkdirSync(path.join(profileDir, 'Default'), { recursive: true });
+    await fs.promises.mkdir(path.join(profileDir, 'Default'), { recursive: true });
   }
 
   private clearSingletonLocks(profileDir: string): void {
     for (const name of ['SingletonLock', 'SingletonCookie', 'SingletonSocket']) {
       const file = path.join(profileDir, name);
       try { fs.rmSync(file, { force: true, recursive: true }); } catch { /* ignore */ }
+    }
+  }
+
+  /**
+   * 等待 profile 目录释放，用于 refreshAndRecreateContext 中避免 profile 双重占用。
+   * 轮询检查 SingletonLock 文件是否仍存在，最多等待 maxWaitMs。
+   */
+  private async waitForProfileRelease(profileDir: string, maxWaitMs: number): Promise<void> {
+    const lockFile = path.join(profileDir, 'SingletonLock');
+    const start = Date.now();
+    while (fs.existsSync(lockFile)) {
+      if (Date.now() - start > maxWaitMs) {
+        this.logger.warn(`[BrowserPool] profile 锁等待超时，继续执行: ${profileDir}`);
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 100));
     }
   }
 }
