@@ -109,7 +109,7 @@ async function getPostsToRefresh(pool, minIntervalHours, maxPosts = 500) {
   const cutoff = new Date(Date.now() - minIntervalHours * 60 * 60 * 1000);
   const cutoffStr = cutoff.toISOString().slice(0, 19).replace("T", " ");
 
-  const [rows] = await pool.execute(
+  const [rows] = await pool.query(
     `
     SELECT id, post_url, title, metrics_updated_at, platform
     FROM posts
