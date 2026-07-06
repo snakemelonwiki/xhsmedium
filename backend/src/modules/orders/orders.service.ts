@@ -617,18 +617,29 @@ export class OrdersService {
         [dateKey],
       );
 
-      const rows: Array<{ 'LAST_INSERT_ID()': number | string }> = await runner.query(
+      const rows: Array<{ next_seq: number | string }> = await runner.query(
         `SELECT LAST_INSERT_ID() as next_seq`,
       );
-      const nextSeq = Number(rows[0]?.['next_seq'] ?? 0);
+      const nextSeq = Number(rows[0]?.next_seq ?? 0);
+      if (nextSeq <= 0) {
+        throw new Error(`生成订单顺序号失败：dateKey=${dateKey}`);
+      }
 
       await runner.commitTransaction();
       return nextSeq;
     } catch (e) {
-      await runner.rollbackTransaction();
+      try {
+        await runner.rollbackTransaction();
+      } catch {
+        // 忽略 rollback 失败
+      }
       throw e;
     } finally {
-      await runner.release();
+      try {
+        await runner.release();
+      } catch {
+        // 忽略 release 失败，避免掩盖原始异常或返回值
+      }
     }
   }
 

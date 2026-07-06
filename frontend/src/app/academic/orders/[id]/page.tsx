@@ -1,6 +1,6 @@
 'use client';
 
-import { DeleteOutlined, DownloadOutlined, ExclamationCircleOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons';
+import { DeleteOutlined, DownloadOutlined, EditOutlined, ExclamationCircleOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons';
 import { Button, Card, Checkbox, Col, DatePicker, Descriptions, Divider, Empty, Form, Input, InputNumber, Modal, Popconfirm, Row, Select, Space, Spin, Steps, Table, Tag, Timeline, Tooltip, Typography, Upload, message } from 'antd';
 import type { UploadProps } from 'antd';
 import dayjs, { type Dayjs } from 'dayjs';
@@ -8,6 +8,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
 import {
+  checkOrderCodeExists,
   createAbnormalFeedback,
   closeAbnormalFeedback,
   createOrderFollowRecord,
@@ -356,6 +357,8 @@ export default function AcademicOrderDetailPage() {
   const [teacherOptions, setTeacherOptions] = useState<TeacherOption[]>([]);
   const [teacherLoading, setTeacherLoading] = useState(false);
   const [teacherDetail, setTeacherDetail] = useState<TeacherOption | null>(null);
+  const [editingOrderNumber, setEditingOrderNumber] = useState(false);
+  const [savingOrderNumber, setSavingOrderNumber] = useState(false);
   const [teacherDetailOpen, setTeacherDetailOpen] = useState(false);
   const [abnormalForm] = Form.useForm();
   const [form] = Form.useForm();
@@ -706,6 +709,33 @@ export default function AcademicOrderDetailPage() {
       teacherStability: normalizeTeacherStability(teacher?.stability),
     };
     deliveryForm.setFieldsValue({ order: { ...(deliveryForm.getFieldValue('order') || {}), backupTeachers } });
+  }
+
+  async function handleSaveOrderNumber(newOrderNumber: string) {
+    const trimmed = newOrderNumber.trim();
+    if (!trimmed) {
+      message.error('订单编号不能为空');
+      return;
+    }
+    setSavingOrderNumber(true);
+    try {
+      // 如果输入与当前编号相同，跳过查重
+      if (trimmed !== (order?.orderCode || '')) {
+        const check = await checkOrderCodeExists(trimmed);
+        if (check.exists) {
+          message.error('订单编号已存在');
+          return;
+        }
+      }
+      await updateOrder(orderId, { orderCode: trimmed });
+      message.success('订单编号已更新');
+      await loadDetail();
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '更新订单编号失败');
+    } finally {
+      setSavingOrderNumber(false);
+      setEditingOrderNumber(false);
+    }
   }
 
   async function openTeacherDetail(teacherId?: string | null) {
@@ -1073,7 +1103,60 @@ export default function AcademicOrderDetailPage() {
 
               <Typography.Title id="client-info" level={5}>基础与投稿资料</Typography.Title>
               <Row gutter={12}>
-                {BASIC_DELIVERY_FIELDS.map((field) => (
+                {/* 订单编号：可点击编辑 */}
+                <Col xs={24} md={8}>
+                  <Form.Item name={['order', 'orderNumber']} label="订单编号">
+                    {editingOrderNumber ? (
+                      <Space style={{ width: '100%' }}>
+                        <Input
+                          id="orderNumberInput"
+                          defaultValue={deliveryForm.getFieldValue(['order', 'orderNumber'])}
+                          placeholder="请输入订单编号"
+                          allowClear
+                          disabled={savingOrderNumber}
+                          onPressEnter={(e) => {
+                            handleSaveOrderNumber((e.target as HTMLInputElement).value);
+                          }}
+                          style={{ flex: 1 }}
+                        />
+                        <Button
+                          type="primary"
+                          size="small"
+                          loading={savingOrderNumber}
+                          onClick={() => {
+                            const input = document.getElementById('orderNumberInput') as HTMLInputElement | null;
+                            if (input) handleSaveOrderNumber(input.value);
+                          }}
+                        >
+                          保存
+                        </Button>
+                        <Button
+                          size="small"
+                          disabled={savingOrderNumber}
+                          onClick={() => setEditingOrderNumber(false)}
+                        >
+                          取消
+                        </Button>
+                      </Space>
+                    ) : (
+                      <span
+                        onClick={() => setEditingOrderNumber(true)}
+                        style={{
+                          cursor: 'pointer',
+                          color: '#1890ff',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 4,
+                          transition: 'opacity 0.2s',
+                        }}
+                      >
+                        {emptyText(deliveryForm.getFieldValue(['order', 'orderNumber']) ?? order?.orderCode)}
+                        <EditOutlined />
+                      </span>
+                    )}
+                  </Form.Item>
+                </Col>
+                {BASIC_DELIVERY_FIELDS.filter((field) => field.name !== 'orderNumber').map((field) => (
                   <Col xs={24} md={8} key={field.name}>
                     <Form.Item name={['order', field.name]} label={field.label}>
                       {renderDeliveryControl(field)}
