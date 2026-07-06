@@ -555,15 +555,16 @@ export class OrdersService {
   }
 
   /**
-   * 生成成交订单编号，沿用既有当日顺序号表与事务行锁，仅调整编号模板。
+   * 生成成交订单编号，脱离主业务事务：
+   * 用独立连接（非事务 manager）更新/读取序列表，
+   * 保证即使 closeDeal 事务回滚，order_code 也不会重复。
    */
   private async generateOrderCode(
-    manager: EntityManager,
+    _manager: EntityManager,
     options: { productType?: string | null; serviceType?: string | null; major?: string | null },
   ): Promise<string> {
-    // 校验并锁定当日顺序号，确保并发成交时递增顺序稳定。
     const { dateKey, compactDate } = this.getOrderCodeDateParts();
-    const rawSequence = await this.getNextOrderCodeSequence(manager, dateKey);
+    const rawSequence = await this.getNextOrderCodeSequence(dateKey);
 
     // 按文档模板拼接订单编号：YL + 顺序编号（从1开始递增） + 产品类型 + 服务类型 + 日期 + 专业。
     const displaySequence = rawSequence;
@@ -591,32 +592,44 @@ export class OrdersService {
 
   /**
    * 获取下一个订单顺序号，改用数据库原子递增（UPDATE + LAST_INSERT_ID），
-   * 消除 SELECT-FOR-UPDATE + 应用层计算 + UPDATE 两步之间的并发窗口。
+   * 且使用独立数据源连接（非事务 manager），彻底消除事务回滚导致序列回退的问题。
    */
-  private async getNextOrderCodeSequence(manager: EntityManager, dateKey: string): Promise<number> {
-    // 确保当天行存在（幂等，并发也安全）
-    await manager.query(
-      `INSERT INTO orders_order_code_seq (seq_date, current_seq)
-       VALUES (?, 0)
-       ON DUPLICATE KEY UPDATE seq_date = seq_date`,
-      [dateKey],
-    );
+  private async getNextOrderCodeSequence(dateKey: string): Promise<number> {
+    // 使用独立连接，不受主事务回滚影响
+    const runner = this.dataSource.createQueryRunner();
+    try {
+      await runner.connect();
+      await runner.startTransaction('READ COMMITTED');
 
-    // 原子递增：让数据库在单条 UPDATE 内完成读+加1+写，彻底消除并发窗口。
-    // LAST_INSERT_ID(current_seq + 1) 在 UPDATE 后会将新值设为会话级 LAST_INSERT_ID，
-    // 后续 SELECT LAST_INSERT_ID() 即可读取，无需再次回表。
-    await manager.query(
-      `UPDATE orders_order_code_seq
-       SET current_seq = LAST_INSERT_ID(current_seq + 1)
-       WHERE seq_date = ?`,
-      [dateKey],
-    );
+      // 确保当天行存在（幂等，并发也安全）
+      await runner.query(
+        `INSERT INTO orders_order_code_seq (seq_date, current_seq)
+         VALUES (?, 0)
+         ON DUPLICATE KEY UPDATE seq_date = seq_date`,
+        [dateKey],
+      );
 
-    const rows: Array<{ 'LAST_INSERT_ID()': number | string }> = await manager.query(
-      `SELECT LAST_INSERT_ID() as next_seq`,
-    );
-    const nextSeq = Number(rows[0]?.['next_seq'] ?? 0);
-    return nextSeq;
+      // 原子递增
+      await runner.query(
+        `UPDATE orders_order_code_seq
+         SET current_seq = LAST_INSERT_ID(current_seq + 1)
+         WHERE seq_date = ?`,
+        [dateKey],
+      );
+
+      const rows: Array<{ 'LAST_INSERT_ID()': number | string }> = await runner.query(
+        `SELECT LAST_INSERT_ID() as next_seq`,
+      );
+      const nextSeq = Number(rows[0]?.['next_seq'] ?? 0);
+
+      await runner.commitTransaction();
+      return nextSeq;
+    } catch (e) {
+      await runner.rollbackTransaction();
+      throw e;
+    } finally {
+      await runner.release();
+    }
   }
 
   /**
