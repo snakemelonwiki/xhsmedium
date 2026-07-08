@@ -72,17 +72,19 @@ export default function SalesTodayFollowupsPage() {
           ) : (
             <Empty description="今日无待跟进客资" />
           )}
-          <Pagination
-            current={page}
-            pageSize={pageSize}
-            total={total}
-            onChange={(nextPage, nextPageSize) => {
-              setPage(nextPage);
-              setPageSize(nextPageSize);
-              load();
-            }}
-            style={{ marginTop: 16, textAlign: 'right' }}
-          />
+          <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Typography.Text type="secondary">共 {total} 条</Typography.Text>
+            <Pagination
+              current={page}
+              pageSize={pageSize}
+              total={total}
+              onChange={(nextPage, nextPageSize) => {
+                setPage(nextPage);
+                setPageSize(nextPageSize);
+                load();
+              }}
+            />
+          </div>
         </Card>
       </Spin>
     </Space>

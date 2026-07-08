@@ -583,11 +583,6 @@ export function OrderTable({
     return baseColumns;
   }, [actionMode, isClaimPool, isFollowup, renderRowExtra, router, updatingId]);
 
-  const displayItems = useMemo(
-    () => (abnormalOnly ? items.filter((it) => it.orderStatus === 'abnormal') : items),
-    [items, abnormalOnly],
-  );
-
   return (
     <Space direction="vertical" size={16} className="page-stack">
       {title || description ? (
@@ -700,20 +695,22 @@ export function OrderTable({
         <Table<OrderItem>
           rowKey="id"
           columns={columns}
-          dataSource={displayItems}
+          dataSource={items}
           loading={loading}
           pagination={false}
           // v1.3 / Task 12: 加了稿件进度(110)+ 投稿进度(240) 两列，horizontal scroll 阈值从 1040 提到 1440。
           scroll={{ x: 1440 }}
         />
-        <Pagination
-          current={page}
-          pageSize={pageSize}
-          total={total}
-          showSizeChanger
-          onChange={(nextPage, nextPageSize) => loadOrders(nextPage, nextPageSize, statusFilter, handoverFilter)}
-          style={{ marginTop: 16, textAlign: 'right' }}
-        />
+        <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <Typography.Text type="secondary">共 {total} 条</Typography.Text>
+          <Pagination
+            current={page}
+            pageSize={pageSize}
+            total={total}
+            showSizeChanger
+            onChange={(nextPage, nextPageSize) => loadOrders(nextPage, nextPageSize, statusFilter, handoverFilter)}
+          />
+        </div>
       </Card>
 
       <Modal

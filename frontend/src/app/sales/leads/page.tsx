@@ -298,12 +298,10 @@ export default function SalesLeadsPage() {
   }, [capacityPaused, capacityPausedAt]);
 
   const sortedItems = useMemo(() => {
-    // 「我的客资」= 待处理客资（未添加 + 中间态），已添加的（addStatus=added）应去「客资跟进」。
-    // 后端 findFilteredPaged 在 sales scope 下不强制过滤 addStatus=added，
-    // 这里前端做一次 client-side 过滤，避免已添加客资混在"我的客资"里。
-    const visible = items.filter((lead) => lead.addStatus !== LeadAddStatus.ADDED);
+    // v1.3 / SA-13: 后端 findFilteredPaged 已在 scope=self + role=sales 时
+    // 自动排除 addStatus='added'，前端不再做 client-side 过滤，避免分页错乱。
     // 今日未添加置顶
-    return [...visible].sort((a, b) => {
+    return [...items].sort((a, b) => {
       const aT = isTodayNotAdded(a) ? 1 : 0;
       const bT = isTodayNotAdded(b) ? 1 : 0;
       if (aT !== bT) return bT - aT;
@@ -814,14 +812,18 @@ export default function SalesLeadsPage() {
           ) : (
             <Empty description="暂无客资" />
           )}
-          <Pagination
-            current={page}
-            pageSize={pageSize}
-            total={total}
-            showSizeChanger
-            onChange={(nextPage, nextPageSize) => loadLeads(nextPage, nextPageSize, filters)}
-            style={{ marginTop: 16, textAlign: 'right' }}
-          />
+          <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Typography.Text type="secondary">
+              共 {total} 条
+            </Typography.Text>
+            <Pagination
+              current={page}
+              pageSize={pageSize}
+              total={total}
+              showSizeChanger
+              onChange={(nextPage, nextPageSize) => loadLeads(nextPage, nextPageSize, filters)}
+            />
+          </div>
         </Card>
       </Spin>
 
@@ -959,11 +961,13 @@ export default function SalesLeadsPage() {
 function buildListQuery(filters: Filters) {
   return {
     status: filters.status || undefined,
-    addStatus: filters.addStatus || undefined,
+    // v1.3 / SA-13: 「我的客资」默认只显示未添加的客资（排除已添加的，已添加去「客资跟进」页）
+    // 若用户手动选择了添加状态，则以用户选择为准
+    addStatus: filters.addStatus || 'not_added',
     intentionLevel: filters.intentionLevel || undefined,
     // 用 YYYY-MM-DD 本地日期字符串，让后端 normalizeDayBoundary 补成 00:00:00 / 23:59:59，避免 ISO 时区偏差
     from: filters.dateRange ? filters.dateRange.start.startOf('day').format('YYYY-MM-DD') : undefined,
-    to: filters.dateRange ? filters.dateRange.end.endOf('day').format('YYYY-MM-DD') : undefined,
+    to: filters.dateRange ? filters.dateRange.end.startOf('day').format('YYYY-MM-DD') : undefined,
     search: filters.search || undefined,
   };
 }

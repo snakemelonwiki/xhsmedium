@@ -350,17 +350,19 @@ export default function SalesDealsPage() {
           ) : (
             <Empty description="暂无成交记录" />
           )}
-          <Pagination
-            current={page}
-            pageSize={pageSize}
-            total={total}
-            showSizeChanger
-            onChange={(nextPage, nextPageSize) => {
-              setPage(nextPage);
-              setPageSize(nextPageSize);
-            }}
-            style={{ marginTop: 16, textAlign: 'right' }}
-          />
+          <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Typography.Text type="secondary">共 {total} 条</Typography.Text>
+            <Pagination
+              current={page}
+              pageSize={pageSize}
+              total={total}
+              showSizeChanger
+              onChange={(nextPage, nextPageSize) => {
+                setPage(nextPage);
+                setPageSize(nextPageSize);
+              }}
+            />
+          </div>
         </Card>
       </Spin>
       <Modal

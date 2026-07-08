@@ -99,8 +99,7 @@ export default function SalesLeadFollowupPage() {
     setLoading(true);
     setError('');
     try {
-      // 主查询：已添加通过的客资
-      const mainResult = await listSalesLeads({
+      const result = await listSalesLeads({
         page: nextPage,
         pageSize: nextPageSize,
         addStatus: LeadAddStatus.ADDED,
@@ -109,36 +108,10 @@ export default function SalesLeadFollowupPage() {
         from: dateRange ? dateRange.start.startOf('day').format('YYYY-MM-DD') : undefined,
         to: dateRange ? dateRange.end.endOf('day').format('YYYY-MM-DD') : undefined,
       });
-      // 同时拉取无效客资（可能 addStatus 不是 ADDED，但也应出现在客资跟进面板）
-      let invalidItems: SalesLead[] = [];
-      if (!intentionFilter || intentionFilter === 'invalid') {
-        try {
-          const invalidResult = await listSalesLeads({
-            page: 1,
-            pageSize: 200,
-            intentionLevel: 'invalid',
-            search: search || undefined,
-            from: dateRange ? dateRange.start.startOf('day').format('YYYY-MM-DD') : undefined,
-            to: dateRange ? dateRange.end.endOf('day').format('YYYY-MM-DD') : undefined,
-          });
-          invalidItems = invalidResult.items;
-        } catch {
-          // 静默失败
-        }
-      }
-      // 合并去重（先算唯一数量再合并，避免 merged.has 始终为 true 的 bug）
-      const mainIds = new Set(mainResult.items.map((l) => l.id));
-      const uniqueInvalidCount = invalidItems.filter((l) => !mainIds.has(l.id)).length;
-      const merged = new Map<string | number, SalesLead>();
-      mainResult.items.forEach((lead) => merged.set(lead.id, lead));
-      // 仅在首页或筛选无效时才合并无效客资，避免无效客资出现在每一页
-      if (nextPage === 1 || intentionFilter === 'invalid') {
-        invalidItems.forEach((lead) => merged.set(lead.id, lead));
-      }
-      setItems(Array.from(merged.values()));
-      setTotal(mainResult.total + (nextPage === 1 && !intentionFilter ? uniqueInvalidCount : 0));
-      setPage(mainResult.page);
-      setPageSize(mainResult.pageSize);
+      setItems(result.items);
+      setTotal(result.total);
+      setPage(result.page);
+      setPageSize(result.pageSize);
     } catch (err) {
       const text = err instanceof Error ? err.message : '客资跟进加载失败';
       setError(text);
@@ -389,14 +362,16 @@ export default function SalesLeadFollowupPage() {
           ) : (
             <Empty description="暂无需要跟进的客资" />
           )}
-          <Pagination
-            current={page}
-            pageSize={pageSize}
-            total={total}
-            showSizeChanger
-            onChange={(nextPage, nextPageSize) => load(nextPage, nextPageSize)}
-            style={{ marginTop: 16, textAlign: 'right' }}
-          />
+          <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Typography.Text type="secondary">共 {total} 条</Typography.Text>
+            <Pagination
+              current={page}
+              pageSize={pageSize}
+              total={total}
+              showSizeChanger
+              onChange={(nextPage, nextPageSize) => load(nextPage, nextPageSize)}
+            />
+          </div>
         </Card>
       </Spin>
 
