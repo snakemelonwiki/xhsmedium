@@ -125,39 +125,37 @@ export interface AdminLeadPostAggregate {
   leadCount: number;
 }
 
+/**
+ * 后端 /leads/stats 的 byStatus / byAddStatus / byProcess 是「对象映射」
+ * （toCountMap → { [statusValue]: count }）。这里既兼容该对象形态，也兼容历史
+ * 数组形态（[{ k, n }]），避免因形态判断错误把整张映射解析成空对象，导致
+ * 「待添加/已通过/协同中/已成交/无效」等依赖映射的统计卡恒为 0。
+ */
+function coerceCountMap(raw: unknown): Record<string, number> {
+  const out: Record<string, number> = {};
+  if (Array.isArray(raw)) {
+    raw.forEach((item) => {
+      const rec = item as RawRecord;
+      const k = text(rec.k) ?? '';
+      out[k] = numberValue(rec.n);
+    });
+  } else if (raw && typeof raw === 'object') {
+    for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+      out[k] = numberValue(v);
+    }
+  }
+  return out;
+}
+
 function mapStats(raw: RawRecord): AdminLeadsStats {
-  const byStatus: Record<string, number> = {};
-  const byAddStatus: Record<string, number> = {};
-  const byProcess: Record<string, number> = {};
-  const rawByStatus = raw.byStatus as RawRecord[] | undefined;
-  const rawByAddStatus = raw.byAddStatus as RawRecord[] | undefined;
-  const rawByProcess = raw.byProcess as RawRecord[] | undefined;
-  if (Array.isArray(rawByStatus)) {
-    rawByStatus.forEach((item) => {
-      const k = text(item.k) ?? '';
-      byStatus[k] = numberValue(item.n);
-    });
-  }
-  if (Array.isArray(rawByAddStatus)) {
-    rawByAddStatus.forEach((item) => {
-      const k = text(item.k) ?? '';
-      byAddStatus[k] = numberValue(item.n);
-    });
-  }
-  if (Array.isArray(rawByProcess)) {
-    rawByProcess.forEach((item) => {
-      const k = text(item.k) ?? '';
-      byProcess[k] = numberValue(item.n);
-    });
-  }
   return {
     total: numberValue(raw.total),
     filteredTotal: numberValue(raw.filteredTotal),
     assigned: numberValue(raw.assigned),
     pending: numberValue(raw.pending),
-    byStatus,
-    byAddStatus,
-    byProcess,
+    byStatus: coerceCountMap(raw.byStatus),
+    byAddStatus: coerceCountMap(raw.byAddStatus),
+    byProcess: coerceCountMap(raw.byProcess),
   };
 }
 

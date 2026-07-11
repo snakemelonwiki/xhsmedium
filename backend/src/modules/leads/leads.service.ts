@@ -128,6 +128,10 @@ const PROCESS_STATUS_ALIASES: Record<string, string> = {
 
 @Injectable()
 export class LeadsService {
+  /** 平台别名，兼容 leads.platform 历史中英文混存写法 */
+  private static readonly XHS_ALIASES = ['小红书', 'xiaohongshu', 'xhs'];
+  private static readonly DOUYIN_ALIASES = ['抖音', 'douyin', 'dy'];
+
   constructor(
     @InjectRepository(Lead)
     private readonly leadRepository: Repository<Lead>,
@@ -543,9 +547,9 @@ export class LeadsService {
 
   private applyLeadFilters(qb: any, filters: LeadFilterOptions): void {
     if (filters.accountId) qb.andWhere('l.account_id = :accountId', { accountId: filters.accountId });
-    if (filters.platform) qb.andWhere('l.platform = :platform', { platform: filters.platform });
+    if (filters.platform) this.applyPlatformFilter(qb, filters.platform);
     if (filters.status) qb.andWhere('l.status = :status', { status: filters.status });
-    if (filters.addStatus) qb.andWhere('l.add_status = :addStatus', { addStatus: filters.addStatus });
+    if (filters.addStatus) this.applyAddStatusFilter(qb, filters.addStatus);
     if (filters.processStatus) qb.andWhere('l.process_status = :processStatus', { processStatus: filters.processStatus });
     if (filters.intentionLevel) qb.andWhere('l.intention_level = :intentionLevel', { intentionLevel: filters.intentionLevel });
     // BUG-2: 新增筛选条件
@@ -584,6 +588,56 @@ export class LeadsService {
         'l.post_id IN (SELECT p.id FROM posts p WHERE p.post_type = :postType)',
         { postType: filters.postType },
       );
+    }
+  }
+
+  /**
+   * 把平台筛选条件叠加到 qb。
+   * leads.platform 历史上中英文混存（如 '小红书' 与 'xiaohongshu' 并存），
+   * 精确等值匹配会漏掉另一套写法，导致「全部平台总数 ≠ 各平台之和」。
+   * 这里改用别名 IN(...) 归一化匹配（与 dashboard.service.getPlatformAliases 口径一致）：
+   *   - 小红书 / 抖音：按别名 IN(...) 匹配（兼容中英文写法）
+   *   - other / 其他：非小红书且非抖音（含 NULL/空/未知写法）
+   *   - 其它未知值：回退精确匹配（向后兼容）
+   */
+  private applyPlatformFilter(qb: any, platform: string): void {
+    const raw = String(platform || '').trim();
+    const key = raw.toLowerCase();
+    const xhs = LeadsService.XHS_ALIASES;
+    const dy = LeadsService.DOUYIN_ALIASES;
+    if (xhs.includes(key) || raw === '小红书') {
+      qb.andWhere('l.platform IN (:...xhsAliases)', { xhsAliases: xhs });
+    } else if (dy.includes(key) || raw === '抖音') {
+      qb.andWhere('l.platform IN (:...dyAliases)', { dyAliases: dy });
+    } else if (key === 'other' || raw === '其他') {
+      qb.andWhere('(l.platform IS NULL OR l.platform NOT IN (:...knownAliases))', {
+        knownAliases: [...xhs, ...dy],
+      });
+    } else {
+      qb.andWhere('l.platform = :platform', { platform: raw });
+    }
+  }
+
+  /**
+   * add_status 筛选：与统计卡口径一致，把规范 code 展开成其全部历史写法（含中文别名）。
+   * 别名来源与统计合并逻辑共用 ADD_STATUS_ALIASES（单一事实源），避免筛选与卡片对不上。
+   * 例如筛「未添加」(not_added) 会同时命中 'not_added' 与 '未添加'。
+   */
+  private applyAddStatusFilter(qb: any, addStatus: string): void {
+    const raw = String(addStatus || '').trim();
+    if (!raw) return;
+    const aliases = Array.from(
+      new Set([
+        raw,
+        ...Object.entries(LeadsService.ADD_STATUS_ALIASES)
+          .filter(([, canonical]) => canonical === raw)
+          .map(([legacy]) => legacy),
+      ]),
+    );
+    if (aliases.length > 1) {
+      qb.andWhere('l.add_status IN (:...addStatusAliases)', { addStatusAliases: aliases });
+    } else {
+      qb.andWhere('l.add_status = :addStatus', { addStatus: raw });
     }
   }
 
@@ -1429,6 +1483,11 @@ export class LeadsService {
     status?: string;
     addStatus?: string;
     processStatus?: string;
+    // 与列表筛选一致：让统计卡随销售/来源作品/成交状态/搜索标签联动（AC-3.2）
+    assignedSalesUserId?: string;
+    postId?: string;
+    dealStatus?: string;
+    search?: string;
   }): Promise<any> {
     const scope = opts.scope || 'all';
     const scopeFilters: LeadFilterOptions = {
@@ -1483,6 +1542,11 @@ export class LeadsService {
       // BUG-SUPERVISOR-KANBAN 修复 (2026-06-04)：stats 也需要按运营过滤，
       // 与列表 applyLeadFilters 保持口径一致（AC-3.2）。
       employeeId: opts.employeeId,
+      // 统计卡随全部筛选标签联动：销售/来源作品/成交状态/搜索
+      assignedSalesUserId: opts.assignedSalesUserId,
+      postId: opts.postId,
+      dealStatus: opts.dealStatus,
+      search: opts.search,
     });
 
     const total = await qbBase.getCount();
@@ -1529,7 +1593,12 @@ export class LeadsService {
       byStatus: this.toCountMap(byStatus),
       byIntention: this.toCountMap(byIntention),
       byProcess: this.toCountMap(byProcess),
-      byAddStatus: this.toCountMap(byAddStatus),
+      // add_status 历史中英文混存（'未添加'↔'not_added'、'已添加'↔'added'），
+      // 归一化合并后再返回，避免「待添加/已通过」统计卡系统性少算。
+      byAddStatus: this.mergeCountAliases(
+        this.toCountMap(byAddStatus),
+        LeadsService.ADD_STATUS_ALIASES,
+      ),
       scope,
       period: opts.period || 'all',
       from: from ?? null,
@@ -1596,7 +1665,7 @@ export class LeadsService {
       .addOrderBy('l.post_id', 'ASC')
       .limit(safeLimit);
 
-    if (opts.platform) qb.andWhere('l.platform = :platform', { platform: opts.platform });
+    if (opts.platform) this.applyPlatformFilter(qb, opts.platform);
     if (opts.from) qb.andWhere('l.created_at >= :from', { from: opts.from });
     if (opts.to) qb.andWhere('l.created_at < :to', { to: opts.to });
 
@@ -1622,14 +1691,36 @@ export class LeadsService {
     return out;
   }
 
+  /** add_status 历史遗留中文写法 → 规范英文 code（用于统计卡口径归一化） */
+  private static readonly ADD_STATUS_ALIASES: Record<string, string> = {
+    未添加: 'not_added',
+    已添加: 'added',
+  };
+
+  /**
+   * 把 count map 里的别名 key 折叠成规范 key 并累加计数。
+   * 仅重写命中 aliases 的 key，其余原样保留。
+   */
+  private mergeCountAliases(
+    map: Record<string, number>,
+    aliases: Record<string, string>,
+  ): Record<string, number> {
+    const out: Record<string, number> = {};
+    for (const [k, v] of Object.entries(map)) {
+      const canonical = aliases[k] || k;
+      out[canonical] = (out[canonical] || 0) + v;
+    }
+    return out;
+  }
+
   private resolvePeriod(
     period?: string,
     from?: string,
     to?: string,
   ): { from: string | null; to: string | null } {
-    if (period === 'custom') return { from: from || null, to: to || null };
     const now = new Date();
     const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    // 预设优先：显式请求 today/week/month 时用预设区间。
     if (period === 'today') {
       const end = new Date(startOfDay.getTime() + 86400 * 1000);
       return { from: this.fmt(startOfDay), to: this.fmt(end) };
@@ -1644,6 +1735,24 @@ export class LeadsService {
       const first = new Date(now.getFullYear(), now.getMonth(), 1);
       const next = new Date(now.getFullYear(), now.getMonth() + 1, 1);
       return { from: this.fmt(first), to: this.fmt(next) };
+    }
+    // 未指定预设（period 为 undefined / 'custom' / 未知）：以显式 from/to 为准。
+    // 客资看板的统计只发 from/to、不发 period；旧实现因 period !== 'custom' 直接
+    // 返回 {null,null}，导致日期标签对统计卡完全失效。这里改为始终尊重显式区间。
+    if (from || to) {
+      // from → 当天起点(00:00:00)；to → 「含当天」闭区间，qbBase 用 `< to`（开区间），
+      // 故 date-only 的 to 需 +1 天转成开区间上界，避免 from==to 同一天时退化成空区间。
+      const normFrom = from ? this.normalizeDayBoundary(from, 'start') : null;
+      let normTo: string | null = null;
+      if (to) {
+        if (/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+          const next = new Date(new Date(`${to}T00:00:00`).getTime() + 86400 * 1000);
+          normTo = this.fmt(next);
+        } else {
+          normTo = to;
+        }
+      }
+      return { from: normFrom, to: normTo };
     }
     return { from: null, to: null };
   }

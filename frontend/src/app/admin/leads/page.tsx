@@ -534,7 +534,7 @@ export default function AdminLeadsPage() {
     filters.dealStatus,
   ].filter(Boolean).length + (isDefaultDateRange ? 0 : 1);
 
-  // 8 统计卡数据
+  // 7 统计卡数据（均取自 stats，随全部筛选标签联动）
   const statsData = useMemo(() => {
     if (!stats) {
       return {
@@ -546,10 +546,10 @@ export default function AdminLeadsPage() {
         collaborating: 0,
         dealDone: 0,
         invalid: 0,
-        platformTotal: 0,
       };
     }
     return {
+      // 「客资总数」取 filteredTotal → 随全部筛选标签联动（平台/销售/作品/成交状态/时间…）
       total: stats.filteredTotal,
       newCount: stats.byStatus['new'] ?? 0,
       assigned: stats.assigned,
@@ -558,16 +558,8 @@ export default function AdminLeadsPage() {
       collaborating: stats.byStatus['in_collaboration'] ?? 0,
       dealDone: stats.byProcess['deal_done'] ?? 0,
       invalid: stats.byStatus['invalid'] ?? 0,
-      // T11: 顶部统计数字随全部筛选条件联动（统一用 filteredTotal）
-      platformTotal: stats.filteredTotal,
     };
-  }, [stats, filters.platform]);
-
-  // v1.3 / T5.2 当前筛选平台的展示名
-  const currentPlatformLabel = useMemo(() => {
-    const opt = platformOptions.find((o) => o.value === filters.platform);
-    return opt?.label || '全部平台';
-  }, [filters.platform]);
+  }, [stats]);
 
   const columns: ColumnsType<Lead> = [
     { title: '客户昵称', dataIndex: 'customerName', width: 120, render: (v: string) => v || '未命名客户' },
@@ -737,21 +729,11 @@ export default function AdminLeadsPage() {
         </Space>
       </div>
 
-      {/* 8 统计卡（T5.2: 第 2 张改为按当前平台筛选的"平台客资数"卡，标题随平台变化） */}
+      {/* 7 统计卡（均随全部筛选标签联动；原"平台客资数"卡与"客资总数"重复，已删除） */}
       <Row gutter={[12, 12]}>
         <Col xs={6} sm={3}>
           <Card size="small">
             <Statistic title="客资总数" value={statsData.total} loading={statsLoading} />
-          </Card>
-        </Col>
-        <Col xs={6} sm={3}>
-          <Card size="small" data-testid="platform-leads-card">
-            <Statistic
-              title={`${currentPlatformLabel}客资数`}
-              value={statsData.platformTotal}
-              loading={statsLoading}
-              valueStyle={{ color: filters.platform ? '#eb2f96' : '#8c8c8c' }}
-            />
           </Card>
         </Col>
         <Col xs={6} sm={3}>

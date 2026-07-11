@@ -106,6 +106,13 @@ export class LeadsController {
     @Query('status') status?: string,
     @Query('addStatus') addStatus?: string,
     @Query('processStatus') processStatus?: string,
+    // 与列表端点(findAll)保持一致的筛选维度，保证统计卡随全部标签联动
+    @Query('assignedSalesUserId') assignedSalesUserId?: string,
+    @Query('postId') postId?: string,
+    @Query('dealStatus') dealStatus?: string,
+    @Query('q') q?: string,
+    @Query('search') search?: string,
+    @Query('keyword') keyword?: string,
   ) {
     const session = (req as any).session;
     const result = await this.leadsService.stats({
@@ -123,6 +130,10 @@ export class LeadsController {
       status,
       addStatus,
       processStatus,
+      assignedSalesUserId,
+      postId,
+      dealStatus,
+      search: q || search || keyword,
     });
     return res.json(result);
   }
